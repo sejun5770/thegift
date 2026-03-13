@@ -420,10 +420,201 @@
     margin: 48px 0;
   }
 
+  /* ===== 2단 비교 레이아웃 ===== */
+  .compare-section {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 48px 24px;
+  }
+  .compare-title {
+    text-align: center;
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .compare-subtitle {
+    text-align: center;
+    font-size: 14px;
+    color: var(--text-sub);
+    margin-bottom: 32px;
+  }
+  .compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 48px 1fr;
+    gap: 0;
+    align-items: start;
+  }
+  .compare-col {
+    background: #fff;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  }
+  .compare-col-header {
+    padding: 16px 24px;
+    text-align: center;
+    font-size: 15px;
+    font-weight: 700;
+  }
+  .compare-col-header.as-is {
+    background: #f1f3f5;
+    color: #6b7280;
+  }
+  .compare-col-header.to-be {
+    background: linear-gradient(135deg, #e74c3c, #f97316);
+    color: #fff;
+  }
+  .compare-col-header .tag {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .compare-col-header.as-is .tag {
+    background: #d1d5db;
+    color: #fff;
+  }
+  .compare-col-header.to-be .tag {
+    background: rgba(255,255,255,0.3);
+    color: #fff;
+  }
+  .compare-col-body {
+    padding: 20px;
+  }
+  .compare-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    color: var(--accent);
+    font-weight: 700;
+    padding-top: 60px;
+  }
+
+  /* AS-IS 카드 (현행) */
+  .asis-card {
+    background: var(--card-bg);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    margin-bottom: 16px;
+  }
+  .asis-card .card-img {
+    position: relative;
+    aspect-ratio: 1;
+    background: #f5f0eb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .asis-card .card-img img {
+    width: 80%;
+    height: 80%;
+    object-fit: contain;
+  }
+  .asis-card .card-body {
+    padding: 14px 16px 16px;
+  }
+  .asis-card .card-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--primary);
+    margin-bottom: 10px;
+    line-height: 1.4;
+  }
+  .asis-price-only {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--primary);
+  }
+  .asis-unit {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+  .asis-card .card-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px 14px;
+  }
+
+  /* 비교 포인트 callout */
+  .compare-points {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 32px;
+    max-width: 1200px;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 0 24px;
+  }
+  .compare-point {
+    background: #fff;
+    border-radius: 12px;
+    padding: 20px 24px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  }
+  .compare-point.negative {
+    border-left: 4px solid #d1d5db;
+  }
+  .compare-point.positive {
+    border-left: 4px solid var(--accent);
+  }
+  .compare-point h5 {
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .compare-point.negative h5 { color: #6b7280; }
+  .compare-point.positive h5 { color: var(--accent); }
+  .compare-point ul {
+    list-style: none;
+    padding: 0;
+  }
+  .compare-point li {
+    font-size: 13px;
+    color: #444;
+    margin-bottom: 4px;
+    padding-left: 16px;
+    position: relative;
+  }
+  .compare-point.negative li::before {
+    content: '✕';
+    position: absolute;
+    left: 0;
+    color: #9ca3af;
+    font-size: 11px;
+  }
+  .compare-point.positive li::before {
+    content: '✓';
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 12px;
+  }
+
   @media (max-width: 768px) {
     .product-grid { grid-template-columns: repeat(2, 1fr); }
     .option-grid { grid-template-columns: 1fr; }
     .doc-header h1 { font-size: 22px; }
+    .compare-grid {
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    .compare-arrow {
+      padding-top: 0;
+      transform: rotate(90deg);
+    }
+    .compare-points {
+      grid-template-columns: 1fr;
+    }
   }
 </style>
 </head>
@@ -529,6 +720,63 @@
       <li><strong>장점:</strong> 세트 구매 유도 효과 극대화</li>
       <li><strong>단점:</strong> 단독 구매 고객에게 혼란 가능성</li>
     </ul>
+  </div>
+
+</div>
+
+<!-- ===== 2단 비교: AS-IS vs TO-BE ===== -->
+<div style="background: #f1f3f5; padding: 48px 0;">
+
+  <div class="compare-section" style="padding-top:0;">
+    <p class="compare-title">AS-IS vs TO-BE 비교</p>
+    <p class="compare-subtitle">현행 단품가 단일 표시 → 개선안 정가/세트가/단품가 동시 표시</p>
+
+    <div class="compare-grid">
+      <!-- AS-IS -->
+      <div class="compare-col">
+        <div class="compare-col-header as-is">
+          <span class="tag">현행</span> AS-IS: 단품가만 표시
+        </div>
+        <div class="compare-col-body" id="asis-cards">
+          <!-- JS로 생성 -->
+        </div>
+      </div>
+
+      <!-- 화살표 -->
+      <div class="compare-arrow">→</div>
+
+      <!-- TO-BE -->
+      <div class="compare-col">
+        <div class="compare-col-header to-be">
+          <span class="tag">개선</span> TO-BE: 3가지 가격 표시
+        </div>
+        <div class="compare-col-body" id="tobe-cards">
+          <!-- JS로 생성 -->
+        </div>
+      </div>
+    </div>
+
+    <!-- 비교 포인트 -->
+    <div class="compare-points">
+      <div class="compare-point negative">
+        <h5>AS-IS 문제점</h5>
+        <ul>
+          <li>단품가만 노출, 할인 여부를 알 수 없음</li>
+          <li>세트가 혜택이 목록에서 보이지 않음</li>
+          <li>정가 기준이 없어 가격 매력도 전달 불가</li>
+          <li>세트 구매 유도 장치 부재</li>
+        </ul>
+      </div>
+      <div class="compare-point positive">
+        <h5>TO-BE 개선 효과</h5>
+        <ul>
+          <li>정가 취소선으로 할인 중임을 즉시 인지</li>
+          <li>세트가/단품가 동시 노출로 비교 가능</li>
+          <li>세트가 할인율 강조로 동시 구매 유도</li>
+          <li>할인 뱃지로 시각적 주목도 향상</li>
+        </ul>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -763,6 +1011,74 @@ function createCard(p) {
     </div>
   `;
 }
+
+// AS-IS 카드 (현행: 단품가만 표시)
+function createAsIsCard(p) {
+  return `
+    <div class="asis-card">
+      <div class="card-img" style="background:#f5f0eb;">
+        <img src="${p.img}" alt="${p.name}">
+      </div>
+      <div class="card-body">
+        <p class="card-name">${p.name}</p>
+        <div class="asis-price-only">${fmt(p.single)}</div>
+        <div class="asis-unit">${p.unit}</div>
+      </div>
+      <div class="card-bottom">
+        <button class="btn-cart ${p.inCart ? 'in-cart' : ''}">${p.inCart ? '담기완료' : '장바구니'}</button>
+        <span class="zzim">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          ${p.zzim}
+        </span>
+      </div>
+    </div>
+  `;
+}
+
+// TO-BE 카드 (개선안: 정가/세트가/단품가 동시 표시)
+function createToBeCard(p) {
+  const setRate = discRate(p.retail, p.set);
+  const singleRate = discRate(p.retail, p.single);
+  return `
+    <div class="product-card">
+      <div class="card-img" style="background:#f5f0eb;">
+        <img src="${p.img}" alt="${p.name}">
+        <div class="badge-discount">${setRate}%</div>
+      </div>
+      <div class="card-body">
+        <p class="card-name">${p.name}</p>
+        <div class="price-area">
+          <div class="price-row">
+            <span class="price-original">${fmt(p.retail)}</span>
+          </div>
+          <div class="price-row">
+            <span class="price-label set">세트</span>
+            <span class="price-discount-rate red">${setRate}%</span>
+            <span class="price-final">${fmt(p.set)}</span>
+          </div>
+          <div class="price-row">
+            <span class="price-label single">단품</span>
+            <span class="price-discount-rate blue">${singleRate}%</span>
+            <span class="price-final">${fmt(p.single)}</span>
+          </div>
+          <span class="price-unit">${p.unit}</span>
+        </div>
+      </div>
+      <div class="card-bottom">
+        <button class="btn-cart ${p.inCart ? 'in-cart' : ''}">${p.inCart ? '담기완료' : '장바구니'}</button>
+        <span class="zzim">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          ${p.zzim}
+        </span>
+      </div>
+    </div>
+  `;
+}
+
+// 2단 비교 렌더 (상위 2개만 표시)
+const compareProducts = products.slice(0, 2);
+document.getElementById('asis-cards').innerHTML = compareProducts.map(createAsIsCard).join('');
+document.getElementById('tobe-cards').innerHTML = compareProducts.map(createToBeCard).join('');
 
 // 렌더
 document.getElementById('pc-grid').innerHTML = products.map(createCard).join('');
