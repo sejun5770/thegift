@@ -23,14 +23,25 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-60 border-r bg-white">
-      <div className="flex h-14 items-center border-b px-4">
+    <aside className="fixed left-0 top-0 z-40 flex h-screen w-56 flex-col border-r bg-slate-900">
+      {/* 로고 */}
+      <div className="flex h-14 items-center px-5">
         <Link href="/dashboard" className="flex items-center gap-2">
-          <span className="text-lg font-bold text-gray-900">더기프트</span>
-          <span className="text-xs text-gray-500">퍼스트몰</span>
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-500">
+            <span className="text-xs font-bold text-white">G</span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm font-bold text-white leading-tight">더기프트</span>
+            <span className="text-[10px] text-slate-400 leading-tight">퍼스트몰</span>
+          </div>
         </Link>
       </div>
-      <nav className="space-y-1 p-3">
+
+      {/* 구분선 */}
+      <div className="mx-4 border-t border-slate-700" />
+
+      {/* 네비게이션 */}
+      <nav className="mt-2 flex-1 space-y-0.5 px-3">
         {navItems.map((item) => {
           const isActive = pathname.startsWith(item.href);
           return (
@@ -38,18 +49,31 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               className={cn(
-                'flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors',
+                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium transition-all',
                 isActive
-                  ? 'bg-gray-100 text-gray-900'
-                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
               )}
             >
-              <item.icon className="h-4 w-4" />
+              <item.icon className={cn('h-4 w-4', isActive ? 'text-white' : 'text-slate-500')} />
               {item.label}
             </Link>
           );
         })}
       </nav>
+
+      {/* 하단 */}
+      <div className="border-t border-slate-700 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-700">
+            <span className="text-[10px] font-medium text-slate-300">AD</span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-xs font-medium text-slate-300">관리자</span>
+            <span className="text-[10px] text-slate-500">admin@thegift.co.kr</span>
+          </div>
+        </div>
+      </div>
     </aside>
   );
 }

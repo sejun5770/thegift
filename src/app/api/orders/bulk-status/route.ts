@@ -1,21 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { VALID_STATUS_TRANSITIONS } from '@/lib/constants';
-import type { OrderStatus } from '@/types/enums';
+
+function isMockMode() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  return !supabaseUrl || supabaseUrl.includes('your_supabase');
+}
 
 export async function PATCH(request: NextRequest) {
+  const { orderIds, newStatus } = await request.json();
+
+  if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+    return NextResponse.json({ error: '주문을 선택해주세요.' }, { status: 400 });
+  }
+
+  if (isMockMode()) {
+    const results = orderIds.map((id: string) => ({ id, success: true }));
+    return NextResponse.json({
+      results,
+      summary: { total: results.length, success: results.length, failed: 0 },
+    });
+  }
+
   try {
+    const { createClient } = await import('@/lib/supabase/server');
+    const { VALID_STATUS_TRANSITIONS } = await import('@/lib/constants');
     const supabase = await createClient();
-    const { orderIds, newStatus, reason } = await request.json();
 
-    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
-      return NextResponse.json(
-        { error: '주문을 선택해주세요.' },
-        { status: 400 }
-      );
-    }
-
-    // 각 주문의 현재 상태 조회
     const { data: orders, error: fetchError } = await supabase
       .from('orders')
       .select('id, status')
@@ -28,11 +37,13 @@ export async function PATCH(request: NextRequest) {
     const results: { id: string; success: boolean; error?: string }[] = [];
     const now = new Date().toISOString();
 
+    type OrderStatusType = keyof typeof VALID_STATUS_TRANSITIONS;
+
     for (const order of orders || []) {
-      const currentStatus = order.status as OrderStatus;
+      const currentStatus = order.status as OrderStatusType;
       const validTransitions = VALID_STATUS_TRANSITIONS[currentStatus] || [];
 
-      if (!validTransitions.includes(newStatus as OrderStatus)) {
+      if (!validTransitions.includes(newStatus as OrderStatusType)) {
         results.push({
           id: order.id,
           success: false,
@@ -61,7 +72,6 @@ export async function PATCH(request: NextRequest) {
           break;
         case 'validation_failed':
           updateData.validation_failed_at = now;
-          updateData.validation_failed_reason = reason || null;
           break;
       }
 
@@ -74,8 +84,6 @@ export async function PATCH(request: NextRequest) {
         results.push({ id: order.id, success: false, error: updateError.message });
       } else {
         results.push({ id: order.id, success: true });
-
-        // 이력 기록
         await supabase.from('order_history').insert({
           order_id: order.id,
           action: 'status_change',
@@ -95,9 +103,6 @@ export async function PATCH(request: NextRequest) {
       summary: { total: results.length, success: successCount, failed: failCount },
     });
   } catch {
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

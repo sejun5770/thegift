@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { VALID_STATUS_TRANSITIONS } from '@/lib/constants';
-import type { OrderStatus } from '@/types/enums';
+
+function isMockMode() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  return !supabaseUrl || supabaseUrl.includes('your_supabase');
+}
 
 export async function PATCH(
   request: NextRequest,
@@ -9,11 +11,17 @@ export async function PATCH(
 ) {
   const { orderId } = await params;
 
+  if (isMockMode()) {
+    const { status: newStatus } = await request.json();
+    return NextResponse.json({ success: true, status: newStatus });
+  }
+
   try {
+    const { createClient } = await import('@/lib/supabase/server');
+    const { VALID_STATUS_TRANSITIONS } = await import('@/lib/constants');
     const supabase = await createClient();
     const { status: newStatus, reason } = await request.json();
 
-    // 현재 상태 조회
     const { data: order, error: fetchError } = await supabase
       .from('orders')
       .select('status')
@@ -24,19 +32,17 @@ export async function PATCH(
       return NextResponse.json({ error: '주문을 찾을 수 없습니다.' }, { status: 404 });
     }
 
-    const currentStatus = order.status as OrderStatus;
+    type OrderStatusType = keyof typeof VALID_STATUS_TRANSITIONS;
+    const currentStatus = order.status as OrderStatusType;
     const validTransitions = VALID_STATUS_TRANSITIONS[currentStatus] || [];
 
-    if (!validTransitions.includes(newStatus as OrderStatus)) {
+    if (!validTransitions.includes(newStatus as OrderStatusType)) {
       return NextResponse.json(
-        {
-          error: `${currentStatus}에서 ${newStatus}(으)로 변경할 수 없습니다.`,
-        },
+        { error: `${currentStatus}에서 ${newStatus}(으)로 변경할 수 없습니다.` },
         { status: 400 }
       );
     }
 
-    // 상태별 타임스탬프 업데이트
     const updateData: Record<string, unknown> = { status: newStatus };
     const now = new Date().toISOString();
 
@@ -71,7 +77,6 @@ export async function PATCH(
       return NextResponse.json({ error: updateError.message }, { status: 500 });
     }
 
-    // 이력 기록
     await supabase.from('order_history').insert({
       order_id: orderId,
       action: 'status_change',
@@ -85,9 +90,6 @@ export async function PATCH(
 
     return NextResponse.json({ success: true, status: newStatus });
   } catch {
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

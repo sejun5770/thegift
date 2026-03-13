@@ -2,21 +2,25 @@
 
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { OrderTable } from '@/components/orders/order-table';
 import { OrderTableToolbar } from '@/components/orders/order-table-toolbar';
 import { OrderDetailDialog } from '@/components/orders/order-detail-dialog';
 import { ORDER_TABS } from '@/lib/constants';
 import { toast } from 'sonner';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import type { OrderTab, OrderStatus } from '@/types/enums';
 import type { OrderListItem } from '@/types/order';
 
 export default function OrdersPageWrapper() {
   return (
-    <Suspense fallback={<div className="p-8 text-center text-sm text-gray-500">로딩중...</div>}>
+    <Suspense fallback={
+      <div className="flex items-center justify-center p-12">
+        <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+        <span className="ml-2 text-sm text-gray-500">로딩중...</span>
+      </div>
+    }>
       <OrdersPage />
     </Suspense>
   );
@@ -53,7 +57,6 @@ function OrdersPage() {
       });
       if (search) params.set('search', search);
 
-      // URL 파라미터에서 날짜 필터
       const dateType = searchParams.get('date_type');
       const startDate = searchParams.get('start_date');
       const endDate = searchParams.get('end_date');
@@ -84,7 +87,6 @@ function OrdersPage() {
     }
   }, [currentTab, page, search, sortBy, sortOrder, searchParams]);
 
-  // 탭별 건수 조회
   const fetchTabCounts = useCallback(async () => {
     try {
       const counts: Record<string, number> = {};
@@ -149,7 +151,6 @@ function OrdersPage() {
     }
   };
 
-  // 검색 디바운스
   useEffect(() => {
     const timer = setTimeout(() => {
       setPage(1);
@@ -160,27 +161,37 @@ function OrdersPage() {
   return (
     <div className="space-y-4">
       {/* 탭 */}
-      <Tabs value={currentTab} onValueChange={handleTabChange}>
-        <TabsList className="h-auto flex-wrap gap-1 bg-transparent p-0">
-          {ORDER_TABS.map((tab) => (
-            <TabsTrigger
+      <div className="flex flex-wrap gap-1.5 border-b border-gray-200 pb-3">
+        {ORDER_TABS.map((tab) => {
+          const isActive = currentTab === tab.value;
+          const count = tabCounts[tab.value];
+          return (
+            <button
               key={tab.value}
-              value={tab.value}
-              className="data-[state=active]:bg-gray-900 data-[state=active]:text-white"
+              type="button"
+              onClick={() => handleTabChange(tab.value)}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-all',
+                isActive
+                  ? 'bg-gray-900 text-white shadow-sm'
+                  : 'text-gray-500 hover:bg-gray-100 hover:text-gray-700'
+              )}
             >
               {tab.label}
-              {tabCounts[tab.value] != null && (
-                <Badge
-                  variant="secondary"
-                  className="ml-1.5 h-5 min-w-[20px] px-1.5 text-[10px]"
-                >
-                  {tabCounts[tab.value]}
-                </Badge>
+              {count != null && (
+                <span className={cn(
+                  'inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-[10px] font-bold',
+                  isActive
+                    ? 'bg-white/20 text-white'
+                    : 'bg-gray-100 text-gray-500'
+                )}>
+                  {count}
+                </span>
               )}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+            </button>
+          );
+        })}
+      </div>
 
       {/* 툴바 */}
       <OrderTableToolbar
@@ -193,52 +204,55 @@ function OrdersPage() {
       />
 
       {/* 주문 테이블 */}
-      <OrderTable
-        orders={orders}
-        currentTab={currentTab}
-        selectedIds={selectedIds}
-        onSelectionChange={setSelectedIds}
-        onOrderClick={(id) => setSelectedOrderId(id)}
-        sortBy={sortBy}
-        sortOrder={sortOrder}
-        onSort={handleSort}
-      />
+      <div className="relative">
+        <OrderTable
+          orders={orders}
+          currentTab={currentTab}
+          selectedIds={selectedIds}
+          onSelectionChange={setSelectedIds}
+          onOrderClick={(id) => setSelectedOrderId(id)}
+          sortBy={sortBy}
+          sortOrder={sortOrder}
+          onSort={handleSort}
+        />
+        {loading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-md bg-white/70">
+            <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+          </div>
+        )}
+      </div>
 
       {/* 페이지네이션 */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-gray-500">
-            총 {totalCount.toLocaleString()}건
-          </span>
+      <div className="flex items-center justify-between pt-1">
+        <span className="text-xs text-gray-500">
+          총 <strong className="text-gray-800">{totalCount.toLocaleString()}</strong>건
+        </span>
+        {totalPages > 1 && (
           <div className="flex items-center gap-1">
             <Button
               variant="outline"
-              size="sm"
+              size="icon"
+              className="h-7 w-7"
               disabled={page <= 1}
               onClick={() => setPage(page - 1)}
             >
-              <ChevronLeft className="h-4 w-4" />
+              <ChevronLeft className="h-3.5 w-3.5" />
             </Button>
-            <span className="px-3 text-sm">
-              {page} / {totalPages}
+            <span className="px-2 text-xs text-gray-600">
+              <strong>{page}</strong> / {totalPages}
             </span>
             <Button
               variant="outline"
-              size="sm"
+              size="icon"
+              className="h-7 w-7"
               disabled={page >= totalPages}
               onClick={() => setPage(page + 1)}
             >
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-3.5 w-3.5" />
             </Button>
           </div>
-        </div>
-      )}
-
-      {loading && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/50">
-          <div className="text-sm text-gray-500">로딩중...</div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* 주문 상세 다이얼로그 */}
       {selectedOrderId && (

@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+
+function isMockMode() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  return !supabaseUrl || supabaseUrl.includes('your_supabase');
+}
 
 export async function POST(
   request: NextRequest,
@@ -7,7 +11,18 @@ export async function POST(
 ) {
   const { orderId } = await params;
 
+  if (isMockMode()) {
+    const { memo_text } = await request.json();
+    return NextResponse.json({
+      id: `memo-${Date.now()}`,
+      order_id: orderId,
+      memo_text,
+      created_at: new Date().toISOString(),
+    }, { status: 201 });
+  }
+
   try {
+    const { createClient } = await import('@/lib/supabase/server');
     const supabase = await createClient();
     const { memo_text } = await request.json();
 
@@ -25,13 +40,11 @@ export async function POST(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 메모 하이라이트 추가
     await supabase.from('order_highlights').upsert(
       { order_id: orderId, highlight_type: 'admin_memo', is_auto: true },
       { onConflict: 'order_id,highlight_type' }
     );
 
-    // 이력 기록
     await supabase.from('order_history').insert({
       order_id: orderId,
       action: 'memo_added',
@@ -50,7 +63,12 @@ export async function DELETE(
 ) {
   const { orderId } = await params;
 
+  if (isMockMode()) {
+    return NextResponse.json({ success: true });
+  }
+
   try {
+    const { createClient } = await import('@/lib/supabase/server');
     const supabase = await createClient();
     const { memo_id } = await request.json();
 
@@ -64,7 +82,6 @@ export async function DELETE(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 남은 메모가 없으면 하이라이트 제거
     const { count } = await supabase
       .from('admin_memos')
       .select('id', { count: 'exact', head: true })
@@ -78,7 +95,6 @@ export async function DELETE(
         .eq('highlight_type', 'admin_memo');
     }
 
-    // 이력 기록
     await supabase.from('order_history').insert({
       order_id: orderId,
       action: 'memo_deleted',

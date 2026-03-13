@@ -6,6 +6,7 @@ import { OrderStatusCards } from '@/components/dashboard/order-status-cards';
 import { WorkStatusCards } from '@/components/dashboard/work-status-cards';
 import { ShippingCalendar } from '@/components/dashboard/shipping-calendar';
 import { getDateRangeFromPreset } from '@/lib/date-utils';
+import { Loader2 } from 'lucide-react';
 import type { PeriodFilter as PeriodFilterType, DashboardSummary, ShippingMonthData } from '@/types/dashboard';
 
 export default function DashboardPage() {
@@ -23,7 +24,6 @@ export default function DashboardPage() {
   const fetchDashboard = useCallback(async () => {
     setLoading(true);
     try {
-      // 기간 프리셋에 따른 날짜 범위 계산
       const range = filter.preset === 'custom'
         ? { startDate: filter.startDate, endDate: filter.endDate }
         : getDateRangeFromPreset(filter.preset, filter.month);
@@ -60,7 +60,6 @@ export default function DashboardPage() {
   }, [fetchDashboard]);
 
   const handleFilterChange = (newFilter: PeriodFilterType) => {
-    // 프리셋 변경 시 자동으로 날짜 범위 계산
     if (newFilter.preset !== 'custom') {
       const range = getDateRangeFromPreset(newFilter.preset, newFilter.month);
       setFilter({ ...newFilter, ...range });
@@ -70,7 +69,7 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6">
       {/* 기간 검색 */}
       <PeriodFilter value={filter} onChange={handleFilterChange} />
 
@@ -83,9 +82,13 @@ export default function DashboardPage() {
       {/* 희망 출고일 현황 */}
       <ShippingCalendar data={shippingData} />
 
+      {/* 로딩 오버레이 */}
       {loading && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/50">
-          <div className="text-sm text-gray-500">로딩중...</div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white/60 backdrop-blur-[1px]">
+          <div className="flex items-center gap-2 rounded-lg bg-white px-4 py-3 shadow-lg">
+            <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+            <span className="text-sm text-gray-600">데이터를 불러오는 중...</span>
+          </div>
         </div>
       )}
     </div>

@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { MOCK_ORDERS, MOCK_ORDER_HISTORY } from '@/lib/mock-data';
+
+function isMockMode() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  return !supabaseUrl || supabaseUrl.includes('your_supabase');
+}
 
 export async function GET(
   request: NextRequest,
@@ -7,7 +12,17 @@ export async function GET(
 ) {
   const { orderId } = await params;
 
+  if (isMockMode()) {
+    const order = MOCK_ORDERS.find((o) => o.id === orderId);
+    if (!order) {
+      return NextResponse.json({ error: '주문을 찾을 수 없습니다.' }, { status: 404 });
+    }
+    const history = MOCK_ORDER_HISTORY.filter((h) => h.order_id === orderId);
+    return NextResponse.json({ ...order, history });
+  }
+
   try {
+    const { createClient } = await import('@/lib/supabase/server');
     const supabase = await createClient();
 
     const { data: order, error } = await supabase
@@ -26,7 +41,6 @@ export async function GET(
       return NextResponse.json({ error: error.message }, { status: 404 });
     }
 
-    // 주문 이력 별도 조회
     const { data: history } = await supabase
       .from('order_history')
       .select('*')
@@ -41,10 +55,11 @@ export async function GET(
       history: history || [],
     });
   } catch {
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    const order = MOCK_ORDERS.find((o) => o.id === orderId);
+    if (order) {
+      return NextResponse.json({ ...order, history: [] });
+    }
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -54,14 +69,18 @@ export async function PATCH(
 ) {
   const { orderId } = await params;
 
+  if (isMockMode()) {
+    const body = await request.json();
+    return NextResponse.json({ id: orderId, ...body, updated_at: new Date().toISOString() });
+  }
+
   try {
+    const { createClient } = await import('@/lib/supabase/server');
     const supabase = await createClient();
     const body = await request.json();
     const { field, value, old_value } = body;
 
     const updateData: Record<string, unknown> = {};
-
-    // 허용된 필드만 업데이트
     const allowedFields = [
       'recipient_name', 'recipient_phone', 'recipient_address',
       'recipient_zipcode', 'delivery_message', 'desired_shipping_date',
@@ -71,27 +90,17 @@ export async function PATCH(
     if (field && allowedFields.includes(field)) {
       updateData[field] = value;
 
-      // 희망출고일 변경 시 일정 하이라이트 추가
       if (field === 'desired_shipping_date') {
         await supabase.from('order_highlights').upsert(
-          {
-            order_id: orderId,
-            highlight_type: 'schedule_changed',
-            is_auto: true,
-          },
+          { order_id: orderId, highlight_type: 'schedule_changed', is_auto: true },
           { onConflict: 'order_id,highlight_type' }
         );
       }
 
-      // 사고건 토글
       if (field === 'is_incident') {
         if (value) {
           await supabase.from('order_highlights').upsert(
-            {
-              order_id: orderId,
-              highlight_type: 'incident',
-              is_auto: false,
-            },
+            { order_id: orderId, highlight_type: 'incident', is_auto: false },
             { onConflict: 'order_id,highlight_type' }
           );
         } else {
@@ -103,7 +112,6 @@ export async function PATCH(
         }
       }
     } else if (typeof body === 'object' && !field) {
-      // 다중 필드 업데이트
       for (const key of allowedFields) {
         if (key in body) {
           updateData[key] = body[key];
@@ -126,24 +134,18 @@ export async function PATCH(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 이력 기록
     await supabase.from('order_history').insert({
       order_id: orderId,
       action: 'field_updated',
       field_name: field || Object.keys(updateData).join(', '),
       old_value: old_value != null ? String(old_value) : null,
       new_value: value != null ? String(value) : null,
-      description: field
-        ? `${field} 변경`
-        : '주문정보 수정',
+      description: field ? `${field} 변경` : '주문정보 수정',
     });
 
     return NextResponse.json(data);
   } catch {
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -153,10 +155,14 @@ export async function DELETE(
 ) {
   const { orderId } = await params;
 
+  if (isMockMode()) {
+    return NextResponse.json({ success: true });
+  }
+
   try {
+    const { createClient } = await import('@/lib/supabase/server');
     const supabase = await createClient();
 
-    // 관리자 주문만 삭제 가능 (soft delete)
     const { data: order } = await supabase
       .from('orders')
       .select('order_source')
@@ -179,7 +185,6 @@ export async function DELETE(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // 이력 기록
     await supabase.from('order_history').insert({
       order_id: orderId,
       action: 'order_deleted',
@@ -188,9 +193,6 @@ export async function DELETE(
 
     return NextResponse.json({ success: true });
   } catch {
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

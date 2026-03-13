@@ -1,6 +1,5 @@
 'use client';
 
-import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
 interface StatusSummaryCardProps {
@@ -17,17 +16,18 @@ export function StatusSummaryCard({
   onClick,
 }: StatusSummaryCardProps) {
   return (
-    <Card
+    <button
+      type="button"
       className={cn(
-        'cursor-pointer border transition-shadow hover:shadow-md',
+        'flex flex-col items-center justify-center rounded-xl border p-4 transition-all',
+        'hover:shadow-md hover:-translate-y-0.5 active:translate-y-0',
+        'cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-400/50',
         colorClass
       )}
       onClick={onClick}
     >
-      <CardContent className="flex flex-col items-center justify-center p-4">
-        <span className="text-2xl font-bold">{count.toLocaleString()}</span>
-        <span className="mt-1 text-xs font-medium">{label}</span>
-      </CardContent>
-    </Card>
+      <span className="text-3xl font-bold tabular-nums">{count.toLocaleString()}</span>
+      <span className="mt-1.5 text-[11px] font-semibold tracking-tight">{label}</span>
+    </button>
   );
 }

@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>더기프트 퍼스트몰 - 가격 체계 UI 기획안</title>
+<style>
+  :root {
+    --primary: #2c2c2c;
+    --accent: #e74c3c;
+    --accent-blue: #3b82f6;
+    --bg: #f8f9fa;
+    --card-bg: #fff;
+    --border: #e5e7eb;
+    --text-muted: #9ca3af;
+    --text-sub: #6b7280;
+    --badge-set: #fff0f0;
+    --badge-set-text: #e74c3c;
+    --badge-single: #f0f4ff;
+    --badge-single-text: #3b82f6;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--primary); line-height: 1.6; }
+
+  /* ===== 기획서 영역 ===== */
+  .doc-section {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 40px 24px;
+  }
+  .doc-header {
+    text-align: center;
+    padding: 60px 24px 40px;
+    background: linear-gradient(135deg, #1e1e2e, #2d2d44);
+    color: #fff;
+    margin-bottom: 0;
+  }
+  .doc-header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+  .doc-header p { color: #a0a0b8; font-size: 14px; }
+  .doc-header .date { margin-top: 12px; font-size: 13px; color: #7a7a96; }
+
+  .section-title {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 48px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--primary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-title .num {
+    background: var(--primary);
+    color: #fff;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  .info-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0 24px;
+    font-size: 14px;
+  }
+  .info-table th, .info-table td {
+    border: 1px solid var(--border);
+    padding: 12px 16px;
+    text-align: left;
+  }
+  .info-table th {
+    background: #f1f3f5;
+    font-weight: 600;
+    width: 140px;
+    white-space: nowrap;
+  }
+  .info-table .highlight { color: var(--accent); font-weight: 600; }
+  .info-table .highlight-blue { color: var(--accent-blue); font-weight: 600; }
+
+  .desc-box {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin: 16px 0;
+  }
+  .desc-box h4 {
+    font-size: 15px;
+    margin-bottom: 12px;
+    color: var(--primary);
+  }
+  .desc-box ul { padding-left: 20px; }
+  .desc-box li { margin-bottom: 6px; font-size: 14px; color: #444; }
+
+  .callout {
+    background: #fffbe6;
+    border-left: 4px solid #f59e0b;
+    padding: 16px 20px;
+    border-radius: 0 8px 8px 0;
+    margin: 20px 0;
+    font-size: 14px;
+  }
+  .callout strong { color: #b45309; }
+
+  /* ===== 프로토타입 영역 ===== */
+  .proto-section {
+    background: #f1f3f5;
+    padding: 48px 0;
+    margin-top: 48px;
+  }
+  .proto-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+  .proto-title {
+    text-align: center;
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .proto-subtitle {
+    text-align: center;
+    font-size: 14px;
+    color: var(--text-sub);
+    margin-bottom: 32px;
+  }
+
+  .view-toggle {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 32px;
+  }
+  .view-toggle button {
+    padding: 8px 20px;
+    border: 2px solid var(--border);
+    background: #fff;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .view-toggle button.active {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: #fff;
+  }
+
+  /* ===== 상품 카드 - PC ===== */
+  .product-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+  }
+  .product-card {
+    background: var(--card-bg);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    transition: box-shadow 0.2s;
+  }
+  .product-card:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+  }
+  .card-img {
+    position: relative;
+    aspect-ratio: 1;
+    background: #f5f0eb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .card-img img {
+    width: 80%;
+    height: 80%;
+    object-fit: contain;
+  }
+  .card-img .badge-discount {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+  }
+  .card-body {
+    padding: 14px 16px 16px;
+  }
+  .card-body .card-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--primary);
+    margin-bottom: 12px;
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* 가격 영역 - 핵심 */
+  .price-area {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .price-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+  }
+  .price-label {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+  .price-label.set {
+    background: var(--badge-set);
+    color: var(--badge-set-text);
+  }
+  .price-label.single {
+    background: var(--badge-single);
+    color: var(--badge-single-text);
+  }
+  .price-original {
+    color: var(--text-muted);
+    text-decoration: line-through;
+    font-size: 12px;
+  }
+  .price-discount-rate {
+    font-weight: 700;
+    font-size: 13px;
+  }
+  .price-discount-rate.red { color: var(--accent); }
+  .price-discount-rate.blue { color: var(--accent-blue); }
+  .price-final {
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--primary);
+  }
+  .price-final.big {
+    font-size: 16px;
+  }
+  .price-unit {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .card-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px 14px;
+  }
+  .btn-cart {
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  .btn-cart:hover { opacity: 0.85; }
+  .btn-cart.in-cart {
+    background: #e5e7eb;
+    color: var(--text-sub);
+  }
+  .zzim {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .zzim svg { width: 16px; height: 16px; }
+
+  /* ===== 모바일 뷰 ===== */
+  .mobile-frame {
+    max-width: 390px;
+    margin: 0 auto;
+    background: #fff;
+    border-radius: 24px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.12);
+    padding: 20px 0;
+    display: none;
+  }
+  .mobile-frame .product-grid-mobile {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    padding: 0 16px;
+  }
+  .mobile-frame .product-card {
+    border-radius: 8px;
+  }
+  .mobile-frame .card-body {
+    padding: 10px 12px 12px;
+  }
+  .mobile-frame .card-body .card-name {
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+  .mobile-frame .price-row {
+    gap: 4px;
+  }
+  .mobile-frame .price-label {
+    font-size: 10px;
+    padding: 1px 4px;
+  }
+  .mobile-frame .price-original { font-size: 11px; }
+  .mobile-frame .price-discount-rate { font-size: 12px; }
+  .mobile-frame .price-final { font-size: 13px; }
+  .mobile-frame .price-final.big { font-size: 14px; }
+  .mobile-frame .price-unit { font-size: 10px; }
+  .mobile-frame .card-bottom {
+    padding: 0 12px 10px;
+  }
+  .mobile-frame .btn-cart {
+    padding: 6px 10px;
+    font-size: 11px;
+  }
+
+  /* 탭 스위치 */
+  .price-tab {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 12px;
+  }
+  .price-tab button {
+    flex: 1;
+    padding: 8px 0;
+    border: none;
+    background: none;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--text-muted);
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+  }
+  .price-tab button.active-set {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+  .price-tab button.active-single {
+    color: var(--accent-blue);
+    border-bottom-color: var(--accent-blue);
+  }
+
+  /* 옵션 비교 */
+  .option-section { margin-top: 48px; }
+  .option-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-top: 20px;
+  }
+  .option-card {
+    background: #fff;
+    border: 2px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 24px;
+    text-align: center;
+    position: relative;
+  }
+  .option-card.recommended {
+    border-color: var(--accent);
+  }
+  .option-card .rec-badge {
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--accent);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 14px;
+    border-radius: 12px;
+  }
+  .option-card h4 {
+    font-size: 16px;
+    margin-bottom: 16px;
+  }
+  .option-card .preview-card {
+    background: var(--bg);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+    min-height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .option-card .pros { text-align: left; font-size: 13px; }
+  .option-card .pros li { margin-bottom: 4px; color: #444; }
+
+  .divider {
+    border: none;
+    border-top: 1px dashed var(--border);
+    margin: 48px 0;
+  }
+
+  @media (max-width: 768px) {
+    .product-grid { grid-template-columns: repeat(2, 1fr); }
+    .option-grid { grid-template-columns: 1fr; }
+    .doc-header h1 { font-size: 22px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== 기획서 헤더 ===== -->
+<div class="doc-header">
+  <h1>가격 체계 UI 개선 기획안</h1>
+  <p>실링스티커 / 추가상품 상품 카드 가격 표시 방안</p>
+  <div class="date">작성일: 2026.03.13 | 더기프트 퍼스트몰</div>
+</div>
+
+<!-- ===== 1. 현황 분석 ===== -->
+<div class="doc-section">
+
+  <div class="section-title"><span class="num">1</span> 현황 및 문제점</div>
+
+  <table class="info-table">
+    <tr>
+      <th>현재 표시</th>
+      <td><code>&lt;strong class="price-real"&gt;5,900원&lt;/strong&gt;</code> → <strong>단품가만 노출</strong></td>
+    </tr>
+    <tr>
+      <th>문제점 1</th>
+      <td>단품가가 이미 할인된 가격인데, 정가 대비 할인 폭을 <span class="highlight">고객이 인지할 수 없음</span></td>
+    </tr>
+    <tr>
+      <th>문제점 2</th>
+      <td>청첩장과 함께 구매 시 세트가 할인 혜택이 <span class="highlight">상품 목록에서 보이지 않음</span></td>
+    </tr>
+    <tr>
+      <th>문제점 3</th>
+      <td>단품가 / 세트가 가격 차이를 통한 <span class="highlight-blue">세트 구매 유도가 불가능</span></td>
+    </tr>
+  </table>
+
+  <!-- ===== 2. 가격 체계 정리 ===== -->
+  <div class="section-title"><span class="num">2</span> 가격 체계 구조</div>
+
+  <table class="info-table">
+    <tr>
+      <th>정가 (소비자가)</th>
+      <td>기준이 되는 원래 가격. 취소선으로 표시하여 할인 기준점 역할</td>
+    </tr>
+    <tr>
+      <th>세트가</th>
+      <td>청첩장과 함께 구매 시 적용. 정가 대비 <span class="highlight">높은 할인율</span> → 세트 구매 유도</td>
+    </tr>
+    <tr>
+      <th>단품가</th>
+      <td>단독 구매 시 적용. 정가 대비 <span class="highlight-blue">기본 할인율</span> 적용</td>
+    </tr>
+  </table>
+
+  <div class="callout">
+    <strong>💡 핵심 전략:</strong> 정가를 기준선으로 노출하여 세트가/단품가 모두 "할인 중"이라는 인식을 만들고,
+    세트가의 더 높은 할인율로 청첩장 동시 구매를 유도합니다.
+  </div>
+
+  <p style="margin-top:16px; font-size:14px;">예시 — 블렌딩 실링스티커 로즈 쿼츠:</p>
+  <table class="info-table">
+    <tr>
+      <th>정가</th>
+      <td>8,000원</td>
+    </tr>
+    <tr>
+      <th>세트가</th>
+      <td><span class="highlight">45% OFF → 4,400원</span> (청첩장 함께 구매 시)</td>
+    </tr>
+    <tr>
+      <th>단품가</th>
+      <td><span class="highlight-blue">26% OFF → 5,900원</span> (단독 구매 시)</td>
+    </tr>
+  </table>
+
+  <!-- ===== 3. UI 표시 방안 ===== -->
+  <div class="section-title"><span class="num">3</span> UI 표시 방안 (권장안)</div>
+
+  <div class="desc-box">
+    <h4>✅ A안: 두 가격 동시 표시 (권장)</h4>
+    <ul>
+      <li>카드 내 가격 영역에 <strong>세트가</strong>와 <strong>단품가</strong>를 한눈에 표시</li>
+      <li>각각 배지 라벨(<span style="color:#e74c3c;">세트</span> / <span style="color:#3b82f6;">단품</span>)로 구분</li>
+      <li>정가는 취소선으로 표시, 할인율을 강조</li>
+      <li><strong>장점:</strong> 한 화면에서 두 가격을 비교 가능, 세트가의 혜택이 즉시 체감됨</li>
+      <li><strong>단점:</strong> 카드 높이가 다소 증가</li>
+    </ul>
+  </div>
+
+  <div class="desc-box">
+    <h4>B안: 탭 전환 방식</h4>
+    <ul>
+      <li>카드 상단에 "세트구매 / 단독구매" 탭을 두고 전환</li>
+      <li><strong>장점:</strong> 카드 높이 유지, 깔끔한 레이아웃</li>
+      <li><strong>단점:</strong> 한 번에 비교 불가, 탭 인터랙션 필요</li>
+    </ul>
+  </div>
+
+  <div class="desc-box">
+    <h4>C안: 세트가 강조 + 단품가 보조 표시</h4>
+    <ul>
+      <li>세트가를 메인 가격으로 크게 표시, 단품가는 작은 텍스트로 보조</li>
+      <li><strong>장점:</strong> 세트 구매 유도 효과 극대화</li>
+      <li><strong>단점:</strong> 단독 구매 고객에게 혼란 가능성</li>
+    </ul>
+  </div>
+
+</div>
+
+<!-- ===== 프로토타입 ===== -->
+<div class="proto-section">
+  <div class="proto-inner">
+
+    <p class="proto-title">📱 인터랙티브 프로토타입</p>
+    <p class="proto-subtitle">PC / Mobile 뷰를 전환하며 확인하세요</p>
+
+    <div class="view-toggle">
+      <button class="active" onclick="switchView('pc')">🖥 PC 뷰</button>
+      <button onclick="switchView('mobile')">📱 모바일 뷰</button>
+    </div>
+
+    <!-- ===== A안: PC 그리드 ===== -->
+    <div id="pc-view">
+      <h3 style="font-size:16px; margin-bottom:16px; text-align:center;">A안 — 두 가격 동시 표시 (권장)</h3>
+      <div class="product-grid" id="pc-grid">
+        <!-- JS로 생성 -->
+      </div>
+    </div>
+
+    <!-- ===== A안: 모바일 ===== -->
+    <div id="mobile-view" class="mobile-frame">
+      <div style="text-align:center; padding: 8px 16px 16px; font-size:14px; font-weight:600;">A안 — 모바일 뷰</div>
+      <div class="product-grid-mobile" id="mobile-grid">
+        <!-- JS로 생성 -->
+      </div>
+    </div>
+
+    <!-- ===== B안 프로토타입 ===== -->
+    <div style="margin-top:48px;">
+      <h3 style="font-size:16px; margin-bottom:16px; text-align:center;">B안 — 탭 전환 방식</h3>
+      <div style="max-width: 280px; margin: 0 auto;">
+        <div class="product-card">
+          <div class="card-img" style="background:#f5f0eb;">
+            <img src="https://file.barunsoncard.com/barunsoncard/seal_d_pk/800.png" alt="">
+            <div class="badge-discount">BEST</div>
+          </div>
+          <div class="card-body">
+            <p class="card-name">블렌딩 실링스티커 로즈 쿼츠(1set-18ea)</p>
+            <div class="price-tab">
+              <button class="active-set" onclick="switchTab(this, 'set')">청첩장과 함께</button>
+              <button onclick="switchTab(this, 'single')">단독 구매</button>
+            </div>
+            <div class="price-area" id="tab-price-area">
+              <div class="price-row">
+                <span class="price-original">8,000원</span>
+              </div>
+              <div class="price-row" style="gap:8px;">
+                <span class="price-discount-rate red">45%</span>
+                <span class="price-final big">4,400원</span>
+              </div>
+              <span class="price-unit">1set(18개)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== C안 프로토타입 ===== -->
+    <div style="margin-top:48px;">
+      <h3 style="font-size:16px; margin-bottom:16px; text-align:center;">C안 — 세트가 강조 + 단품가 보조</h3>
+      <div style="max-width: 280px; margin: 0 auto;">
+        <div class="product-card">
+          <div class="card-img" style="background:#f5f0eb;">
+            <img src="https://file.barunsoncard.com/barunsoncard/seal_d_pk/800.png" alt="">
+            <div class="badge-discount">45%</div>
+          </div>
+          <div class="card-body">
+            <p class="card-name">블렌딩 실링스티커 로즈 쿼츠(1set-18ea)</p>
+            <div class="price-area">
+              <div class="price-row">
+                <span class="price-original">8,000원</span>
+                <span class="price-discount-rate red">45%</span>
+                <span class="price-final big">4,400원</span>
+              </div>
+              <div style="background:#f8f9fa; border-radius:6px; padding:6px 8px; margin-top:4px; font-size:11px; color:#6b7280;">
+                단독 구매 시 <span style="color:#3b82f6; font-weight:700;">26%</span> <span style="font-weight:600;">5,900원</span>
+              </div>
+              <span class="price-unit">1set(18개)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== 4. 데이터 요구사항 ===== -->
+<div class="doc-section">
+  <div class="section-title"><span class="num">4</span> 데이터 요구사항</div>
+
+  <table class="info-table">
+    <tr>
+      <th>필드명</th>
+      <th>설명</th>
+      <th>예시</th>
+    </tr>
+    <tr>
+      <td><code>price_retail</code></td>
+      <td>정가 (소비자가) — 표시 기준가</td>
+      <td>8,000</td>
+    </tr>
+    <tr>
+      <td><code>price_set</code></td>
+      <td>세트가 (청첩장 동시 구매가)</td>
+      <td>4,400</td>
+    </tr>
+    <tr>
+      <td><code>price_single</code></td>
+      <td>단품가 (단독 구매가)</td>
+      <td>5,900</td>
+    </tr>
+  </table>
+
+  <div class="callout">
+    <strong>📌 참고:</strong> 할인율은 프론트엔드에서 계산합니다.<br>
+    <code>할인율 = Math.round((1 - 판매가 / 정가) * 100)</code>
+  </div>
+
+  <div class="section-title"><span class="num">5</span> 기대 효과</div>
+
+  <div class="desc-box">
+    <ul>
+      <li>🎯 <strong>세트 구매 전환율 증가:</strong> 세트가의 높은 할인율이 시각적으로 즉시 인지되어 청첩장 동시 구매 유도</li>
+      <li>💰 <strong>할인 가치 인식 향상:</strong> 정가 대비 취소선 + 할인율로 고객이 "저렴하게 사고 있다"는 심리적 만족감 제공</li>
+      <li>📊 <strong>가격 투명성 확보:</strong> 세트가/단품가를 동시 노출하여 가격 정책에 대한 고객 신뢰 향상</li>
+      <li>📱 <strong>모바일 최적화:</strong> 제한된 화면에서도 핵심 가격 정보를 효과적으로 전달</li>
+    </ul>
+  </div>
+
+</div>
+
+<div style="text-align:center; padding:40px 24px; color:#999; font-size:13px; border-top:1px solid #eee;">
+  더기프트 퍼스트몰 — 가격 체계 UI 기획안 v1.0
+</div>
+
+<script>
+const products = [
+  {
+    name: '블렌딩 실링스티커 로즈 쿼츠(1set-18ea)',
+    img: 'https://file.barunsoncard.com/barunsoncard/seal_d_pk/800.png',
+    retail: 8000, set: 4400, single: 5900,
+    unit: '1set(18개)', zzim: 664
+  },
+  {
+    name: '블렌딩 실링스티커 레몬 버터(1set-18ea)',
+    img: 'https://file.barunsoncard.com/barunsoncard/seal_d_yl/800.png',
+    retail: 8000, set: 4400, single: 5900,
+    unit: '1set(18개)', zzim: 211, inCart: true
+  },
+  {
+    name: '실링스티커 스카이블루 리본 (1set-25ea)',
+    img: 'https://file.barunsoncard.com/barunsoncard/DD_seal_ribbon_b_b/500.png',
+    retail: 32000, set: 19800, single: 25000,
+    unit: '1set(25장)', zzim: 4
+  },
+  {
+    name: '실링스티커 내츄럴크림 리본 (1set-25ea)',
+    img: 'https://file.barunsoncard.com/barunsoncard/DD_seal_ribbon_CR_b/500.png',
+    retail: 32000, set: 19800, single: 25000,
+    unit: '1set(25장)', zzim: 5
+  },
+  {
+    name: '실링스티커 화이트LEAF (1set-25ea)',
+    img: 'https://file.barunsoncard.com/barunsoncard/seal_leaf_w_K/500.png',
+    retail: 32000, set: 19800, single: 25000,
+    unit: '1set(25장)', zzim: 15
+  },
+  {
+    name: 'Happy Stamp_black (1set 25개입)',
+    img: 'https://file.barunsoncard.com/barunsoncard/BSI344/500.png',
+    retail: 2000, set: 1100, single: 1500,
+    unit: '25개', zzim: 6
+  },
+  {
+    name: '디즈니 실링스티커(1set-25ea)',
+    img: 'https://file.barunsoncard.com/barunsoncard/seal_disney_w/500.png',
+    retail: 32000, set: 19800, single: 25000,
+    unit: '1set(25장)', zzim: 3
+  },
+  {
+    name: '리본스티커 (1set-25ea)',
+    img: 'https://file.barunsoncard.com/barunsoncard/RA034IV/500.png',
+    retail: 20000, set: 12000, single: 15000,
+    unit: '1set(25장)', zzim: 9
+  },
+];
+
+function fmt(n) { return n.toLocaleString() + '원'; }
+function discRate(retail, sale) { return Math.round((1 - sale / retail) * 100); }
+
+function createCard(p) {
+  const setRate = discRate(p.retail, p.set);
+  const singleRate = discRate(p.retail, p.single);
+  return `
+    <div class="product-card">
+      <div class="card-img" style="background:#f5f0eb;">
+        <img src="${p.img}" alt="${p.name}">
+        <div class="badge-discount">${setRate}%</div>
+      </div>
+      <div class="card-body">
+        <p class="card-name">${p.name}</p>
+        <div class="price-area">
+          <div class="price-row">
+            <span class="price-original">${fmt(p.retail)}</span>
+          </div>
+          <div class="price-row">
+            <span class="price-label set">세트</span>
+            <span class="price-discount-rate red">${setRate}%</span>
+            <span class="price-final">${fmt(p.set)}</span>
+          </div>
+          <div class="price-row">
+            <span class="price-label single">단품</span>
+            <span class="price-discount-rate blue">${singleRate}%</span>
+            <span class="price-final">${fmt(p.single)}</span>
+          </div>
+          <span class="price-unit">${p.unit}</span>
+        </div>
+      </div>
+      <div class="card-bottom">
+        <button class="btn-cart ${p.inCart ? 'in-cart' : ''}">${p.inCart ? '담기완료' : '장바구니'}</button>
+        <span class="zzim">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          ${p.zzim}
+        </span>
+      </div>
+    </div>
+  `;
+}
+
+// 렌더
+document.getElementById('pc-grid').innerHTML = products.map(createCard).join('');
+document.getElementById('mobile-grid').innerHTML = products.map(createCard).join('');
+
+// 뷰 전환
+function switchView(view) {
+  const btns = document.querySelectorAll('.view-toggle button');
+  btns.forEach(b => b.classList.remove('active'));
+  if (view === 'pc') {
+    btns[0].classList.add('active');
+    document.getElementById('pc-view').style.display = 'block';
+    document.getElementById('mobile-view').style.display = 'none';
+  } else {
+    btns[1].classList.add('active');
+    document.getElementById('pc-view').style.display = 'none';
+    document.getElementById('mobile-view').style.display = 'block';
+  }
+}
+
+// B안 탭 전환
+function switchTab(btn, type) {
+  const tabs = btn.parentElement.querySelectorAll('button');
+  tabs.forEach(t => { t.className = ''; });
+  btn.className = type === 'set' ? 'active-set' : 'active-single';
+
+  const area = document.getElementById('tab-price-area');
+  if (type === 'set') {
+    area.innerHTML = `
+      <div class="price-row"><span class="price-original">8,000원</span></div>
+      <div class="price-row" style="gap:8px;">
+        <span class="price-discount-rate red">45%</span>
+        <span class="price-final big">4,400원</span>
+      </div>
+      <span class="price-unit">1set(18개)</span>
+    `;
+  } else {
+    area.innerHTML = `
+      <div class="price-row"><span class="price-original">8,000원</span></div>
+      <div class="price-row" style="gap:8px;">
+        <span class="price-discount-rate blue">26%</span>
+        <span class="price-final big">5,900원</span>
+      </div>
+      <span class="price-unit">1set(18개)</span>
+    `;
+  }
+}
+</script>
+
+</body>
+</html>

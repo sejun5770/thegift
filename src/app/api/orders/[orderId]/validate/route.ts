@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
 import { validateOrderItems, isMultiProduct, isCheckRequired } from '@/lib/services/validation-service';
+import { MOCK_ORDERS } from '@/lib/mock-data';
 import type { OrderItem } from '@/types/order';
+
+function isMockMode() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  return !supabaseUrl || supabaseUrl.includes('your_supabase');
+}
 
 export async function POST(
   request: NextRequest,
@@ -9,10 +14,23 @@ export async function POST(
 ) {
   const { orderId } = await params;
 
+  if (isMockMode()) {
+    const order = MOCK_ORDERS.find((o) => o.id === orderId);
+    if (!order) {
+      return NextResponse.json({ error: '주문을 찾을 수 없습니다.' }, { status: 404 });
+    }
+    const orderItems = (order.order_items || []) as unknown as OrderItem[];
+    const result = validateOrderItems(orderItems);
+    return NextResponse.json({
+      isValid: result.isValid,
+      failures: result.failures,
+    });
+  }
+
   try {
+    const { createClient } = await import('@/lib/supabase/server');
     const supabase = await createClient();
 
-    // 주문 상품 조회
     const { data: items, error: itemsError } = await supabase
       .from('order_items')
       .select('*')
@@ -26,7 +44,6 @@ export async function POST(
     const result = validateOrderItems(orderItems);
 
     if (!result.isValid) {
-      // 검증실패 처리
       const reasons = result.failures.map((f) => f.message).join('\n');
 
       await supabase
@@ -38,7 +55,6 @@ export async function POST(
         })
         .eq('id', orderId);
 
-      // 이력 기록
       await supabase.from('order_history').insert({
         order_id: orderId,
         action: 'validation_failed',
@@ -46,8 +62,6 @@ export async function POST(
       });
     }
 
-    // 하이라이트 업데이트
-    // 복수상품
     if (isMultiProduct(orderItems)) {
       await supabase.from('order_highlights').upsert(
         { order_id: orderId, highlight_type: 'multi_product', is_auto: true },
@@ -62,7 +76,6 @@ export async function POST(
         .eq('is_auto', true);
     }
 
-    // 점검필요
     if (isCheckRequired(orderItems)) {
       await supabase.from('order_highlights').upsert(
         { order_id: orderId, highlight_type: 'check_required', is_auto: true },

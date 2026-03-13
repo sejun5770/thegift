@@ -41,8 +41,11 @@ export function WorkStatusCards({ data }: WorkStatusCardsProps) {
   ];
 
   return (
-    <div>
-      <h3 className="mb-3 text-sm font-semibold text-gray-700">작업현황</h3>
+    <section>
+      <div className="mb-3 flex items-center gap-2">
+        <div className="h-4 w-1 rounded-full bg-emerald-500" />
+        <h3 className="text-sm font-semibold text-gray-800">작업현황</h3>
+      </div>
       <div className="grid grid-cols-5 gap-3">
         {items.map((item) => (
           <StatusSummaryCard
@@ -54,6 +57,6 @@ export function WorkStatusCards({ data }: WorkStatusCardsProps) {
           />
         ))}
       </div>
-    </div>
+    </section>
   );
 }

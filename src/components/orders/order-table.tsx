@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import {
   Table,
   TableBody,
@@ -64,23 +63,22 @@ export function OrderTable({
     <Button
       variant="ghost"
       size="sm"
-      className="-ml-3 h-8 text-xs font-medium"
+      className="-ml-3 h-7 text-[11px] font-semibold text-gray-500 hover:text-gray-900"
       onClick={() => onSort(field)}
     >
       {label}
       {sortBy === field ? (
         sortOrder === 'asc' ? (
-          <ArrowUp className="ml-1 h-3 w-3" />
+          <ArrowUp className="ml-0.5 h-3 w-3" />
         ) : (
-          <ArrowDown className="ml-1 h-3 w-3" />
+          <ArrowDown className="ml-0.5 h-3 w-3" />
         )
       ) : (
-        <ArrowUpDown className="ml-1 h-3 w-3 opacity-50" />
+        <ArrowUpDown className="ml-0.5 h-3 w-3 opacity-30" />
       )}
     </Button>
   );
 
-  // 스티커 정보 표시 로직
   const getStickerDisplay = (item: OrderListItem) => {
     const orderItem = item.order_items?.[0];
     if (!orderItem) return { type1: '-', type2: '-', type3: '-' };
@@ -97,7 +95,6 @@ export function OrderTable({
     };
   };
 
-  // 상품수 표시 (복수구매: n/N)
   const getProductCountDisplay = (item: OrderListItem) => {
     if (item.display_item_index != null && item.display_item_total != null) {
       return `${item.display_item_index + 1}/${item.display_item_total}`;
@@ -106,121 +103,126 @@ export function OrderTable({
   };
 
   return (
-    <div className="rounded-md border bg-white">
-      <Table>
-        <TableHeader>
-          <TableRow className="bg-gray-50">
-            <TableHead className="w-10">
-              <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
-            </TableHead>
-            <TableHead className="w-20 text-xs">하이라이트</TableHead>
-            <TableHead className="w-16 text-xs">출고방식</TableHead>
-            <TableHead className="w-28 text-xs">
-              <SortButton field="order_number" label="주문번호" />
-            </TableHead>
-            <TableHead className="w-24 text-xs">
-              <SortButton field="desired_shipping_date" label="희망출고일" />
-            </TableHead>
-            <TableHead className="w-14 text-xs">상품수</TableHead>
-            <TableHead className="w-16 text-xs">수령인</TableHead>
-            <TableHead className="min-w-[120px] text-xs">상품명</TableHead>
-            <TableHead className="w-14 text-xs">주문수량</TableHead>
-            <TableHead className="w-16 text-xs">박스타입</TableHead>
-            <TableHead className="w-24 text-xs">스티커타입1</TableHead>
-            <TableHead className="w-24 text-xs">스티커타입2</TableHead>
-            <TableHead className="w-24 text-xs">스티커타입3</TableHead>
-            <TableHead className="min-w-[100px] text-xs">입력메시지</TableHead>
-            <TableHead className="min-w-[80px] text-xs">배송메시지</TableHead>
-            <TableHead className="w-20 text-xs">관리자메모</TableHead>
-            <TableHead className="w-16 text-xs">주문상태</TableHead>
-            <TableHead className="w-28 text-xs">
-              <SortButton field="collected_at" label="수집일시" />
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {orders.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={18} className="h-32 text-center text-sm text-gray-500">
-                주문 내역이 없습니다.
-              </TableCell>
+    <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow className="border-b border-gray-200 bg-gray-50/80">
+              <TableHead className="w-10 px-3">
+                <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
+              </TableHead>
+              <TableHead className="w-[90px] text-[11px] font-semibold text-gray-500">하이라이트</TableHead>
+              <TableHead className="w-16 text-[11px] font-semibold text-gray-500">출고방식</TableHead>
+              <TableHead className="w-28 text-[11px] font-semibold text-gray-500">
+                <SortButton field="order_number" label="주문번호" />
+              </TableHead>
+              <TableHead className="w-24 text-[11px] font-semibold text-gray-500">
+                <SortButton field="desired_shipping_date" label="희망출고일" />
+              </TableHead>
+              <TableHead className="w-12 text-center text-[11px] font-semibold text-gray-500">상품수</TableHead>
+              <TableHead className="w-16 text-[11px] font-semibold text-gray-500">수령인</TableHead>
+              <TableHead className="min-w-[120px] text-[11px] font-semibold text-gray-500">상품명</TableHead>
+              <TableHead className="w-12 text-center text-[11px] font-semibold text-gray-500">수량</TableHead>
+              <TableHead className="w-16 text-[11px] font-semibold text-gray-500">박스타입</TableHead>
+              <TableHead className="w-24 text-[11px] font-semibold text-gray-500">스티커1</TableHead>
+              <TableHead className="w-24 text-[11px] font-semibold text-gray-500">스티커2</TableHead>
+              <TableHead className="w-24 text-[11px] font-semibold text-gray-500">스티커3</TableHead>
+              <TableHead className="min-w-[100px] text-[11px] font-semibold text-gray-500">입력메시지</TableHead>
+              <TableHead className="min-w-[80px] text-[11px] font-semibold text-gray-500">배송메시지</TableHead>
+              <TableHead className="w-20 text-[11px] font-semibold text-gray-500">관리자메모</TableHead>
+              <TableHead className="w-28 text-[11px] font-semibold text-gray-500">
+                <SortButton field="collected_at" label="수집일시" />
+              </TableHead>
             </TableRow>
-          ) : (
-            orders.map((order) => {
-              const sticker = getStickerDisplay(order);
-              const orderItem = order.order_items?.[0];
+          </TableHeader>
+          <TableBody>
+            {orders.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={17} className="h-32 text-center">
+                  <div className="flex flex-col items-center gap-1">
+                    <span className="text-sm text-gray-400">주문 내역이 없습니다.</span>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : (
+              orders.map((order, idx) => {
+                const sticker = getStickerDisplay(order);
+                const orderItem = order.order_items?.[0];
+                const isSelected = selectedIds.includes(order.id);
 
-              return (
-                <TableRow
-                  key={order.id}
-                  className={cn(
-                    'cursor-pointer hover:bg-gray-50',
-                    selectedIds.includes(order.id) && 'bg-blue-50'
-                  )}
-                >
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    <Checkbox
-                      checked={selectedIds.includes(order.id)}
-                      onCheckedChange={() => toggleOne(order.id)}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <HighlightBadges highlights={order.highlights} />
-                  </TableCell>
-                  <TableCell>
-                    <ShippingMethodBadge method={order.shipping_method} />
-                  </TableCell>
-                  <TableCell
-                    className="font-mono text-xs text-blue-600 hover:underline"
-                    onClick={() => onOrderClick(order.id)}
-                  >
-                    {order.order_number}
-                    {order.order_source === 'admin' && (
-                      <Badge variant="outline" className="ml-1 text-[9px] px-1 py-0">
-                        A
-                      </Badge>
+                return (
+                  <TableRow
+                    key={order.id}
+                    className={cn(
+                      'cursor-pointer border-b border-gray-100 transition-colors',
+                      isSelected
+                        ? 'bg-blue-50/70'
+                        : idx % 2 === 0
+                        ? 'bg-white hover:bg-gray-50'
+                        : 'bg-gray-50/30 hover:bg-gray-50'
                     )}
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    {formatDateKo(order.desired_shipping_date)}
-                  </TableCell>
-                  <TableCell className="text-center text-xs">
-                    {getProductCountDisplay(order)}
-                  </TableCell>
-                  <TableCell className="text-xs">{order.recipient_name}</TableCell>
-                  <TableCell className="max-w-[200px] truncate text-xs">
-                    {orderItem?.product_name || '-'}
-                  </TableCell>
-                  <TableCell className="text-center text-xs">
-                    {orderItem?.quantity || '-'}
-                  </TableCell>
-                  <TableCell className="text-xs">
-                    {orderItem?.box_type_name || '-'}
-                  </TableCell>
-                  <TableCell className="text-xs">{sticker.type1}</TableCell>
-                  <TableCell className="text-xs">{sticker.type2}</TableCell>
-                  <TableCell className="text-xs">{sticker.type3}</TableCell>
-                  <TableCell className="max-w-[150px] truncate text-xs">
-                    {orderItem?.input_message || '-'}
-                  </TableCell>
-                  <TableCell className="max-w-[120px] truncate text-xs">
-                    {order.delivery_message || '-'}
-                  </TableCell>
-                  <TableCell className="max-w-[100px] truncate text-xs">
-                    {order.latest_memo || '-'}
-                  </TableCell>
-                  <TableCell>
-                    <OrderStatusBadge status={order.status} />
-                  </TableCell>
-                  <TableCell className="text-xs text-gray-500">
-                    {formatDateTimeKo(order.collected_at)}
-                  </TableCell>
-                </TableRow>
-              );
-            })
-          )}
-        </TableBody>
-      </Table>
+                  >
+                    <TableCell className="px-3" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={isSelected}
+                        onCheckedChange={() => toggleOne(order.id)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <HighlightBadges highlights={order.highlights} />
+                    </TableCell>
+                    <TableCell>
+                      <ShippingMethodBadge method={order.shipping_method} />
+                    </TableCell>
+                    <TableCell
+                      className="font-mono text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                      onClick={() => onOrderClick(order.id)}
+                    >
+                      {order.order_number}
+                      {order.order_source === 'admin' && (
+                        <Badge variant="outline" className="ml-1 h-4 border-amber-300 bg-amber-50 px-1 py-0 text-[8px] font-bold text-amber-700">
+                          A
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs tabular-nums text-gray-700">
+                      {formatDateKo(order.desired_shipping_date)}
+                    </TableCell>
+                    <TableCell className="text-center text-xs tabular-nums text-gray-600">
+                      {getProductCountDisplay(order)}
+                    </TableCell>
+                    <TableCell className="text-xs font-medium text-gray-800">{order.recipient_name}</TableCell>
+                    <TableCell className="max-w-[200px] truncate text-xs text-gray-600">
+                      {orderItem?.product_name || '-'}
+                    </TableCell>
+                    <TableCell className="text-center text-xs tabular-nums text-gray-600">
+                      {orderItem?.quantity || '-'}
+                    </TableCell>
+                    <TableCell className="text-xs text-gray-600">
+                      {orderItem?.box_type_name || '-'}
+                    </TableCell>
+                    <TableCell className="text-xs text-gray-600">{sticker.type1}</TableCell>
+                    <TableCell className="text-xs text-gray-500">{sticker.type2}</TableCell>
+                    <TableCell className="text-xs text-gray-500">{sticker.type3}</TableCell>
+                    <TableCell className="max-w-[150px] truncate text-xs text-gray-600">
+                      {orderItem?.input_message || '-'}
+                    </TableCell>
+                    <TableCell className="max-w-[120px] truncate text-xs text-gray-500">
+                      {order.delivery_message || '-'}
+                    </TableCell>
+                    <TableCell className="max-w-[100px] truncate text-xs text-gray-500">
+                      {order.latest_memo || '-'}
+                    </TableCell>
+                    <TableCell className="text-xs text-gray-400 tabular-nums">
+                      {formatDateTimeKo(order.collected_at)}
+                    </TableCell>
+                  </TableRow>
+                );
+              })
+            )}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }

@@ -16,7 +16,7 @@ export function OrderStatusCards({ data }: OrderStatusCardsProps) {
     {
       key: 'total' as const,
       label: '전체주문',
-      color: 'bg-gray-50 text-gray-700 border-gray-200',
+      color: 'bg-slate-50 text-slate-700 border-slate-200',
     },
     {
       key: 'collected' as const,
@@ -41,8 +41,11 @@ export function OrderStatusCards({ data }: OrderStatusCardsProps) {
   ];
 
   return (
-    <div>
-      <h3 className="mb-3 text-sm font-semibold text-gray-700">주문현황</h3>
+    <section>
+      <div className="mb-3 flex items-center gap-2">
+        <div className="h-4 w-1 rounded-full bg-blue-500" />
+        <h3 className="text-sm font-semibold text-gray-800">주문현황</h3>
+      </div>
       <div className="grid grid-cols-5 gap-3">
         {items.map((item) => (
           <StatusSummaryCard
@@ -60,6 +63,6 @@ export function OrderStatusCards({ data }: OrderStatusCardsProps) {
           />
         ))}
       </div>
-    </div>
+    </section>
   );
 }

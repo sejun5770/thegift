@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>가격 표현 UI 비교 프로토타입</title>
+<style>
+  :root {
+    --red: #e53935;
+    --orange: #ff6d00;
+    --blue: #1565c0;
+    --gray-light: #f5f5f5;
+    --gray-mid: #999;
+    --gray-dark: #333;
+    --set-bg: #fff0f0;
+    --set-border: #ffcdd2;
+    --solo-bg: #f0f4ff;
+    --solo-border: #bbdefb;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, 'Pretendard', 'Noto Sans KR', sans-serif;
+    background: #f8f8f8;
+    color: var(--gray-dark);
+    padding: 20px;
+  }
+
+  h1 {
+    text-align: center;
+    font-size: 22px;
+    margin-bottom: 8px;
+    font-weight: 700;
+  }
+  .subtitle {
+    text-align: center;
+    color: var(--gray-mid);
+    font-size: 14px;
+    margin-bottom: 32px;
+  }
+
+  /* Viewport toggle */
+  .viewport-toggle {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 24px;
+  }
+  .viewport-toggle button {
+    padding: 8px 20px;
+    border: 1px solid #ddd;
+    border-radius: 20px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all .2s;
+  }
+  .viewport-toggle button.active {
+    background: var(--gray-dark);
+    color: #fff;
+    border-color: var(--gray-dark);
+  }
+
+  /* Style sections */
+  .style-section {
+    margin-bottom: 48px;
+  }
+  .style-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #eee;
+  }
+  .style-number {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--gray-dark);
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 14px;
+    flex-shrink: 0;
+  }
+  .style-title { font-size: 17px; font-weight: 700; }
+  .style-desc { font-size: 13px; color: var(--gray-mid); }
+
+  /* Card grid */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    transition: all .3s;
+  }
+  .card-grid.mobile {
+    grid-template-columns: repeat(2, 1fr);
+    max-width: 400px;
+    margin: 0 auto;
+    gap: 12px;
+  }
+
+  /* Product card */
+  .product-card {
+    background: #fff;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    transition: box-shadow .2s;
+  }
+  .product-card:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,.1);
+  }
+
+  .card-image {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1;
+    background: var(--gray-light);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .card-image img {
+    width: 80%;
+    height: 80%;
+    object-fit: contain;
+  }
+
+  /* Badge for style C */
+  .set-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: var(--red);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+    line-height: 1.3;
+  }
+
+  .card-body {
+    padding: 12px;
+  }
+  .card-body.mobile-body {
+    padding: 8px 10px;
+  }
+
+  .product-name {
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+    margin-bottom: 8px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .mobile .product-name {
+    font-size: 12px;
+    margin-bottom: 6px;
+  }
+
+  .count-label {
+    font-size: 12px;
+    color: var(--gray-mid);
+    margin-bottom: 6px;
+  }
+
+  /* ---------- Style A: Tab switching ---------- */
+  .tab-row {
+    display: flex;
+    gap: 0;
+    margin-bottom: 8px;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid #e0e0e0;
+  }
+  .tab-btn {
+    flex: 1;
+    padding: 5px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    text-align: center;
+    transition: all .2s;
+    background: #fff;
+    color: var(--gray-mid);
+  }
+  .tab-btn.active-set {
+    background: var(--red);
+    color: #fff;
+  }
+  .tab-btn.active-solo {
+    background: var(--blue);
+    color: #fff;
+  }
+
+  .price-area-a {
+    min-height: 52px;
+  }
+  .original-price {
+    font-size: 12px;
+    color: var(--gray-mid);
+    text-decoration: line-through;
+    margin-bottom: 2px;
+  }
+  .discount-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .discount-pct {
+    font-size: 16px;
+    font-weight: 800;
+  }
+  .discount-pct.red { color: var(--red); }
+  .discount-pct.blue { color: var(--blue); }
+  .final-price {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--gray-dark);
+  }
+  .mobile .final-price,
+  .mobile .discount-pct {
+    font-size: 14px;
+  }
+  .set-hint {
+    font-size: 11px;
+    color: var(--orange);
+    margin-top: 4px;
+    font-weight: 500;
+  }
+
+  /* ---------- Style B: 2-row comparison ---------- */
+  .price-box {
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin-bottom: 6px;
+  }
+  .price-box.set-box {
+    background: var(--set-bg);
+    border: 1px solid var(--set-border);
+  }
+  .price-box.solo-box {
+    background: var(--solo-bg);
+    border: 1px solid var(--solo-border);
+  }
+  .price-box-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 2px;
+  }
+  .price-box-label {
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .price-box-label.set { color: var(--red); }
+  .price-box-label.solo { color: var(--blue); }
+  .price-box-pct {
+    font-size: 13px;
+    font-weight: 800;
+  }
+  .price-box-pct.red { color: var(--red); }
+  .price-box-pct.blue { color: var(--blue); }
+  .price-box-amount {
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .mobile .price-box-amount {
+    font-size: 13px;
+  }
+
+  /* ---------- Style C: Badge + main price ---------- */
+  .price-area-c {}
+  .solo-discount-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-bottom: 2px;
+  }
+  .solo-pct {
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--red);
+  }
+  .solo-final {
+    font-size: 16px;
+    font-weight: 700;
+  }
+  .mobile .solo-pct,
+  .mobile .solo-final {
+    font-size: 14px;
+  }
+
+  /* Cart button */
+  .cart-btn {
+    display: block;
+    width: 100%;
+    padding: 8px;
+    margin-top: 10px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    background: #fff;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all .15s;
+    color: var(--gray-dark);
+  }
+  .cart-btn:hover {
+    background: var(--gray-dark);
+    color: #fff;
+    border-color: var(--gray-dark);
+  }
+
+  /* Like row */
+  .like-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #f0f0f0;
+  }
+  .like-row .heart { font-size: 14px; cursor: pointer; }
+  .like-row .like-count { font-size: 11px; color: var(--gray-mid); }
+</style>
+</head>
+<body>
+
+<h1>가격 표현 UI 비교</h1>
+<p class="subtitle">3가지 스타일을 PC / 모바일 뷰에서 비교해 보세요</p>
+
+<div class="viewport-toggle">
+  <button class="active" onclick="setView('pc')">PC (4열)</button>
+  <button onclick="setView('mobile')">Mobile (2열)</button>
+</div>
+
+<!-- ========== STYLE A: Tab switching ========== -->
+<div class="style-section">
+  <div class="style-header">
+    <div class="style-number">A</div>
+    <div>
+      <div class="style-title">탭 전환 방식</div>
+      <div class="style-desc">'세트구매 / 단독구매' 탭으로 전환하여 가격 확인 · 카드 공간 절약</div>
+    </div>
+  </div>
+  <div class="card-grid" id="grid-a"></div>
+</div>
+
+<!-- ========== STYLE B: 2-row comparison ========== -->
+<div class="style-section">
+  <div class="style-header">
+    <div class="style-number">B</div>
+    <div>
+      <div class="style-title">2단 비교 방식</div>
+      <div class="style-desc">세트가와 단품가를 위아래로 나란히 배치 · 한눈에 비교 가능</div>
+    </div>
+  </div>
+  <div class="card-grid" id="grid-b"></div>
+</div>
+
+<!-- ========== STYLE C: Badge + solo price ========== -->
+<div class="style-section">
+  <div class="style-header">
+    <div class="style-number">C</div>
+    <div>
+      <div class="style-title">뱃지 + 최저가 강조 방식</div>
+      <div class="style-desc">카드에는 단품가(기본)를 보여주고, 세트구매 할인은 이미지 뱃지로 강조</div>
+    </div>
+  </div>
+  <div class="card-grid" id="grid-c"></div>
+</div>
+
+<script>
+const products = [
+  {
+    name: '블렌딩 실링스티커 로즈 쿼츠(1set-18ea)',
+    img: 'https://file.barunsoncard.com/barunsoncard/seal_d_pk/800.png',
+    count: '1set(18개)',
+    regular: 8000,
+    setPrice: 3900,
+    soloPrice: 5900,
+    likes: 664
+  },
+  {
+    name: '블렌딩 실링스티커 레몬 버터(1set-18ea)',
+    img: 'https://file.barunsoncard.com/barunsoncard/seal_d_yl/800.png',
+    count: '1set(18개)',
+    regular: 8000,
+    setPrice: 3900,
+    soloPrice: 5900,
+    likes: 211
+  },
+  {
+    name: '실링스티커 스카이블루 리본 (1set-25ea)',
+    img: 'https://file.barunsoncard.com/barunsoncard/DD_seal_ribbon_b_b/500.png',
+    count: '1set(25장)',
+    regular: 35000,
+    setPrice: 21000,
+    soloPrice: 25000,
+    likes: 4
+  },
+  {
+    name: '실링스티커 내츄럴크림 리본 (1set-25ea)',
+    img: 'https://file.barunsoncard.com/barunsoncard/DD_seal_ribbon_CR_b/500.png',
+    count: '1set(25장)',
+    regular: 35000,
+    setPrice: 21000,
+    soloPrice: 25000,
+    likes: 5
+  }
+];
+
+function fmt(n) {
+  return n.toLocaleString('ko-KR') + '원';
+}
+function pct(regular, sale) {
+  return Math.round((1 - sale / regular) * 100);
+}
+
+// ---------- Style A ----------
+function renderA(container) {
+  container.innerHTML = products.map((p, i) => `
+    <div class="product-card">
+      <div class="card-image">
+        <img src="${p.img}" alt="${p.name}">
+      </div>
+      <div class="card-body">
+        <div class="product-name">${p.name}</div>
+        <div class="count-label">${p.count}</div>
+        <div class="tab-row">
+          <button class="tab-btn active-set" onclick="switchTab(${i},'set')" id="tab-set-${i}">세트구매</button>
+          <button class="tab-btn" onclick="switchTab(${i},'solo')" id="tab-solo-${i}">단독구매</button>
+        </div>
+        <div class="price-area-a" id="price-a-${i}">
+          <div class="original-price">${fmt(p.regular)}</div>
+          <div class="discount-row">
+            <span class="discount-pct red">${pct(p.regular, p.setPrice)}%</span>
+            <span class="final-price">${fmt(p.setPrice)}</span>
+          </div>
+          <div class="set-hint">청첩장과 함께 구매 시</div>
+        </div>
+        <button class="cart-btn">장바구니</button>
+        <div class="like-row">
+          <span class="heart">♡</span>
+          <span class="like-count">${p.likes}</span>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function switchTab(i, type) {
+  const p = products[i];
+  const setBtn = document.getElementById(`tab-set-${i}`);
+  const soloBtn = document.getElementById(`tab-solo-${i}`);
+  const area = document.getElementById(`price-a-${i}`);
+
+  if (type === 'set') {
+    setBtn.className = 'tab-btn active-set';
+    soloBtn.className = 'tab-btn';
+    area.innerHTML = `
+      <div class="original-price">${fmt(p.regular)}</div>
+      <div class="discount-row">
+        <span class="discount-pct red">${pct(p.regular, p.setPrice)}%</span>
+        <span class="final-price">${fmt(p.setPrice)}</span>
+      </div>
+      <div class="set-hint">청첩장과 함께 구매 시</div>
+    `;
+  } else {
+    setBtn.className = 'tab-btn';
+    soloBtn.className = 'tab-btn active-solo';
+    area.innerHTML = `
+      <div class="original-price">${fmt(p.regular)}</div>
+      <div class="discount-row">
+        <span class="discount-pct blue">${pct(p.regular, p.soloPrice)}%</span>
+        <span class="final-price">${fmt(p.soloPrice)}</span>
+      </div>
+    `;
+  }
+}
+
+// ---------- Style B ----------
+function renderB(container) {
+  container.innerHTML = products.map(p => `
+    <div class="product-card">
+      <div class="card-image">
+        <img src="${p.img}" alt="${p.name}">
+      </div>
+      <div class="card-body">
+        <div class="product-name">${p.name}</div>
+        <div class="count-label">${p.count}</div>
+        <div class="original-price" style="margin-bottom:6px">정가 ${fmt(p.regular)}</div>
+        <div class="price-box set-box">
+          <div class="price-box-header">
+            <span class="price-box-label set">세트구매</span>
+            <span class="price-box-pct red">-${pct(p.regular, p.setPrice)}%</span>
+          </div>
+          <div class="price-box-amount">${fmt(p.setPrice)}</div>
+        </div>
+        <div class="price-box solo-box">
+          <div class="price-box-header">
+            <span class="price-box-label solo">단독구매</span>
+            <span class="price-box-pct blue">-${pct(p.regular, p.soloPrice)}%</span>
+          </div>
+          <div class="price-box-amount">${fmt(p.soloPrice)}</div>
+        </div>
+        <button class="cart-btn">장바구니</button>
+        <div class="like-row">
+          <span class="heart">♡</span>
+          <span class="like-count">${p.likes}</span>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ---------- Style C ----------
+function renderC(container) {
+  container.innerHTML = products.map(p => `
+    <div class="product-card">
+      <div class="card-image">
+        <img src="${p.img}" alt="${p.name}">
+        <div class="set-badge">세트구매 시<br>-${pct(p.regular, p.setPrice)}%</div>
+      </div>
+      <div class="card-body">
+        <div class="product-name">${p.name}</div>
+        <div class="count-label">${p.count}</div>
+        <div class="price-area-c">
+          <div class="original-price">${fmt(p.regular)}</div>
+          <div class="solo-discount-row">
+            <span class="solo-pct">${pct(p.regular, p.soloPrice)}%</span>
+            <span class="solo-final">${fmt(p.soloPrice)}</span>
+          </div>
+        </div>
+        <button class="cart-btn">장바구니</button>
+        <div class="like-row">
+          <span class="heart">♡</span>
+          <span class="like-count">${p.likes}</span>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// Viewport toggle
+function setView(mode) {
+  const grids = document.querySelectorAll('.card-grid');
+  const btns = document.querySelectorAll('.viewport-toggle button');
+  btns.forEach(b => b.classList.remove('active'));
+  if (mode === 'mobile') {
+    btns[1].classList.add('active');
+    grids.forEach(g => g.classList.add('mobile'));
+  } else {
+    btns[0].classList.add('active');
+    grids.forEach(g => g.classList.remove('mobile'));
+  }
+}
+
+// Init
+renderA(document.getElementById('grid-a'));
+renderB(document.getElementById('grid-b'));
+renderC(document.getElementById('grid-c'));
+</script>
+</body>
+</html>
