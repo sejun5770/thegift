@@ -494,53 +494,154 @@
     padding-top: 60px;
   }
 
-  /* AS-IS 카드 (현행) */
-  .asis-card {
-    background: var(--card-bg);
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
-    margin-bottom: 16px;
+  /* ===== AS-IS 카드 (바른손카드 실제 UI 재현) ===== */
+  .real-card {
+    background: #fff;
+    margin-bottom: 20px;
   }
-  .asis-card .card-img {
+  .real-card .real-card__image {
     position: relative;
     aspect-ratio: 1;
-    background: #f5f0eb;
+    background: #f4f4f5;
     display: flex;
     align-items: center;
     justify-content: center;
     overflow: hidden;
   }
-  .asis-card .card-img img {
-    width: 80%;
-    height: 80%;
+  .real-card .real-card__image img {
+    width: 75%;
+    height: 75%;
     object-fit: contain;
   }
-  .asis-card .card-body {
-    padding: 14px 16px 16px;
+  .real-card .real-card__info {
+    padding: 12px 0 0;
   }
-  .asis-card .card-name {
+  .real-card .real-card__name {
+    font-family: 'Pretendard', -apple-system, sans-serif;
+    font-size: 14px;
+    font-weight: 400;
+    color: #111;
+    line-height: 1.3;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .real-card .real-card__price-row {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 8px;
+  }
+  .real-card .real-card__price {
     font-size: 13px;
-    font-weight: 500;
-    color: var(--primary);
-    margin-bottom: 10px;
-    line-height: 1.4;
-  }
-  .asis-price-only {
-    font-size: 16px;
     font-weight: 700;
-    color: var(--primary);
+    color: #111;
   }
-  .asis-unit {
-    font-size: 11px;
-    color: var(--text-muted);
-    margin-top: 4px;
+  .real-card .real-card__unit {
+    font-size: 13px;
+    font-weight: 400;
+    color: #999;
+    margin-left: 4px;
   }
-  .asis-card .card-bottom {
+  .real-card .real-card__bottom {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 16px 14px;
+  }
+  .real-card .real-card__zzim {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 13px;
+    color: #999;
+  }
+  .real-card .real-card__zzim svg {
+    width: 16px;
+    height: 16px;
+    stroke: #ccc;
+    fill: none;
+  }
+  .real-card .real-card__cart-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: #fff;
+    border: 0.8px solid #eee;
+    border-radius: 2px;
+    padding: 7px 10px;
+    font-size: 12px;
+    color: #474747;
+    cursor: pointer;
+    font-family: 'Pretendard', sans-serif;
+  }
+  .real-card .real-card__cart-btn svg {
+    width: 14px;
+    height: 14px;
+    stroke: #474747;
+    fill: none;
+  }
+  .real-card .real-card__cart-btn.in-cart {
+    background: #f4f4f5;
+    border-color: #ddd;
+    color: #999;
+  }
+
+  /* ===== TO-BE 카드 (개선안 - 바른손 스타일 기반) ===== */
+  .real-card .real-card__price-original {
+    font-size: 12px;
+    color: #bbb;
+    text-decoration: line-through;
+    margin-bottom: 2px;
+  }
+  .real-card .real-card__price-line {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 2px;
+  }
+  .real-card .real-card__label {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .real-card .real-card__label.set {
+    background: #fff0f0;
+    color: #e74c3c;
+  }
+  .real-card .real-card__label.single {
+    background: #f0f4ff;
+    color: #3b82f6;
+  }
+  .real-card .real-card__rate {
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .real-card .real-card__rate.red { color: #e74c3c; }
+  .real-card .real-card__rate.blue { color: #3b82f6; }
+  .real-card .real-card__sale-price {
+    font-size: 13px;
+    font-weight: 700;
+    color: #111;
+  }
+  .real-card .real-card__unit-sm {
+    font-size: 12px;
+    color: #999;
+    margin-top: 2px;
+    margin-bottom: 8px;
+  }
+  .real-card .real-card__badge {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: #e74c3c;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
   }
 
   /* 비교 포인트 callout */
@@ -737,8 +838,10 @@
         <div class="compare-col-header as-is">
           <span class="tag">현행</span> AS-IS: 단품가만 표시
         </div>
-        <div class="compare-col-body" id="asis-cards">
-          <!-- JS로 생성 -->
+        <div class="compare-col-body">
+          <div id="asis-cards" style="display:grid; grid-template-columns:repeat(3,1fr); gap:16px;">
+            <!-- JS로 생성 -->
+          </div>
         </div>
       </div>
 
@@ -750,8 +853,10 @@
         <div class="compare-col-header to-be">
           <span class="tag">개선</span> TO-BE: 3가지 가격 표시
         </div>
-        <div class="compare-col-body" id="tobe-cards">
-          <!-- JS로 생성 -->
+        <div class="compare-col-body">
+          <div id="tobe-cards" style="display:grid; grid-template-columns:repeat(3,1fr); gap:16px;">
+            <!-- JS로 생성 -->
+          </div>
         </div>
       </div>
     </div>
@@ -1012,71 +1117,67 @@ function createCard(p) {
   `;
 }
 
-// AS-IS 카드 (현행: 단품가만 표시)
+// AS-IS 카드 (현행: 바른손카드 실제 UI 재현)
 function createAsIsCard(p) {
+  const cartIcon = `<svg viewBox="0 0 24 24" stroke-width="1.5"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>`;
+  const heartIcon = `<svg viewBox="0 0 24 24" stroke-width="1.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
   return `
-    <div class="asis-card">
-      <div class="card-img" style="background:#f5f0eb;">
+    <div class="real-card">
+      <div class="real-card__image">
         <img src="${p.img}" alt="${p.name}">
       </div>
-      <div class="card-body">
-        <p class="card-name">${p.name}</p>
-        <div class="asis-price-only">${fmt(p.single)}</div>
-        <div class="asis-unit">${p.unit}</div>
-      </div>
-      <div class="card-bottom">
-        <button class="btn-cart ${p.inCart ? 'in-cart' : ''}">${p.inCart ? '담기완료' : '장바구니'}</button>
-        <span class="zzim">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-          ${p.zzim}
-        </span>
+      <div class="real-card__info">
+        <p class="real-card__name">${p.name}</p>
+        <div class="real-card__price-row">
+          <span class="real-card__price">${fmt(p.single)}</span>
+          <span class="real-card__unit">${p.unit}</span>
+        </div>
+        <div class="real-card__bottom">
+          <span class="real-card__zzim">${heartIcon} ${p.zzim}</span>
+          <button class="real-card__cart-btn ${p.inCart ? 'in-cart' : ''}">${cartIcon}<span>${p.inCart ? '담기완료' : '장바구니'}</span></button>
+        </div>
       </div>
     </div>
   `;
 }
 
-// TO-BE 카드 (개선안: 정가/세트가/단품가 동시 표시)
+// TO-BE 카드 (개선안: 바른손카드 스타일 기반 + 가격 체계 추가)
 function createToBeCard(p) {
   const setRate = discRate(p.retail, p.set);
   const singleRate = discRate(p.retail, p.single);
+  const cartIcon = `<svg viewBox="0 0 24 24" stroke-width="1.5"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>`;
+  const heartIcon = `<svg viewBox="0 0 24 24" stroke-width="1.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>`;
   return `
-    <div class="product-card">
-      <div class="card-img" style="background:#f5f0eb;">
+    <div class="real-card">
+      <div class="real-card__image">
+        <div class="real-card__badge">${setRate}%</div>
         <img src="${p.img}" alt="${p.name}">
-        <div class="badge-discount">${setRate}%</div>
       </div>
-      <div class="card-body">
-        <p class="card-name">${p.name}</p>
-        <div class="price-area">
-          <div class="price-row">
-            <span class="price-original">${fmt(p.retail)}</span>
-          </div>
-          <div class="price-row">
-            <span class="price-label set">세트</span>
-            <span class="price-discount-rate red">${setRate}%</span>
-            <span class="price-final">${fmt(p.set)}</span>
-          </div>
-          <div class="price-row">
-            <span class="price-label single">단품</span>
-            <span class="price-discount-rate blue">${singleRate}%</span>
-            <span class="price-final">${fmt(p.single)}</span>
-          </div>
-          <span class="price-unit">${p.unit}</span>
+      <div class="real-card__info">
+        <p class="real-card__name">${p.name}</p>
+        <div class="real-card__price-original">${fmt(p.retail)}</div>
+        <div class="real-card__price-line">
+          <span class="real-card__label set">세트</span>
+          <span class="real-card__rate red">${setRate}%</span>
+          <span class="real-card__sale-price">${fmt(p.set)}</span>
         </div>
-      </div>
-      <div class="card-bottom">
-        <button class="btn-cart ${p.inCart ? 'in-cart' : ''}">${p.inCart ? '담기완료' : '장바구니'}</button>
-        <span class="zzim">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-          ${p.zzim}
-        </span>
+        <div class="real-card__price-line">
+          <span class="real-card__label single">단품</span>
+          <span class="real-card__rate blue">${singleRate}%</span>
+          <span class="real-card__sale-price">${fmt(p.single)}</span>
+        </div>
+        <div class="real-card__unit-sm">${p.unit}</div>
+        <div class="real-card__bottom">
+          <span class="real-card__zzim">${heartIcon} ${p.zzim}</span>
+          <button class="real-card__cart-btn ${p.inCart ? 'in-cart' : ''}">${cartIcon}<span>${p.inCart ? '담기완료' : '장바구니'}</span></button>
+        </div>
       </div>
     </div>
   `;
 }
 
-// 2단 비교 렌더 (상위 2개만 표시)
-const compareProducts = products.slice(0, 2);
+// 2단 비교 렌더 (상위 3개 표시 - 실제 사이트 3열 레이아웃)
+const compareProducts = products.slice(0, 3);
 document.getElementById('asis-cards').innerHTML = compareProducts.map(createAsIsCard).join('');
 document.getElementById('tobe-cards').innerHTML = compareProducts.map(createToBeCard).join('');
 
