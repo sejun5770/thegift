@@ -18,5 +18,7 @@ __pycache__
 .venv
 venv
 docs
-pricing-prototype
+# pricing-prototype 중 daeryepum만 포함 (Dockerfile에서 직접 COPY)
+pricing-prototype/*/REQUIREMENTS_AUDIT.md
+pricing-prototype/*/SESSION_CONTEXT.md
 .claude

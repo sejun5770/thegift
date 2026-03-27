@@ -3,18 +3,19 @@ const fs = require('fs');
 const path = require('path');
 const url = require('url');
 
-const PORT = 3457;
+const PORT = parseInt(process.env.PORT || '3457');
+const BASE_PATH = process.env.BASE_PATH || '';  // 예: /c/barungift
 
 // --- MSSQL connection ---
 let sql;
 try { sql = require('mssql'); } catch { sql = require(path.join(__dirname, '../../node_modules/mssql')); }
 
 const DB_CONFIG = {
-  server: 'barun-shopdb.9925ce92729d.database.windows.net',
-  port: 1433,
-  user: 'readonly_user',
-  password: 'barunreadonly12#',
-  database: 'bar_shop1',
+  server: process.env.DB_SERVER || 'barun-shopdb.9925ce92729d.database.windows.net',
+  port: parseInt(process.env.DB_PORT || '1433'),
+  user: process.env.DB_USER || 'readonly_user',
+  password: process.env.DB_PASSWORD || 'barunreadonly12#',
+  database: process.env.DB_NAME || 'bar_shop1',
   options: { encrypt: true, trustServerCertificate: false },
   pool: { max: 5, min: 0, idleTimeoutMillis: 30000 },
   requestTimeout: 60000,
@@ -594,7 +595,11 @@ async function apiMarketing() {
 // --- HTTP Server ---
 const server = http.createServer(async (req, res) => {
   const parsed = url.parse(req.url, true);
-  const pathname = parsed.pathname;
+  // BASE_PATH 접두어 제거 (docker-manager 프록시가 /c/barungift/... 형태로 전달)
+  let pathname = parsed.pathname;
+  if (BASE_PATH && pathname.startsWith(BASE_PATH)) {
+    pathname = pathname.slice(BASE_PATH.length) || '/';
+  }
 
   // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -651,6 +656,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`답례품 관리 서버: http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`답례품 관리 서버: http://localhost:${PORT}${BASE_PATH || ''}`);
 });
