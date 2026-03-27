@@ -16,6 +16,7 @@ COPY . .
 RUN mkdir -p public
 
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_PUBLIC_BASE_PATH=/c/barungift
 
 RUN npm run build
 
