@@ -8,8 +8,15 @@ LICENSE
 *.md
 .env
 .env.*
+.env*.local
+.env.local
+.next
 node_modules
+npm-debug.log*
 __pycache__
 *.pyc
 .venv
 venv
+docs
+pricing-prototype
+.claude

@@ -1,20 +1,47 @@
-FROM node:20-alpine AS deps
+FROM node:20-alpine AS base
+
+# 1단계: 의존성 설치
+FROM base AS deps
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
-COPY package*.json ./
+
+COPY package.json package-lock.json* ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-FROM node:20-alpine AS builder
+# 2단계: 빌드
+FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN mkdir -p public
-ENV NEXT_PUBLIC_BASE_PATH=/c/barungift
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
 RUN npm run build
 
-FROM node:20-alpine
+# 3단계: 프로덕션 실행
+FROM base AS runner
 WORKDIR /app
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
 COPY --from=builder /app/public ./public
+
+RUN mkdir .next
+RUN chown nextjs:nodejs .next
+
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
+
 EXPOSE 3000
+
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
 CMD ["node", "server.js"]
