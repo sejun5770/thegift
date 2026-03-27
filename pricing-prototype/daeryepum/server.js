@@ -607,6 +607,17 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
 
+  // 서버 공인 IP 확인용 (임시)
+  if (pathname === '/api/myip') {
+    const https = require('https');
+    https.get('https://api.ipify.org?format=json', (ipRes) => {
+      let body = '';
+      ipRes.on('data', c => body += c);
+      ipRes.on('end', () => { res.writeHead(200, {'Content-Type':'application/json'}); res.end(body); });
+    }).on('error', (e) => { res.writeHead(500); res.end(JSON.stringify({error:e.message})); });
+    return;
+  }
+
   // API routes
   if (pathname.startsWith('/api/')) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
