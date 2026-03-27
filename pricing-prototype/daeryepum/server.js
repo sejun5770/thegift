@@ -159,69 +159,67 @@ async function apiDashboardComparison() {
   const todayStr = fmtDate(today());
   const tomorrowStr = fmtDate(addDays(today(), 1));
   const yesterdayStr = fmtDate(addDays(today(), -1));
+  const lastWeekSameDayStr = fmtDate(addDays(today(), -7));
+  const lastWeekSameDayNextStr = fmtDate(addDays(today(), -6));
 
-  const result = await p.request()
-    .input('today', sql.VarChar, todayStr)
-    .input('tomorrow', sql.VarChar, tomorrowStr)
-    .input('yesterday', sql.VarChar, yesterdayStr)
-    .query(`
-      -- 오늘
-      SELECT 'today' AS period,
-        COUNT(DISTINCT o.order_seq) AS order_count,
-        ISNULL(SUM(oi.card_sale_price),0) AS total_amount,
-        ISNULL(SUM(oi.order_count),0) AS total_qty
-      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND o.order_date >= @today AND o.order_date < @tomorrow AND o.status_seq >= 1
+  // 요일 이름
+  const dayNames = ['일','월','화','수','목','금','토'];
+  const todayDow = dayNames[today().getDay()];
 
-      UNION ALL
-      SELECT 'today_card' AS period,
-        COUNT(DISTINCT co.order_seq),
-        ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count),0),
-        ISNULL(SUM(coi.item_count),0)
-      FROM custom_order co WITH (NOLOCK)
-      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
-      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.order_date >= @today AND co.order_date < @tomorrow AND co.status_seq >= 1
+  // 각 기간별 ETC+CARD 합산 헬퍼
+  async function getPeriodTotal(startStr, endStr) {
+    const r = await p.request()
+      .input('s', sql.VarChar, startStr)
+      .input('e', sql.VarChar, endStr)
+      .query(`
+        SELECT
+          COUNT(DISTINCT o.order_seq) AS order_count,
+          ISNULL(SUM(oi.card_sale_price),0) AS total_amount,
+          ISNULL(SUM(oi.order_count),0) AS total_qty
+        FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+        INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+        WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e AND o.status_seq NOT IN (3, 5)
+      `);
+    const r2 = await p.request()
+      .input('s', sql.VarChar, startStr)
+      .input('e', sql.VarChar, endStr)
+      .query(`
+        SELECT
+          COUNT(DISTINCT co.order_seq) AS order_count,
+          ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count),0) AS total_amount,
+          ISNULL(SUM(coi.item_count),0) AS total_qty
+        FROM custom_order co WITH (NOLOCK)
+        INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+        WHERE ${D01_FILTER} AND co.order_date >= @s AND co.order_date < @e AND co.status_seq NOT IN (3, 5)
+      `);
+    const a = r.recordset[0] || {};
+    const b = r2.recordset[0] || {};
+    return {
+      order_count: (a.order_count||0) + (b.order_count||0),
+      total_amount: (a.total_amount||0) + (b.total_amount||0),
+      total_qty: (a.total_qty||0) + (b.total_qty||0),
+    };
+  }
 
-      UNION ALL
-      -- 어제
-      SELECT 'yesterday' AS period,
-        COUNT(DISTINCT o.order_seq),
-        ISNULL(SUM(oi.card_sale_price),0),
-        ISNULL(SUM(oi.order_count),0)
-      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND o.order_date >= @yesterday AND o.order_date < @today AND o.status_seq >= 1
+  const [todayTotal, yesterdayTotal, lastWeekTotal] = await Promise.all([
+    getPeriodTotal(todayStr, tomorrowStr),
+    getPeriodTotal(yesterdayStr, todayStr),
+    getPeriodTotal(lastWeekSameDayStr, lastWeekSameDayNextStr),
+  ]);
 
-      UNION ALL
-      SELECT 'yesterday_card' AS period,
-        COUNT(DISTINCT co.order_seq),
-        ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count),0),
-        ISNULL(SUM(coi.item_count),0)
-      FROM custom_order co WITH (NOLOCK)
-      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
-      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.order_date >= @yesterday AND co.order_date < @today AND co.status_seq >= 1
-    `);
-
-  const data = {};
-  for (const r of result.recordset) { data[r.period] = r; }
-
-  const todayTotal = {
-    order_count: (data.today?.order_count||0) + (data.today_card?.order_count||0),
-    total_amount: (data.today?.total_amount||0) + (data.today_card?.total_amount||0),
-    total_qty: (data.today?.total_qty||0) + (data.today_card?.total_qty||0),
+  return {
+    today: todayTotal,
+    yesterday: yesterdayTotal,
+    last_week_same_day: lastWeekTotal,
+    date: {
+      today: todayStr,
+      yesterday: yesterdayStr,
+      last_week_same_day: lastWeekSameDayStr,
+      today_dow: todayDow,
+    },
   };
-  const yesterdayTotal = {
-    order_count: (data.yesterday?.order_count||0) + (data.yesterday_card?.order_count||0),
-    total_amount: (data.yesterday?.total_amount||0) + (data.yesterday_card?.total_amount||0),
-    total_qty: (data.yesterday?.total_qty||0) + (data.yesterday_card?.total_qty||0),
-  };
-
-  return { today: todayTotal, yesterday: yesterdayTotal, date: { today: todayStr, yesterday: yesterdayStr } };
 }
 
 async function apiDashboardSummary(query) {
@@ -243,7 +241,7 @@ async function apiDashboardSummary(query) {
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 1
+      WHERE ${D01_FILTER} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq NOT IN (3, 5)
       GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), o.order_date, 120)
 
       UNION ALL
@@ -258,7 +256,7 @@ async function apiDashboardSummary(query) {
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 1
+      WHERE ${D01_FILTER} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq NOT IN (3, 5)
       GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), co.order_date, 120)
 
       ORDER BY order_day DESC, total_amount DESC
@@ -360,7 +358,7 @@ async function apiForecast() {
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND o.order_date >= @awStart AND o.order_date < @awEnd AND o.status_seq >= 1
+      WHERE ${D01_FILTER} AND o.order_date >= @awStart AND o.order_date < @awEnd AND o.status_seq NOT IN (3, 5)
       GROUP BY CONVERT(varchar(10), o.order_date, 120)
 
       UNION ALL
@@ -373,7 +371,7 @@ async function apiForecast() {
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.order_date >= @awStart AND co.order_date < @awEnd AND co.status_seq >= 1
+      WHERE ${D01_FILTER} AND co.order_date >= @awStart AND co.order_date < @awEnd AND co.status_seq NOT IN (3, 5)
       GROUP BY CONVERT(varchar(10), co.order_date, 120)
     `);
 
@@ -425,7 +423,7 @@ async function apiForecast() {
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND o.order_date >= @start30 AND o.order_date < DATEADD(day,1,@today) AND o.status_seq >= 1
+      WHERE ${D01_FILTER} AND o.order_date >= @start30 AND o.order_date < DATEADD(day,1,@today) AND o.status_seq NOT IN (3, 5)
     `);
 
   const actual = actualStats.recordset[0] || {};
@@ -500,6 +498,99 @@ async function apiLeadtime() {
   return { avg_days: avg, median_days: median, total_samples: allDays.length, distribution: buckets };
 }
 
+async function apiMarketing() {
+  const p = await getPool();
+
+  // 1) 시간대별 주문 분포
+  const hourly = await p.request().query(`
+    SELECT DATEPART(hour, o.order_date) AS hr, COUNT(DISTINCT o.order_seq) AS cnt
+    FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+    INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+    INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+    WHERE ${D01_FILTER} AND o.status_seq NOT IN (3, 5) AND o.order_date >= DATEADD(day,-90,GETDATE())
+    GROUP BY DATEPART(hour, o.order_date)
+    ORDER BY hr
+  `);
+
+  // 2) 요일별 주문 분포
+  const weekly = await p.request().query(`
+    SELECT DATEPART(weekday, o.order_date) AS dow, COUNT(DISTINCT o.order_seq) AS cnt
+    FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+    INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+    INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+    WHERE ${D01_FILTER} AND o.status_seq NOT IN (3, 5) AND o.order_date >= DATEADD(day,-90,GETDATE())
+    GROUP BY DATEPART(weekday, o.order_date)
+    ORDER BY dow
+  `);
+
+  // 3) 지역별 (ETC 단독주문)
+  const region = await p.request().query(`
+    SELECT TOP 12
+      LEFT(o.recv_address, CHARINDEX(' ', o.recv_address + ' ') - 1) AS region,
+      COUNT(DISTINCT o.order_seq) AS cnt
+    FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+    INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+    INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+    WHERE ${D01_FILTER} AND o.status_seq NOT IN (3, 5) AND o.order_date >= DATEADD(day,-90,GETDATE())
+      AND o.recv_address IS NOT NULL AND LEN(o.recv_address) > 2
+    GROUP BY LEFT(o.recv_address, CHARINDEX(' ', o.recv_address + ' ') - 1)
+    ORDER BY cnt DESC
+  `);
+
+  // 4) 전환율 (2단계 - 답례품 구매자 member_id → 청첩장 주문자 교차)
+  const giftMembers = await p.request().query(`
+    SELECT DISTINCT o.member_id
+    FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+    INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+    INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+    WHERE ${D01_FILTER} AND o.status_seq NOT IN (3, 5) AND o.order_date >= DATEADD(day,-90,GETDATE())
+      AND o.member_id IS NOT NULL AND o.member_id != ''
+  `);
+  const giftSet = new Set(giftMembers.recordset.map(r => r.member_id));
+
+  const cardMembers = await p.request().query(`
+    SELECT DISTINCT co.member_id
+    FROM custom_order co WITH (NOLOCK)
+    INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+    INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+    WHERE c.Card_Div = 'A01' AND co.status_seq NOT IN (3, 5) AND co.order_date >= DATEADD(day,-90,GETDATE())
+      AND co.member_id IS NOT NULL AND co.member_id != ''
+  `);
+  const cardSet = new Set(cardMembers.recordset.map(r => r.member_id));
+
+  let crossCount = 0;
+  for (const m of giftSet) { if (cardSet.has(m)) crossCount++; }
+
+  const conversion = {
+    card_members: cardSet.size,
+    gift_members: giftSet.size,
+    cross_buy: crossCount,
+    card_to_gift_pct: cardSet.size ? +(crossCount / cardSet.size * 100).toFixed(1) : 0,
+    gift_has_card_pct: giftSet.size ? +(crossCount / giftSet.size * 100).toFixed(1) : 0,
+    gift_only: giftSet.size - crossCount,
+    gift_only_pct: giftSet.size ? +((giftSet.size - crossCount) / giftSet.size * 100).toFixed(1) : 0,
+  };
+
+  // 시간대 정리 (0~23시 전체)
+  const hourMap = {};
+  for (let i = 0; i < 24; i++) hourMap[i] = 0;
+  hourly.recordset.forEach(r => { hourMap[r.hr] = r.cnt; });
+
+  // 요일 정리
+  const dayNames = ['','일','월','화','수','목','금','토'];
+  const dayMap = {};
+  for (let i = 1; i <= 7; i++) dayMap[dayNames[i]] = 0;
+  weekly.recordset.forEach(r => { dayMap[dayNames[r.dow]] = r.cnt; });
+
+  return {
+    hourly: hourMap,
+    weekly: dayMap,
+    region: region.recordset,
+    conversion,
+    period: '최근 90일',
+  };
+}
+
 // --- HTTP Server ---
 const server = http.createServer(async (req, res) => {
   const parsed = url.parse(req.url, true);
@@ -526,6 +617,8 @@ const server = http.createServer(async (req, res) => {
         data = await apiForecast();
       } else if (pathname === '/api/dashboard/leadtime') {
         data = await apiLeadtime();
+      } else if (pathname === '/api/dashboard/marketing') {
+        data = await apiMarketing();
       } else {
         res.writeHead(404);
         res.end(JSON.stringify({ error: 'Not found' }));

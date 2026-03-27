@@ -85,6 +85,12 @@ nav a:hover{color:var(--gray-900)}
 .leadtime-bar .label{position:absolute;bottom:-20px;left:50%;transform:translateX(-50%);font-size:10px;white-space:nowrap;color:var(--gray-500)}
 .leadtime-bar .count{position:absolute;top:-16px;left:50%;transform:translateX(-50%);font-size:11px;font-weight:600}
 .tooltip-wrap:hover .tooltip-content{display:block!important}
+.data-table tfoot td{padding:10px 12px;border-top:2px solid var(--gray-200);font-weight:700;background:var(--gray-50)}
+/* pivot table sticky first column */
+#sales-table{border-collapse:separate;border-spacing:0}
+#sales-table th,#sales-table td{border-bottom:1px solid var(--gray-100)}
+#sales-table thead th{border-bottom:2px solid var(--gray-200);position:sticky;top:0;z-index:3}
+#sales-table thead th:first-child{z-index:4}
 @media(max-width:900px){.card-grid-4{grid-template-columns:repeat(2,1fr)}.compare-grid{grid-template-columns:1fr}}
 </style>
 </head>
@@ -93,17 +99,47 @@ nav a:hover{color:var(--gray-900)}
   <span class="logo">💐 답례품 관리</span>
   <a href="#dashboard" class="active" onclick="showPage('dashboard')">대시보드</a>
   <a href="#orders" onclick="showPage('orders')">주문조회</a>
+  <a href="#sns" onclick="showPage('sns')">💡 SNS 인사이트</a>
 </nav>
 
 <div class="container">
 <!-- ========== DASHBOARD ========== -->
 <div id="page-dashboard" class="page active">
+  <!-- 대시보드 기간 조회 -->
+  <div class="toolbar" style="margin-bottom:20px">
+    <input type="date" id="dash-start" />
+    <span>~</span>
+    <input type="date" id="dash-end" />
+    <button class="btn btn-primary" onclick="loadDashboard()">조회</button>
+  </div>
+  <!-- Sales Data Toggle -->
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <span style="font-size:15px;font-weight:700">📋 기간 매출 현황</span>
+    <div style="display:flex;gap:4px">
+      <button class="btn btn-sm btn-primary" id="btn-view-card" onclick="setDashView('card')">카드 보기</button>
+      <button class="btn btn-sm" id="btn-view-table" onclick="setDashView('table')">테이블 보기</button>
+    </div>
+  </div>
+  <div id="dash-card-view">
   <!-- Summary Cards -->
   <div class="card-grid card-grid-4" id="summary-cards">
     <div class="card"><h3>총 매출</h3><div class="value" id="s-revenue">-</div><div class="sub" id="s-revenue-sub"></div></div>
     <div class="card"><h3>총 수량</h3><div class="value" id="s-qty">-</div><div class="sub" id="s-qty-sub"></div></div>
     <div class="card"><h3>주문 건수</h3><div class="value" id="s-orders">-</div><div class="sub" id="s-orders-sub"></div></div>
     <div class="card"><h3>평균 리드타임</h3><div class="value" id="s-leadtime">-</div><div class="sub" id="s-leadtime-sub"></div></div>
+  </div>
+  <div class="feedback" id="summary-feedback" style="margin-top:-8px;margin-bottom:16px"></div>
+  </div><!-- end dash-card-view -->
+
+  <!-- Table View -->
+  <div id="dash-table-view" style="display:none;margin-bottom:20px">
+    <div style="display:flex;gap:4px;margin-bottom:12px">
+      <button class="btn btn-sm btn-primary" id="tab-daily" onclick="setTableTab('daily')">일자별</button>
+      <button class="btn btn-sm" id="tab-weekly" onclick="setTableTab('weekly')">주차별</button>
+    </div>
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table class="data-table" id="sales-table"></table>
+    </div>
   </div>
 
   <!-- Yesterday vs Today Comparison -->
@@ -126,6 +162,29 @@ nav a:hover{color:var(--gray-900)}
         </div>
       </div>
       <div class="feedback" id="cmp-feedback"></div>
+    </div>
+  </div>
+
+  <!-- Today vs Last Week Same Day -->
+  <div class="section">
+    <div class="section-title">📅 오늘 vs 전주 같은 요일 (WoW)</div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="compare-grid">
+        <div class="compare-col yesterday">
+          <div class="compare-header"><span id="wow-last-date">전주</span></div>
+          <div class="compare-row"><span class="compare-label">매출</span><span class="compare-value" id="wow-l-amount">-</span></div>
+          <div class="compare-row"><span class="compare-label">수량</span><span class="compare-value" id="wow-l-qty">-</span></div>
+          <div class="compare-row"><span class="compare-label">건수</span><span class="compare-value" id="wow-l-orders">-</span></div>
+        </div>
+        <div class="compare-vs">VS</div>
+        <div class="compare-col today">
+          <div class="compare-header"><span id="wow-today-date">오늘</span> <span id="wow-badge"></span></div>
+          <div class="compare-row"><span class="compare-label">매출</span><span class="compare-value" id="wow-t-amount">-</span></div>
+          <div class="compare-row"><span class="compare-label">수량</span><span class="compare-value" id="wow-t-qty">-</span></div>
+          <div class="compare-row"><span class="compare-label">건수</span><span class="compare-value" id="wow-t-orders">-</span></div>
+        </div>
+      </div>
+      <div class="feedback" id="wow-feedback"></div>
     </div>
   </div>
 
@@ -184,14 +243,61 @@ nav a:hover{color:var(--gray-900)}
     </div>
   </div>
 
+  <!-- Marketing Analytics -->
+  <div class="section">
+    <div class="section-title">📊 마케팅 분석 (최근 90일)</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <!-- 전환율 카드 -->
+      <div class="card">
+        <h3 style="margin-bottom:12px">🔄 청첩장→답례품 전환율</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center;margin-bottom:12px">
+          <div><div style="font-size:24px;font-weight:700;color:var(--primary)" id="mk-card-members">-</div><div style="font-size:11px;color:#666">청첩장 주문자</div></div>
+          <div><div style="font-size:24px;font-weight:700;color:#f59e0b" id="mk-cross">-</div><div style="font-size:11px;color:#666">답례품도 구매</div></div>
+          <div><div style="font-size:24px;font-weight:700;color:#10b981" id="mk-conv-pct">-</div><div style="font-size:11px;color:#666">전환율</div></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <div style="flex:1;background:#eff6ff;border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:18px;font-weight:600" id="mk-gift-has-card">-</div>
+            <div style="font-size:11px;color:#666">답례품 구매자 중 청첩장O</div>
+          </div>
+          <div style="flex:1;background:#fef3c7;border-radius:8px;padding:10px;text-align:center">
+            <div style="font-size:18px;font-weight:600" id="mk-gift-only">-</div>
+            <div style="font-size:11px;color:#666">답례품 단독 구매 (비청첩장)</div>
+          </div>
+        </div>
+        <div class="feedback" id="mk-conv-feedback" style="margin:0;font-size:12px"></div>
+      </div>
+      <!-- 지역별 분포 -->
+      <div class="card">
+        <h3 style="margin-bottom:12px">📍 배송지역 분포</h3>
+        <div id="mk-region-bars" style="display:flex;gap:6px;align-items:end;height:120px;margin-bottom:8px"></div>
+        <div class="feedback" id="mk-region-feedback" style="margin:0;font-size:12px"></div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <!-- 시간대별 -->
+      <div class="card">
+        <h3 style="margin-bottom:12px">⏰ 시간대별 주문 분포</h3>
+        <div class="chart-container" style="height:180px"><canvas id="hourlyChart"></canvas></div>
+      </div>
+      <!-- 요일별 -->
+      <div class="card">
+        <h3 style="margin-bottom:12px">📅 요일별 주문 분포</h3>
+        <div class="chart-container" style="height:180px"><canvas id="weeklyChart"></canvas></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Daily x Product Chart -->
   <div class="section">
-    <div class="section-title">📈 상품별 일자별 매출 추이</div>
-    <div class="toolbar">
-      <input type="date" id="dash-start" />
-      <span>~</span>
-      <input type="date" id="dash-end" />
-      <button class="btn btn-primary" onclick="loadDashboard()">조회</button>
+    <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <span>📈 상품별 일자별 매출 추이</span>
+      <div class="toolbar" style="margin:0">
+        <input type="date" id="chart-start" />
+        <span>~</span>
+        <input type="date" id="chart-end" />
+        <button class="btn btn-primary btn-sm" onclick="loadChart()">조회</button>
+      </div>
     </div>
     <div class="card">
       <div class="chart-container"><canvas id="salesChart"></canvas></div>
@@ -224,6 +330,60 @@ nav a:hover{color:var(--gray-900)}
 </div>
 </div>
 
+<!-- ========== SNS INSIGHT ========== -->
+<div id="page-sns" class="page">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+    <h2 style="margin:0">💡 SNS 콘텐츠 인사이트</h2>
+    <button class="btn btn-primary" onclick="loadSnsInsight()">🔄 새로고침</button>
+  </div>
+
+  <!-- 이번 주 추천 콘텐츠 -->
+  <div class="section">
+    <div class="section-title">📱 이번 주 추천 콘텐츠 소재</div>
+    <div id="sns-content-cards" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px"></div>
+  </div>
+
+  <!-- 인스타그램 캡션 & 해시태그 -->
+  <div class="section">
+    <div class="section-title">📸 인스타그램 추천</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="card" id="sns-caption-card">
+        <h3 style="margin-bottom:12px">추천 캡션</h3>
+        <div id="sns-captions" style="display:flex;flex-direction:column;gap:10px"></div>
+      </div>
+      <div class="card" id="sns-hashtag-card">
+        <h3 style="margin-bottom:12px">추천 해시태그</h3>
+        <div id="sns-hashtags" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+        <button class="btn btn-sm" style="margin-top:12px" onclick="copySnsHashtags()">📋 해시태그 복사</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 타이밍 & 타겟 전략 -->
+  <div class="section">
+    <div class="section-title">🎯 게시 타이밍 & 타겟 전략</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="card" id="sns-timing-card">
+        <h3 style="margin-bottom:12px">⏰ 최적 게시 시간</h3>
+        <div id="sns-timing"></div>
+      </div>
+      <div class="card" id="sns-target-card">
+        <h3 style="margin-bottom:12px">🎯 타겟 오디언스</h3>
+        <div id="sns-target"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 키워드 & 소구점 -->
+  <div class="section">
+    <div class="section-title">🔑 핵심 키워드 & 소구점</div>
+    <div class="card">
+      <div id="sns-keywords"></div>
+      <div class="feedback" id="sns-overall-feedback" style="margin-top:12px"></div>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -242,10 +402,14 @@ const ALL_COLS = [
   {key:'wedding_date',label:'예식일',default:false},
   {key:'lead_days',label:'리드타임(일)',default:false,num:true},
   {key:'order_type_label',label:'주문유형',default:false},
+  {key:'status_label',label:'주문상태',default:false},
 ];
 
 let ordersData = [];
 let salesChart = null;
+let dashboardSummaryData = [];
+let dashViewMode = 'card';
+let tableTabMode = 'daily';
 
 // --- Init ---
 function init() {
@@ -257,10 +421,17 @@ function init() {
   document.getElementById('ord-end').value = end;
   document.getElementById('dash-start').value = start30;
   document.getElementById('dash-end').value = end;
+  document.getElementById('chart-start').value = start30;
+  document.getElementById('chart-end').value = end;
 
   buildColSelector();
   loadDashboard();
+  loadChart();
   loadOrders();
+
+  // URL hash 기반 페이지 전환
+  const hash = location.hash.replace('#', '') || 'dashboard';
+  if (['dashboard', 'orders', 'sns'].includes(hash)) showPage(hash);
 }
 
 function fmt(d) { return d.toISOString().slice(0,10); }
@@ -274,6 +445,7 @@ function showPage(name) {
   document.getElementById('page-' + name).classList.add('active');
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
   document.querySelector(`nav a[href="#${name}"]`).classList.add('active');
+  if (name === 'sns') loadSnsInsight();
 }
 
 // --- Column Selector ---
@@ -298,11 +470,20 @@ async function loadOrders() {
   const endPlus = fmt(new Date(new Date(end).getTime() + 86400000));
   try {
     const res = await fetch(`${API}/api/orders?start_date=${start}&end_date=${endPlus}`);
-    ordersData = await res.json();
+    const jsonData = await res.json();
+    ordersData = Array.isArray(jsonData) ? jsonData : [];
     ordersData.forEach(r => {
       r.order_date_fmt = r.order_date ? new Date(r.order_date).toLocaleString('ko-KR',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
       r.item_amount_fmt = fmtKRW(r.item_amount);
       r.order_type_label = r.order_type === 'ETC' ? '부가상품' : '청첩장+답례품';
+      // 주문상태 매핑 (bar_shop1 status_seq)
+      const STATUS_MAP = {
+        0:'주문접수', 1:'결제대기', 2:'입금확인', 3:'결제취소', 4:'결제확인',
+        5:'주문취소', 6:'제작준비', 7:'인쇄대기', 8:'인쇄중',
+        9:'제본중', 10:'포장중', 11:'배송준비', 12:'배송완료',
+        13:'수령확인', 14:'환불요청', 15:'환불완료'
+      };
+      r.status_label = STATUS_MAP[r.status_seq] || `상태${r.status_seq ?? '?'}`;
       const rawLead = r.wedding_date && r.order_date ? Math.round((new Date(r.wedding_date) - new Date(r.order_date)) / 86400000) : null;
       r.lead_days_raw = rawLead;
       r.lead_days = rawLead !== null ? (rawLead < 0 ? `예식후 ${Math.abs(rawLead)}일` : `${rawLead}일`) : '';
@@ -380,11 +561,23 @@ async function loadDashboard() {
     renderComparison(cmp);
     renderForecast(forecast);
     renderLeadtime(leadtime);
-    renderSalesChart(summary);
+    // 마케팅 분석 (별도 로드 - 무거운 쿼리)
+    fetch(`${API}/api/dashboard/marketing`).then(r=>r.json()).then(renderMarketing).catch(e=>console.warn('Marketing load failed:', e));
   } catch(e) { console.error(e); showToast('대시보드 로딩 실패: ' + e.message); }
 }
 
+async function loadChart() {
+  try {
+    const chartStart = document.getElementById('chart-start').value;
+    const chartEnd = document.getElementById('chart-end').value;
+    const chartEndPlus = fmt(new Date(new Date(chartEnd).getTime() + 86400000));
+    const chartData = await fetch(`${API}/api/dashboard/summary?start_date=${chartStart}&end_date=${chartEndPlus}`).then(r=>r.json());
+    renderSalesChart(chartData);
+  } catch(e) { console.error(e); showToast('차트 로딩 실패: ' + e.message); }
+}
+
 function renderSummary(summary, lt) {
+  dashboardSummaryData = summary;
   let totalAmt=0, totalQty=0, orders=new Set();
   summary.forEach(r => { totalAmt += r.total_amount||0; totalQty += r.total_qty||0; orders.add(r.order_day+'_'+r.card_code); });
   // approximate order count from unique day+product combos
@@ -398,6 +591,38 @@ function renderSummary(summary, lt) {
   document.getElementById('s-orders-sub').textContent = `건`;
   document.getElementById('s-leadtime').textContent = lt.avg_days + '일';
   document.getElementById('s-leadtime-sub').textContent = `중앙값 ${lt.median_days}일`;
+
+  // 기간 데이터 피드백
+  const dailyAvg = uniqueDays > 0 ? Math.round(totalAmt / uniqueDays) : 0;
+  const avgOrderValue = totalOrders > 0 ? Math.round(totalAmt / totalOrders) : 0;
+  const avgQtyPerOrder = totalOrders > 0 ? Math.round(totalQty / totalOrders) : 0;
+
+  // 상품별 매출 집계
+  const productSales = {};
+  summary.forEach(r => {
+    const name = (r.card_name||'').replace(/^\[.*?\]\s*/g,'');
+    if (!productSales[name]) productSales[name] = { amount: 0, qty: 0 };
+    productSales[name].amount += r.total_amount||0;
+    productSales[name].qty += r.total_qty||0;
+  });
+  const sorted = Object.entries(productSales).sort((a,b) => b[1].amount - a[1].amount);
+  const top1 = sorted[0];
+  const top1Pct = totalAmt > 0 && top1 ? Math.round(top1[1].amount / totalAmt * 100) : 0;
+
+  let fb = `조회 기간 <strong>${uniqueDays}일</strong> 동안 총 <strong>${fmtNum(totalOrders)}건</strong>의 답례품 주문이 발생했습니다. `;
+  fb += `일평균 매출 <strong>${fmtKRW(dailyAvg)}</strong>, 주문 건당 평균 결제금액 <strong>${fmtKRW(avgOrderValue)}</strong>, 건당 평균 수량 <strong>${fmtNum(avgQtyPerOrder)}개</strong>입니다. `;
+
+  if (top1) {
+    fb += `매출 1위 상품은 <strong>${top1[0]}</strong>(${fmtKRW(top1[1].amount)}, 전체의 ${top1Pct}%)입니다. `;
+    if (top1Pct > 50) fb += '매출이 단일 상품에 과도하게 집중되어 있으며, 상품 다변화 전략이 필요할 수 있습니다. ';
+    else if (sorted.length >= 3) fb += `상위 3개 상품(${sorted.slice(0,3).map(s=>s[0]).join(', ')})이 고르게 분포하여 건강한 포트폴리오입니다. `;
+  }
+
+  if (lt.median_days <= 7) fb += '📌 리드타임 중앙값이 <strong>7일 이내</strong>로, 급주문 비율이 높아 재고/물류 대응력이 중요합니다.';
+  else if (lt.median_days <= 21) fb += '📌 리드타임 중앙값이 <strong>2~3주</strong>로, 청첩장 발송과 연동된 계획형 주문 패턴입니다.';
+  else fb += '📌 리드타임 중앙값이 <strong>3주 이상</strong>으로, 사전 준비형 고객이 많습니다. 얼리버드 할인이 효과적일 수 있습니다.';
+
+  document.getElementById('summary-feedback').innerHTML = fb;
 }
 
 function renderComparison(cmp) {
@@ -446,6 +671,45 @@ function renderComparison(cmp) {
   else feedback += '❄️ <strong>겨울 비수기</strong>입니다. 봄 시즌 사전 주문이 시작되는 2월부터 점진적 증가가 예상됩니다.';
 
   document.getElementById('cmp-feedback').innerHTML = feedback;
+
+  // --- WoW: 오늘 vs 전주 같은 요일 ---
+  const lw = cmp.last_week_same_day;
+  const dow = cmp.date.today_dow;
+  document.getElementById('wow-last-date').textContent = `전주 ${dow}요일 (${cmp.date.last_week_same_day})`;
+  document.getElementById('wow-today-date').textContent = `오늘 ${dow}요일 (${cmp.date.today})`;
+  document.getElementById('wow-l-amount').textContent = fmtKRW(lw.total_amount);
+  document.getElementById('wow-l-qty').textContent = fmtNum(lw.total_qty);
+  document.getElementById('wow-l-orders').textContent = fmtNum(lw.order_count) + '건';
+  document.getElementById('wow-t-amount').textContent = fmtKRW(t.total_amount);
+  document.getElementById('wow-t-qty').textContent = fmtNum(t.total_qty);
+  document.getElementById('wow-t-orders').textContent = fmtNum(t.order_count) + '건';
+
+  const wowPct = pctChange(t.total_amount, lw.total_amount);
+  const wowBadge = document.getElementById('wow-badge');
+  if (wowPct > 0) wowBadge.innerHTML = `<span class="badge badge-up">▲ ${wowPct}%</span>`;
+  else if (wowPct < 0) wowBadge.innerHTML = `<span class="badge badge-down">▼ ${Math.abs(wowPct)}%</span>`;
+  else wowBadge.innerHTML = `<span class="badge badge-neutral">- 0%</span>`;
+
+  let wowFeedback = '';
+  if (lw.total_amount === 0 && t.total_amount === 0) {
+    wowFeedback = `전주 ${dow}요일과 오늘 모두 매출이 없습니다.`;
+  } else if (lw.total_amount === 0) {
+    wowFeedback = `전주 ${dow}요일에는 매출이 없었으나, 오늘은 <strong>${fmtKRW(t.total_amount)}</strong>이 발생했습니다.`;
+  } else {
+    wowFeedback = `같은 ${dow}요일 기준 WoW <strong>${wowPct > 0 ? wowPct+'% 성장' : Math.abs(wowPct)+'% 감소'}</strong>. `;
+    if (wowPct > 20) wowFeedback += '전주 대비 큰 폭의 성장세로, 시즌 진입 또는 마케팅 효과가 반영된 것으로 보입니다. ';
+    else if (wowPct > 0) wowFeedback += '소폭 성장 중입니다. 웨딩 시즌 진행에 따른 자연 증가로 판단됩니다. ';
+    else if (wowPct > -20) wowFeedback += '소폭 하락이나 정상 변동 범위입니다. 요일별 편차가 ±15% 이내이면 안정적입니다. ';
+    else wowFeedback += '전주 대비 큰 폭의 감소입니다. 시즌 전환기이거나 외부 요인(연휴, 날씨 등)을 확인해보세요. ';
+  }
+  // 요일별 특성 코멘트
+  const dowIdx = new Date().getDay();
+  if (dowIdx === 0 || dowIdx === 6) wowFeedback += '📌 주말은 예식 당일이 집중되어 답례품 주문보다 <strong>예식 전 사전주문</strong>이 더 중요한 지표입니다.';
+  else if (dowIdx === 1) wowFeedback += '📌 월요일은 주말 예식 후 후속 주문이 몰리는 패턴이 있어 WoW 변동이 클 수 있습니다.';
+  else if (dowIdx >= 2 && dowIdx <= 4) wowFeedback += '📌 화~목은 주중 안정 구간으로, WoW 비교의 신뢰도가 가장 높은 요일대입니다.';
+  else wowFeedback += '📌 금요일은 주말 예식 직전 마감 주문이 발생하는 시점입니다.';
+
+  document.getElementById('wow-feedback').innerHTML = wowFeedback;
 }
 
 function renderForecast(fc) {
@@ -548,7 +812,7 @@ function renderLeadtime(lt) {
   document.getElementById('lt-median').textContent = lt.median_days + '일';
   document.getElementById('lt-samples').textContent = fmtNum(lt.total_samples) + '건';
 
-  const dist = lt.distribution;
+  const dist = lt.distribution || {};
   const maxVal = Math.max(...Object.values(dist), 1);
   const colors = ['#ef4444','#3b82f6','#2563eb','#1d4ed8','#1e40af','#1e3a8a','#172554'];
   document.getElementById('lt-bars').innerHTML = Object.entries(dist).map(([label, count], i) => {
@@ -561,6 +825,276 @@ function renderLeadtime(lt) {
   else if (lt.median_days <= 30) feedback += '웨딩업계 평균(2~4주)에 부합하는 건강한 리드타임입니다. 청첩장 발송 시점과 맞물리는 패턴입니다.';
   else feedback += '리드타임이 길어 <strong>사전 계획형 주문</strong>이 많습니다. 조기 주문 할인 프로모션이 효과적일 수 있습니다.';
   document.getElementById('lt-feedback').innerHTML = feedback;
+}
+
+let hourlyChart = null, weeklyChart = null;
+function renderMarketing(mk) {
+  const c = mk.conversion;
+  document.getElementById('mk-card-members').textContent = fmtNum(c.card_members) + '명';
+  document.getElementById('mk-cross').textContent = fmtNum(c.cross_buy) + '명';
+  document.getElementById('mk-conv-pct').textContent = c.card_to_gift_pct + '%';
+  document.getElementById('mk-gift-has-card').textContent = c.gift_has_card_pct + '%';
+  document.getElementById('mk-gift-only').textContent = c.gift_only + '명 (' + c.gift_only_pct + '%)';
+
+  // 전환율 피드백
+  let convFb = `청첩장 주문자 <strong>${fmtNum(c.card_members)}명</strong> 중 답례품을 함께 구매한 고객은 <strong>${c.cross_buy}명(${c.card_to_gift_pct}%)</strong>입니다. `;
+  if (c.gift_only_pct > 50) convFb += `답례품 구매자의 <strong>${c.gift_only_pct}%가 비청첩장 고객</strong>으로, 검색/직접유입 등 외부 채널의 비중이 높습니다. 크로스셀 강화 여지가 큽니다.`;
+  else convFb += `답례품 구매자의 대다수가 청첩장 고객으로, 크로스셀이 잘 작동하고 있습니다.`;
+  document.getElementById('mk-conv-feedback').innerHTML = convFb;
+
+  // 지역별 바 차트
+  const regions = mk.region;
+  const maxR = Math.max(...regions.map(r => r.cnt), 1);
+  const rColors = ['#3b82f6','#60a5fa','#93c5fd','#bfdbfe','#dbeafe','#eff6ff','#f0f9ff','#f8fafc','#f1f5f9','#e2e8f0','#cbd5e1','#94a3b8'];
+  document.getElementById('mk-region-bars').innerHTML = regions.map((r, i) => {
+    const h = Math.max(8, Math.round((r.cnt / maxR) * 100));
+    return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px">
+      <span style="font-size:11px;font-weight:600">${r.cnt}</span>
+      <div style="width:100%;height:${h}px;background:${rColors[i]||'#e2e8f0'};border-radius:4px 4px 0 0"></div>
+      <span style="font-size:10px;color:#666">${r.region}</span>
+    </div>`;
+  }).join('');
+
+  const top2 = regions.slice(0, 2);
+  const totalR = regions.reduce((s, r) => s + r.cnt, 0);
+  const top2Pct = totalR ? Math.round((top2[0].cnt + top2[1].cnt) / totalR * 100) : 0;
+  document.getElementById('mk-region-feedback').innerHTML =
+    `수도권(${top2.map(r=>r.region).join('·')})이 전체의 <strong>${top2Pct}%</strong>를 차지합니다. 지방 배송 비율이 ${100-top2Pct}%로, 도서산간 배송비 정책 검토가 필요할 수 있습니다.`;
+
+  // 시간대 차트
+  const hours = Object.keys(mk.hourly).map(Number).sort((a,b) => a - b);
+  const hourData = hours.map(h => mk.hourly[h]);
+  if (hourlyChart) hourlyChart.destroy();
+  hourlyChart = new Chart(document.getElementById('hourlyChart'), {
+    type: 'bar',
+    data: {
+      labels: hours.map(h => h + '시'),
+      datasets: [{ label: '주문건수', data: hourData, backgroundColor: '#3b82f6', borderRadius: 4 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } }, x: { ticks: { font: { size: 10 } } } }
+    }
+  });
+
+  // 요일 차트
+  const dayLabels = Object.keys(mk.weekly);
+  const dayData = dayLabels.map(d => mk.weekly[d]);
+  const dayColors = dayLabels.map(d => d === '토' || d === '일' ? '#f87171' : '#3b82f6');
+  if (weeklyChart) weeklyChart.destroy();
+  weeklyChart = new Chart(document.getElementById('weeklyChart'), {
+    type: 'bar',
+    data: {
+      labels: dayLabels,
+      datasets: [{ label: '주문건수', data: dayData, backgroundColor: dayColors, borderRadius: 4 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { stepSize: 2 } } }
+    }
+  });
+}
+
+// --- SNS Insight ---
+async function loadSnsInsight() {
+  try {
+    const [mk, summary, lt] = await Promise.all([
+      fetch(`${API}/api/dashboard/marketing`).then(r => r.json()),
+      fetch(`${API}/api/dashboard/summary?start_date=${fmt(new Date(Date.now() - 30*86400000))}&end_date=${fmt(new Date(Date.now() + 86400000))}`).then(r => r.json()),
+      fetch(`${API}/api/dashboard/leadtime`).then(r => r.json()),
+    ]);
+    renderSnsInsight(mk, summary, lt);
+  } catch(e) { console.error(e); showToast('SNS 인사이트 로딩 실패: ' + e.message); }
+}
+
+function renderSnsInsight(mk, summary, lt) {
+  // 상품별 매출 집계
+  const prodMap = {};
+  summary.forEach(r => {
+    const name = (r.card_name||'').replace(/^\[.*?\]\s*/g, '');
+    if (!prodMap[name]) prodMap[name] = { amount: 0, qty: 0, orders: 0 };
+    prodMap[name].amount += r.total_amount || 0;
+    prodMap[name].qty += r.total_qty || 0;
+    prodMap[name].orders += r.order_count || 0;
+  });
+  const products = Object.entries(prodMap).sort((a,b) => b[1].amount - a[1].amount);
+  const top3 = products.slice(0, 3);
+  const totalAmt = products.reduce((s, p) => s + p[1].amount, 0);
+
+  // 1) 추천 콘텐츠 소재 카드
+  const contentCards = [];
+
+  // 인기 상품 콘텐츠
+  if (top3.length > 0) {
+    contentCards.push({
+      icon: '🏆', title: '인기 답례품 TOP3',
+      desc: top3.map((p, i) => `${i+1}. ${p[0]}`).join('<br>'),
+      tip: `"이번 달 가장 많은 신랑신부가 선택한 답례품!" 포맷으로 릴스/카드뉴스 제작. 실제 주문 수량(${fmtNum(top3[0][1].qty)}개) 강조.`,
+      color: '#3b82f6',
+    });
+  }
+
+  // 리드타임 기반 타이밍 콘텐츠
+  contentCards.push({
+    icon: '⏰', title: `예식 ${lt.median_days}일 전 준비`,
+    desc: `답례품 주문자의 50%가<br>예식 <strong>${lt.median_days}일 전</strong>에 주문`,
+    tip: `"결혼식 ${Math.ceil(lt.median_days/7)}주 전, 잊지 말아야 할 것!" 웨딩 체크리스트 콘텐츠. 예비 신부 타겟 저장용 콘텐츠로 효과적.`,
+    color: '#f59e0b',
+  });
+
+  // 전환율 기반 콘텐츠
+  const c = mk.conversion;
+  contentCards.push({
+    icon: '💡', title: `비청첩장 고객 ${c.gift_only_pct}%`,
+    desc: `답례품 구매자 중<br><strong>${c.gift_only_pct}%</strong>가 검색/직접유입`,
+    tip: `"청첩장 없이도 답례품만 주문 가능!" 메시지 강조. 네이버/인스타 검색 광고에서 비청첩장 고객 유입 확대 가능.`,
+    color: '#10b981',
+  });
+
+  document.getElementById('sns-content-cards').innerHTML = contentCards.map(card => `
+    <div class="card" style="border-top:3px solid ${card.color}">
+      <div style="font-size:24px;margin-bottom:8px">${card.icon}</div>
+      <h3 style="margin-bottom:8px">${card.title}</h3>
+      <div style="font-size:13px;color:#666;margin-bottom:12px;line-height:1.5">${card.desc}</div>
+      <div style="background:${card.color}11;border-radius:8px;padding:10px;font-size:12px;line-height:1.6">
+        <strong style="color:${card.color}">💡 콘텐츠 TIP:</strong><br>${card.tip}
+      </div>
+    </div>
+  `).join('');
+
+  // 2) 인스타 캡션
+  const topProduct = top3[0] ? top3[0][0] : '답례품';
+  const captions = [
+    { type: '인기상품', text: `✨ 이번 달 답례품 인기 1위!\n${topProduct}\n\n결혼식 준비하시는 예비 신랑신부님 💍\n감사의 마음을 담은 답례품, 고민하지 마세요!\n\n👉 프로필 링크에서 바로 확인하세요` },
+    { type: '타이밍', text: `📋 결혼 준비 체크리스트\n\n✅ 청첩장 발송 (6주 전)\n✅ 식순지 준비 (4주 전)\n👉 답례품 주문 (${Math.ceil(lt.median_days/7)}주 전) ← 지금이에요!\n\n바른손카드에서 한번에 준비하세요 🎁` },
+    { type: '리뷰형', text: `💐 "답례품 뭐로 하지...?" 고민 끝!\n\n올해 가장 많이 선택된 답례품 TOP3\n🥇 ${top3[0] ? top3[0][0] : '-'}\n🥈 ${top3[1] ? top3[1][0] : '-'}\n🥉 ${top3[2] ? top3[2][0] : '-'}\n\n실제 ${fmtNum(products.reduce((s,p) => s+p[1].orders, 0))}건 주문 데이터 기반이에요 📊` },
+  ];
+
+  document.getElementById('sns-captions').innerHTML = captions.map(cap => `
+    <div style="background:var(--gray-50);border-radius:8px;padding:12px;position:relative">
+      <span style="font-size:10px;background:var(--primary);color:#fff;padding:2px 6px;border-radius:4px;position:absolute;top:8px;right:8px">${cap.type}</span>
+      <pre style="white-space:pre-wrap;font-family:inherit;font-size:12px;line-height:1.6;margin:0">${cap.text}</pre>
+      <button class="btn btn-sm" style="margin-top:8px" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);showToast('캡션이 복사되었습니다')">📋 복사</button>
+    </div>
+  `).join('');
+
+  // 3) 해시태그
+  const hashtags = [
+    '#답례품', '#결혼답례품', '#웨딩답례품', '#결혼준비', '#예비신부',
+    '#웨딩준비', '#결혼선물', '#하객선물', '#답례품추천', '#바른손카드',
+    '#결혼식준비', '#웨딩체크리스트', '#신부일기', '#결혼준비중',
+  ];
+  // 상품별 해시태그 추가
+  top3.forEach(p => {
+    const name = p[0].replace(/\s/g, '');
+    hashtags.push('#' + name);
+  });
+
+  document.getElementById('sns-hashtags').innerHTML = hashtags.map(tag =>
+    `<span style="display:inline-block;padding:4px 10px;background:#eff6ff;color:var(--primary);border-radius:20px;font-size:12px;font-weight:500">${tag}</span>`
+  ).join('');
+
+  // 4) 타이밍 전략
+  const hourly = mk.hourly;
+  const peakHours = Object.entries(hourly).sort((a,b) => b[1] - a[1]).slice(0, 3);
+  const weekly = mk.weekly;
+  const peakDays = Object.entries(weekly).sort((a,b) => b[1] - a[1]).slice(0, 3);
+
+  document.getElementById('sns-timing').innerHTML = `
+    <div style="margin-bottom:12px">
+      <div style="font-weight:600;margin-bottom:6px">게시 최적 시간대</div>
+      ${peakHours.map(([h, cnt]) => {
+        const hr = parseInt(h);
+        const period = hr < 12 ? '오전' : '오후';
+        const label = hr === 0 ? '자정' : hr <= 12 ? period + ' ' + hr + '시' : period + ' ' + (hr-12) + '시';
+        return `<div style="display:flex;align-items:center;gap:8px;margin:4px 0">
+          <span style="font-size:20px">${hr >= 6 && hr < 12 ? '🌅' : hr >= 12 && hr < 18 ? '☀️' : '🌙'}</span>
+          <span style="font-weight:600;min-width:80px">${label}</span>
+          <div style="flex:1;background:#e5e7eb;height:8px;border-radius:4px"><div style="height:100%;background:var(--primary);border-radius:4px;width:${Math.round(cnt/peakHours[0][1]*100)}%"></div></div>
+          <span style="font-size:12px;color:#666">${cnt}건</span>
+        </div>`;
+      }).join('')}
+    </div>
+    <div>
+      <div style="font-weight:600;margin-bottom:6px">게시 최적 요일</div>
+      ${peakDays.map(([day, cnt]) => `
+        <div style="display:flex;align-items:center;gap:8px;margin:4px 0">
+          <span style="font-weight:600;min-width:50px">${day}요일</span>
+          <div style="flex:1;background:#e5e7eb;height:8px;border-radius:4px"><div style="height:100%;background:#f59e0b;border-radius:4px;width:${Math.round(cnt/peakDays[0][1]*100)}%"></div></div>
+          <span style="font-size:12px;color:#666">${cnt}건</span>
+        </div>`).join('')}
+    </div>
+    <div class="feedback" style="margin-top:12px;font-size:12px">
+      주문이 가장 많은 <strong>${parseInt(peakHours[0][0]) < 12 ? '오전' : '오후'} ${parseInt(peakHours[0][0]) <= 12 ? peakHours[0][0] : parseInt(peakHours[0][0])-12}시</strong>에 맞춰 콘텐츠를 발행하면 참여율이 높습니다.
+      인스타그램은 게시 1~2시간 전이 최적이므로 <strong>${Math.max(0, parseInt(peakHours[0][0])-2)}시경 발행</strong>을 권장합니다.
+    </div>
+  `;
+
+  // 5) 타겟 오디언스
+  const regions = mk.region;
+  const topRegion = regions[0] ? regions[0].region : '서울';
+  document.getElementById('sns-target').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div style="background:#eff6ff;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:11px;color:#666">핵심 타겟</div>
+        <div style="font-size:16px;font-weight:700;color:var(--primary);margin-top:4px">예비 신부/신랑</div>
+        <div style="font-size:11px;color:#666;margin-top:2px">청첩장 발송 2~4주 후</div>
+      </div>
+      <div style="background:#fef3c7;border-radius:8px;padding:12px;text-align:center">
+        <div style="font-size:11px;color:#666">잠재 타겟</div>
+        <div style="font-size:16px;font-weight:700;color:#f59e0b;margin-top:4px">비청첩장 고객</div>
+        <div style="font-size:11px;color:#666;margin-top:2px">전체의 ${c.gift_only_pct}% (검색유입)</div>
+      </div>
+    </div>
+    <div style="font-size:13px;line-height:1.6">
+      <div style="font-weight:600;margin-bottom:6px">📍 지역 타겟팅</div>
+      <div style="margin-bottom:8px">${regions.slice(0,5).map(r => `<span style="display:inline-block;padding:2px 8px;background:var(--gray-100);border-radius:4px;font-size:12px;margin:2px">${r.region} ${r.cnt}건</span>`).join('')}</div>
+      <div style="font-weight:600;margin-bottom:6px">💰 가격대 소구</div>
+      <div>객단가 <strong>${fmtKRW(totalAmt / Math.max(products.reduce((s,p)=>s+p[1].orders,0), 1))}</strong> 기준, "N만원대 답례품" 키워드가 효과적</div>
+    </div>
+  `;
+
+  // 6) 핵심 키워드
+  const keywords = [
+    { keyword: '결혼 답례품', type: '핵심', reason: '가장 높은 검색 볼륨. 모든 콘텐츠에 포함 필수.' },
+    { keyword: '답례품 추천', type: '정보형', reason: 'TOP3 리스트 콘텐츠에 적합. 저장율 높음.' },
+    { keyword: `${topProduct}`, type: '상품명', reason: `인기 1위 상품. 상품 리뷰/언박싱 콘텐츠에 활용.` },
+    { keyword: '하객 선물', type: '대안', reason: '"답례품"을 모르는 고객도 검색하는 키워드.' },
+    { keyword: '결혼 준비', type: '상위', reason: '넓은 퍼널. 웨딩 체크리스트 콘텐츠에서 답례품 노출.' },
+    { keyword: '예식 답례품', type: '세부', reason: '구매 의도가 높은 키워드. 전환 광고에 적합.' },
+  ];
+
+  document.getElementById('sns-keywords').innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px">
+      ${keywords.map(kw => `
+        <div style="background:var(--gray-50);border-radius:8px;padding:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <span style="font-weight:700;font-size:14px">${kw.keyword}</span>
+            <span style="font-size:10px;background:var(--primary);color:#fff;padding:1px 6px;border-radius:4px">${kw.type}</span>
+          </div>
+          <div style="font-size:11px;color:#666;line-height:1.5">${kw.reason}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  // 종합 피드백
+  document.getElementById('sns-overall-feedback').innerHTML = `
+    <strong>💡 종합 SNS 전략 제안</strong><br><br>
+    1. <strong>콘텐츠 유형</strong>: 인기 답례품 TOP3 카드뉴스(주 1회) + 웨딩 체크리스트 릴스(월 2회) + 실 주문 후기 스토리(수시)<br>
+    2. <strong>발행 시간</strong>: ${parseInt(peakHours[0][0]) < 12 ? '오전' : '오후'} ${parseInt(peakHours[0][0]) <= 12 ? peakHours[0][0] : parseInt(peakHours[0][0])-12}시 전후 (주문 피크 1~2시간 전)<br>
+    3. <strong>최적 요일</strong>: ${peakDays[0][0]}요일 발행 → ${peakDays[0][0]}~${peakDays[1] ? peakDays[1][0] : ''}요일 주문 유도<br>
+    4. <strong>비청첩장 고객(${c.gift_only_pct}%)</strong>: "청첩장 없이도 주문 가능" 메시지를 네이버 쇼핑/인스타 광고에 활용<br>
+    5. <strong>가격 소구</strong>: 객단가 기준 "N만원대 감사 답례품" 프레이밍이 가장 효과적
+  `;
+}
+
+function copySnsHashtags() {
+  const tags = document.getElementById('sns-hashtags').textContent;
+  navigator.clipboard.writeText(tags);
+  showToast('해시태그가 복사되었습니다');
 }
 
 function renderSalesChart(summary) {
@@ -607,6 +1141,261 @@ function renderSalesChart(summary) {
       interaction: { mode: 'index', intersect: false },
     },
   });
+}
+
+// --- Dashboard View Toggle ---
+function setDashView(mode) {
+  dashViewMode = mode;
+  document.getElementById('dash-card-view').style.display = mode === 'card' ? '' : 'none';
+  document.getElementById('dash-table-view').style.display = mode === 'table' ? '' : 'none';
+  document.getElementById('btn-view-card').className = 'btn btn-sm' + (mode === 'card' ? ' btn-primary' : '');
+  document.getElementById('btn-view-table').className = 'btn btn-sm' + (mode === 'table' ? ' btn-primary' : '');
+  if (mode === 'table' && dashboardSummaryData.length > 0) renderDashTable();
+}
+
+function setTableTab(tab) {
+  tableTabMode = tab;
+  document.getElementById('tab-daily').className = 'btn btn-sm' + (tab === 'daily' ? ' btn-primary' : '');
+  document.getElementById('tab-weekly').className = 'btn btn-sm' + (tab === 'weekly' ? ' btn-primary' : '');
+  renderDashTable();
+}
+
+function getTopProducts(data) {
+  const prodAmtMap = {};
+  data.forEach(r => {
+    const name = (r.card_name||'').replace(/^\[.*?\]\s*/g,'');
+    if (!prodAmtMap[name]) prodAmtMap[name] = 0;
+    prodAmtMap[name] += r.total_amount || 0;
+  });
+  return Object.entries(prodAmtMap).sort((a,b) => b[1]-a[1]).map(e => e[0]);
+}
+
+function getWeekMondayStr(dateStr) {
+  const d = new Date(dateStr);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  const monday = new Date(d);
+  monday.setDate(d.getDate() + diff);
+  return monday.toISOString().slice(0,10);
+}
+
+function getISOWeekFromStr(dateStr) {
+  const d = new Date(dateStr);
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+  const week1 = new Date(d.getFullYear(), 0, 4);
+  return 1 + Math.round(((d - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+}
+
+function fmtShortDate(d) {
+  return `${d.getMonth()+1}/${d.getDate()}`;
+}
+
+function renderDashTable() {
+  const data = dashboardSummaryData;
+  if (!data || data.length === 0) { document.getElementById('sales-table').innerHTML = '<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--gray-500)">데이터 없음</td></tr>'; return; }
+  const topProducts = getTopProducts(data);
+  if (tableTabMode === 'daily') renderDailyTable(data, topProducts);
+  else renderWeeklyTable(data, topProducts);
+}
+
+function renderDailyTable(data, topProducts) {
+  const dayMap = {};
+  data.forEach(r => {
+    const day = r.order_day;
+    const name = (r.card_name||'').replace(/^\[.*?\]\s*/g,'');
+    if (!dayMap[day]) dayMap[day] = { amount:0, qty:0, orders:0, products:{} };
+    dayMap[day].amount += r.total_amount||0;
+    dayMap[day].qty += r.total_qty||0;
+    dayMap[day].orders += r.order_count||0;
+    if (!dayMap[day].products[name]) dayMap[day].products[name] = 0;
+    dayMap[day].products[name] += r.total_amount||0;
+  });
+  // 날짜 오름차순 (왼쪽=오래된 날짜, 오른쪽=최신)
+  const days = Object.keys(dayMap).sort();
+
+  const totalAmt = days.reduce((s,d)=>s+dayMap[d].amount, 0);
+  const totalQty = days.reduce((s,d)=>s+dayMap[d].qty, 0);
+  const totalOrders = days.reduce((s,d)=>s+dayMap[d].orders, 0);
+  const totalAvg = totalOrders > 0 ? Math.round(totalAmt/totalOrders) : 0;
+  const maxAmt = Math.max(...days.map(d=>dayMap[d].amount), 1);
+
+  // 헤더: 구분 | 날짜1 | 날짜2 | ... | 합계
+  const STICKY = 'position:sticky;left:0;z-index:2;';
+  const dateThs = days.map(d => `<th class="num" style="min-width:88px;white-space:nowrap;font-weight:500">${d.slice(5)}</th>`).join('');
+  const thead = `<tr>
+    <th style="${STICKY}background:var(--gray-50);min-width:80px">구분</th>
+    ${dateThs}
+    <th class="num" style="min-width:96px;background:#fef9c3;border-left:2px solid var(--gray-200)">합계</th>
+  </tr>`;
+
+  // 행 생성 헬퍼
+  const mkRow = (label, cells, totalCell, rowStyle='') =>
+    `<tr style="${rowStyle}">
+      <td style="${STICKY}background:#fff;font-weight:600;white-space:nowrap">${label}</td>
+      ${cells}
+      <td class="num" style="background:#fef9c3;font-weight:600;border-left:2px solid var(--gray-200)">${totalCell}</td>
+    </tr>`;
+
+  // 총 매출 행 (미니 막대 포함)
+  const amtCells = days.map(d => {
+    const barW = Math.round((dayMap[d].amount/maxAmt)*44);
+    return `<td class="num"><div style="display:flex;align-items:center;gap:3px;justify-content:flex-end">
+      <div style="width:${barW}px;height:5px;background:var(--primary);border-radius:2px;opacity:.35;flex-shrink:0"></div>
+      ${dayMap[d].amount ? fmtKRW(dayMap[d].amount) : '<span style="color:var(--gray-300)">-</span>'}
+    </div></td>`;
+  }).join('');
+
+  // 주문건수 행
+  const orderCells = days.map(d => `<td class="num">${dayMap[d].orders ? fmtNum(dayMap[d].orders)+'건' : '<span style="color:var(--gray-300)">-</span>'}</td>`).join('');
+
+  // 수량 행
+  const qtyCells = days.map(d => `<td class="num">${dayMap[d].qty ? fmtNum(dayMap[d].qty) : '<span style="color:var(--gray-300)">-</span>'}</td>`).join('');
+
+  // 객단가 행
+  const avgCells = days.map(d => {
+    const avg = dayMap[d].orders > 0 ? Math.round(dayMap[d].amount/dayMap[d].orders) : 0;
+    return `<td class="num" style="font-size:12px">${avg ? fmtKRW(avg) : '<span style="color:var(--gray-300)">-</span>'}</td>`;
+  }).join('');
+
+  // 상품별 행 구분선
+  const divider = `<tr style="background:var(--gray-100)">
+    <td style="${STICKY}background:var(--gray-100);font-size:10px;color:var(--gray-500);padding:3px 12px;font-weight:600;letter-spacing:.5px">상품별 매출</td>
+    ${days.map(()=>`<td style="background:var(--gray-100)"></td>`).join('')}
+    <td style="background:#fef9c3;border-left:2px solid var(--gray-200)"></td>
+  </tr>`;
+
+  // 상품별 행
+  const productRows = topProducts.map((p, i) => {
+    const pCells = days.map(d => {
+      const v = dayMap[d].products[p] || 0;
+      return `<td class="num" style="font-size:12px">${v ? fmtKRW(v) : '<span style="color:var(--gray-200)">-</span>'}</td>`;
+    }).join('');
+    const pTotal = days.reduce((s,d)=>s+(dayMap[d].products[p]||0),0);
+    const label = p.length > 16 ? p.slice(0,16)+'…' : p;
+    const bg = i % 2 === 0 ? '#fff' : '#fafafa';
+    return `<tr>
+      <td style="${STICKY}background:${bg};font-size:12px;color:var(--gray-700);padding-left:16px;white-space:nowrap">${label}</td>
+      ${pCells}
+      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${pTotal ? fmtKRW(pTotal) : '-'}</td>
+    </tr>`;
+  }).join('');
+
+  const tbody =
+    mkRow('총 매출', amtCells, fmtKRW(totalAmt)) +
+    mkRow('주문건수', orderCells, fmtNum(totalOrders)+'건') +
+    mkRow('주문수량', qtyCells, fmtNum(totalQty)) +
+    mkRow('객단가', avgCells, fmtKRW(totalAvg)) +
+    divider +
+    productRows;
+
+  document.getElementById('sales-table').innerHTML = `<thead>${thead}</thead><tbody>${tbody}</tbody>`;
+}
+
+function renderWeeklyTable(data, topProducts) {
+  const weekMap = {};
+  data.forEach(r => {
+    const wk = getWeekMondayStr(r.order_day);
+    const name = (r.card_name||'').replace(/^\[.*?\]\s*/g,'');
+    if (!weekMap[wk]) weekMap[wk] = { amount:0, qty:0, orders:0, products:{} };
+    weekMap[wk].amount += r.total_amount||0;
+    weekMap[wk].qty += r.total_qty||0;
+    weekMap[wk].orders += r.order_count||0;
+    if (!weekMap[wk].products[name]) weekMap[wk].products[name] = 0;
+    weekMap[wk].products[name] += r.total_amount||0;
+  });
+  // 주차 오름차순 (왼쪽=오래된 주, 오른쪽=최신)
+  const weeks = Object.keys(weekMap).sort();
+
+  const totalAmt = weeks.reduce((s,w)=>s+weekMap[w].amount, 0);
+  const totalQty = weeks.reduce((s,w)=>s+weekMap[w].qty, 0);
+  const totalOrders = weeks.reduce((s,w)=>s+weekMap[w].orders, 0);
+  const totalAvg = totalOrders > 0 ? Math.round(totalAmt/totalOrders) : 0;
+  const maxAmt = Math.max(...weeks.map(w=>weekMap[w].amount), 1);
+
+  const STICKY = 'position:sticky;left:0;z-index:2;';
+
+  // 헤더: 구분 | W1 | W2 | ... | 합계
+  const weekThs = weeks.map(wk => {
+    const weekNo = getISOWeekFromStr(wk);
+    const monday = new Date(wk);
+    const sunday = new Date(wk); sunday.setDate(sunday.getDate()+6);
+    return `<th class="num" style="min-width:100px;white-space:nowrap;font-weight:500">${weekNo}주차<br><span style="font-size:10px;font-weight:400;color:var(--gray-500)">${fmtShortDate(monday)}~${fmtShortDate(sunday)}</span></th>`;
+  }).join('');
+  const thead = `<tr>
+    <th style="${STICKY}background:var(--gray-50);min-width:80px">구분</th>
+    ${weekThs}
+    <th class="num" style="min-width:100px;background:#fef9c3;border-left:2px solid var(--gray-200)">합계</th>
+  </tr>`;
+
+  const mkRow = (label, cells, totalCell, rowStyle='') =>
+    `<tr style="${rowStyle}">
+      <td style="${STICKY}background:#fff;font-weight:600;white-space:nowrap">${label}</td>
+      ${cells}
+      <td class="num" style="background:#fef9c3;font-weight:600;border-left:2px solid var(--gray-200)">${totalCell}</td>
+    </tr>`;
+
+  // 총 매출 행
+  const amtCells = weeks.map(w => {
+    const barW = Math.round((weekMap[w].amount/maxAmt)*44);
+    return `<td class="num"><div style="display:flex;align-items:center;gap:3px;justify-content:flex-end">
+      <div style="width:${barW}px;height:5px;background:var(--primary);border-radius:2px;opacity:.35;flex-shrink:0"></div>
+      ${weekMap[w].amount ? fmtKRW(weekMap[w].amount) : '<span style="color:var(--gray-300)">-</span>'}
+    </div></td>`;
+  }).join('');
+
+  // WoW% 행 (이전 주 대비)
+  const wowCells = weeks.map((wk, idx) => {
+    if (idx === 0) return `<td class="num" style="color:var(--gray-300)">-</td>`;
+    const cur = weekMap[wk].amount;
+    const prev = weekMap[weeks[idx-1]].amount;
+    if (!prev) return `<td class="num"><span class="badge badge-neutral">신규</span></td>`;
+    const pct = Math.round((cur-prev)/prev*100);
+    const cls = pct>0?'badge-up':pct<0?'badge-down':'badge-neutral';
+    const sign = pct>0?'▲':pct<0?'▼':'';
+    return `<td class="num"><span class="badge ${cls}">${sign}${Math.abs(pct)}%</span></td>`;
+  }).join('');
+
+  // 주문건수, 수량, 객단가
+  const orderCells = weeks.map(w => `<td class="num">${weekMap[w].orders ? fmtNum(weekMap[w].orders)+'건' : '<span style="color:var(--gray-300)">-</span>'}</td>`).join('');
+  const qtyCells = weeks.map(w => `<td class="num">${weekMap[w].qty ? fmtNum(weekMap[w].qty) : '<span style="color:var(--gray-300)">-</span>'}</td>`).join('');
+  const avgCells = weeks.map(w => {
+    const avg = weekMap[w].orders > 0 ? Math.round(weekMap[w].amount/weekMap[w].orders) : 0;
+    return `<td class="num" style="font-size:12px">${avg ? fmtKRW(avg) : '<span style="color:var(--gray-300)">-</span>'}</td>`;
+  }).join('');
+
+  // 상품별 구분선 + 행
+  const divider = `<tr style="background:var(--gray-100)">
+    <td style="${STICKY}background:var(--gray-100);font-size:10px;color:var(--gray-500);padding:3px 12px;font-weight:600;letter-spacing:.5px">상품별 매출</td>
+    ${weeks.map(()=>`<td style="background:var(--gray-100)"></td>`).join('')}
+    <td style="background:#fef9c3;border-left:2px solid var(--gray-200)"></td>
+  </tr>`;
+
+  const productRows = topProducts.map((p, i) => {
+    const pCells = weeks.map(w => {
+      const v = weekMap[w].products[p] || 0;
+      return `<td class="num" style="font-size:12px">${v ? fmtKRW(v) : '<span style="color:var(--gray-200)">-</span>'}</td>`;
+    }).join('');
+    const pTotal = weeks.reduce((s,w)=>s+(weekMap[w].products[p]||0), 0);
+    const label = p.length > 16 ? p.slice(0,16)+'…' : p;
+    const bg = i % 2 === 0 ? '#fff' : '#fafafa';
+    return `<tr>
+      <td style="${STICKY}background:${bg};font-size:12px;color:var(--gray-700);padding-left:16px;white-space:nowrap">${label}</td>
+      ${pCells}
+      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${pTotal ? fmtKRW(pTotal) : '-'}</td>
+    </tr>`;
+  }).join('');
+
+  const tbody =
+    mkRow('총 매출', amtCells, fmtKRW(totalAmt)) +
+    mkRow('WoW%', wowCells, '-') +
+    mkRow('주문건수', orderCells, fmtNum(totalOrders)+'건') +
+    mkRow('주문수량', qtyCells, fmtNum(totalQty)) +
+    mkRow('객단가', avgCells, fmtKRW(totalAvg)) +
+    divider +
+    productRows;
+
+  document.getElementById('sales-table').innerHTML = `<thead>${thead}</thead><tbody>${tbody}</tbody>`;
 }
 
 function showToast(msg) {
