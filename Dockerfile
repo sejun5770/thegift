@@ -20,6 +20,7 @@ EXPOSE 3000
 ENV PORT=3000
 ENV BASE_PATH=/c/barungift
 ENV NODE_ENV=production
+ENV GOOGLE_CLIENT_ID=469142074640-i9q13bl4c6l42pspfb1414bb0sr7arn9.apps.googleusercontent.com
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
   CMD wget -q -O /dev/null http://localhost:3000/ || exit 1
