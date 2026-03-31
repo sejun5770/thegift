@@ -219,6 +219,7 @@ async function apiOrders(query) {
       -- 예식일: member_id → 최근 청첩장주문(custom_order) → custom_order_WeddInfo
       SELECT
         o.order_seq AS order_seq,
+        o.member_id AS member_id,
         'ETC' AS order_type,
         CONVERT(varchar(19), o.order_date, 120) AS order_date,
         CONVERT(varchar(19), o.settle_date, 120) AS settle_date,
@@ -254,6 +255,7 @@ async function apiOrders(query) {
       -- 청첩장과 함께 주문 (custom_order)
       SELECT
         co.order_seq,
+        co.member_id AS member_id,
         'CARD' AS order_type,
         CONVERT(varchar(19), co.order_date, 120) AS order_date,
         CONVERT(varchar(19), co.settle_date, 120) AS settle_date,
