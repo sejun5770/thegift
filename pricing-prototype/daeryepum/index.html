@@ -84,6 +84,14 @@ nav a:hover{color:var(--gray-900)}
 .leadtime-bar{flex:1;background:var(--primary);border-radius:4px 4px 0 0;position:relative;min-width:40px;transition:height .3s}
 .leadtime-bar .label{position:absolute;bottom:-20px;left:50%;transform:translateX(-50%);font-size:10px;white-space:nowrap;color:var(--gray-500)}
 .leadtime-bar .count{position:absolute;top:-16px;left:50%;transform:translateX(-50%);font-size:11px;font-weight:600}
+/* VIEW TOGGLE */
+.view-toggle{position:absolute;top:12px;right:12px;display:flex;gap:2px;background:var(--gray-100);border-radius:6px;padding:2px}
+.view-toggle button{padding:4px 8px;font-size:11px;border:none;background:transparent;cursor:pointer;border-radius:4px;color:var(--gray-500);transition:all .15s}
+.view-toggle button.active{background:#fff;color:var(--primary);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.mk-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+.mk-table th{background:var(--gray-50);padding:6px 8px;text-align:left;font-weight:600;border-bottom:2px solid var(--gray-200);white-space:nowrap}
+.mk-table td{padding:5px 8px;border-bottom:1px solid var(--gray-100)}
+.mk-table .num{text-align:right;font-variant-numeric:tabular-nums}
 .tooltip-wrap:hover .tooltip-content{display:block!important}
 .data-table tfoot td{padding:10px 12px;border-top:2px solid var(--gray-200);font-weight:700;background:var(--gray-50)}
 /* pivot table sticky first column */
@@ -91,6 +99,13 @@ nav a:hover{color:var(--gray-900)}
 #sales-table th,#sales-table td{border-bottom:1px solid var(--gray-100)}
 #sales-table thead th{border-bottom:2px solid var(--gray-200);position:sticky;top:0;z-index:3}
 #sales-table thead th:first-child{z-index:4}
+/* CATEGORY TABS */
+.cat-tab{padding:10px 20px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:var(--gray-500);border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s}
+.cat-tab:hover{color:var(--gray-900);background:var(--gray-50)}
+.cat-tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+/* FORECAST HISTORY */
+.forecast-table tr.history-row{background:#f8fafc}
+.forecast-table tr.history-row td{color:var(--gray-500);font-size:12px}
 @media(max-width:900px){.card-grid-4{grid-template-columns:repeat(2,1fr)}.compare-grid{grid-template-columns:1fr}}
 </style>
 </head>
@@ -248,42 +263,127 @@ nav a:hover{color:var(--gray-900)}
     <div class="section-title">📊 마케팅 분석 (최근 90일)</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
       <!-- 전환율 카드 -->
-      <div class="card">
+      <div class="card" style="position:relative">
+        <div class="view-toggle">
+          <button class="active" onclick="toggleMkView('conv','chart',this)">차트</button>
+          <button onclick="toggleMkView('conv','table',this)">테이블</button>
+        </div>
         <h3 style="margin-bottom:12px">🔄 청첩장→답례품 전환율</h3>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center;margin-bottom:12px">
-          <div><div style="font-size:24px;font-weight:700;color:var(--primary)" id="mk-card-members">-</div><div style="font-size:11px;color:#666">청첩장 주문자</div></div>
-          <div><div style="font-size:24px;font-weight:700;color:#f59e0b" id="mk-cross">-</div><div style="font-size:11px;color:#666">답례품도 구매</div></div>
-          <div><div style="font-size:24px;font-weight:700;color:#10b981" id="mk-conv-pct">-</div><div style="font-size:11px;color:#666">전환율</div></div>
-        </div>
-        <div style="display:flex;gap:8px;margin-bottom:8px">
-          <div style="flex:1;background:#eff6ff;border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:18px;font-weight:600" id="mk-gift-has-card">-</div>
-            <div style="font-size:11px;color:#666">답례품 구매자 중 청첩장O</div>
+        <div id="mk-conv-chart">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center;margin-bottom:12px">
+            <div><div style="font-size:24px;font-weight:700;color:var(--primary)" id="mk-card-members">-</div><div style="font-size:11px;color:#666">청첩장 주문자</div></div>
+            <div><div style="font-size:24px;font-weight:700;color:#f59e0b" id="mk-cross">-</div><div style="font-size:11px;color:#666">답례품도 구매</div></div>
+            <div><div style="font-size:24px;font-weight:700;color:#10b981" id="mk-conv-pct">-</div><div style="font-size:11px;color:#666">전환율</div></div>
           </div>
-          <div style="flex:1;background:#fef3c7;border-radius:8px;padding:10px;text-align:center">
-            <div style="font-size:18px;font-weight:600" id="mk-gift-only">-</div>
-            <div style="font-size:11px;color:#666">답례품 단독 구매 (비청첩장)</div>
+          <div style="display:flex;gap:8px;margin-bottom:8px">
+            <div style="flex:1;background:#eff6ff;border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:18px;font-weight:600" id="mk-gift-has-card">-</div>
+              <div style="font-size:11px;color:#666">답례품 구매자 중 청첩장O</div>
+            </div>
+            <div style="flex:1;background:#fef3c7;border-radius:8px;padding:10px;text-align:center">
+              <div style="font-size:18px;font-weight:600" id="mk-gift-only">-</div>
+              <div style="font-size:11px;color:#666">답례품 단독 구매 (비청첩장)</div>
+            </div>
           </div>
         </div>
+        <div id="mk-conv-table" style="display:none"></div>
         <div class="feedback" id="mk-conv-feedback" style="margin:0;font-size:12px"></div>
       </div>
       <!-- 지역별 분포 -->
-      <div class="card">
+      <div class="card" style="position:relative">
+        <div class="view-toggle">
+          <button class="active" onclick="toggleMkView('region','chart',this)">차트</button>
+          <button onclick="toggleMkView('region','table',this)">테이블</button>
+        </div>
         <h3 style="margin-bottom:12px">📍 배송지역 분포</h3>
-        <div id="mk-region-bars" style="display:flex;gap:6px;align-items:end;height:120px;margin-bottom:8px"></div>
+        <div id="mk-region-chart">
+          <div id="mk-region-bars" style="display:flex;gap:6px;align-items:end;height:120px;margin-bottom:8px"></div>
+        </div>
+        <div id="mk-region-table" style="display:none"></div>
         <div class="feedback" id="mk-region-feedback" style="margin:0;font-size:12px"></div>
       </div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
       <!-- 시간대별 -->
-      <div class="card">
+      <div class="card" style="position:relative">
+        <div class="view-toggle">
+          <button class="active" onclick="toggleMkView('hourly','chart',this)">차트</button>
+          <button onclick="toggleMkView('hourly','table',this)">테이블</button>
+        </div>
         <h3 style="margin-bottom:12px">⏰ 시간대별 주문 분포</h3>
-        <div class="chart-container" style="height:180px"><canvas id="hourlyChart"></canvas></div>
+        <div id="mk-hourly-chart">
+          <div class="chart-container" style="height:180px"><canvas id="hourlyChart"></canvas></div>
+        </div>
+        <div id="mk-hourly-table" style="display:none"></div>
       </div>
       <!-- 요일별 -->
-      <div class="card">
+      <div class="card" style="position:relative">
+        <div class="view-toggle">
+          <button class="active" onclick="toggleMkView('weekly','chart',this)">차트</button>
+          <button onclick="toggleMkView('weekly','table',this)">테이블</button>
+        </div>
         <h3 style="margin-bottom:12px">📅 요일별 주문 분포</h3>
-        <div class="chart-container" style="height:180px"><canvas id="weeklyChart"></canvas></div>
+        <div id="mk-weekly-chart">
+          <div class="chart-container" style="height:180px"><canvas id="weeklyChart"></canvas></div>
+        </div>
+        <div id="mk-weekly-table" style="display:none"></div>
+      </div>
+      <!-- 가입 사이트 -->
+      <div class="card" style="position:relative">
+        <div class="view-toggle">
+          <button class="active" onclick="toggleMkView('site','chart',this)">차트</button>
+          <button onclick="toggleMkView('site','table',this)">테이블</button>
+        </div>
+        <h3 style="margin-bottom:12px">🌐 회원 가입사이트</h3>
+        <div id="mk-site-chart">
+          <div style="display:flex;gap:16px">
+            <div style="flex:1">
+              <div style="font-size:11px;color:#666;margin-bottom:4px;text-align:center">주문 사이트</div>
+              <div id="mk-order-site" style="display:flex;gap:4px;align-items:end;height:120px;margin-bottom:4px"></div>
+            </div>
+            <div style="flex:1">
+              <div style="font-size:11px;color:#666;margin-bottom:4px;text-align:center">최초 가입 사이트</div>
+              <div id="mk-signup-site" style="display:flex;gap:4px;align-items:end;height:120px;margin-bottom:4px"></div>
+            </div>
+          </div>
+        </div>
+        <div id="mk-site-table" style="display:none"></div>
+        <div class="feedback" id="mk-site-feedback" style="margin:0;font-size:12px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 전환율 + 샘플 -->
+  <div class="section">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <!-- 주차별 전환율 -->
+      <div class="card" style="position:relative">
+        <div class="view-toggle">
+          <button class="active" onclick="toggleChartTable('conversion','chart',this)">차트</button>
+          <button onclick="toggleChartTable('conversion','table',this)">테이블</button>
+        </div>
+        <h3 style="margin-bottom:12px">🔄 주차별 전환율 (예식수 → 답례품 주문)</h3>
+        <div id="conversion-chart-view">
+          <div class="chart-container" style="height:250px"><canvas id="conversionChart"></canvas></div>
+        </div>
+        <div id="conversion-table-view" style="display:none"></div>
+        <div class="feedback" id="conversion-feedback" style="margin-top:8px;font-size:12px"></div>
+      </div>
+      <!-- 샘플 주문 추이 -->
+      <div class="card" style="position:relative">
+        <div class="view-toggle" style="right:12px">
+          <button class="active" onclick="toggleChartTable('sample','chart',this)">차트</button>
+          <button onclick="toggleChartTable('sample','table',this)">테이블</button>
+          <span style="width:1px;background:var(--gray-300);margin:2px 4px"></span>
+          <button class="active" id="sample-mode-product" onclick="switchSampleMode('product',this)">상품기준</button>
+          <button id="sample-mode-order" onclick="switchSampleMode('order',this)">주문건기준</button>
+        </div>
+        <h3 style="margin-bottom:12px">🧪 샘플 주문 추이 (수량 1개)</h3>
+        <div id="sample-chart-view">
+          <div class="chart-container" style="height:250px"><canvas id="sampleChart"></canvas></div>
+        </div>
+        <div id="sample-table-view" style="display:none"></div>
+        <div class="feedback" id="sample-feedback" style="margin-top:8px;font-size:12px"></div>
       </div>
     </div>
   </div>
@@ -307,10 +407,17 @@ nav a:hover{color:var(--gray-900)}
 
 <!-- ========== ORDERS ========== -->
 <div id="page-orders" class="page">
+  <!-- 카테고리 탭 -->
+  <div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid var(--gray-200)">
+    <button class="cat-tab active" data-cat="daeryepum" onclick="switchCategory('daeryepum')">🎁 답례품</button>
+    <button class="cat-tab" data-cat="deco" onclick="switchCategory('deco')">✨ 데코소품</button>
+    <button class="cat-tab" data-cat="flower" onclick="switchCategory('flower')">💐 꽃다발</button>
+  </div>
   <div class="toolbar">
     <input type="date" id="ord-start" />
     <span>~</span>
     <input type="date" id="ord-end" />
+    <input type="text" id="ord-code-search" placeholder="상품코드 검색" style="width:160px" oninput="renderOrderTable()" />
     <button class="btn btn-primary" onclick="loadOrders()">조회</button>
     <div style="flex:1"></div>
     <button class="btn" onclick="copySelected()">📋 클립보드 복사</button>
@@ -400,6 +507,7 @@ const ALL_COLS = [
   {key:'card_code',label:'상품코드',default:false},
   {key:'item_count',label:'상품수량',default:true,num:true},
   {key:'item_amount_fmt',label:'결제금액',default:false,num:true},
+  {key:'settle_price_fmt',label:'주문총액',default:false,num:true},
   {key:'wedding_date',label:'예식일',default:false},
   {key:'lead_days',label:'리드타임(일)',default:false,num:true},
   {key:'order_type_label',label:'주문유형',default:false},
@@ -411,6 +519,7 @@ let salesChart = null;
 let dashboardSummaryData = [];
 let dashViewMode = 'card';
 let tableTabMode = 'daily';
+let currentCategory = 'daeryepum';
 
 // --- Init ---
 function init() {
@@ -449,6 +558,13 @@ function showPage(name) {
   if (name === 'sns') loadSnsInsight();
 }
 
+// --- Category Tabs ---
+function switchCategory(cat) {
+  currentCategory = cat;
+  document.querySelectorAll('.cat-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === cat));
+  loadOrders();
+}
+
 // --- Column Selector ---
 function buildColSelector() {
   const el = document.getElementById('col-selector');
@@ -470,12 +586,13 @@ async function loadOrders() {
   const end = document.getElementById('ord-end').value;
   const endPlus = fmt(new Date(new Date(end).getTime() + 86400000));
   try {
-    const res = await fetch(`${API}/api/orders?start_date=${start}&end_date=${endPlus}`);
+    const res = await fetch(`${API}/api/orders?start_date=${start}&end_date=${endPlus}&category=${currentCategory}`);
     const jsonData = await res.json();
     ordersData = Array.isArray(jsonData) ? jsonData : [];
     ordersData.forEach(r => {
-      r.order_date_fmt = r.order_date ? new Date(r.order_date).toLocaleString('ko-KR',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+      r.order_date_fmt = r.order_date ? r.order_date.replace('T',' ').slice(0,16) : '';
       r.item_amount_fmt = fmtKRW(r.item_amount);
+      r.settle_price_fmt = fmtKRW(r.settle_price);
       r.order_type_label = r.order_type === 'ETC' ? '부가상품' : '청첩장+답례품';
       // 주문상태 매핑 (bar_shop1 status_seq)
       const STATUS_MAP = {
@@ -494,17 +611,29 @@ async function loadOrders() {
   } catch(e) { console.error(e); showToast('주문 조회 실패: ' + e.message); }
 }
 
+function getFilteredOrders() {
+  const q = (document.getElementById('ord-code-search')?.value || '').trim().toLowerCase();
+  if (!q) return ordersData;
+  return ordersData.filter(r => {
+    const code = (r.card_code || '').toLowerCase();
+    const name = (r.card_name || '').toLowerCase();
+    return code.includes(q) || name.includes(q);
+  });
+}
+
 function renderOrderTable() {
   const cols = getSelectedCols();
+  const filtered = getFilteredOrders();
   document.getElementById('order-thead').innerHTML =
     `<th style="width:36px"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"></th>` +
     cols.map(c => `<th>${c.label}</th>`).join('');
-  document.getElementById('order-tbody').innerHTML = ordersData.map((r, i) =>
+  document.getElementById('order-tbody').innerHTML = filtered.map((r, i) =>
     `<tr>` +
     `<td><input type="checkbox" class="row-check" data-idx="${i}" onchange="updateSelectedCount()"></td>` +
     cols.map(c => `<td class="${c.num?'num':''}">${r[c.key] ?? ''}</td>`).join('') +
     `</tr>`
   ).join('');
+  document.getElementById('order-count').textContent = filtered.length;
   updateSelectedCount();
 }
 
@@ -519,9 +648,10 @@ function updateSelectedCount() {
 }
 
 function getSelectedRows() {
+  const filtered = getFilteredOrders();
   const indices = [];
   document.querySelectorAll('.row-check:checked').forEach(cb => { indices.push(parseInt(cb.dataset.idx)); });
-  return indices.length > 0 ? indices.map(i => ordersData[i]) : ordersData; // 선택 없으면 전체
+  return indices.length > 0 ? indices.map(i => filtered[i]) : filtered; // 선택 없으면 필터된 전체
 }
 
 // --- Copy / Download ---
@@ -559,11 +689,14 @@ async function loadDashboard() {
       fetch(`${API}/api/dashboard/summary?start_date=${document.getElementById('dash-start').value}&end_date=${fmt(new Date(new Date(document.getElementById('dash-end').value).getTime()+86400000))}`).then(r=>r.json()),
     ]);
     renderSummary(summary, leadtime);
-    renderComparison(cmp);
+    try { renderComparison(cmp); } catch(e) { console.warn('Comparison render failed:', e); }
     renderForecast(forecast);
     renderLeadtime(leadtime);
     // 마케팅 분석 (별도 로드 - 무거운 쿼리)
     fetch(`${API}/api/dashboard/marketing`).then(r=>r.json()).then(renderMarketing).catch(e=>console.warn('Marketing load failed:', e));
+    // 전환율 + 샘플 (별도 로드)
+    fetch(`${API}/api/dashboard/conversion`).then(r=>r.json()).then(renderConversion).catch(e=>console.warn('Conversion load failed:', e));
+    fetch(`${API}/api/dashboard/samples`).then(r=>r.json()).then(renderSamples).catch(e=>console.warn('Samples load failed:', e));
   } catch(e) { console.error(e); showToast('대시보드 로딩 실패: ' + e.message); }
 }
 
@@ -713,6 +846,54 @@ function renderComparison(cmp) {
   document.getElementById('wow-feedback').innerHTML = wowFeedback;
 }
 
+function renderForecastRow(w, maxRevenue, isHistory) {
+  const estBar = Math.round((w.est_weekly_revenue / maxRevenue) * 120);
+  const actBar = Math.round(((w.actual_weekly_revenue||0) / maxRevenue) * 120);
+  const startD = new Date(w.week_start).toLocaleDateString('ko-KR',{month:'short',day:'numeric'});
+  const endD = new Date(w.week_end).toLocaleDateString('ko-KR',{month:'short',day:'numeric'});
+  const isThisWeek = w.is_current;
+  const isPast = w.is_past;
+
+  // 상태 뱃지
+  let weekBadge = '';
+  if (isThisWeek) weekBadge = '<span class="badge badge-up">금주</span>';
+  else if (isPast && !isHistory) weekBadge = '<span class="badge badge-neutral">완료</span>';
+
+  // 실제 매출
+  let actualCell = '-';
+  if (isPast || isThisWeek) {
+    const dayLabel = isThisWeek ? `(${w.actual_days}일 경과)` : '';
+    actualCell = `<strong>${fmtKRW(w.actual_weekly_revenue)}</strong> <span style="font-size:10px;color:var(--gray-500)">${dayLabel}</span>`;
+  }
+
+  // 오차율
+  let accCell = '-';
+  if (w.accuracy_pct !== null && w.accuracy_pct !== undefined) {
+    const sign = w.accuracy_pct > 0 ? '+' : '';
+    const cls = w.accuracy_pct > 10 ? 'badge-up' : w.accuracy_pct < -10 ? 'badge-down' : 'badge-neutral';
+    accCell = `<span class="badge ${cls}">${sign}${w.accuracy_pct}%</span>`;
+  }
+
+  // 실제 건수/수량
+  const ordersCell = (isPast || isThisWeek) ? `${fmtNum(w.actual_orders)}건` : '-';
+  const qtyCell = (isPast || isThisWeek) ? `${fmtNum(w.actual_qty)}` : '-';
+
+  const rowStyle = isThisWeek ? 'background:#eff6ff' : isHistory ? 'background:#f8fafc' : isPast ? 'background:#fafafa' : '';
+  const rowClass = isHistory ? 'history-row' : '';
+
+  return `<tr class="${rowClass}" style="${rowStyle}">
+    <td><strong>${w.week_no}주차</strong> ${weekBadge}</td>
+    <td>${startD} ~ ${endD}</td>
+    <td class="num">${fmtNum(w.card_orders_in_lag)}건</td>
+    <td class="num">${w.avg_daily_card}건/일</td>
+    <td class="num" style="min-width:140px"><div class="forecast-bar" style="width:${estBar}px;background:var(--primary);opacity:.3"></div> ${fmtKRW(w.est_weekly_revenue)}</td>
+    <td class="num" style="min-width:140px">${isPast || isThisWeek ? `<div class="forecast-bar" style="width:${actBar}px;background:var(--green)"></div> ` : ''}${actualCell}</td>
+    <td class="num">${accCell}</td>
+    <td class="num">${ordersCell}</td>
+    <td class="num">${qtyCell}</td>
+  </tr>`;
+}
+
 function renderForecast(fc) {
   const m = fc.model;
   document.getElementById('fc-formula').textContent = `일매출 = ${fmtNum(m.coefficient)}원 × 청첩장일주문 − ${fmtNum(Math.abs(m.intercept))}원`;
@@ -722,50 +903,24 @@ function renderForecast(fc) {
 
   const maxRevenue = Math.max(...fc.weeks.map(w => Math.max(w.est_weekly_revenue, w.actual_weekly_revenue || 0)), 1);
   const tbody = document.getElementById('fc-body');
-  tbody.innerHTML = fc.weeks.map((w, i) => {
-    const estBar = Math.round((w.est_weekly_revenue / maxRevenue) * 120);
-    const actBar = Math.round(((w.actual_weekly_revenue||0) / maxRevenue) * 120);
-    const startD = new Date(w.week_start).toLocaleDateString('ko-KR',{month:'short',day:'numeric'});
-    const endD = new Date(w.week_end).toLocaleDateString('ko-KR',{month:'short',day:'numeric'});
-    const isThisWeek = w.is_current;
-    const isPast = w.is_past;
 
-    // 상태 뱃지
-    let weekBadge = '';
-    if (isThisWeek) weekBadge = '<span class="badge badge-up">금주</span>';
-    else if (isPast) weekBadge = '<span class="badge badge-neutral">완료</span>';
+  // 히스토리(과거) / 현재+미래 구분
+  const historyWeeks = fc.weeks.filter(w => w.is_past && !w.is_current);
+  const currentAndFutureWeeks = fc.weeks.filter(w => !w.is_past || w.is_current);
 
-    // 실제 매출
-    let actualCell = '-';
-    if (isPast || isThisWeek) {
-      const dayLabel = isThisWeek ? `(${w.actual_days}일 경과)` : '';
-      actualCell = `<strong>${fmtKRW(w.actual_weekly_revenue)}</strong> <span style="font-size:10px;color:var(--gray-500)">${dayLabel}</span>`;
-    }
+  let html = '';
 
-    // 오차율
-    let accCell = '-';
-    if (w.accuracy_pct !== null && w.accuracy_pct !== undefined) {
-      const sign = w.accuracy_pct > 0 ? '+' : '';
-      const cls = w.accuracy_pct > 10 ? 'badge-up' : w.accuracy_pct < -10 ? 'badge-down' : 'badge-neutral';
-      accCell = `<span class="badge ${cls}">${sign}${w.accuracy_pct}%</span>`;
-    }
+  // 히스토리 헤더
+  if (historyWeeks.length > 0) {
+    html += `<tr><td colspan="9" style="background:#f1f5f9;padding:8px 12px;font-size:12px;font-weight:600;color:var(--gray-500);border-bottom:2px solid var(--gray-200)">📋 지난 주차 히스토리 (${historyWeeks.length}주)</td></tr>`;
+    html += historyWeeks.map(w => renderForecastRow(w, maxRevenue, true)).join('');
+    html += `<tr><td colspan="9" style="background:#e5e7eb;padding:1px"></td></tr>`;
+  }
 
-    // 실제 건수/수량
-    const ordersCell = (isPast || isThisWeek) ? `${fmtNum(w.actual_orders)}건` : '-';
-    const qtyCell = (isPast || isThisWeek) ? `${fmtNum(w.actual_qty)}` : '-';
+  // 현재 + 미래
+  html += currentAndFutureWeeks.map(w => renderForecastRow(w, maxRevenue, false)).join('');
 
-    return `<tr style="${isThisWeek ? 'background:#eff6ff' : isPast ? 'background:#fafafa' : ''}">
-      <td><strong>${w.week_no}주차</strong> ${weekBadge}</td>
-      <td>${startD} ~ ${endD}</td>
-      <td class="num">${fmtNum(w.card_orders_in_lag)}건</td>
-      <td class="num">${w.avg_daily_card}건/일</td>
-      <td class="num" style="min-width:140px"><div class="forecast-bar" style="width:${estBar}px;background:var(--primary);opacity:.3"></div> ${fmtKRW(w.est_weekly_revenue)}</td>
-      <td class="num" style="min-width:140px">${isPast || isThisWeek ? `<div class="forecast-bar" style="width:${actBar}px;background:var(--green)"></div> ` : ''}${actualCell}</td>
-      <td class="num">${accCell}</td>
-      <td class="num">${ordersCell}</td>
-      <td class="num">${qtyCell}</td>
-    </tr>`;
-  }).join('');
+  tbody.innerHTML = html;
 
   // 피드백
   let feedback = '';
@@ -793,9 +948,10 @@ function renderForecast(fc) {
     else feedback += `예측 대비 하회하는 주차 다수 — 시즌 변동 또는 마케팅 효과 감소 가능. `;
   }
 
-  const totalEst = fc.weeks.reduce((s,w) => s + w.est_weekly_revenue, 0);
+  const futureWeeks = fc.weeks.filter(w => !w.is_past && !w.is_current);
+  const totalEst = futureWeeks.reduce((s,w) => s + w.est_weekly_revenue, 0);
   const totalAct = fc.weeks.filter(w=>w.is_past||w.is_current).reduce((s,w) => s + (w.actual_weekly_revenue||0), 0);
-  feedback += `<br><br>향후 12주 모델 예측 총매출: <strong>${fmtKRW(totalEst)}</strong>`;
+  feedback += `<br><br>향후 ${futureWeeks.length}주 모델 예측 총매출: <strong>${fmtKRW(totalEst)}</strong>`;
   if (totalAct > 0) feedback += ` / 실적 누계: <strong>${fmtKRW(totalAct)}</strong>`;
   feedback += `. `;
 
@@ -815,7 +971,7 @@ function renderLeadtime(lt) {
 
   const dist = lt.distribution || {};
   const maxVal = Math.max(...Object.values(dist), 1);
-  const colors = ['#ef4444','#3b82f6','#2563eb','#1d4ed8','#1e40af','#1e3a8a','#172554'];
+  const colors = ['#991b1b','#dc2626','#f87171','#fca5a5','#3b82f6','#2563eb','#1d4ed8','#1e40af','#1e3a8a','#172554'];
   document.getElementById('lt-bars').innerHTML = Object.entries(dist).map(([label, count], i) => {
     const h = Math.max(4, Math.round((count / maxVal) * 70));
     return `<div class="leadtime-bar" style="height:${h}px;background:${colors[i]}"><span class="count">${count}</span><span class="label">${label}</span></div>`;
@@ -830,6 +986,7 @@ function renderLeadtime(lt) {
 
 let hourlyChart = null, weeklyChart = null;
 function renderMarketing(mk) {
+  _mkData = mk; // 테이블 뷰용 캐시
   const c = mk.conversion;
   document.getElementById('mk-card-members').textContent = fmtNum(c.card_members) + '명';
   document.getElementById('mk-cross').textContent = fmtNum(c.cross_buy) + '명';
@@ -896,6 +1053,296 @@ function renderMarketing(mk) {
       scales: { y: { beginAtZero: true, ticks: { stepSize: 2 } } }
     }
   });
+
+  // 가입사이트 분포
+  const sites = mk.memberSite || [];
+  // 주문 사이트별 집계
+  const orderSiteMap = {};
+  const signupSiteMap = {};
+  sites.forEach(s => {
+    const os = s.order_site || '미확인';
+    const ss = s.signup_site || '미확인';
+    orderSiteMap[os] = (orderSiteMap[os]||0) + s.order_count;
+    signupSiteMap[ss] = (signupSiteMap[ss]||0) + s.member_count;
+  });
+
+  function renderSiteBar(containerId, map) {
+    const entries = Object.entries(map).sort((a,b) => b[1] - a[1]);
+    const maxV = Math.max(...entries.map(e => e[1]), 1);
+    const sColors = ['#3b82f6','#60a5fa','#93c5fd','#bfdbfe','#dbeafe'];
+    document.getElementById(containerId).innerHTML = entries.map(([name, cnt], i) => {
+      const h = Math.max(8, Math.round((cnt / maxV) * 100));
+      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px">
+        <span style="font-size:11px;font-weight:600">${cnt}</span>
+        <div style="width:100%;height:${h}px;background:${sColors[i]||'#e2e8f0'};border-radius:4px 4px 0 0"></div>
+        <span style="font-size:10px;color:#666;white-space:nowrap">${name}</span>
+      </div>`;
+    }).join('');
+  }
+  renderSiteBar('mk-order-site', orderSiteMap);
+  renderSiteBar('mk-signup-site', signupSiteMap);
+
+  const totalOrders = Object.values(orderSiteMap).reduce((s,v) => s+v, 0);
+  const topOrderSite = Object.entries(orderSiteMap).sort((a,b) => b[1]-a[1])[0];
+  const topSignupSite = Object.entries(signupSiteMap).sort((a,b) => b[1]-a[1])[0];
+  let siteFb = '';
+  if (topOrderSite) siteFb += `주문의 <strong>${Math.round(topOrderSite[1]/totalOrders*100)}%</strong>가 <strong>${topOrderSite[0]}</strong>에서 발생. `;
+  if (topSignupSite) siteFb += `회원 최초 가입은 <strong>${topSignupSite[0]}</strong>이 가장 많습니다.`;
+  document.getElementById('mk-site-feedback').innerHTML = siteFb;
+}
+
+// --- 마케팅 뷰 토글 ---
+let _mkData = null; // 마케팅 데이터 캐시
+function toggleMkView(cardId, mode, btn) {
+  // 버튼 active 상태
+  btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const chartEl = document.getElementById(`mk-${cardId}-chart`);
+  const tableEl = document.getElementById(`mk-${cardId}-table`);
+  if (mode === 'chart') {
+    chartEl.style.display = '';
+    tableEl.style.display = 'none';
+  } else {
+    chartEl.style.display = 'none';
+    tableEl.style.display = '';
+    if (_mkData) renderMkTable(cardId, _mkData);
+  }
+}
+function renderMkTable(cardId, mk) {
+  const el = document.getElementById(`mk-${cardId}-table`);
+  if (!el || el.innerHTML) return; // 이미 렌더링됨
+  let html = '';
+  if (cardId === 'conv') {
+    const c = mk.conversion;
+    html = `<table class="mk-table">
+      <thead><tr><th>항목</th><th class="num">값</th></tr></thead>
+      <tbody>
+        <tr><td>청첩장 주문자</td><td class="num">${fmtNum(c.card_members)}명</td></tr>
+        <tr><td>답례품도 구매 (크로스셀)</td><td class="num">${fmtNum(c.cross_buy)}명</td></tr>
+        <tr><td>청첩장→답례품 전환율</td><td class="num">${c.card_to_gift_pct}%</td></tr>
+        <tr><td>답례품 구매자 중 청첩장O</td><td class="num">${c.gift_has_card_pct}%</td></tr>
+        <tr><td>답례품 단독 구매 (비청첩장)</td><td class="num">${c.gift_only}명 (${c.gift_only_pct}%)</td></tr>
+      </tbody></table>`;
+  } else if (cardId === 'region') {
+    const total = mk.region.reduce((s, r) => s + r.cnt, 0);
+    html = `<table class="mk-table">
+      <thead><tr><th>지역</th><th class="num">주문수</th><th class="num">비율</th></tr></thead>
+      <tbody>${mk.region.map(r => `<tr><td>${r.region}</td><td class="num">${fmtNum(r.cnt)}</td><td class="num">${total ? Math.round(r.cnt/total*1000)/10 : 0}%</td></tr>`).join('')}</tbody></table>`;
+  } else if (cardId === 'hourly') {
+    const entries = Object.entries(mk.hourly).sort((a,b) => Number(a[0]) - Number(b[0]));
+    const total = entries.reduce((s, e) => s + e[1], 0);
+    html = `<table class="mk-table">
+      <thead><tr><th>시간대</th><th class="num">주문수</th><th class="num">비율</th></tr></thead>
+      <tbody>${entries.map(([h, cnt]) => `<tr><td>${h}시</td><td class="num">${cnt}</td><td class="num">${total ? Math.round(cnt/total*1000)/10 : 0}%</td></tr>`).join('')}</tbody></table>`;
+  } else if (cardId === 'weekly') {
+    const entries = Object.entries(mk.weekly);
+    const total = entries.reduce((s, e) => s + e[1], 0);
+    html = `<table class="mk-table">
+      <thead><tr><th>요일</th><th class="num">주문수</th><th class="num">비율</th></tr></thead>
+      <tbody>${entries.map(([d, cnt]) => `<tr><td>${d}</td><td class="num">${cnt}</td><td class="num">${total ? Math.round(cnt/total*1000)/10 : 0}%</td></tr>`).join('')}</tbody></table>`;
+  } else if (cardId === 'site') {
+    const sites = mk.memberSite || [];
+    html = `<table class="mk-table">
+      <thead><tr><th>주문 사이트</th><th>가입 사이트</th><th class="num">주문수</th><th class="num">회원수</th></tr></thead>
+      <tbody>${sites.map(s => `<tr><td>${s.order_site||'미확인'}</td><td>${s.signup_site||'미확인'}</td><td class="num">${s.order_count}</td><td class="num">${s.member_count}</td></tr>`).join('')}</tbody></table>`;
+  }
+  el.innerHTML = html;
+}
+
+// --- 차트/테이블 토글 (전환율, 샘플) ---
+let _conversionData = null;
+let _sampleViewMode = 'chart'; // chart or table
+
+function toggleChartTable(section, mode, btn) {
+  btn.parentElement.querySelectorAll('button').forEach(b => {
+    // 상품기준/주문건기준 버튼은 건드리지 않음
+    if (b.id && b.id.startsWith('sample-mode-')) return;
+    b.classList.remove('active');
+  });
+  btn.classList.add('active');
+  const chartEl = document.getElementById(`${section}-chart-view`);
+  const tableEl = document.getElementById(`${section}-table-view`);
+  if (mode === 'chart') {
+    chartEl.style.display = '';
+    tableEl.style.display = 'none';
+  } else {
+    chartEl.style.display = 'none';
+    tableEl.style.display = '';
+    if (section === 'conversion' && _conversionData) renderConversionTable();
+    if (section === 'sample' && _sampleData) renderSampleTable();
+  }
+  if (section === 'sample') _sampleViewMode = mode;
+}
+
+function renderConversionTable() {
+  const el = document.getElementById('conversion-table-view');
+  if (!_conversionData) return;
+  const weeks = _conversionData.weeks;
+  el.innerHTML = `<table class="mk-table">
+    <thead><tr><th>주차</th><th class="num">예식수</th><th class="num">답례품 주문</th><th class="num">전환율</th></tr></thead>
+    <tbody>${weeks.map(w => `<tr>
+      <td>${w.week_label}</td>
+      <td class="num">${fmtNum(w.wedding_count)}</td>
+      <td class="num">${fmtNum(w.order_count)}</td>
+      <td class="num">${w.conversion_pct}%</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+function renderSampleTable() {
+  const el = document.getElementById('sample-table-view');
+  if (!_sampleData) return;
+  const source = _sampleMode === 'product' ? _sampleData.byProduct : _sampleData.byOrder;
+  const daily = source.slice(0, 30);
+  const modeLabel = _sampleMode === 'product' ? '상품 수' : '주문 건수';
+  let rows = '';
+  if (_sampleMode === 'product') {
+    daily.forEach(d => {
+      rows += `<tr><td rowspan="${d.products.length||1}">${d.date}</td><td rowspan="${d.products.length||1}" class="num">${d.total}</td>`;
+      d.products.forEach((p, i) => {
+        if (i > 0) rows += '<tr>';
+        rows += `<td>${p.name}</td><td class="num">${p.count}</td></tr>`;
+      });
+    });
+    el.innerHTML = `<div style="max-height:300px;overflow-y:auto"><table class="mk-table">
+      <thead><tr><th>일자</th><th class="num">합계</th><th>상품명</th><th class="num">건수</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+  } else {
+    rows = daily.map(d => `<tr><td>${d.date}</td><td class="num">${d.total}</td></tr>`).join('');
+    el.innerHTML = `<div style="max-height:300px;overflow-y:auto"><table class="mk-table">
+      <thead><tr><th>일자</th><th class="num">${modeLabel}</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+  }
+}
+
+// --- 전환율 차트 ---
+let conversionChart = null;
+function renderConversion(data) {
+  _conversionData = data;
+  const weeks = data.weeks;
+  const labels = weeks.map(w => w.week_label);
+  if (conversionChart) conversionChart.destroy();
+  conversionChart = new Chart(document.getElementById('conversionChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: '예식수', data: weeks.map(w => w.wedding_count), backgroundColor: '#93c5fd', borderRadius: 4, yAxisID: 'y' },
+        { label: '답례품 주문수', data: weeks.map(w => w.order_count), backgroundColor: '#3b82f6', borderRadius: 4, yAxisID: 'y' },
+        { label: '전환율(%)', data: weeks.map(w => w.conversion_pct), type: 'line', borderColor: '#f97316', backgroundColor: '#f97316', pointRadius: 4, pointBackgroundColor: '#f97316', borderWidth: 2, yAxisID: 'y1', tension: 0.3 },
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 11 }, usePointStyle: true } },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              if (ctx.dataset.label === '전환율(%)') return ctx.dataset.label + ': ' + ctx.raw + '%';
+              return ctx.dataset.label + ': ' + ctx.raw.toLocaleString() + '건';
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+        y: { beginAtZero: true, position: 'left', title: { display: true, text: '건수' } },
+        y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '전환율(%)' } }
+      }
+    }
+  });
+
+  // 피드백
+  const recent = weeks.slice(-4);
+  const avgConv = recent.length ? Math.round(recent.reduce((s,w) => s + w.conversion_pct, 0) / recent.length * 10) / 10 : 0;
+  const totalWed = recent.reduce((s,w) => s + w.wedding_count, 0);
+  const totalOrd = recent.reduce((s,w) => s + w.order_count, 0);
+  let fb = `최근 4주 평균 전환율 <strong>${avgConv}%</strong> (예식 ${fmtNum(totalWed)}건 중 답례품 주문 ${fmtNum(totalOrd)}건). `;
+  if (avgConv < 1) fb += '전환율이 낮습니다. 청첩장 주문 후 답례품 추천 메시지 등 크로스셀 강화가 필요합니다.';
+  else if (avgConv < 3) fb += '전환율이 보통 수준입니다. 예식 2~3주 전 타겟 마케팅이 효과적일 수 있습니다.';
+  else fb += '전환율이 양호합니다. 현재 마케팅 전략이 잘 작동하고 있습니다.';
+  document.getElementById('conversion-feedback').innerHTML = fb;
+}
+
+// --- 샘플 주문 차트 ---
+let sampleChart = null;
+let _sampleData = null;
+let _sampleMode = 'product';
+
+function switchSampleMode(mode, btn) {
+  // 상품기준/주문건기준 버튼만 토글
+  document.getElementById('sample-mode-product').classList.toggle('active', mode === 'product');
+  document.getElementById('sample-mode-order').classList.toggle('active', mode === 'order');
+  _sampleMode = mode;
+  if (_sampleData) {
+    renderSamples(_sampleData);
+    // 테이블 뷰인 경우 테이블도 갱신
+    const tableEl = document.getElementById('sample-table-view');
+    if (tableEl.style.display !== 'none') {
+      tableEl.innerHTML = ''; // 강제 재렌더링
+      renderSampleTable();
+    }
+  }
+}
+
+function renderSamples(data) {
+  _sampleData = data;
+  const mode = _sampleMode;
+  const source = mode === 'product' ? data.byProduct : data.byOrder;
+  const daily = source.slice(0, 30).reverse(); // 최근 30일, 오래된 날짜 먼저
+  const labels = daily.map(d => d.date.slice(5));
+  const totals = daily.map(d => d.total);
+  const modeLabel = mode === 'product' ? '샘플 상품' : '샘플 주문';
+  const barColor = mode === 'product' ? '#a78bfa' : '#60a5fa';
+
+  if (sampleChart) sampleChart.destroy();
+  sampleChart = new Chart(document.getElementById('sampleChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ label: modeLabel, data: totals, backgroundColor: barColor, borderRadius: 4 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            afterBody: function(ctx) {
+              if (mode !== 'product') return '';
+              const idx = ctx[0].dataIndex;
+              const d = daily[idx];
+              if (!d || !d.products) return '';
+              return d.products.map(p => '  ' + p.name + ' ×' + p.count).join('\n');
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+        y: { beginAtZero: true, ticks: { stepSize: 1 }, title: { display: true, text: mode === 'product' ? '상품 수' : '주문 건수' } }
+      }
+    }
+  });
+
+  // 피드백
+  const totalSamples = daily.reduce((s,d) => s + d.total, 0);
+  const activeDays = daily.filter(d => d.total > 0).length;
+  const avgDaily = activeDays > 0 ? Math.round(totalSamples / activeDays * 10) / 10 : 0;
+
+  if (mode === 'product') {
+    const prodCount = {};
+    daily.forEach(d => (d.products||[]).forEach(p => { prodCount[p.name] = (prodCount[p.name]||0) + p.count; }));
+    const topProducts = Object.entries(prodCount).sort((a,b) => b[1] - a[1]).slice(0, 3);
+    let fb = `<strong>[상품기준]</strong> 최근 30일간 총 <strong>${totalSamples}건</strong> 샘플 상품 (일평균 ${avgDaily}건). `;
+    if (topProducts.length) fb += `가장 많은 샘플: <strong>${topProducts.map(([n,c]) => n + ' ' + c + '건').join(', ')}</strong>`;
+    document.getElementById('sample-feedback').innerHTML = fb;
+  } else {
+    let fb = `<strong>[주문건기준]</strong> 최근 30일간 총 <strong>${totalSamples}건</strong> 샘플 주문 (일평균 ${avgDaily}건). `;
+    fb += `수량 1개 상품이 포함된 주문을 1건으로 카운트합니다.`;
+    document.getElementById('sample-feedback').innerHTML = fb;
+  }
 }
 
 // --- SNS Insight ---
@@ -1273,12 +1720,13 @@ function renderDailyTable(data, topProducts) {
       return `<td class="num" style="font-size:12px">${v ? fmtKRW(v) : '<span style="color:var(--gray-200)">-</span>'}</td>`;
     }).join('');
     const pTotal = days.reduce((s,d)=>s+(dayMap[d].products[p]||0),0);
+    const pPct = totalAmt > 0 ? Math.round(pTotal / totalAmt * 1000) / 10 : 0;
     const label = p.length > 16 ? p.slice(0,16)+'…' : p;
     const bg = i % 2 === 0 ? '#fff' : '#fafafa';
     return `<tr>
       <td style="${STICKY}background:${bg};font-size:12px;color:var(--gray-700);padding-left:16px;white-space:nowrap">${label}</td>
       ${pCells}
-      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${pTotal ? fmtKRW(pTotal) : '-'}</td>
+      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${pTotal ? fmtKRW(pTotal)+' <span style="color:var(--gray-500)">('+pPct+'%)</span>' : '-'}</td>
     </tr>`;
   }).join('');
 
@@ -1378,12 +1826,13 @@ function renderWeeklyTable(data, topProducts) {
       return `<td class="num" style="font-size:12px">${v ? fmtKRW(v) : '<span style="color:var(--gray-200)">-</span>'}</td>`;
     }).join('');
     const pTotal = weeks.reduce((s,w)=>s+(weekMap[w].products[p]||0), 0);
+    const pPct = totalAmt > 0 ? Math.round(pTotal / totalAmt * 1000) / 10 : 0;
     const label = p.length > 16 ? p.slice(0,16)+'…' : p;
     const bg = i % 2 === 0 ? '#fff' : '#fafafa';
     return `<tr>
       <td style="${STICKY}background:${bg};font-size:12px;color:var(--gray-700);padding-left:16px;white-space:nowrap">${label}</td>
       ${pCells}
-      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${pTotal ? fmtKRW(pTotal) : '-'}</td>
+      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${pTotal ? fmtKRW(pTotal)+' <span style="color:var(--gray-500)">('+pPct+'%)</span>' : '-'}</td>
     </tr>`;
   }).join('');
 

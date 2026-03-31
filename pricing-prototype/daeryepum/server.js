@@ -32,8 +32,19 @@ async function getPool() {
   return pool;
 }
 
-// D01 category = 답례품
+// 카테고리 필터 정의
+const CATEGORY_FILTERS = {
+  daeryepum: { label: '답례품', filter: `c.Card_Div = 'D01'` },
+  deco:      { label: '데코소품', filter: `c.Card_Code LIKE '2026_%'` },
+  flower:    { label: '꽃다발', filter: `c.Card_Div = 'D02'` },
+};
+// D01 category = 답례품 (기본, 대시보드용)
 const D01_FILTER = `c.Card_Div = 'D01'`;
+
+function getCategoryFilter(category) {
+  const cat = CATEGORY_FILTERS[category];
+  return cat ? cat.filter : D01_FILTER;
+}
 
 // Clean product name (remove [할인], [시크릿특가] etc.)
 function cleanName(name) {
@@ -62,6 +73,7 @@ async function apiOrders(query) {
   const p = await getPool();
   const startDate = query.start_date || fmtDate(addDays(today(), -7));
   const endDate = query.end_date || fmtDate(addDays(today(), 1));
+  const categoryFilter = getCategoryFilter(query.category);
 
   const result = await p.request()
     .input('startDate', sql.VarChar, startDate)
@@ -72,8 +84,8 @@ async function apiOrders(query) {
       SELECT
         o.order_seq AS order_seq,
         'ETC' AS order_type,
-        o.order_date AS order_date,
-        o.settle_date AS settle_date,
+        CONVERT(varchar(19), o.order_date, 120) AS order_date,
+        CONVERT(varchar(19), o.settle_date, 120) AS settle_date,
         o.order_name AS order_name,
         o.recv_name AS recv_name,
         o.recv_hphone AS recv_hphone,
@@ -97,7 +109,7 @@ async function apiOrders(query) {
           AND w2.event_year IS NOT NULL AND LEN(w2.event_year) = 4
         ORDER BY co2.order_seq DESC
       ) cw
-      WHERE ${D01_FILTER}
+      WHERE ${categoryFilter}
         AND o.order_date >= @startDate AND o.order_date < @endDate
         AND o.status_seq >= 1
 
@@ -107,8 +119,8 @@ async function apiOrders(query) {
       SELECT
         co.order_seq,
         'CARD' AS order_type,
-        co.order_date,
-        co.settle_date,
+        CONVERT(varchar(19), co.order_date, 120) AS order_date,
+        CONVERT(varchar(19), co.settle_date, 120) AS settle_date,
         co.order_name,
         di.NAME AS recv_name,
         ISNULL(di.HPHONE, di.PHONE) AS recv_hphone,
@@ -117,7 +129,11 @@ async function apiOrders(query) {
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
         coi.item_count,
-        CAST(coi.item_sale_price AS float) * coi.item_count AS item_amount,
+        CAST(coi.item_sale_price AS float) *
+          CASE WHEN c.Unit_Value > 1
+            THEN CEILING(CAST(coi.item_count AS float) / c.Unit_Value)
+            ELSE coi.item_count
+          END AS item_amount,
         co.settle_price,
         co.status_seq,
         w.event_year + '-' + RIGHT('0'+w.event_month,2) + '-' + RIGHT('0'+w.event_Day,2) AS wedding_date
@@ -126,7 +142,7 @@ async function apiOrders(query) {
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN DELIVERY_INFO di WITH (NOLOCK) ON co.order_seq = di.ORDER_SEQ
       LEFT JOIN custom_order_WeddInfo w WITH (NOLOCK) ON co.order_seq = w.order_seq
-      WHERE ${D01_FILTER}
+      WHERE ${categoryFilter}
         AND co.order_date >= @startDate AND co.order_date < @endDate
         AND co.status_seq >= 1
 
@@ -175,12 +191,12 @@ async function apiDashboardComparison() {
       .query(`
         SELECT
           COUNT(DISTINCT o.order_seq) AS order_count,
-          ISNULL(SUM(oi.card_sale_price),0) AS total_amount,
+          ISNULL((SELECT SUM(t.settle_price) FROM (SELECT DISTINCT o2.order_seq, o2.settle_price FROM CUSTOM_ETC_ORDER o2 WITH (NOLOCK) INNER JOIN CUSTOM_ETC_ORDER_ITEM oi2 WITH (NOLOCK) ON o2.order_seq = oi2.order_seq INNER JOIN S2_Card c2 WITH (NOLOCK) ON oi2.card_seq = c2.Card_Seq WHERE ${D01_FILTER.replace(/c\./g,'c2.')} AND o2.order_date >= @s AND o2.order_date < @e AND o2.status_seq >= 1 AND o2.status_seq NOT IN (3, 5)) t),0) AS total_amount,
           ISNULL(SUM(oi.order_count),0) AS total_qty
         FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
         INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-        WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e AND o.status_seq NOT IN (3, 5)
+        WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
       `);
     const r2 = await p.request()
       .input('s', sql.VarChar, startStr)
@@ -188,12 +204,12 @@ async function apiDashboardComparison() {
       .query(`
         SELECT
           COUNT(DISTINCT co.order_seq) AS order_count,
-          ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count),0) AS total_amount,
+          ISNULL((SELECT SUM(t.settle_price) FROM (SELECT DISTINCT co2.order_seq, co2.settle_price FROM custom_order co2 WITH (NOLOCK) INNER JOIN custom_order_item coi2 WITH (NOLOCK) ON co2.order_seq = coi2.order_seq INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq WHERE ${D01_FILTER.replace(/c\./g,'c2.')} AND co2.order_date >= @s AND co2.order_date < @e AND co2.status_seq >= 1 AND co2.status_seq NOT IN (3, 5)) t),0) AS total_amount,
           ISNULL(SUM(coi.item_count),0) AS total_qty
         FROM custom_order co WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-        WHERE ${D01_FILTER} AND co.order_date >= @s AND co.order_date < @e AND co.status_seq NOT IN (3, 5)
+        WHERE ${D01_FILTER} AND co.order_date >= @s AND co.order_date < @e AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
       `);
     const a = r.recordset[0] || {};
     const b = r2.recordset[0] || {};
@@ -242,7 +258,7 @@ async function apiDashboardSummary(query) {
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
       GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), o.order_date, 120)
 
       UNION ALL
@@ -257,7 +273,7 @@ async function apiDashboardSummary(query) {
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
       GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), co.order_date, 120)
 
       ORDER BY order_day DESC, total_amount DESC
@@ -282,7 +298,7 @@ async function apiForecast() {
   // 1) 향후 12주 예측을 위해 과거 4~12주 전 청첩장 일별 주문수 필요
   //    (향후 N주 답례품 = N-8주 전 ~ N-8주+7일 의 청첩장 주문 기반)
   //    즉, 오늘 기준 -56일 ~ +28일 범위의 청첩장 데이터 필요
-  const lagStart = fmtDate(addDays(today(), -LAG_DAYS));       // 8주 전
+  const lagStart = fmtDate(addDays(today(), -LAG_DAYS - 56));   // 8주 전 시작 기준의 lag 데이터 (16주 전)
   const lagEnd = fmtDate(addDays(today(), 84 - LAG_DAYS));     // 12주 후 - 8주 lag = 4주 후
 
   const cardDaily = await p.request()
@@ -303,17 +319,17 @@ async function apiForecast() {
   const cardDailyMap = {};
   for (const r of cardDaily.recordset) { cardDailyMap[r.order_day] = r.daily_orders; }
 
-  // 2) 주차별 예측 계산 (월~일 기준)
-  // 이번 주 월요일 구하기
+  // 2) 주차별 예측 계산 (일~토 기준)
+  // 이번 주 일요일 구하기
   const todayDate = today();
   const dayOfWeek = todayDate.getDay(); // 0=일, 1=월, ..., 6=토
-  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; // 일요일이면 -6, 아니면 1-요일
-  const thisMonday = addDays(todayDate, mondayOffset);
+  const thisSunday = addDays(todayDate, -dayOfWeek); // 이번 주 일요일
 
   const weeks = [];
-  for (let w = 0; w < 12; w++) {
-    const weekStart = addDays(thisMonday, w * 7);        // 월요일
-    const weekEnd = addDays(thisMonday, w * 7 + 6);      // 일요일
+  // 과거 8주(-8) ~ 미래 12주(+11) = 총 20주
+  for (let w = -8; w < 12; w++) {
+    const weekStart = addDays(thisSunday, w * 7);        // 일요일
+    const weekEnd = addDays(thisSunday, w * 7 + 6);      // 토요일
 
     // 이 주차에 대응하는 청첩장 주문 기간 (8주 전)
     let totalCardOrders = 0;
@@ -344,36 +360,34 @@ async function apiForecast() {
   }
 
   // 3) 주차별 실제 매출 조회 (ETC + CARD 합산)
-  const actualWeeklyStart = fmtDate(addDays(thisMonday, -7 * 4)); // 4주 전부터
+  const actualWeeklyStart = fmtDate(addDays(thisSunday, -7 * 8)); // 8주 전부터
   const actualWeeklyEnd = fmtDate(addDays(todayDate, 1));
 
   const actualWeekly = await p.request()
     .input('awStart', sql.VarChar, actualWeeklyStart)
     .input('awEnd', sql.VarChar, actualWeeklyEnd)
     .query(`
-      SELECT
-        CONVERT(varchar(10), o.order_date, 120) AS order_day,
-        COUNT(DISTINCT o.order_seq) AS order_count,
-        ISNULL(SUM(oi.card_sale_price),0) AS total_amount,
-        ISNULL(SUM(oi.order_count),0) AS total_qty
-      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND o.order_date >= @awStart AND o.order_date < @awEnd AND o.status_seq NOT IN (3, 5)
-      GROUP BY CONVERT(varchar(10), o.order_date, 120)
+      SELECT order_day, COUNT(*) AS order_count, SUM(settle_price) AS total_amount, SUM(total_qty) AS total_qty
+      FROM (
+        SELECT DISTINCT o.order_seq, CONVERT(varchar(10), o.order_date, 120) AS order_day, o.settle_price,
+          (SELECT SUM(oi2.order_count) FROM CUSTOM_ETC_ORDER_ITEM oi2 WITH (NOLOCK) INNER JOIN S2_Card c2 WITH (NOLOCK) ON oi2.card_seq=c2.Card_Seq WHERE oi2.order_seq=o.order_seq AND ${D01_FILTER.replace(/c\./g,'c2.')}) AS total_qty
+        FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+        INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+        WHERE ${D01_FILTER} AND o.order_date >= @awStart AND o.order_date < @awEnd AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+      ) t GROUP BY order_day
 
       UNION ALL
 
-      SELECT
-        CONVERT(varchar(10), co.order_date, 120),
-        COUNT(DISTINCT co.order_seq),
-        ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count),0),
-        ISNULL(SUM(coi.item_count),0)
-      FROM custom_order co WITH (NOLOCK)
-      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
-      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.order_date >= @awStart AND co.order_date < @awEnd AND co.status_seq NOT IN (3, 5)
-      GROUP BY CONVERT(varchar(10), co.order_date, 120)
+      SELECT order_day, COUNT(*) AS order_count, SUM(settle_price) AS total_amount, SUM(total_qty) AS total_qty
+      FROM (
+        SELECT DISTINCT co.order_seq, CONVERT(varchar(10), co.order_date, 120) AS order_day, co.settle_price,
+          (SELECT SUM(coi2.item_count) FROM custom_order_item coi2 WITH (NOLOCK) INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq=c2.Card_Seq WHERE coi2.order_seq=co.order_seq AND ${D01_FILTER.replace(/c\./g,'c2.')}) AS total_qty
+        FROM custom_order co WITH (NOLOCK)
+        INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+        WHERE ${D01_FILTER} AND co.order_date >= @awStart AND co.order_date < @awEnd AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
+      ) t GROUP BY order_day
     `);
 
   // 일별 실제 매출 맵 (ETC+CARD 합산)
@@ -417,14 +431,14 @@ async function apiForecast() {
     .input('start30', sql.VarChar, fmtDate(addDays(today(), -30)))
     .input('today', sql.VarChar, todayStr)
     .query(`
-      SELECT
-        COUNT(DISTINCT o.order_seq) AS total_orders,
-        ISNULL(SUM(oi.card_sale_price),0) AS total_amount,
-        COUNT(DISTINCT CONVERT(varchar(10), o.order_date, 120)) AS active_days
-      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND o.order_date >= @start30 AND o.order_date < DATEADD(day,1,@today) AND o.status_seq NOT IN (3, 5)
+      SELECT COUNT(*) AS total_orders, ISNULL(SUM(settle_price),0) AS total_amount, COUNT(DISTINCT order_day) AS active_days
+      FROM (
+        SELECT DISTINCT o.order_seq, o.settle_price, CONVERT(varchar(10), o.order_date, 120) AS order_day
+        FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+        INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+        WHERE ${D01_FILTER} AND o.order_date >= @start30 AND o.order_date < DATEADD(day,1,@today) AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+      ) t
     `);
 
   const actual = actualStats.recordset[0] || {};
@@ -453,26 +467,29 @@ function getISOWeek(d) {
 async function apiLeadtime() {
   const p = await getPool();
   const result = await p.request().query(`
-    SELECT TOP 1000
-      o.order_seq,
-      o.order_date,
-      TRY_CAST(cw.event_year+'-'+RIGHT('0'+cw.event_month,2)+'-'+RIGHT('0'+cw.event_Day,2) AS date) AS wedding_date,
-      DATEDIFF(day, o.order_date, TRY_CAST(cw.event_year+'-'+RIGHT('0'+cw.event_month,2)+'-'+RIGHT('0'+cw.event_Day,2) AS date)) AS lead_days
-    FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-    INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-    INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-    CROSS APPLY (
-      SELECT TOP 1 w2.event_year, w2.event_month, w2.event_Day
-      FROM custom_order co2 WITH (NOLOCK)
-      INNER JOIN custom_order_WeddInfo w2 WITH (NOLOCK) ON co2.order_seq = w2.order_seq
-      WHERE co2.member_id = o.member_id AND co2.status_seq >= 1
-        AND w2.event_year IS NOT NULL AND LEN(w2.event_year) = 4
-      ORDER BY co2.order_seq DESC
-    ) cw
-    WHERE ${D01_FILTER} AND o.status_seq >= 1
-      AND TRY_CAST(cw.event_year+'-'+RIGHT('0'+cw.event_month,2)+'-'+RIGHT('0'+cw.event_Day,2) AS date) IS NOT NULL
-      AND o.order_date >= DATEADD(day, -180, GETDATE())
-    ORDER BY o.order_date DESC
+    SELECT order_seq, order_date, wedding_date, lead_days FROM (
+      SELECT
+        o.order_seq,
+        o.order_date,
+        TRY_CAST(cw.event_year+'-'+RIGHT('0'+cw.event_month,2)+'-'+RIGHT('0'+cw.event_Day,2) AS date) AS wedding_date,
+        DATEDIFF(day, o.order_date, TRY_CAST(cw.event_year+'-'+RIGHT('0'+cw.event_month,2)+'-'+RIGHT('0'+cw.event_Day,2) AS date)) AS lead_days,
+        ROW_NUMBER() OVER (PARTITION BY o.order_seq ORDER BY o.order_seq) AS rn
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      CROSS APPLY (
+        SELECT TOP 1 w2.event_year, w2.event_month, w2.event_Day
+        FROM custom_order co2 WITH (NOLOCK)
+        INNER JOIN custom_order_WeddInfo w2 WITH (NOLOCK) ON co2.order_seq = w2.order_seq
+        WHERE co2.member_id = o.member_id AND co2.status_seq >= 1
+          AND w2.event_year IS NOT NULL AND LEN(w2.event_year) = 4
+        ORDER BY co2.order_seq DESC
+      ) cw
+      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+        AND TRY_CAST(cw.event_year+'-'+RIGHT('0'+cw.event_month,2)+'-'+RIGHT('0'+cw.event_Day,2) AS date) IS NOT NULL
+        AND o.order_date >= DATEADD(day, -180, GETDATE())
+    ) t WHERE rn = 1
+    ORDER BY order_date DESC
   `);
 
   const allDays = result.recordset.map(r => r.lead_days).filter(d => d !== null && d > -365 && d < 365);
@@ -481,13 +498,17 @@ async function apiLeadtime() {
   const sorted = [...positiveDays].sort((a,b) => a-b);
   const median = sorted.length ? sorted[Math.floor(sorted.length/2)] : 0;
 
-  // 분포 (마이너스 = 예식 후 주문 포함)
+  // 분포 (마이너스 = 예식 후 주문 포함, 구간 세분화)
   const buckets = {
-    '예식후(-)':0, '0-7일':0, '8-14일':0, '15-21일':0,
+    '예식후 21일+':0, '예식후 15~21일':0, '예식후 8~14일':0, '예식후 1~7일':0,
+    '0-7일':0, '8-14일':0, '15-21일':0,
     '22-30일':0, '31-60일':0, '60일+':0
   };
   for (const d of allDays) {
-    if (d < 0) buckets['예식후(-)']++;
+    if (d < -21) buckets['예식후 21일+']++;
+    else if (d < -14) buckets['예식후 15~21일']++;
+    else if (d < -7) buckets['예식후 8~14일']++;
+    else if (d < 0) buckets['예식후 1~7일']++;
     else if (d <= 7) buckets['0-7일']++;
     else if (d <= 14) buckets['8-14일']++;
     else if (d <= 21) buckets['15-21일']++;
@@ -499,6 +520,170 @@ async function apiLeadtime() {
   return { avg_days: avg, median_days: median, total_samples: allDays.length, distribution: buckets };
 }
 
+// === 주차별 전환율 (예식수 vs 답례품 주문수) ===
+async function apiConversion() {
+  const p = await getPool();
+  // 최근 12주 범위
+  const todayDate = today();
+  const thisSunday = addDays(todayDate, -todayDate.getDay()); // 이번 주 일요일
+  const startDate = fmtDate(addDays(thisSunday, -7 * 11));
+  const endDate = fmtDate(addDays(thisSunday, 7)); // 이번주 토요일까지
+
+  // 1) 주차별 예식수 (wedding date 기준, 중복 member 제거)
+  const weddings = await p.request()
+    .input('ws', sql.VarChar, startDate)
+    .input('we', sql.VarChar, endDate)
+    .query(`
+      SELECT
+        wd,
+        COUNT(*) AS wedding_count
+      FROM (
+        SELECT DISTINCT co.member_id,
+          CONVERT(varchar(10), TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date), 120) AS wd
+        FROM custom_order co WITH (NOLOCK)
+        INNER JOIN custom_order_WeddInfo w WITH (NOLOCK) ON co.order_seq = w.order_seq
+        WHERE co.status_seq >= 1
+          AND w.event_year IS NOT NULL AND LEN(w.event_year) = 4
+          AND TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) >= @ws
+          AND TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) < @we
+      ) t
+      GROUP BY wd
+      ORDER BY wd
+    `);
+
+  // 2) 주차별 답례품 주문수 (주문일 기준)
+  const orders = await p.request()
+    .input('os', sql.VarChar, startDate)
+    .input('oe', sql.VarChar, endDate)
+    .query(`
+      SELECT CONVERT(varchar(10), o.order_date, 120) AS od, COUNT(DISTINCT o.order_seq) AS order_count
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND o.order_date >= @os AND o.order_date < @oe
+        AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+      GROUP BY CONVERT(varchar(10), o.order_date, 120)
+
+      UNION ALL
+
+      SELECT CONVERT(varchar(10), co.order_date, 120), COUNT(DISTINCT co.order_seq)
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND co.order_date >= @os AND co.order_date < @oe
+        AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
+      GROUP BY CONVERT(varchar(10), co.order_date, 120)
+    `);
+
+  // 일별 → 주차별 집계
+  const weddingMap = {};
+  weddings.recordset.forEach(r => { weddingMap[r.wd] = (weddingMap[r.wd]||0) + r.wedding_count; });
+  const orderMap = {};
+  orders.recordset.forEach(r => { orderMap[r.od] = (orderMap[r.od]||0) + r.order_count; });
+
+  const weeks = [];
+  for (let i = -11; i <= 0; i++) {
+    const sunday = addDays(thisSunday, i * 7);
+    const saturday = addDays(sunday, 6);
+    const weekLabel = `${fmtDate(sunday).slice(5)}~${fmtDate(saturday).slice(5)}`;
+    let weddCount = 0, ordCount = 0;
+    for (let d = 0; d < 7; d++) {
+      const key = fmtDate(addDays(sunday, d));
+      weddCount += weddingMap[key] || 0;
+      ordCount += orderMap[key] || 0;
+    }
+    weeks.push({
+      week_label: weekLabel,
+      week_start: fmtDate(sunday),
+      wedding_count: weddCount,
+      order_count: ordCount,
+      conversion_pct: weddCount > 0 ? Math.round(ordCount / weddCount * 1000) / 10 : 0,
+    });
+  }
+  return { weeks };
+}
+
+// === 샘플 주문 (수량=1) 일별 추이 ===
+async function apiSamples() {
+  const p = await getPool();
+  const endDate = fmtDate(addDays(today(), 1));
+  const startDate = fmtDate(addDays(today(), -30));
+
+  const result = await p.request()
+    .input('ss', sql.VarChar, startDate)
+    .input('se', sql.VarChar, endDate)
+    .query(`
+      SELECT order_day, card_name, card_code, COUNT(*) AS sample_count
+      FROM (
+        SELECT CONVERT(varchar(10), o.order_date, 120) AS order_day,
+          c.Card_Name AS card_name, c.Card_Code AS card_code
+        FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+        INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+        WHERE ${D01_FILTER} AND o.order_date >= @ss AND o.order_date < @se
+          AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+          AND oi.order_count = 1
+
+        UNION ALL
+
+        SELECT CONVERT(varchar(10), co.order_date, 120),
+          c.Card_Name, c.Card_Code
+        FROM custom_order co WITH (NOLOCK)
+        INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+        WHERE ${D01_FILTER} AND co.order_date >= @ss AND co.order_date < @se
+          AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
+          AND coi.item_count = 1
+      ) t
+      GROUP BY order_day, card_name, card_code
+      ORDER BY order_day DESC, sample_count DESC
+    `);
+
+  // 상품기준 일별 합계 (수량1인 상품 각각 1건)
+  const dailyMap = {};
+  result.recordset.forEach(r => {
+    if (!dailyMap[r.order_day]) dailyMap[r.order_day] = { total: 0, products: [] };
+    dailyMap[r.order_day].total += r.sample_count;
+    dailyMap[r.order_day].products.push({ name: r.card_name, code: r.card_code, count: r.sample_count });
+  });
+
+  const byProduct = Object.entries(dailyMap)
+    .sort((a,b) => b[0].localeCompare(a[0]))
+    .map(([day, v]) => ({ date: day, total: v.total, products: v.products }));
+
+  // 주문건 기준 (수량1 상품이 포함된 주문 = DISTINCT order_seq)
+  const orderResult = await p.request()
+    .input('sos', sql.VarChar, startDate)
+    .input('soe', sql.VarChar, endDate)
+    .query(`
+      SELECT order_day, COUNT(*) AS order_count FROM (
+        SELECT DISTINCT CONVERT(varchar(10), o.order_date, 120) AS order_day, o.order_seq
+        FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+        INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+        WHERE ${D01_FILTER} AND o.order_date >= @sos AND o.order_date < @soe
+          AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+          AND oi.order_count = 1
+
+        UNION
+
+        SELECT DISTINCT CONVERT(varchar(10), co.order_date, 120), co.order_seq
+        FROM custom_order co WITH (NOLOCK)
+        INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+        WHERE ${D01_FILTER} AND co.order_date >= @sos AND co.order_date < @soe
+          AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
+          AND coi.item_count = 1
+      ) t
+      GROUP BY order_day
+      ORDER BY order_day DESC
+    `);
+
+  const byOrder = orderResult.recordset.map(r => ({ date: r.order_day, total: r.order_count }));
+
+  return { byProduct, byOrder };
+}
+
 async function apiMarketing() {
   const p = await getPool();
 
@@ -508,7 +693,7 @@ async function apiMarketing() {
     FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
     INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
     INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-    WHERE ${D01_FILTER} AND o.status_seq NOT IN (3, 5) AND o.order_date >= DATEADD(day,-90,GETDATE())
+    WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5) AND o.order_date >= DATEADD(day,-90,GETDATE())
     GROUP BY DATEPART(hour, o.order_date)
     ORDER BY hr
   `);
@@ -519,7 +704,7 @@ async function apiMarketing() {
     FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
     INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
     INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-    WHERE ${D01_FILTER} AND o.status_seq NOT IN (3, 5) AND o.order_date >= DATEADD(day,-90,GETDATE())
+    WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5) AND o.order_date >= DATEADD(day,-90,GETDATE())
     GROUP BY DATEPART(weekday, o.order_date)
     ORDER BY dow
   `);
@@ -532,7 +717,7 @@ async function apiMarketing() {
     FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
     INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
     INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-    WHERE ${D01_FILTER} AND o.status_seq NOT IN (3, 5) AND o.order_date >= DATEADD(day,-90,GETDATE())
+    WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5) AND o.order_date >= DATEADD(day,-90,GETDATE())
       AND o.recv_address IS NOT NULL AND LEN(o.recv_address) > 2
     GROUP BY LEFT(o.recv_address, CHARINDEX(' ', o.recv_address + ' ') - 1)
     ORDER BY cnt DESC
@@ -544,7 +729,7 @@ async function apiMarketing() {
     FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
     INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
     INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-    WHERE ${D01_FILTER} AND o.status_seq NOT IN (3, 5) AND o.order_date >= DATEADD(day,-90,GETDATE())
+    WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5) AND o.order_date >= DATEADD(day,-90,GETDATE())
       AND o.member_id IS NOT NULL AND o.member_id != ''
   `);
   const giftSet = new Set(giftMembers.recordset.map(r => r.member_id));
@@ -554,7 +739,7 @@ async function apiMarketing() {
     FROM custom_order co WITH (NOLOCK)
     INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
     INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-    WHERE c.Card_Div = 'A01' AND co.status_seq NOT IN (3, 5) AND co.order_date >= DATEADD(day,-90,GETDATE())
+    WHERE c.Card_Div = 'A01' AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5) AND co.order_date >= DATEADD(day,-90,GETDATE())
       AND co.member_id IS NOT NULL AND co.member_id != ''
   `);
   const cardSet = new Set(cardMembers.recordset.map(r => r.member_id));
@@ -583,11 +768,34 @@ async function apiMarketing() {
   for (let i = 1; i <= 7; i++) dayMap[dayNames[i]] = 0;
   weekly.recordset.forEach(r => { dayMap[dayNames[r.dow]] = r.cnt; });
 
+  // 5) 회원 가입 사이트 분포 (주문 사이트 + 회원 최초 가입 사이트)
+  const siteResult = await p.request().query(`
+    SELECT
+      si.SiteName AS order_site,
+      signup.SiteName AS signup_site,
+      COUNT(DISTINCT o.order_seq) AS order_count,
+      COUNT(DISTINCT o.member_id) AS member_count
+    FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+    INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+    INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+    LEFT JOIN SiteInfo si ON o.company_Seq = si.CompayCode
+    LEFT JOIN (
+      SELECT uid, site_div, ROW_NUMBER() OVER (PARTITION BY uid ORDER BY reg_date ASC) AS rn
+      FROM S2_UserInfo WITH (NOLOCK)
+    ) u ON o.member_id = u.uid AND u.rn = 1
+    LEFT JOIN SiteInfo signup ON u.site_div = signup.SiteCode
+    WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+      AND o.order_date >= DATEADD(day,-90,GETDATE())
+    GROUP BY si.SiteName, signup.SiteName
+    ORDER BY order_count DESC
+  `);
+
   return {
     hourly: hourMap,
     weekly: dayMap,
     region: region.recordset,
     conversion,
+    memberSite: siteResult.recordset,
     period: '최근 90일',
   };
 }
@@ -635,6 +843,12 @@ const server = http.createServer(async (req, res) => {
         data = await apiLeadtime();
       } else if (pathname === '/api/dashboard/marketing') {
         data = await apiMarketing();
+      } else if (pathname === '/api/dashboard/conversion') {
+        data = await apiConversion();
+      } else if (pathname === '/api/dashboard/samples') {
+        data = await apiSamples();
+      } else if (pathname === '/api/categories') {
+        data = Object.entries(CATEGORY_FILTERS).map(([key, val]) => ({ key, label: val.label }));
       } else {
         res.writeHead(404);
         res.end(JSON.stringify({ error: 'Not found' }));
