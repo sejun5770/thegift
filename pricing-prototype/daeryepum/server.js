@@ -1,10 +1,146 @@
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
+const crypto = require('crypto');
 
 const PORT = parseInt(process.env.PORT || '3457');
 const BASE_PATH = process.env.BASE_PATH || '';  // 예: /c/barungift
+
+// --- Google OAuth2 ---
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const ALLOWED_DOMAIN = 'barunn.net';
+const SESSION_MAX_AGE = 24 * 60 * 60 * 1000; // 24시간
+
+// --- Session Store ---
+const sessions = new Map();
+
+function createSession(userData) {
+  const sessionId = crypto.randomBytes(32).toString('hex');
+  const hmac = crypto.createHmac('sha256', SESSION_SECRET).update(sessionId).digest('hex');
+  sessions.set(sessionId, { ...userData, expiresAt: Date.now() + SESSION_MAX_AGE });
+  return sessionId + '.' + hmac;
+}
+
+function getSession(signedId) {
+  if (!signedId || !signedId.includes('.')) return null;
+  const [sessionId, hmac] = signedId.split('.');
+  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(sessionId).digest('hex');
+  if (hmac !== expected) return null;
+  const session = sessions.get(sessionId);
+  if (!session || Date.now() > session.expiresAt) { sessions.delete(sessionId); return null; }
+  return session;
+}
+
+function destroySession(signedId) {
+  if (!signedId || !signedId.includes('.')) return;
+  sessions.delete(signedId.split('.')[0]);
+}
+
+function parseCookies(req) {
+  const cookies = {};
+  (req.headers.cookie || '').split(';').forEach(c => {
+    const [key, ...val] = c.trim().split('=');
+    if (key) cookies[key.trim()] = decodeURIComponent(val.join('='));
+  });
+  return cookies;
+}
+
+// --- Google JWT verification (no npm) ---
+let googleCertsCache = { keys: null, expiresAt: 0 };
+
+function fetchGoogleCerts() {
+  if (googleCertsCache.keys && Date.now() < googleCertsCache.expiresAt) {
+    return Promise.resolve(googleCertsCache.keys);
+  }
+  return new Promise((resolve, reject) => {
+    https.get('https://www.googleapis.com/oauth2/v3/certs', (res) => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          googleCertsCache.keys = data.keys;
+          googleCertsCache.expiresAt = Date.now() + 6 * 60 * 60 * 1000;
+          resolve(data.keys);
+        } catch(e) { reject(e); }
+      });
+    }).on('error', reject);
+  });
+}
+
+async function verifyGoogleToken(idToken) {
+  const parts = idToken.split('.');
+  if (parts.length !== 3) throw new Error('Invalid JWT');
+  const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
+  const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+
+  if (payload.aud !== GOOGLE_CLIENT_ID) throw new Error('Invalid audience');
+  if (payload.iss !== 'accounts.google.com' && payload.iss !== 'https://accounts.google.com') throw new Error('Invalid issuer');
+  if (payload.exp * 1000 < Date.now()) throw new Error('Token expired');
+  if (payload.hd !== ALLOWED_DOMAIN) throw new Error('허용되지 않은 도메인: ' + (payload.hd || payload.email));
+
+  const keys = await fetchGoogleCerts();
+  const key = keys.find(k => k.kid === header.kid);
+  if (!key) throw new Error('Key not found');
+
+  const publicKey = crypto.createPublicKey({ key, format: 'jwk' });
+  const valid = crypto.verify('RSA-SHA256', Buffer.from(parts[0] + '.' + parts[1]), publicKey, Buffer.from(parts[2], 'base64url'));
+  if (!valid) throw new Error('Invalid signature');
+  return payload;
+}
+
+// --- Login Page ---
+function getLoginPageHtml() {
+  const bp = BASE_PATH;
+  return `<!DOCTYPE html>
+<html lang="ko"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>로그인 - 답례품 주문 관리</title>
+<script src="https://accounts.google.com/gsi/client" async defer><\/script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'Pretendard','Noto Sans KR',sans-serif;background:#f0f4ff;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.login-card{background:#fff;border-radius:16px;padding:48px 40px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.08);max-width:400px;width:100%}
+.login-card .logo{font-size:32px;margin-bottom:8px}
+.login-card h1{font-size:20px;font-weight:700;color:#1e293b;margin-bottom:4px}
+.login-card p{color:#64748b;font-size:13px;margin-bottom:32px}
+.login-card .domain{display:inline-block;background:#eff6ff;color:#2563eb;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;margin-bottom:24px}
+.error{color:#dc2626;font-size:13px;margin-top:16px;display:none}
+#g_id_signin{display:flex;justify-content:center}
+</style></head><body>
+<div class="login-card">
+  <div class="logo">🎁</div>
+  <h1>답례품 주문 관리</h1>
+  <p>답례품 주문내역을 조회하고 관리합니다.</p>
+  <div class="domain">@${ALLOWED_DOMAIN} 계정으로 로그인</div>
+  <div id="g_id_signin"></div>
+  <div class="error" id="login-error"></div>
+</div>
+<script>
+function handleCredentialResponse(response) {
+  fetch('${bp}/auth/google', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({credential:response.credential})
+  }).then(r=>r.json()).then(data=>{
+    if(data.ok) window.location.href='${bp}/'||'/';
+    else { document.getElementById('login-error').style.display='block'; document.getElementById('login-error').textContent=data.error||'로그인 실패'; }
+  }).catch(()=>{ document.getElementById('login-error').style.display='block'; document.getElementById('login-error').textContent='서버 연결 실패'; });
+}
+window.onload=function(){
+  ${GOOGLE_CLIENT_ID ? '' : 'document.getElementById("login-error").style.display="block"; document.getElementById("login-error").textContent="GOOGLE_CLIENT_ID 환경변수가 설정되지 않았습니다."; return;'}
+  google.accounts.id.initialize({
+    client_id:'${GOOGLE_CLIENT_ID}',
+    callback:handleCredentialResponse,
+    hosted_domain:'${ALLOWED_DOMAIN}'
+  });
+  google.accounts.id.renderButton(document.getElementById('g_id_signin'),{theme:'outline',size:'large',width:300,text:'signin_with',locale:'ko'});
+};
+<\/script></body></html>`;
+}
 
 // --- MSSQL connection ---
 let sql;
@@ -815,14 +951,59 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
 
-  // 서버 공인 IP 확인용 (임시)
-  if (pathname === '/api/myip') {
-    const https = require('https');
-    https.get('https://api.ipify.org?format=json', (ipRes) => {
-      let body = '';
-      ipRes.on('data', c => body += c);
-      ipRes.on('end', () => { res.writeHead(200, {'Content-Type':'application/json'}); res.end(body); });
-    }).on('error', (e) => { res.writeHead(500); res.end(JSON.stringify({error:e.message})); });
+  // --- Auth routes ---
+  const cookies = parseCookies(req);
+  const session = getSession(cookies.session);
+  const cookiePath = BASE_PATH || '/';
+
+  if (pathname === '/auth/google' && req.method === 'POST') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', async () => {
+      try {
+        const { credential } = JSON.parse(body);
+        const payload = await verifyGoogleToken(credential);
+        const signedId = createSession({ email: payload.email, name: payload.name, picture: payload.picture });
+        const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
+        res.writeHead(200, {
+          'Set-Cookie': `session=${signedId}; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE/1000}${secure}`,
+          'Content-Type': 'application/json',
+        });
+        res.end(JSON.stringify({ ok: true, email: payload.email, name: payload.name }));
+      } catch(err) {
+        console.error('Auth error:', err.message);
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  if (pathname === '/auth/logout' && req.method === 'POST') {
+    destroySession(cookies.session);
+    res.writeHead(200, {
+      'Set-Cookie': `session=; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=0`,
+      'Content-Type': 'application/json',
+    });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  if (pathname === '/auth/me') {
+    if (session) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ email: session.email, name: session.name, picture: session.picture }));
+    } else {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Not authenticated' }));
+    }
+    return;
+  }
+
+  // --- Auth gate: require login for all other routes ---
+  if (!session) {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(getLoginPageHtml());
     return;
   }
 
