@@ -939,25 +939,21 @@ async function apiMarketing() {
   for (let i = 1; i <= 7; i++) dayMap[dayNames[i]] = 0;
   weekly.recordset.forEach(r => { dayMap[dayNames[r.dow]] = r.cnt; });
 
-  // 5) 회원 가입 사이트 분포 (주문 사이트 + 회원 최초 가입 사이트)
+  // 5) 주문 사이트 분포
+  // 참고: S2_UserInfo의 site_div는 통합계정(바/프/M)으로 동일 시각에 3개 행이 생성되어
+  // 최초 가입 사이트 판별이 불가능함. 주문사이트(company_Seq)만 유의미함.
   const siteResult = await p.request().query(`
     SELECT
-      si.SiteName AS order_site,
-      signup.SiteName AS signup_site,
+      ISNULL(si.SiteName, '기타') AS order_site,
       COUNT(DISTINCT o.order_seq) AS order_count,
       COUNT(DISTINCT o.member_id) AS member_count
     FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
     INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
     INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
     LEFT JOIN SiteInfo si ON o.company_Seq = si.CompayCode
-    LEFT JOIN (
-      SELECT uid, site_div, ROW_NUMBER() OVER (PARTITION BY uid ORDER BY reg_date ASC) AS rn
-      FROM S2_UserInfo WITH (NOLOCK)
-    ) u ON o.member_id = u.uid AND u.rn = 1
-    LEFT JOIN SiteInfo signup ON u.site_div = signup.SiteCode
     WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
       AND o.order_date >= DATEADD(day,-90,GETDATE())
-    GROUP BY si.SiteName, signup.SiteName
+    GROUP BY si.SiteName
     ORDER BY order_count DESC
   `);
 

@@ -396,17 +396,10 @@ nav a:hover{color:var(--gray-900)}
           <button class="active" onclick="toggleMkView('site','chart',this)">차트</button>
           <button onclick="toggleMkView('site','table',this)">테이블</button>
         </div>
-        <h3 style="margin-bottom:12px">🌐 회원 가입사이트</h3>
+        <h3 style="margin-bottom:12px">🌐 주문 사이트 분포</h3>
         <div id="mk-site-chart">
-          <div style="display:flex;gap:16px">
-            <div style="flex:1">
-              <div style="font-size:11px;color:#666;margin-bottom:4px;text-align:center">주문 사이트</div>
-              <div id="mk-order-site" style="display:flex;gap:4px;align-items:end;height:120px;margin-bottom:4px"></div>
-            </div>
-            <div style="flex:1">
-              <div style="font-size:11px;color:#666;margin-bottom:4px;text-align:center">최초 가입 사이트</div>
-              <div id="mk-signup-site" style="display:flex;gap:4px;align-items:end;height:120px;margin-bottom:4px"></div>
-            </div>
+          <div>
+            <div id="mk-order-site" style="display:flex;gap:4px;align-items:end;height:120px;margin-bottom:4px"></div>
           </div>
         </div>
         <div id="mk-site-table" style="display:none"></div>
@@ -491,6 +484,11 @@ nav a:hover{color:var(--gray-900)}
     </div>
   </div>
   <div class="col-selector" id="col-selector"></div>
+  <div class="col-selector" id="status-filter" style="gap:8px;align-items:center">
+    <span style="font-weight:600;font-size:12px;color:var(--gray-700);white-space:nowrap">주문상태</span>
+    <label style="border-color:var(--primary);background:var(--primary-light)"><input type="radio" name="status-mode" value="all" checked onchange="renderOrderTable()"><span>전체</span></label>
+    <label style="border-color:#fca5a5;background:#fef2f2"><input type="radio" name="status-mode" value="exclude-cancel" onchange="renderOrderTable()"><span>취소주문 제외</span></label>
+  </div>
   <div class="card" style="padding:0;overflow-x:auto">
     <table class="data-table">
       <thead><tr id="order-thead"></tr></thead>
@@ -614,6 +612,13 @@ function getCollectedSet() {
 function saveCollectedSet(s) {
   localStorage.setItem(COLLECTED_KEY, JSON.stringify([...s]));
 }
+// 주문상태 매핑 (bar_shop1 status_seq)
+const STATUS_MAP = {
+  0:'주문접수', 1:'결제대기', 2:'입금확인', 3:'결제취소', 4:'결제확인',
+  5:'주문취소', 6:'제작준비', 7:'인쇄대기', 8:'인쇄중',
+  9:'제본중', 10:'포장중', 11:'배송준비', 12:'배송완료',
+  13:'수령확인', 14:'환불요청', 15:'환불완료'
+};
 // 취소 상태 (status_seq 3=결제취소, 5=주문취소)
 function isCancelled(r) { return r.status_seq === 3 || r.status_seq === 5; }
 
@@ -707,13 +712,6 @@ async function loadOrders() {
       r.item_amount_fmt = fmtKRW(r.item_amount);
       r.settle_price_fmt = fmtKRW(r.settle_price);
       r.order_type_label = r.order_type === 'ETC' ? '부가상품' : '청첩장+답례품';
-      // 주문상태 매핑 (bar_shop1 status_seq)
-      const STATUS_MAP = {
-        0:'주문접수', 1:'결제대기', 2:'입금확인', 3:'결제취소', 4:'결제확인',
-        5:'주문취소', 6:'제작준비', 7:'인쇄대기', 8:'인쇄중',
-        9:'제본중', 10:'포장중', 11:'배송준비', 12:'배송완료',
-        13:'수령확인', 14:'환불요청', 15:'환불완료'
-      };
       r.status_label = STATUS_MAP[r.status_seq] || `상태${r.status_seq ?? '?'}`;
       r.file_count_fmt = r.file_count > 0
         ? `<a href="#" onclick="showOrderFiles(${r.order_seq});return false" style="color:var(--primary);text-decoration:underline">📎 ${r.file_count}건</a>`
@@ -727,13 +725,24 @@ async function loadOrders() {
   } catch(e) { console.error(e); showToast('주문 조회 실패: ' + e.message); }
 }
 
+function isExcludeCancel() {
+  const radio = document.querySelector('input[name="status-mode"]:checked');
+  return radio && radio.value === 'exclude-cancel';
+}
+
 function getFilteredOrders() {
   const q = (document.getElementById('ord-code-search')?.value || '').trim().toLowerCase();
-  if (!q) return ordersData;
+  const excludeCancel = isExcludeCancel();
   return ordersData.filter(r => {
-    const code = (r.card_code || '').toLowerCase();
-    const name = (r.card_name || '').toLowerCase();
-    return code.includes(q) || name.includes(q);
+    // 취소주문 제외
+    if (excludeCancel && isCancelled(r)) return false;
+    // 상품코드/명 검색
+    if (q) {
+      const code = (r.card_code || '').toLowerCase();
+      const name = (r.card_name || '').toLowerCase();
+      if (!code.includes(q) && !name.includes(q)) return false;
+    }
+    return true;
   });
 }
 
@@ -1224,16 +1233,12 @@ function renderMarketing(mk) {
     }
   });
 
-  // 가입사이트 분포
+  // 주문 사이트 분포
   const sites = mk.memberSite || [];
-  // 주문 사이트별 집계
   const orderSiteMap = {};
-  const signupSiteMap = {};
   sites.forEach(s => {
     const os = s.order_site || '미확인';
-    const ss = s.signup_site || '미확인';
     orderSiteMap[os] = (orderSiteMap[os]||0) + s.order_count;
-    signupSiteMap[ss] = (signupSiteMap[ss]||0) + s.member_count;
   });
 
   function renderSiteBar(containerId, map) {
@@ -1250,14 +1255,11 @@ function renderMarketing(mk) {
     }).join('');
   }
   renderSiteBar('mk-order-site', orderSiteMap);
-  renderSiteBar('mk-signup-site', signupSiteMap);
 
   const totalOrders = Object.values(orderSiteMap).reduce((s,v) => s+v, 0);
   const topOrderSite = Object.entries(orderSiteMap).sort((a,b) => b[1]-a[1])[0];
-  const topSignupSite = Object.entries(signupSiteMap).sort((a,b) => b[1]-a[1])[0];
   let siteFb = '';
-  if (topOrderSite) siteFb += `주문의 <strong>${Math.round(topOrderSite[1]/totalOrders*100)}%</strong>가 <strong>${topOrderSite[0]}</strong>에서 발생. `;
-  if (topSignupSite) siteFb += `회원 최초 가입은 <strong>${topSignupSite[0]}</strong>이 가장 많습니다.`;
+  if (topOrderSite) siteFb += `주문의 <strong>${Math.round(topOrderSite[1]/totalOrders*100)}%</strong>가 <strong>${topOrderSite[0]}</strong>에서 발생합니다.`;
   document.getElementById('mk-site-feedback').innerHTML = siteFb;
 }
 
@@ -1312,9 +1314,10 @@ function renderMkTable(cardId, mk) {
       <tbody>${entries.map(([d, cnt]) => `<tr><td>${d}</td><td class="num">${cnt}</td><td class="num">${total ? Math.round(cnt/total*1000)/10 : 0}%</td></tr>`).join('')}</tbody></table>`;
   } else if (cardId === 'site') {
     const sites = mk.memberSite || [];
+    const total = sites.reduce((s, r) => s + r.order_count, 0);
     html = `<table class="mk-table">
-      <thead><tr><th>주문 사이트</th><th>가입 사이트</th><th class="num">주문수</th><th class="num">회원수</th></tr></thead>
-      <tbody>${sites.map(s => `<tr><td>${s.order_site||'미확인'}</td><td>${s.signup_site||'미확인'}</td><td class="num">${s.order_count}</td><td class="num">${s.member_count}</td></tr>`).join('')}</tbody></table>`;
+      <thead><tr><th>주문 사이트</th><th class="num">주문수</th><th class="num">회원수</th><th class="num">비율</th></tr></thead>
+      <tbody>${sites.map(s => `<tr><td>${s.order_site||'미확인'}</td><td class="num">${fmtNum(s.order_count)}</td><td class="num">${fmtNum(s.member_count)}</td><td class="num">${total ? Math.round(s.order_count/total*1000)/10 : 0}%</td></tr>`).join('')}</tbody></table>`;
   }
   el.innerHTML = html;
 }
