@@ -390,20 +390,62 @@ nav a:hover{color:var(--gray-900)}
         </div>
         <div id="mk-weekly-table" style="display:none"></div>
       </div>
-      <!-- 가입 사이트 -->
+      <!-- 사이트 분포 -->
       <div class="card" style="position:relative">
         <div class="view-toggle">
           <button class="active" onclick="toggleMkView('site','chart',this)">차트</button>
           <button onclick="toggleMkView('site','table',this)">테이블</button>
         </div>
-        <h3 style="margin-bottom:12px">🌐 주문 사이트 분포</h3>
+        <h3 style="margin-bottom:12px">🌐 사이트 분포</h3>
         <div id="mk-site-chart">
-          <div>
-            <div id="mk-order-site" style="display:flex;gap:4px;align-items:end;height:120px;margin-bottom:4px"></div>
+          <div style="display:flex;gap:16px">
+            <div style="flex:1">
+              <div style="font-size:11px;color:#666;margin-bottom:4px;text-align:center">주문 사이트</div>
+              <div id="mk-order-site" style="display:flex;gap:4px;align-items:end;height:110px;margin-bottom:4px"></div>
+            </div>
+            <div style="flex:1">
+              <div style="font-size:11px;color:#666;margin-bottom:4px;text-align:center">가입 사이트 (최초주문 기준)</div>
+              <div id="mk-signup-site" style="display:flex;gap:4px;align-items:end;height:110px;margin-bottom:4px"></div>
+            </div>
           </div>
+          <div id="mk-site-cross" style="margin-top:12px"></div>
         </div>
         <div id="mk-site-table" style="display:none"></div>
         <div class="feedback" id="mk-site-feedback" style="margin:0;font-size:12px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 재주문 + 전환율 + 샘플 -->
+  <div class="section">
+    <div class="resp-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <!-- 재주문 분석 -->
+      <div class="card" style="position:relative">
+        <div class="view-toggle">
+          <button class="active" onclick="toggleChartTable('reorder','chart',this)">차트</button>
+          <button onclick="toggleChartTable('reorder','table',this)">테이블</button>
+        </div>
+        <h3 style="margin-bottom:12px">🔁 재주문 분석</h3>
+        <div id="reorder-chart-view">
+          <div style="display:flex;gap:16px;margin-bottom:12px">
+            <div style="flex:1;text-align:center;padding:12px;background:var(--primary-light);border-radius:8px">
+              <div style="font-size:11px;color:#666">전체 회원</div>
+              <div style="font-size:22px;font-weight:700;color:var(--primary)" id="reorder-total">-</div>
+            </div>
+            <div style="flex:1;text-align:center;padding:12px;background:#fef3c7;border-radius:8px">
+              <div style="font-size:11px;color:#666">재주문 회원</div>
+              <div style="font-size:22px;font-weight:700;color:#d97706" id="reorder-count">-</div>
+            </div>
+            <div style="flex:1;text-align:center;padding:12px;background:#dcfce7;border-radius:8px">
+              <div style="font-size:11px;color:#666">재주문율</div>
+              <div style="font-size:22px;font-weight:700;color:#16a34a" id="reorder-rate">-</div>
+            </div>
+          </div>
+          <div style="font-size:11px;color:#666;margin-bottom:4px;text-align:center">재주문 간격 분포 (첫주문 → 2번째 주문)</div>
+          <div class="chart-container" style="height:160px"><canvas id="reorderChart"></canvas></div>
+        </div>
+        <div id="reorder-table-view" style="display:none"></div>
+        <div class="feedback" id="reorder-feedback" style="margin-top:8px;font-size:12px"></div>
       </div>
     </div>
   </div>
@@ -1233,7 +1275,7 @@ function renderMarketing(mk) {
     }
   });
 
-  // 주문 사이트 분포
+  // 사이트 분포 (주문사이트 + 가입사이트 + 상관관계)
   const sites = mk.memberSite || [];
   const orderSiteMap = {};
   sites.forEach(s => {
@@ -1241,10 +1283,16 @@ function renderMarketing(mk) {
     orderSiteMap[os] = (orderSiteMap[os]||0) + s.order_count;
   });
 
-  function renderSiteBar(containerId, map) {
+  const signupSites = mk.signupSite || [];
+  const signupSiteMap = {};
+  signupSites.forEach(s => {
+    signupSiteMap[s.signup_site || '미확인'] = (signupSiteMap[s.signup_site || '미확인']||0) + s.member_count;
+  });
+
+  function renderSiteBar(containerId, map, colors) {
     const entries = Object.entries(map).sort((a,b) => b[1] - a[1]);
     const maxV = Math.max(...entries.map(e => e[1]), 1);
-    const sColors = ['#3b82f6','#60a5fa','#93c5fd','#bfdbfe','#dbeafe'];
+    const sColors = colors || ['#3b82f6','#60a5fa','#93c5fd','#bfdbfe','#dbeafe'];
     document.getElementById(containerId).innerHTML = entries.map(([name, cnt], i) => {
       const h = Math.max(8, Math.round((cnt / maxV) * 100));
       return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px">
@@ -1255,12 +1303,106 @@ function renderMarketing(mk) {
     }).join('');
   }
   renderSiteBar('mk-order-site', orderSiteMap);
+  renderSiteBar('mk-signup-site', signupSiteMap, ['#f59e0b','#fbbf24','#fcd34d','#fde68a','#fef3c7']);
 
+  // 사이트 상관관계 테이블
+  const crossData = mk.siteCross || [];
+  if (crossData.length > 0) {
+    const orderSites = [...new Set(crossData.map(r => r.order_site))];
+    const signupSiteList = [...new Set(crossData.map(r => r.signup_site))];
+    const crossMap = {};
+    crossData.forEach(r => { crossMap[`${r.signup_site}→${r.order_site}`] = r.order_count; });
+    let crossHtml = `<div style="font-size:11px;color:#666;margin-bottom:4px;text-align:center">가입사이트 → 주문사이트 상관관계</div>`;
+    crossHtml += `<table style="width:100%;font-size:11px;border-collapse:collapse">
+      <thead><tr><th style="text-align:left;padding:3px 6px;border-bottom:1px solid #e2e8f0;font-size:10px">가입 ╲ 주문</th>
+      ${orderSites.map(s => `<th style="padding:3px 4px;border-bottom:1px solid #e2e8f0;font-size:10px;text-align:center">${s}</th>`).join('')}</tr></thead><tbody>`;
+    signupSiteList.forEach(ss => {
+      crossHtml += `<tr><td style="padding:3px 6px;font-weight:600;border-bottom:1px solid #f1f5f9">${ss}</td>`;
+      orderSites.forEach(os => {
+        const v = crossMap[`${ss}→${os}`] || 0;
+        const bg = v > 0 ? (ss === os ? 'background:#dbeafe' : 'background:#fef3c7') : '';
+        crossHtml += `<td style="text-align:center;padding:3px 4px;border-bottom:1px solid #f1f5f9;${bg}">${v || '-'}</td>`;
+      });
+      crossHtml += '</tr>';
+    });
+    crossHtml += '</tbody></table>';
+    document.getElementById('mk-site-cross').innerHTML = crossHtml;
+  }
+
+  // 피드백
   const totalOrders = Object.values(orderSiteMap).reduce((s,v) => s+v, 0);
   const topOrderSite = Object.entries(orderSiteMap).sort((a,b) => b[1]-a[1])[0];
+  const topSignupSite = Object.entries(signupSiteMap).sort((a,b) => b[1]-a[1])[0];
+  const totalMembers = Object.values(signupSiteMap).reduce((s,v) => s+v, 0);
   let siteFb = '';
-  if (topOrderSite) siteFb += `주문의 <strong>${Math.round(topOrderSite[1]/totalOrders*100)}%</strong>가 <strong>${topOrderSite[0]}</strong>에서 발생합니다.`;
+  if (topOrderSite) siteFb += `주문의 <strong>${Math.round(topOrderSite[1]/totalOrders*100)}%</strong>가 <strong>${topOrderSite[0]}</strong>에서 발생. `;
+  if (topSignupSite) siteFb += `최초 가입은 <strong>${topSignupSite[0]}</strong>이 <strong>${Math.round(topSignupSite[1]/totalMembers*100)}%</strong>로 최다.`;
   document.getElementById('mk-site-feedback').innerHTML = siteFb;
+
+  // 재주문 분석 렌더링
+  renderReorder(mk);
+}
+
+let reorderChart = null;
+function renderReorder(mk) {
+  const r = mk.reorder || {};
+  const intervals = mk.reorderInterval || [];
+
+  const total = r.total_members || 0;
+  const reorder = r.reorder_members || 0;
+  const rate = total > 0 ? (reorder / total * 100).toFixed(1) : 0;
+
+  document.getElementById('reorder-total').textContent = fmtNum(total) + '명';
+  document.getElementById('reorder-count').textContent = fmtNum(reorder) + '명';
+  document.getElementById('reorder-rate').textContent = rate + '%';
+
+  // 재주문 간격 차트
+  if (intervals.length > 0) {
+    const labels = intervals.map(i => i.interval_label);
+    const data = intervals.map(i => i.cnt);
+    const colors = ['#ef4444','#f59e0b','#3b82f6','#8b5cf6','#6b7280'];
+    if (reorderChart) reorderChart.destroy();
+    reorderChart = new Chart(document.getElementById('reorderChart'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{ label: '회원수', data, backgroundColor: colors, borderRadius: 4 }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+      }
+    });
+  }
+
+  // 인사이트
+  const reorder3 = r.reorder_3plus || 0;
+  const avgDays = r.avg_reorder_days ? Math.round(r.avg_reorder_days) : null;
+  const avgOrders = r.avg_orders_per_member ? r.avg_orders_per_member.toFixed(1) : '-';
+  const avgReorderAmt = r.avg_reorder_amount ? fmtKRW(Math.round(r.avg_reorder_amount)) : '-';
+  const avgSingleAmt = r.avg_single_amount ? fmtKRW(Math.round(r.avg_single_amount)) : '-';
+
+  let fb = '';
+  fb += `전체 <strong>${fmtNum(total)}명</strong> 중 <strong>${fmtNum(reorder)}명(${rate}%)</strong>이 재주문. `;
+  if (reorder3 > 0) fb += `3회 이상 주문 <strong>${fmtNum(reorder3)}명</strong>. `;
+  if (avgDays !== null) fb += `평균 재주문 간격 <strong>${avgDays}일</strong>. `;
+  fb += `<br>`;
+  fb += `1인당 평균 주문: <strong>${avgOrders}건</strong>. `;
+  fb += `재주문 회원 평균 결제액 <strong>${avgReorderAmt}</strong> vs 단일주문 <strong>${avgSingleAmt}</strong>. `;
+  if (rate > 0 && rate < 5) {
+    fb += `<br><span style="color:#dc2626">⚠️ 재주문율이 낮습니다. 첫 구매 후 만족도 조사/쿠폰 발송 등 리텐션 전략을 검토해보세요.</span>`;
+  } else if (rate >= 5 && rate < 15) {
+    fb += `<br><span style="color:#d97706">💡 재주문율이 보통 수준입니다. 재주문 회원에게 VIP 혜택을 제공하면 충성도를 높일 수 있습니다.</span>`;
+  } else if (rate >= 15) {
+    fb += `<br><span style="color:#16a34a">✅ 재주문율이 높습니다! 재주문 회원 세그먼트를 활용한 타겟 마케팅이 효과적일 수 있습니다.</span>`;
+  }
+  if (avgDays !== null && avgDays <= 30) {
+    fb += ` 평균 <strong>${avgDays}일</strong> 이내 재주문이 발생하므로, 첫 구매 후 <strong>2~3주 내</strong> 리마인드 메시지가 적절합니다.`;
+  } else if (avgDays !== null && avgDays <= 90) {
+    fb += ` 재주문까지 평균 <strong>${avgDays}일</strong> 소요. 결혼 시즌(봄/가을)에 맞춘 시즈널 캠페인을 권장합니다.`;
+  }
+  document.getElementById('reorder-feedback').innerHTML = fb;
 }
 
 // --- 마케팅 뷰 토글 ---
@@ -1314,10 +1456,17 @@ function renderMkTable(cardId, mk) {
       <tbody>${entries.map(([d, cnt]) => `<tr><td>${d}</td><td class="num">${cnt}</td><td class="num">${total ? Math.round(cnt/total*1000)/10 : 0}%</td></tr>`).join('')}</tbody></table>`;
   } else if (cardId === 'site') {
     const sites = mk.memberSite || [];
-    const total = sites.reduce((s, r) => s + r.order_count, 0);
-    html = `<table class="mk-table">
-      <thead><tr><th>주문 사이트</th><th class="num">주문수</th><th class="num">회원수</th><th class="num">비율</th></tr></thead>
-      <tbody>${sites.map(s => `<tr><td>${s.order_site||'미확인'}</td><td class="num">${fmtNum(s.order_count)}</td><td class="num">${fmtNum(s.member_count)}</td><td class="num">${total ? Math.round(s.order_count/total*1000)/10 : 0}%</td></tr>`).join('')}</tbody></table>`;
+    const signupSites = mk.signupSite || [];
+    const totalO = sites.reduce((s, r) => s + r.order_count, 0);
+    const totalS = signupSites.reduce((s, r) => s + r.member_count, 0);
+    html = `<div style="font-weight:600;margin-bottom:4px;font-size:12px">📦 주문 사이트</div>
+      <table class="mk-table">
+      <thead><tr><th>사이트</th><th class="num">주문수</th><th class="num">회원수</th><th class="num">비율</th></tr></thead>
+      <tbody>${sites.map(s => `<tr><td>${s.order_site||'미확인'}</td><td class="num">${fmtNum(s.order_count)}</td><td class="num">${fmtNum(s.member_count)}</td><td class="num">${totalO ? Math.round(s.order_count/totalO*1000)/10 : 0}%</td></tr>`).join('')}</tbody></table>`;
+    html += `<div style="font-weight:600;margin:12px 0 4px;font-size:12px">🏠 가입 사이트 (최초주문 기준)</div>
+      <table class="mk-table">
+      <thead><tr><th>사이트</th><th class="num">회원수</th><th class="num">비율</th></tr></thead>
+      <tbody>${signupSites.map(s => `<tr><td>${s.signup_site||'미확인'}</td><td class="num">${fmtNum(s.member_count)}</td><td class="num">${totalS ? Math.round(s.member_count/totalS*1000)/10 : 0}%</td></tr>`).join('')}</tbody></table>`;
   }
   el.innerHTML = html;
 }
@@ -1343,6 +1492,7 @@ function toggleChartTable(section, mode, btn) {
     tableEl.style.display = '';
     if (section === 'conversion' && _conversionData) renderConversionTable();
     if (section === 'sample' && _sampleData) renderSampleTable();
+    if (section === 'reorder' && _mkData) renderReorderTable();
   }
   if (section === 'sample') _sampleViewMode = mode;
 }
@@ -1359,6 +1509,35 @@ function renderConversionTable() {
       <td class="num">${fmtNum(w.order_count)}</td>
       <td class="num">${w.conversion_pct}%</td>
     </tr>`).join('')}</tbody></table>`;
+}
+
+function renderReorderTable() {
+  const el = document.getElementById('reorder-table-view');
+  if (!_mkData || el.innerHTML) return;
+  const r = _mkData.reorder || {};
+  const intervals = _mkData.reorderInterval || [];
+  const total = r.total_members || 0;
+  const reorder = r.reorder_members || 0;
+  const rate = total > 0 ? (reorder / total * 100).toFixed(1) : 0;
+  let html = `<table class="mk-table">
+    <thead><tr><th>항목</th><th class="num">값</th></tr></thead>
+    <tbody>
+      <tr><td>전체 회원</td><td class="num">${fmtNum(total)}명</td></tr>
+      <tr><td>재주문 회원 (2회+)</td><td class="num">${fmtNum(reorder)}명 (${rate}%)</td></tr>
+      <tr><td>3회 이상 주문</td><td class="num">${fmtNum(r.reorder_3plus || 0)}명</td></tr>
+      <tr><td>평균 재주문 간격</td><td class="num">${r.avg_reorder_days ? Math.round(r.avg_reorder_days) + '일' : '-'}</td></tr>
+      <tr><td>1인당 평균 주문</td><td class="num">${r.avg_orders_per_member ? r.avg_orders_per_member.toFixed(1) + '건' : '-'}</td></tr>
+      <tr><td>재주문 회원 평균 결제액</td><td class="num">${r.avg_reorder_amount ? fmtKRW(Math.round(r.avg_reorder_amount)) : '-'}</td></tr>
+      <tr><td>단일주문 회원 평균 결제액</td><td class="num">${r.avg_single_amount ? fmtKRW(Math.round(r.avg_single_amount)) : '-'}</td></tr>
+    </tbody></table>`;
+  if (intervals.length > 0) {
+    const totalI = intervals.reduce((s, i) => s + i.cnt, 0);
+    html += `<div style="font-weight:600;margin:12px 0 4px;font-size:12px">재주문 간격 분포</div>
+      <table class="mk-table">
+      <thead><tr><th>간격</th><th class="num">회원수</th><th class="num">비율</th></tr></thead>
+      <tbody>${intervals.map(i => `<tr><td>${i.interval_label}</td><td class="num">${fmtNum(i.cnt)}</td><td class="num">${totalI ? Math.round(i.cnt/totalI*1000)/10 : 0}%</td></tr>`).join('')}</tbody></table>`;
+  }
+  el.innerHTML = html;
 }
 
 function renderSampleTable() {

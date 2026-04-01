@@ -939,22 +939,139 @@ async function apiMarketing() {
   for (let i = 1; i <= 7; i++) dayMap[dayNames[i]] = 0;
   weekly.recordset.forEach(r => { dayMap[dayNames[r.dow]] = r.cnt; });
 
-  // 5) 주문 사이트 분포
-  // 참고: S2_UserInfo의 site_div는 통합계정(바/프/M)으로 동일 시각에 3개 행이 생성되어
-  // 최초 가입 사이트 판별이 불가능함. 주문사이트(company_Seq)만 유의미함.
+  // 5) 사이트 분포 (주문사이트 + 가입사이트)
+  // COMPANY.SALES_GUBUN → SiteInfo.SiteCode 매핑으로 제휴사도 올바른 사이트 분류
+  // 주문사이트: COMPANY.SALES_GUBUN 기준 (제휴사도 소속 사이트로 분류)
+  // 가입사이트: 첫 주문의 사이트를 가입사이트로 간주
   const siteResult = await p.request().query(`
     SELECT
-      ISNULL(si.SiteName, '기타') AS order_site,
+      ISNULL(os_si.SiteName, ISNULL(co.COMPANY_NAME, '기타')) AS order_site,
       COUNT(DISTINCT o.order_seq) AS order_count,
       COUNT(DISTINCT o.member_id) AS member_count
     FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
     INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
     INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-    LEFT JOIN SiteInfo si ON o.company_Seq = si.CompayCode
+    LEFT JOIN COMPANY co WITH (NOLOCK) ON o.company_Seq = co.COMPANY_SEQ
+    LEFT JOIN SiteInfo os_si ON co.SALES_GUBUN = os_si.SiteCode
     WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
       AND o.order_date >= DATEADD(day,-90,GETDATE())
-    GROUP BY si.SiteName
+    GROUP BY ISNULL(os_si.SiteName, ISNULL(co.COMPANY_NAME, '기타'))
     ORDER BY order_count DESC
+  `);
+
+  // 가입사이트 = 회원의 최초 주문 사이트 기준
+  const signupSiteResult = await p.request().query(`
+    SELECT
+      ISNULL(first_si.SiteName, '기타') AS signup_site,
+      COUNT(*) AS member_count
+    FROM (
+      SELECT o.member_id,
+             co.SALES_GUBUN,
+             ROW_NUMBER() OVER (PARTITION BY o.member_id ORDER BY o.order_date ASC) AS rn
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      LEFT JOIN COMPANY co WITH (NOLOCK) ON o.company_Seq = co.COMPANY_SEQ
+      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+        AND o.order_date >= DATEADD(day,-90,GETDATE())
+    ) first_order
+    LEFT JOIN SiteInfo first_si ON first_order.SALES_GUBUN = first_si.SiteCode
+    WHERE first_order.rn = 1
+    GROUP BY ISNULL(first_si.SiteName, '기타')
+    ORDER BY member_count DESC
+  `);
+
+  // 사이트 상관관계 (가입사이트 → 주문사이트 크로스탭)
+  const siteCrossResult = await p.request().query(`
+    WITH first_site AS (
+      SELECT o.member_id, co.SALES_GUBUN AS first_sg,
+             ROW_NUMBER() OVER (PARTITION BY o.member_id ORDER BY o.order_date ASC) AS rn
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      LEFT JOIN COMPANY co WITH (NOLOCK) ON o.company_Seq = co.COMPANY_SEQ
+      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+        AND o.order_date >= DATEADD(day,-90,GETDATE())
+    )
+    SELECT
+      ISNULL(fs_si.SiteName, '기타') AS signup_site,
+      ISNULL(os_si.SiteName, '기타') AS order_site,
+      COUNT(DISTINCT o.order_seq) AS order_count
+    FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+    INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+    INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+    LEFT JOIN COMPANY co WITH (NOLOCK) ON o.company_Seq = co.COMPANY_SEQ
+    LEFT JOIN SiteInfo os_si ON co.SALES_GUBUN = os_si.SiteCode
+    INNER JOIN first_site fs ON o.member_id = fs.member_id AND fs.rn = 1
+    LEFT JOIN SiteInfo fs_si ON fs.first_sg = fs_si.SiteCode
+    WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+      AND o.order_date >= DATEADD(day,-90,GETDATE())
+    GROUP BY ISNULL(fs_si.SiteName, '기타'), ISNULL(os_si.SiteName, '기타')
+    ORDER BY order_count DESC
+  `);
+
+  // 6) 재주문 분석
+  // 조건: 동일 member_id가 2건 이상 유효 주문(취소 제외) → 재주문 회원
+  // 주문 후 취소 → 재주문은 해당안됨 (취소주문 자체를 제외하므로 자동 충족)
+  const reorderResult = await p.request().query(`
+    WITH member_orders AS (
+      SELECT
+        o.member_id,
+        COUNT(DISTINCT o.order_seq) AS order_cnt,
+        MIN(o.order_date) AS first_order_date,
+        MAX(o.order_date) AS last_order_date,
+        SUM(CAST(oi.card_sale_price AS float)) AS total_amount
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+      GROUP BY o.member_id
+    )
+    SELECT
+      COUNT(*) AS total_members,
+      SUM(CASE WHEN order_cnt >= 2 THEN 1 ELSE 0 END) AS reorder_members,
+      SUM(CASE WHEN order_cnt >= 3 THEN 1 ELSE 0 END) AS reorder_3plus,
+      AVG(CASE WHEN order_cnt >= 2 THEN DATEDIFF(day, first_order_date, last_order_date) END) AS avg_reorder_days,
+      AVG(CAST(order_cnt AS FLOAT)) AS avg_orders_per_member,
+      AVG(CASE WHEN order_cnt >= 2 THEN total_amount END) AS avg_reorder_amount,
+      AVG(CASE WHEN order_cnt = 1 THEN total_amount END) AS avg_single_amount
+    FROM member_orders
+  `);
+
+  // 재주문 회원의 시간대별 분포 (첫주문→재주문 간격)
+  const reorderIntervalResult = await p.request().query(`
+    WITH ordered AS (
+      SELECT o.member_id, o.order_seq, o.order_date,
+             ROW_NUMBER() OVER (PARTITION BY o.member_id ORDER BY o.order_date) AS rn
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+    ),
+    reorder_gap AS (
+      SELECT a.member_id,
+             DATEDIFF(day, a.order_date, b.order_date) AS gap_days
+      FROM ordered a
+      INNER JOIN ordered b ON a.member_id = b.member_id AND a.rn = 1 AND b.rn = 2
+    )
+    SELECT
+      CASE
+        WHEN gap_days <= 7 THEN '1주 이내'
+        WHEN gap_days <= 30 THEN '1개월 이내'
+        WHEN gap_days <= 90 THEN '3개월 이내'
+        WHEN gap_days <= 180 THEN '6개월 이내'
+        ELSE '6개월 초과'
+      END AS interval_label,
+      COUNT(*) AS cnt
+    FROM reorder_gap
+    GROUP BY CASE
+        WHEN gap_days <= 7 THEN '1주 이내'
+        WHEN gap_days <= 30 THEN '1개월 이내'
+        WHEN gap_days <= 90 THEN '3개월 이내'
+        WHEN gap_days <= 180 THEN '6개월 이내'
+        ELSE '6개월 초과'
+      END
+    ORDER BY MIN(gap_days)
   `);
 
   return {
@@ -963,6 +1080,10 @@ async function apiMarketing() {
     region: region.recordset,
     conversion,
     memberSite: siteResult.recordset,
+    signupSite: signupSiteResult.recordset,
+    siteCross: siteCrossResult.recordset,
+    reorder: reorderResult.recordset[0] || {},
+    reorderInterval: reorderIntervalResult.recordset,
     period: '최근 90일',
   };
 }
