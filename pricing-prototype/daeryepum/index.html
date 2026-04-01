@@ -71,6 +71,12 @@ nav a:hover{color:var(--gray-900)}
 .data-table th{background:var(--gray-50);padding:10px 12px;text-align:left;font-weight:600;border-bottom:2px solid var(--gray-200);white-space:nowrap;cursor:pointer;user-select:none}
 .data-table td{padding:8px 12px;border-bottom:1px solid var(--gray-100);max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .data-table tr:hover{background:var(--primary-light)}
+.data-table tr.row-collected{background:#f0fdf4}
+.data-table tr.row-collected:hover{background:#dcfce7}
+.data-table tr.row-collected td{color:var(--gray-500)}
+.data-table tr.row-cancel-alert{background:#fef2f2}
+.data-table tr.row-cancel-alert:hover{background:#fee2e2}
+.data-table tr.row-cancel-alert td{color:#dc2626;font-weight:600}
 .data-table .num{text-align:right;font-variant-numeric:tabular-nums}
 /* COLUMN SELECTOR */
 .col-selector{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;padding:12px;background:var(--gray-50);border-radius:var(--radius)}
@@ -425,6 +431,8 @@ nav a:hover{color:var(--gray-900)}
     <input type="text" id="ord-code-search" placeholder="상품코드 검색" style="width:160px" oninput="renderOrderTable()" />
     <button class="btn btn-primary" onclick="loadOrders()">조회</button>
     <div style="flex:1"></div>
+    <button class="btn" onclick="markCollected()" style="background:#dcfce7;border-color:#86efac">✅ 수집완료</button>
+    <button class="btn" onclick="unmarkCollected()" style="background:#fef3c7;border-color:#fcd34d">↩️ 수집해제</button>
     <button class="btn" onclick="copySelected()">📋 클립보드 복사</button>
     <button class="btn" onclick="downloadExcel()">📥 엑셀 다운로드</button>
   </div>
@@ -438,6 +446,9 @@ nav a:hover{color:var(--gray-900)}
   <div style="margin-top:8px;font-size:12px;color:var(--gray-500);display:flex;align-items:center;gap:12px">
     <span>총 <strong id="order-count">0</strong>건</span>
     <span>선택 <strong id="order-selected-count">0</strong>건</span>
+    <span style="color:#16a34a">수집완료 <strong id="order-collected-count">0</strong>건</span>
+    <span style="color:#dc2626">취소주의 <strong id="order-cancel-count">0</strong>건</span>
+    <label style="margin-left:auto;cursor:pointer"><input type="checkbox" id="hide-collected" onchange="renderOrderTable()"> 수집완료 숨기기</label>
   </div>
 </div>
 </div>
@@ -539,6 +550,18 @@ let dashboardSummaryData = [];
 let dashViewMode = 'card';
 let tableTabMode = 'daily';
 let currentCategory = 'daeryepum';
+
+// --- 수집완료 상태 관리 (localStorage) ---
+const COLLECTED_KEY = 'daeryepum_collected';
+function getCollectedSet() {
+  try { return new Set(JSON.parse(localStorage.getItem(COLLECTED_KEY) || '[]')); }
+  catch { return new Set(); }
+}
+function saveCollectedSet(s) {
+  localStorage.setItem(COLLECTED_KEY, JSON.stringify([...s]));
+}
+// 취소 상태 (status_seq 3=결제취소, 5=주문취소)
+function isCancelled(r) { return r.status_seq === 3 || r.status_seq === 5; }
 
 // --- Auth ---
 function loadUserInfo() {
@@ -662,17 +685,38 @@ function getFilteredOrders() {
 
 function renderOrderTable() {
   const cols = getSelectedCols();
-  const filtered = getFilteredOrders();
+  const hideCollected = document.getElementById('hide-collected')?.checked;
+  const collected = getCollectedSet();
+  let filtered = getFilteredOrders();
+  if (hideCollected) filtered = filtered.filter(r => !collected.has(String(r.order_seq)));
+
   document.getElementById('order-thead').innerHTML =
     `<th style="width:36px"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"></th>` +
     cols.map(c => `<th>${c.label}</th>`).join('');
-  document.getElementById('order-tbody').innerHTML = filtered.map((r, i) =>
-    `<tr>` +
-    `<td><input type="checkbox" class="row-check" data-idx="${i}" onchange="updateSelectedCount()"></td>` +
-    cols.map(c => `<td class="${c.num?'num':''}">${r[c.key] ?? ''}</td>`).join('') +
-    `</tr>`
-  ).join('');
+  document.getElementById('order-tbody').innerHTML = filtered.map((r, i) => {
+    const key = String(r.order_seq);
+    const isCollected = collected.has(key);
+    const isCancel = isCancelled(r);
+    let cls = '';
+    if (isCollected && isCancel) cls = 'row-cancel-alert';
+    else if (isCollected) cls = 'row-collected';
+    return `<tr class="${cls}">` +
+      `<td><input type="checkbox" class="row-check" data-idx="${i}" onchange="updateSelectedCount()"></td>` +
+      cols.map(c => `<td class="${c.num?'num':''}">${r[c.key] ?? ''}</td>`).join('') +
+      `</tr>`;
+  }).join('');
   document.getElementById('order-count').textContent = filtered.length;
+  // 수집/취소 건수
+  const allOrders = getFilteredOrders();
+  let collectedCnt = 0, cancelCnt = 0;
+  allOrders.forEach(r => {
+    if (collected.has(String(r.order_seq))) {
+      collectedCnt++;
+      if (isCancelled(r)) cancelCnt++;
+    }
+  });
+  document.getElementById('order-collected-count').textContent = collectedCnt;
+  document.getElementById('order-cancel-count').textContent = cancelCnt;
   updateSelectedCount();
 }
 
@@ -687,10 +731,43 @@ function updateSelectedCount() {
 }
 
 function getSelectedRows() {
-  const filtered = getFilteredOrders();
+  const hideCollected = document.getElementById('hide-collected')?.checked;
+  const collected = getCollectedSet();
+  let filtered = getFilteredOrders();
+  if (hideCollected) filtered = filtered.filter(r => !collected.has(String(r.order_seq)));
   const indices = [];
   document.querySelectorAll('.row-check:checked').forEach(cb => { indices.push(parseInt(cb.dataset.idx)); });
-  return indices.length > 0 ? indices.map(i => filtered[i]) : filtered; // 선택 없으면 필터된 전체
+  return indices.length > 0 ? indices.map(i => filtered[i]).filter(Boolean) : filtered;
+}
+
+// --- 수집완료 마킹 ---
+function markCollected() {
+  const rows = getCheckedRows();
+  if (!rows.length) { showToast('선택된 주문이 없습니다'); return; }
+  const collected = getCollectedSet();
+  rows.forEach(r => collected.add(String(r.order_seq)));
+  saveCollectedSet(collected);
+  renderOrderTable();
+  showToast(`${rows.length}건 수집완료 처리`);
+}
+
+function unmarkCollected() {
+  const rows = getCheckedRows();
+  if (!rows.length) { showToast('선택된 주문이 없습니다'); return; }
+  const collected = getCollectedSet();
+  rows.forEach(r => collected.delete(String(r.order_seq)));
+  saveCollectedSet(collected);
+  renderOrderTable();
+  showToast(`${rows.length}건 수집해제 처리`);
+}
+
+function getCheckedRows() {
+  const filtered = document.getElementById('hide-collected')?.checked
+    ? getFilteredOrders().filter(r => !getCollectedSet().has(String(r.order_seq)))
+    : getFilteredOrders();
+  const indices = [];
+  document.querySelectorAll('.row-check:checked').forEach(cb => { indices.push(parseInt(cb.dataset.idx)); });
+  return indices.map(i => filtered[i]).filter(Boolean);
 }
 
 // --- Copy / Download ---
