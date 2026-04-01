@@ -498,6 +498,17 @@ nav a:hover{color:var(--gray-900)}
 
 <div class="toast" id="toast"></div>
 
+<!-- 첨부파일 모달 -->
+<div id="file-modal" onclick="if(event.target===this)closeFileModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;max-width:700px;width:90%;max-height:80vh;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
+      <h3 id="file-modal-title" style="margin:0;font-size:16px">첨부파일</h3>
+      <button onclick="closeFileModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--gray-500)">&times;</button>
+    </div>
+    <div id="file-modal-body" style="padding:16px 20px"></div>
+  </div>
+</div>
+
 <script>
 // basePath 자동 감지: /c/barungift/ → '/c/barungift', localhost:3457/ → ''
 const API = window.location.pathname.replace(/\/+$/, '') || '';
@@ -517,6 +528,7 @@ const ALL_COLS = [
   {key:'wedding_date',label:'예식일',default:false},
   {key:'lead_days',label:'리드타임(일)',default:false,num:true},
   {key:'site_name',label:'주문사이트',default:true},
+  {key:'file_count_fmt',label:'첨부파일',default:true},
   {key:'order_type_label',label:'주문유형',default:false},
   {key:'status_label',label:'주문상태',default:false},
 ];
@@ -626,6 +638,9 @@ async function loadOrders() {
         13:'수령확인', 14:'환불요청', 15:'환불완료'
       };
       r.status_label = STATUS_MAP[r.status_seq] || `상태${r.status_seq ?? '?'}`;
+      r.file_count_fmt = r.file_count > 0
+        ? `<a href="#" onclick="showOrderFiles(${r.order_seq});return false" style="color:var(--primary);text-decoration:underline">📎 ${r.file_count}건</a>`
+        : '';
       const rawLead = r.wedding_date && r.order_date ? Math.round((new Date(r.wedding_date) - new Date(r.order_date)) / 86400000) : null;
       r.lead_days_raw = rawLead;
       r.lead_days = rawLead !== null ? (rawLead < 0 ? `예식후 ${Math.abs(rawLead)}일` : `${rawLead}일`) : '';
@@ -1870,6 +1885,68 @@ function renderWeeklyTable(data, topProducts) {
     productRows;
 
   document.getElementById('sales-table').innerHTML = `<thead>${thead}</thead><tbody>${tbody}</tbody>`;
+}
+
+// --- 첨부파일 모달 ---
+async function showOrderFiles(orderSeq) {
+  const modal = document.getElementById('file-modal');
+  const body = document.getElementById('file-modal-body');
+  const title = document.getElementById('file-modal-title');
+  title.textContent = `주문 ${orderSeq} 첨부파일`;
+  body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--gray-500)">로딩 중...</div>';
+  modal.style.display = 'flex';
+  try {
+    const res = await fetch(`${API}/api/order-files?order_seq=${orderSeq}`);
+    const files = await res.json();
+    if (!files.length) {
+      body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--gray-500)">첨부파일이 없습니다.</div>';
+      return;
+    }
+    body.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="background:var(--gray-100)">
+          <th style="padding:8px;text-align:left">상품</th>
+          <th style="padding:8px;text-align:left">파일명</th>
+          <th style="padding:8px;text-align:right">크기</th>
+          <th style="padding:8px;text-align:center">다운로드</th>
+        </tr></thead>
+        <tbody>${files.map(f => `
+          <tr style="border-top:1px solid var(--gray-200)">
+            <td style="padding:8px">${f.Card_Name || f.plist_title || ''}</td>
+            <td style="padding:8px;word-break:break-all">${f.FileName}</td>
+            <td style="padding:8px;text-align:right;white-space:nowrap">${f.file_size_fmt}</td>
+            <td style="padding:8px;text-align:center">
+              <a href="${f.download_url}" target="_blank" style="color:var(--primary);font-weight:600" title="다운로드">⬇️</a>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      <div style="margin-top:12px;text-align:right">
+        <button class="btn btn-primary" onclick="downloadAllFiles(${orderSeq})" style="font-size:13px">📥 전체 다운로드</button>
+      </div>`;
+  } catch(e) {
+    body.innerHTML = `<div style="color:#dc2626;padding:24px">오류: ${e.message}</div>`;
+  }
+}
+
+function closeFileModal() {
+  document.getElementById('file-modal').style.display = 'none';
+}
+
+async function downloadAllFiles(orderSeq) {
+  try {
+    const res = await fetch(`${API}/api/order-files?order_seq=${orderSeq}`);
+    const files = await res.json();
+    files.forEach((f, i) => {
+      setTimeout(() => {
+        const a = document.createElement('a');
+        a.href = f.download_url;
+        a.target = '_blank';
+        a.click();
+      }, i * 500);
+    });
+    showToast(`${files.length}개 파일 다운로드 시작`);
+  } catch(e) { showToast('다운로드 실패: ' + e.message); }
 }
 
 function showToast(msg) {

@@ -235,7 +235,8 @@ async function apiOrders(query) {
         o.settle_price AS settle_price,
         o.status_seq AS status_seq,
         cw.event_year + '-' + RIGHT('0'+cw.event_month,2) + '-' + RIGHT('0'+cw.event_Day,2) AS wedding_date,
-        ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name
+        ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
+        0 AS file_count
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
@@ -277,7 +278,8 @@ async function apiOrders(query) {
         co.settle_price,
         co.status_seq,
         w.event_year + '-' + RIGHT('0'+w.event_month,2) + '-' + RIGHT('0'+w.event_Day,2) AS wedding_date,
-        ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name
+        ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
+        ISNULL((SELECT COUNT(*) FROM custom_order_plist p WITH (NOLOCK) INNER JOIN custom_order_plist_files f WITH (NOLOCK) ON p.id = f.pid WHERE p.order_seq = co.order_seq), 0) AS file_count
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
@@ -301,6 +303,33 @@ async function apiOrders(query) {
   }));
 
   return rows;
+}
+
+const BBARUNSON_FILE_URL = 'https://bbarunsonweb.barunsoncard.com/PrintInfo/DownloadFile?fileId=';
+
+async function apiOrderFiles(query) {
+  const p = await getPool();
+  const orderSeq = parseInt(query.order_seq);
+  if (!orderSeq) return [];
+  const result = await p.request()
+    .input('orderSeq', sql.Int, orderSeq)
+    .query(`
+      SELECT f.id AS file_id, f.pid, f.FileName, f.FilePath, f.FileSize, f.FileType, f.Sort,
+             p.title AS plist_title, p.card_seq,
+             c.Card_Name, c.Card_Code
+      FROM custom_order_plist p WITH (NOLOCK)
+      INNER JOIN custom_order_plist_files f WITH (NOLOCK) ON p.id = f.pid
+      LEFT JOIN S2_Card c WITH (NOLOCK) ON p.card_seq = c.Card_Seq
+      WHERE p.order_seq = @orderSeq
+      ORDER BY f.pid, f.Sort
+    `);
+  return result.recordset.map(r => ({
+    ...r,
+    download_url: BBARUNSON_FILE_URL + r.file_id,
+    file_size_fmt: r.FileSize > 1048576
+      ? (r.FileSize / 1048576).toFixed(1) + 'MB'
+      : (r.FileSize / 1024).toFixed(0) + 'KB',
+  }));
 }
 
 function mergeNames(recvName, orderName) {
@@ -1034,6 +1063,8 @@ const server = http.createServer(async (req, res) => {
         data = await apiConversion();
       } else if (pathname === '/api/dashboard/samples') {
         data = await apiSamples();
+      } else if (pathname === '/api/order-files') {
+        data = await apiOrderFiles(parsed.query);
       } else if (pathname === '/api/categories') {
         data = Object.entries(CATEGORY_FILTERS).map(([key, val]) => ({ key, label: val.label }));
       } else {
