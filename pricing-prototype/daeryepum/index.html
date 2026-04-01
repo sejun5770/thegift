@@ -116,7 +116,58 @@ nav a:hover{color:var(--gray-900)}
 /* FORECAST HISTORY */
 .forecast-table tr.history-row{background:#f8fafc}
 .forecast-table tr.history-row td{color:var(--gray-500);font-size:12px}
-@media(max-width:900px){.card-grid-4{grid-template-columns:repeat(2,1fr)}.compare-grid{grid-template-columns:1fr}}
+/* === RESPONSIVE === */
+@media(max-width:900px){
+  .card-grid-4{grid-template-columns:repeat(2,1fr)}
+  .compare-grid{grid-template-columns:1fr}
+  .compare-vs{display:none}
+}
+@media(max-width:768px){
+  .resp-grid-2{grid-template-columns:1fr!important}
+  .resp-grid-3{grid-template-columns:1fr!important}
+  nav{gap:8px;padding:0 12px;height:auto;min-height:48px;flex-wrap:wrap;justify-content:center;padding-top:8px;padding-bottom:8px}
+  nav .logo{font-size:14px}
+  nav a{font-size:12px;padding:8px 0}
+  .user-area{width:100%;justify-content:center;border-top:1px solid var(--gray-200);padding-top:6px;margin-top:2px}
+  .container{padding:12px 10px}
+  .card{padding:14px}
+  .card .value{font-size:22px}
+  .card-grid-2{grid-template-columns:1fr}
+  .section-title{font-size:14px}
+  .toolbar{gap:6px;font-size:12px}
+  .toolbar input[type=date]{width:110px;font-size:12px;padding:6px 8px}
+  .toolbar input[type=text]{width:100%!important;min-width:0}
+  .btn{padding:6px 10px;font-size:12px}
+  .chart-container{height:220px}
+  .col-selector{padding:8px;gap:4px}
+  .col-selector label{font-size:11px;padding:3px 6px}
+  .cat-tab{padding:8px 12px;font-size:12px}
+  .forecast-table th,.forecast-table td{padding:6px 8px;font-size:12px}
+  .data-table th{padding:6px 8px;font-size:11px}
+  .data-table td{padding:5px 8px;font-size:12px;max-width:150px}
+  .leadtime-bars{height:60px}
+  .leadtime-bar{min-width:28px}
+  .leadtime-bar .label{font-size:8px}
+  .leadtime-bar .count{font-size:9px}
+  .view-toggle button{font-size:10px;padding:3px 6px}
+  .mk-table th,.mk-table td{padding:4px 6px;font-size:11px}
+  .toast{bottom:12px;right:12px;left:12px;text-align:center}
+}
+@media(max-width:480px){
+  nav{gap:4px}
+  nav a{font-size:11px}
+  .card-grid-4{grid-template-columns:1fr 1fr}
+  .card .value{font-size:18px}
+  .card h3{font-size:11px}
+  .toolbar{flex-direction:column;align-items:stretch}
+  .toolbar>div[style*="flex:1"]{display:none}
+  .toolbar input[type=date]{width:100%;flex:1}
+  .chart-container{height:180px}
+  .compare-col{padding:12px}
+  .compare-value{font-size:18px}
+  .compare-header{font-size:14px}
+  #file-modal>div{max-width:95vw;border-radius:8px}
+}
 </style>
 </head>
 <body>
@@ -219,7 +270,7 @@ nav a:hover{color:var(--gray-900)}
     <div class="section-title">
       <span>🔮 답례품 매출 예측 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(청첩장→답례품 8주 lag 회귀모델)</span> <span class="tooltip-wrap" style="position:relative;cursor:help;vertical-align:middle;margin-left:4px">
         <span style="font-size:12px;color:var(--primary);border:1px solid var(--primary);border-radius:50%;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center">?</span>
-        <span class="tooltip-content" style="display:none;position:absolute;right:0;top:28px;width:380px;background:#1e293b;color:#f1f5f9;padding:16px;border-radius:8px;font-size:12px;line-height:1.7;z-index:50;box-shadow:0 4px 20px rgba(0,0,0,.3)">
+        <span class="tooltip-content" style="display:none;position:absolute;right:0;top:28px;width:380px;max-width:90vw;background:#1e293b;color:#f1f5f9;padding:16px;border-radius:8px;font-size:12px;line-height:1.7;z-index:50;box-shadow:0 4px 20px rgba(0,0,0,.3)">
           <strong style="color:#60a5fa">📐 Cross-Correlation 분석 결과</strong><br><br>
           15개월 일별 데이터의 cross-correlation 분석 결과, 청첩장 주문이 <strong style="color:#fbbf24">8주(56일) 후</strong> 답례품 매출에 가장 강한 영향 (r=0.472).<br><br>
           <strong>웨딩 준비 타임라인:</strong><br>
@@ -272,7 +323,7 @@ nav a:hover{color:var(--gray-900)}
   <!-- Marketing Analytics -->
   <div class="section">
     <div class="section-title">📊 마케팅 분석 (최근 90일)</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+    <div class="resp-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
       <!-- 전환율 카드 -->
       <div class="card" style="position:relative">
         <div class="view-toggle">
@@ -281,7 +332,7 @@ nav a:hover{color:var(--gray-900)}
         </div>
         <h3 style="margin-bottom:12px">🔄 청첩장→답례품 전환율</h3>
         <div id="mk-conv-chart">
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center;margin-bottom:12px">
+          <div class="resp-grid-3" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center;margin-bottom:12px">
             <div><div style="font-size:24px;font-weight:700;color:var(--primary)" id="mk-card-members">-</div><div style="font-size:11px;color:#666">청첩장 주문자</div></div>
             <div><div style="font-size:24px;font-weight:700;color:#f59e0b" id="mk-cross">-</div><div style="font-size:11px;color:#666">답례품도 구매</div></div>
             <div><div style="font-size:24px;font-weight:700;color:#10b981" id="mk-conv-pct">-</div><div style="font-size:11px;color:#666">전환율</div></div>
@@ -314,7 +365,7 @@ nav a:hover{color:var(--gray-900)}
         <div class="feedback" id="mk-region-feedback" style="margin:0;font-size:12px"></div>
       </div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
+    <div class="resp-grid-3" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px">
       <!-- 시간대별 -->
       <div class="card" style="position:relative">
         <div class="view-toggle">
@@ -366,7 +417,7 @@ nav a:hover{color:var(--gray-900)}
 
   <!-- 전환율 + 샘플 -->
   <div class="section">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div class="resp-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
       <!-- 주차별 전환율 -->
       <div class="card" style="position:relative">
         <div class="view-toggle">
@@ -425,16 +476,19 @@ nav a:hover{color:var(--gray-900)}
     <button class="cat-tab" data-cat="flower" onclick="switchCategory('flower')">💐 꽃다발</button>
   </div>
   <div class="toolbar">
-    <input type="date" id="ord-start" />
-    <span>~</span>
-    <input type="date" id="ord-end" />
-    <input type="text" id="ord-code-search" placeholder="상품코드 검색" style="width:160px" oninput="renderOrderTable()" />
-    <button class="btn btn-primary" onclick="loadOrders()">조회</button>
-    <div style="flex:1"></div>
-    <button class="btn" onclick="markCollected()" style="background:#dcfce7;border-color:#86efac">✅ 수집완료</button>
-    <button class="btn" onclick="unmarkCollected()" style="background:#fef3c7;border-color:#fcd34d">↩️ 수집해제</button>
-    <button class="btn" onclick="copySelected()">📋 클립보드 복사</button>
-    <button class="btn" onclick="downloadExcel()">📥 엑셀 다운로드</button>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex:1;min-width:0">
+      <input type="date" id="ord-start" />
+      <span>~</span>
+      <input type="date" id="ord-end" />
+      <input type="text" id="ord-code-search" placeholder="상품코드 검색" style="width:160px;min-width:100px" oninput="renderOrderTable()" />
+      <button class="btn btn-primary" onclick="loadOrders()">조회</button>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <button class="btn" onclick="markCollected()" style="background:#dcfce7;border-color:#86efac">✅ 수집완료</button>
+      <button class="btn" onclick="unmarkCollected()" style="background:#fef3c7;border-color:#fcd34d">↩️ 수집해제</button>
+      <button class="btn" onclick="copySelected()">📋 복사</button>
+      <button class="btn" onclick="downloadExcel()">📥 엑셀</button>
+    </div>
   </div>
   <div class="col-selector" id="col-selector"></div>
   <div class="card" style="padding:0;overflow-x:auto">
@@ -443,12 +497,12 @@ nav a:hover{color:var(--gray-900)}
       <tbody id="order-tbody"></tbody>
     </table>
   </div>
-  <div style="margin-top:8px;font-size:12px;color:var(--gray-500);display:flex;align-items:center;gap:12px">
+  <div style="margin-top:8px;font-size:12px;color:var(--gray-500);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <span>총 <strong id="order-count">0</strong>건</span>
     <span>선택 <strong id="order-selected-count">0</strong>건</span>
     <span style="color:#16a34a">수집완료 <strong id="order-collected-count">0</strong>건</span>
     <span style="color:#dc2626">취소주의 <strong id="order-cancel-count">0</strong>건</span>
-    <label style="margin-left:auto;cursor:pointer"><input type="checkbox" id="hide-collected" onchange="renderOrderTable()"> 수집완료 숨기기</label>
+    <label style="margin-left:auto;cursor:pointer;white-space:nowrap"><input type="checkbox" id="hide-collected" onchange="renderOrderTable()"> 수집완료 숨기기</label>
   </div>
 </div>
 </div>
@@ -463,13 +517,13 @@ nav a:hover{color:var(--gray-900)}
   <!-- 이번 주 추천 콘텐츠 -->
   <div class="section">
     <div class="section-title">📱 이번 주 추천 콘텐츠 소재</div>
-    <div id="sns-content-cards" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px"></div>
+    <div id="sns-content-cards" class="resp-grid-3" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px"></div>
   </div>
 
   <!-- 인스타그램 캡션 & 해시태그 -->
   <div class="section">
     <div class="section-title">📸 인스타그램 추천</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div class="resp-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
       <div class="card" id="sns-caption-card">
         <h3 style="margin-bottom:12px">추천 캡션</h3>
         <div id="sns-captions" style="display:flex;flex-direction:column;gap:10px"></div>
@@ -485,7 +539,7 @@ nav a:hover{color:var(--gray-900)}
   <!-- 타이밍 & 타겟 전략 -->
   <div class="section">
     <div class="section-title">🎯 게시 타이밍 & 타겟 전략</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div class="resp-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
       <div class="card" id="sns-timing-card">
         <h3 style="margin-bottom:12px">⏰ 최적 게시 시간</h3>
         <div id="sns-timing"></div>
@@ -1600,7 +1654,7 @@ function renderSnsInsight(mk, summary, lt) {
   const regions = mk.region;
   const topRegion = regions[0] ? regions[0].region : '서울';
   document.getElementById('sns-target').innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+    <div class="resp-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
       <div style="background:#eff6ff;border-radius:8px;padding:12px;text-align:center">
         <div style="font-size:11px;color:#666">핵심 타겟</div>
         <div style="font-size:16px;font-weight:700;color:var(--primary);margin-top:4px">예비 신부/신랑</div>
