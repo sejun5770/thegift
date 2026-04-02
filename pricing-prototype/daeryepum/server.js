@@ -755,8 +755,9 @@ async function apiConversion() {
   const startDate = fmtDate(addDays(thisSunday, -7 * 11));
   const endDate = fmtDate(addDays(thisSunday, 7)); // 이번주 토요일까지
 
-  // 1) 주차별 예식수 (wedding date 기준, 사이트별 분리, 중복 member 제거)
-  // COMPANY.SALES_GUBUN → SiteInfo.SiteCode로 사이트 분류
+  // 1) 주차별 예식수 (회원가입 시 설정된 예식일 기준, 가입사이트별 분리)
+  // S2_UserInfo.REFERER_SALES_GUBUN = 회원의 실제 가입 사이트
+  // site_div = 'SB'로 통합회원 중복 제거 (같은 uid가 SB/SS/BM 3건씩 존재)
   const weddings = await p.request()
     .input('ws', sql.VarChar, startDate)
     .input('we', sql.VarChar, endDate)
@@ -766,17 +767,15 @@ async function apiConversion() {
         site_name,
         COUNT(*) AS wedding_count
       FROM (
-        SELECT DISTINCT co.member_id,
-          CONVERT(varchar(10), TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date), 120) AS wd,
+        SELECT DISTINCT u.uid,
+          CONVERT(varchar(10), TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date), 120) AS wd,
           ISNULL(si.SiteName, '기타') AS site_name
-        FROM custom_order co WITH (NOLOCK)
-        INNER JOIN custom_order_WeddInfo w WITH (NOLOCK) ON co.order_seq = w.order_seq
-        LEFT JOIN COMPANY comp WITH (NOLOCK) ON co.company_Seq = comp.COMPANY_SEQ
-        LEFT JOIN SiteInfo si WITH (NOLOCK) ON comp.SALES_GUBUN = si.SiteCode
-        WHERE co.status_seq >= 1
-          AND w.event_year IS NOT NULL AND LEN(w.event_year) = 4
-          AND TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) >= @ws
-          AND TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) < @we
+        FROM S2_UserInfo u WITH (NOLOCK)
+        LEFT JOIN SiteInfo si ON u.REFERER_SALES_GUBUN = si.SiteCode
+        WHERE u.site_div = 'SB'
+          AND u.wedd_year IS NOT NULL AND LEN(u.wedd_year) = 4
+          AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) >= @ws
+          AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) < @we
       ) t
       GROUP BY wd, site_name
       ORDER BY wd
@@ -808,7 +807,7 @@ async function apiConversion() {
 
   // 일별 → 주차별 집계 (사이트별)
   // weddingMap: { 'YYYY-MM-DD': { total: N, '바른손카드': N, '바른손몰': N, ... } }
-  const MAIN_SITES = ['바른손카드', '바른손몰', '디얼디어'];
+  const MAIN_SITES = ['바른손카드', '바른손몰', '바른손M카드'];
   const weddingMap = {};
   weddings.recordset.forEach(r => {
     if (!weddingMap[r.wd]) weddingMap[r.wd] = { total: 0 };
