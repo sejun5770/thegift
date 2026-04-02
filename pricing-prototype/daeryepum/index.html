@@ -273,7 +273,8 @@ nav a:hover{color:var(--gray-900)}
         <span style="font-size:12px;color:var(--primary);border:1px solid var(--primary);border-radius:50%;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center">?</span>
         <span class="tooltip-content" style="display:none;position:absolute;right:0;top:28px;width:380px;max-width:90vw;background:#1e293b;color:#f1f5f9;padding:16px;border-radius:8px;font-size:12px;line-height:1.7;z-index:50;box-shadow:0 4px 20px rgba(0,0,0,.3)">
           <strong style="color:#60a5fa">📐 예식일 기반 이동평균 모델</strong><br><br>
-          회원가입 시 설정된 <strong style="color:#fbbf24">예식일 ±14일</strong> 범위의 예식 건수를 집계하여, 최근 4주 실적 기반의 <strong>건당 매출</strong>을 곱해 예측합니다.<br><br>
+          실제 청첩장 주문의 제작정보(주문번호 기준) <strong style="color:#fbbf24">예식일 ±14일</strong> 범위의 예식 건수를 집계하여, 최근 4주 실적 기반의 <strong>건당 매출</strong>을 곱해 예측합니다.<br><br>
+          <strong>건당 매출:</strong> 최근 4주 답례품 실제 매출 ÷ 같은 기간 예식 윈도우 건수. 예식 1건당 평균적으로 발생하는 답례품 매출.<br><br>
           <strong>원리:</strong> 예식일 전후 2주가 답례품 주문이 집중되는 구간 → 예식 건수가 많을수록 매출 증가.<br><br>
           <strong>한계:</strong> 단순 이동평균이므로 시즌 전환, 마케팅 효과, 채널 변동은 반영하지 못합니다. 건당 매출은 매주 자동 갱신됩니다.
         </span>
