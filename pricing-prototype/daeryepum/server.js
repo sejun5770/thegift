@@ -514,74 +514,56 @@ async function apiForecast() {
   const p = await getPool();
   const todayStr = fmtDate(today());
 
-  // 회귀 모델 파라미터 (cross-correlation 분석 결과)
-  // 답례품 일매출 = 23,161원 × 청첩장 일주문건수(8주전) − 1,126,839원
-  const COEFF = 23161;
-  const INTERCEPT = -1126839;
-  const LAG_DAYS = 56; // 8주
-  const R_SQUARED = 0.223;
+  const todayDate = today();
+  const dayOfWeek = todayDate.getDay();
+  const thisSunday = addDays(todayDate, -dayOfWeek);
 
-  // 1) 향후 12주 예측을 위해 과거 4~12주 전 청첩장 일별 주문수 필요
-  //    (향후 N주 답례품 = N-8주 전 ~ N-8주+7일 의 청첩장 주문 기반)
-  //    즉, 오늘 기준 -56일 ~ +28일 범위의 청첩장 데이터 필요
-  const lagStart = fmtDate(addDays(today(), -LAG_DAYS - 56));   // 8주 전 시작 기준의 lag 데이터 (16주 전)
-  const lagEnd = fmtDate(addDays(today(), 84 - LAG_DAYS));     // 12주 후 - 8주 lag = 4주 후
+  const WINDOW = 14; // 예식일 ±14일 (앞뒤 2주)
+  const BASE_WEEKS = 4; // 이동평균 기준: 최근 완료 4주
 
-  const cardDaily = await p.request()
-    .input('lagStart', sql.VarChar, lagStart)
-    .input('lagEnd', sql.VarChar, lagEnd)
+  // 1) 예식일별 건수 (S2_UserInfo, 회원가입 시 설정된 예식일)
+  const weddStart = fmtDate(addDays(thisSunday, -7 * 8 - WINDOW));
+  const weddEnd = fmtDate(addDays(thisSunday, 7 * 12 + 7 + WINDOW));
+
+  const weddingsByDate = await p.request()
+    .input('ws', sql.VarChar, weddStart)
+    .input('we', sql.VarChar, weddEnd)
     .query(`
       SELECT
-        CONVERT(varchar(10), order_date, 120) AS order_day,
-        COUNT(DISTINCT order_seq) AS daily_orders
-      FROM custom_order WITH (NOLOCK)
-      WHERE order_date >= @lagStart AND order_date < @lagEnd
-        AND status_seq >= 1
-      GROUP BY CONVERT(varchar(10), order_date, 120)
-      ORDER BY order_day
+        CONVERT(varchar(10), TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date), 120) AS wedd_date,
+        COUNT(DISTINCT u.uid) AS wedding_count
+      FROM S2_UserInfo u WITH (NOLOCK)
+      WHERE u.site_div = 'SB'
+        AND u.wedd_year IS NOT NULL AND LEN(u.wedd_year) = 4
+        AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) >= @ws
+        AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) < @we
+      GROUP BY CONVERT(varchar(10), TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date), 120)
+      ORDER BY wedd_date
     `);
 
-  // 일별 청첩장 주문수 맵
-  const cardDailyMap = {};
-  for (const r of cardDaily.recordset) { cardDailyMap[r.order_day] = r.daily_orders; }
+  const weddingDailyMap = {};
+  for (const r of weddingsByDate.recordset) { weddingDailyMap[r.wedd_date] = r.wedding_count; }
 
-  // 2) 주차별 예측 계산 (일~토 기준)
-  // 이번 주 일요일 구하기
-  const todayDate = today();
-  const dayOfWeek = todayDate.getDay(); // 0=일, 1=월, ..., 6=토
-  const thisSunday = addDays(todayDate, -dayOfWeek); // 이번 주 일요일
-
+  // 2) 주차별 예식 윈도우 건수 (예식일 ±14일 범위)
   const weeks = [];
-  // 과거 8주(-8) ~ 미래 12주(+11) = 총 20주
   for (let w = -8; w < 12; w++) {
-    const weekStart = addDays(thisSunday, w * 7);        // 일요일
-    const weekEnd = addDays(thisSunday, w * 7 + 6);      // 토요일
+    const weekStart = addDays(thisSunday, w * 7);
+    const weekEnd = addDays(thisSunday, w * 7 + 6);
 
-    // 이 주차에 대응하는 청첩장 주문 기간 (8주 전)
-    let totalCardOrders = 0;
-    let dayCount = 0;
-    for (let d = 0; d < 7; d++) {
-      const targetDay = addDays(weekStart, d - LAG_DAYS);
-      const key = fmtDate(targetDay);
-      totalCardOrders += cardDailyMap[key] || 0;
-      if (cardDailyMap[key] !== undefined) dayCount++;
+    // 예식 윈도우: [weekStart - 14일, weekEnd + 14일] 범위의 예식 건수
+    let weddingPool = 0;
+    for (let d = -WINDOW; d <= 6 + WINDOW; d++) {
+      const key = fmtDate(addDays(weekStart, d));
+      weddingPool += weddingDailyMap[key] || 0;
     }
-    const avgDailyCard = dayCount > 0 ? totalCardOrders / dayCount : 0;
 
-    // 회귀 모델 적용 (일매출 × 7일)
-    const dailyRevenue = Math.max(0, COEFF * avgDailyCard + INTERCEPT);
-    const weeklyRevenue = Math.round(dailyRevenue * 7);
-
-    const weekNo = getISOWeek(weekStart);
     weeks.push({
-      week_no: weekNo,
+      week_no: getISOWeek(weekStart),
       week_start: fmtDate(weekStart),
       week_end: fmtDate(weekEnd),
-      card_orders_in_lag: totalCardOrders,
-      avg_daily_card: Math.round(avgDailyCard * 10) / 10,
-      est_daily_revenue: Math.round(dailyRevenue),
-      est_weekly_revenue: weeklyRevenue,
-      has_data: dayCount > 0,
+      wedding_pool: weddingPool,
+      est_weekly_revenue: 0,
+      has_data: weddingPool > 0,
     });
   }
 
@@ -646,13 +628,27 @@ async function apiForecast() {
     w.actual_days = actDays; // 경과일 수 (7이면 완료된 주)
     w.is_past = actDays >= 7;
     w.is_current = actDays > 0 && actDays < 7;
-    // 오차율 (완료된 주만)
+  }
+
+  // 4) 이동평균: 최근 완료 4주의 (실제매출 / 예식윈도우건수) 비율
+  const completedWeeks = weeks.filter(w => w.is_past);
+  const baseWeeks = completedWeeks.slice(-BASE_WEEKS);
+  let baseTotalRevenue = 0, baseTotalWeddings = 0;
+  for (const bw of baseWeeks) {
+    baseTotalRevenue += bw.actual_weekly_revenue;
+    baseTotalWeddings += bw.wedding_pool;
+  }
+  const revenuePerWedding = baseTotalWeddings > 0 ? baseTotalRevenue / baseTotalWeddings : 0;
+
+  // 예측 적용 + 오차율
+  for (const w of weeks) {
+    w.est_weekly_revenue = Math.round(w.wedding_pool * revenuePerWedding);
     w.accuracy_pct = (w.is_past && w.est_weekly_revenue > 0)
       ? Math.round((w.actual_weekly_revenue - w.est_weekly_revenue) / w.est_weekly_revenue * 100)
       : null;
   }
 
-  // 4) 실제 최근 일평균 매출 (검증용)
+  // 5) 실제 최근 일평균 매출 (검증용)
   const actualStats = await p.request()
     .input('start30', sql.VarChar, fmtDate(addDays(today(), -30)))
     .input('today', sql.VarChar, todayStr)
@@ -671,7 +667,14 @@ async function apiForecast() {
   const actualDailyAvg = actual.active_days > 0 ? Math.round(actual.total_amount / actual.active_days) : 0;
 
   return {
-    model: { coefficient: COEFF, intercept: INTERCEPT, lag_days: LAG_DAYS, r_squared: R_SQUARED },
+    model: {
+      type: 'moving_average',
+      window_days: WINDOW,
+      base_weeks: BASE_WEEKS,
+      revenue_per_wedding: Math.round(revenuePerWedding),
+      base_total_revenue: baseTotalRevenue,
+      base_total_weddings: baseTotalWeddings,
+    },
     weeks,
     actual_30d: {
       daily_avg_revenue: actualDailyAvg,
