@@ -272,27 +272,30 @@ nav a:hover{color:var(--gray-900)}
       <span>🔮 답례품 매출 예측 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(예식일 ±2주 이동평균)</span> <span class="tooltip-wrap" style="position:relative;cursor:help;vertical-align:middle;margin-left:4px">
         <span style="font-size:12px;color:var(--primary);border:1px solid var(--primary);border-radius:50%;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center">?</span>
         <span class="tooltip-content" style="display:none;position:absolute;right:0;top:28px;width:380px;max-width:90vw;background:#1e293b;color:#f1f5f9;padding:16px;border-radius:8px;font-size:12px;line-height:1.7;z-index:50;box-shadow:0 4px 20px rgba(0,0,0,.3)">
-          <strong style="color:#60a5fa">📐 예식일 기반 이동평균 모델</strong><br><br>
-          실제 청첩장 주문의 제작정보(주문번호 기준) <strong style="color:#fbbf24">예식일 ±14일</strong> 범위의 예식 건수를 집계하여, 최근 4주 실적 기반의 <strong>건당 매출</strong>을 곱해 예측합니다.<br><br>
-          <strong>건당 매출:</strong> 최근 4주 답례품 실제 매출 ÷ 같은 기간 예식 윈도우 건수. 예식 1건당 평균적으로 발생하는 답례품 매출.<br><br>
-          <strong>원리:</strong> 예식일 전후 2주가 답례품 주문이 집중되는 구간 → 예식 건수가 많을수록 매출 증가.<br><br>
-          <strong>한계:</strong> 단순 이동평균이므로 시즌 전환, 마케팅 효과, 채널 변동은 반영하지 못합니다. 건당 매출은 매주 자동 갱신됩니다.
+          <strong style="color:#60a5fa">📐 예식일 기반 전환율 모델</strong><br><br>
+          <strong>예상 매출 = 예식건수 × 전환율 × 객단가</strong><br><br>
+          <strong style="color:#fbbf24">예식건수:</strong> 청첩장 주문 제작정보(order_seq 기준) 예식일 ±14일 범위 집계<br>
+          <strong style="color:#fbbf24">전환율:</strong> 최근 4주간 (답례품 주문건수 ÷ 예식 윈도우 건수)<br>
+          <strong style="color:#fbbf24">객단가:</strong> 최근 4주간 (답례품 매출 ÷ 답례품 주문건수)<br><br>
+          <strong>원리:</strong> 예식일 전후 2주가 답례품 주문이 집중되는 구간. 전환율과 객단가를 분리하여 매출 변동 요인을 파악할 수 있습니다.<br><br>
+          <strong>한계:</strong> 최근 4주 실적 기반이므로 시즌 전환, 마케팅 캠페인 효과는 후행 반영됩니다.
         </span>
       </span></span>
     </div>
     <div class="card">
       <div style="display:flex;gap:20px;margin-bottom:16px;flex-wrap:wrap">
-        <div><span style="font-size:11px;color:var(--gray-500)">예측 방식</span><br><strong style="font-size:12px" id="fc-method">-</strong></div>
-        <div><span style="font-size:11px;color:var(--gray-500)">예식 윈도우</span><br><strong id="fc-window">-</strong></div>
-        <div><span style="font-size:11px;color:var(--gray-500)">건당 매출</span><br><strong id="fc-rpw">-</strong></div>
+        <div><span style="font-size:11px;color:var(--gray-500)">예측식</span><br><strong style="font-size:12px" id="fc-method">-</strong></div>
+        <div><span style="font-size:11px;color:var(--gray-500)">전환율 (4주)</span><br><strong id="fc-cvr">-</strong></div>
+        <div><span style="font-size:11px;color:var(--gray-500)">객단가 (4주)</span><br><strong id="fc-aov">-</strong></div>
         <div><span style="font-size:11px;color:var(--gray-500)">실제 30일 일평균</span><br><strong id="fc-actual">-</strong></div>
       </div>
       <table class="forecast-table">
         <thead><tr>
           <th>주차</th><th>기간</th>
-          <th>예식 윈도우<br><span style="font-size:10px;font-weight:400">(D-14 ~ D+14)</span></th>
-          <th>예상 주간 매출</th>
-          <th>실제 주간 매출</th>
+          <th>예식건수<br><span style="font-size:10px;font-weight:400">(D-14 ~ D+14)</span></th>
+          <th>예상 건수</th>
+          <th>예상 매출</th>
+          <th>실제 매출</th>
           <th>오차</th>
           <th>실제 건수</th>
           <th>실제 수량</th>
@@ -1185,10 +1188,13 @@ function renderForecastRow(w, maxRevenue, isHistory) {
   const rowStyle = isThisWeek ? 'background:#eff6ff' : isHistory ? 'background:#f8fafc' : isPast ? 'background:#fafafa' : '';
   const rowClass = isHistory ? 'history-row' : '';
 
+  const estOrdersCell = w.est_orders != null ? `${fmtNum(w.est_orders)}건` : '-';
+
   return `<tr class="${rowClass}" style="${rowStyle}">
     <td><strong>${w.week_no}주차</strong> ${weekBadge}</td>
     <td>${startD} ~ ${endD}</td>
     <td class="num">${fmtNum(w.wedding_pool)}명</td>
+    <td class="num">${estOrdersCell}</td>
     <td class="num" style="min-width:140px"><div class="forecast-bar" style="width:${estBar}px;background:var(--primary);opacity:.3"></div> ${fmtKRW(w.est_weekly_revenue)}</td>
     <td class="num" style="min-width:140px">${isPast || isThisWeek ? `<div class="forecast-bar" style="width:${actBar}px;background:var(--green)"></div> ` : ''}${actualCell}</td>
     <td class="num">${accCell}</td>
@@ -1199,9 +1205,9 @@ function renderForecastRow(w, maxRevenue, isHistory) {
 
 function renderForecast(fc) {
   const m = fc.model;
-  document.getElementById('fc-method').textContent = `예식일 ±${m.window_days}일 × 건당 매출`;
-  document.getElementById('fc-window').textContent = `D-${m.window_days} ~ D+${m.window_days}`;
-  document.getElementById('fc-rpw').textContent = fmtKRW(m.revenue_per_wedding);
+  document.getElementById('fc-method').textContent = `예식건수 × 전환율 × 객단가`;
+  document.getElementById('fc-cvr').textContent = `${m.conversion_rate}%`;
+  document.getElementById('fc-aov').textContent = fmtKRW(m.avg_order_value);
   document.getElementById('fc-actual').textContent = fmtKRW(fc.actual_30d.daily_avg_revenue);
 
   const maxRevenue = Math.max(...fc.weeks.map(w => Math.max(w.est_weekly_revenue, w.actual_weekly_revenue || 0)), 1);
@@ -1212,9 +1218,9 @@ function renderForecast(fc) {
 
   let html = '';
   if (historyWeeks.length > 0) {
-    html += `<tr><td colspan="8" style="background:#f1f5f9;padding:8px 12px;font-size:12px;font-weight:600;color:var(--gray-500);border-bottom:2px solid var(--gray-200)">📋 지난 주차 히스토리 (${historyWeeks.length}주)</td></tr>`;
+    html += `<tr><td colspan="9" style="background:#f1f5f9;padding:8px 12px;font-size:12px;font-weight:600;color:var(--gray-500);border-bottom:2px solid var(--gray-200)">📋 지난 주차 히스토리 (${historyWeeks.length}주)</td></tr>`;
     html += historyWeeks.map(w => renderForecastRow(w, maxRevenue, true)).join('');
-    html += `<tr><td colspan="8" style="background:#e5e7eb;padding:1px"></td></tr>`;
+    html += `<tr><td colspan="9" style="background:#e5e7eb;padding:1px"></td></tr>`;
   }
   html += currentAndFutureWeeks.map(w => renderForecastRow(w, maxRevenue, false)).join('');
   tbody.innerHTML = html;
@@ -1226,8 +1232,9 @@ function renderForecast(fc) {
   const pastWeeks = fc.weeks.filter(w => w.is_past && w.accuracy_pct !== null);
 
   if (currentWeek) {
-    feedback += `<strong>금주(${currentWeek.week_no}주차) 예상: ${fmtKRW(currentWeek.est_weekly_revenue)}</strong> — `;
-    feedback += `예식 윈도우 ${fmtNum(currentWeek.wedding_pool)}명, 현재 ${currentWeek.actual_days}일 경과, 실적 <strong>${fmtKRW(currentWeek.actual_weekly_revenue)}</strong> (${fmtNum(currentWeek.actual_orders)}건). `;
+    feedback += `<strong>금주(${currentWeek.week_no}주차) 예상: ${fmtKRW(currentWeek.est_weekly_revenue)}</strong> `;
+    feedback += `(예식 ${fmtNum(currentWeek.wedding_pool)}명 × 전환율 ${m.conversion_rate}% × 객단가 ${fmtKRW(m.avg_order_value)})<br>`;
+    feedback += `현재 ${currentWeek.actual_days}일 경과, 실적 <strong>${fmtKRW(currentWeek.actual_weekly_revenue)}</strong> (${fmtNum(currentWeek.actual_orders)}건). `;
     if (nextWeek) {
       const wow = pctChange(nextWeek.est_weekly_revenue, currentWeek.est_weekly_revenue);
       feedback += `다음 주(${nextWeek.week_no}주차)는 <strong>${wow > 0 ? wow+'% 증가' : Math.abs(wow)+'% 감소'}</strong> 예상. `;
@@ -1253,9 +1260,9 @@ function renderForecast(fc) {
 
   // 모델 한계 설명
   feedback += `<br><br>⚠️ <strong>모델 한계:</strong> `;
-  feedback += `이 예측은 최근 ${m.base_weeks}주 실적(${fmtKRW(m.base_total_revenue)})과 예식 윈도우(${fmtNum(m.base_total_weddings)}명) 비율을 기반으로 한 <strong>단순 이동평균</strong>입니다. `;
-  feedback += `시즌 전환기, 마케팅 캠페인, 채널 변동 등 구조적 변화는 반영하지 못합니다. `;
-  feedback += `건당 매출(${fmtKRW(m.revenue_per_wedding)})은 매주 자동 갱신되며, 최근 실적이 변하면 예측도 함께 조정됩니다.`;
+  feedback += `최근 ${m.base_weeks}주 기준 — 전환율 <strong>${m.conversion_rate}%</strong>(${fmtNum(m.base_total_orders)}건/${fmtNum(m.base_total_weddings)}명), 객단가 <strong>${fmtKRW(m.avg_order_value)}</strong>. `;
+  feedback += `전환율 상승 시 → 마케팅/크로스셀 효과, 객단가 상승 시 → 고가 상품 비중 증가로 해석할 수 있습니다. `;
+  feedback += `시즌 전환기에는 두 지표가 급변할 수 있으며, 매주 자동 갱신됩니다.`;
 
   document.getElementById('fc-feedback').innerHTML = feedback;
 }

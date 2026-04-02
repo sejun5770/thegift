@@ -633,19 +633,23 @@ async function apiForecast() {
     w.is_current = actDays > 0 && actDays < 7;
   }
 
-  // 4) 이동평균: 최근 완료 4주의 (실제매출 / 예식윈도우건수) 비율
+  // 4) 이동평균: 최근 완료 4주 기준 전환율 + 객단가 분리 산출
+  //    예상매출 = 예식건수 × 전환율 × 객단가
   const completedWeeks = weeks.filter(w => w.is_past);
   const baseWeeks = completedWeeks.slice(-BASE_WEEKS);
-  let baseTotalRevenue = 0, baseTotalWeddings = 0;
+  let baseTotalRevenue = 0, baseTotalOrders = 0, baseTotalWeddings = 0;
   for (const bw of baseWeeks) {
     baseTotalRevenue += bw.actual_weekly_revenue;
+    baseTotalOrders += bw.actual_orders;
     baseTotalWeddings += bw.wedding_pool;
   }
-  const revenuePerWedding = baseTotalWeddings > 0 ? baseTotalRevenue / baseTotalWeddings : 0;
+  const conversionRate = baseTotalWeddings > 0 ? baseTotalOrders / baseTotalWeddings : 0;
+  const avgOrderValue = baseTotalOrders > 0 ? baseTotalRevenue / baseTotalOrders : 0;
 
   // 예측 적용 + 오차율
   for (const w of weeks) {
-    w.est_weekly_revenue = Math.round(w.wedding_pool * revenuePerWedding);
+    w.est_orders = Math.round(w.wedding_pool * conversionRate);
+    w.est_weekly_revenue = Math.round(w.wedding_pool * conversionRate * avgOrderValue);
     w.accuracy_pct = (w.is_past && w.est_weekly_revenue > 0)
       ? Math.round((w.actual_weekly_revenue - w.est_weekly_revenue) / w.est_weekly_revenue * 100)
       : null;
@@ -674,8 +678,10 @@ async function apiForecast() {
       type: 'moving_average',
       window_days: WINDOW,
       base_weeks: BASE_WEEKS,
-      revenue_per_wedding: Math.round(revenuePerWedding),
+      conversion_rate: Math.round(conversionRate * 10000) / 100, // % 단위 (소수점 2자리)
+      avg_order_value: Math.round(avgOrderValue),
       base_total_revenue: baseTotalRevenue,
+      base_total_orders: baseTotalOrders,
       base_total_weddings: baseTotalWeddings,
     },
     weeks,
