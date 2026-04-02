@@ -1259,8 +1259,8 @@ function renderForecast(fc) {
   feedback += `. `;
 
   // 모델 한계 설명
-  feedback += `<br><br>⚠️ <strong>모델 한계:</strong> `;
-  feedback += `최근 ${m.base_weeks}주 기준 — 전환율 <strong>${m.conversion_rate}%</strong>(${fmtNum(m.base_total_orders)}건/${fmtNum(m.base_total_weddings)}명), 객단가 <strong>${fmtKRW(m.avg_order_value)}</strong>. `;
+  feedback += `<br><br>⚠️ <strong>산출 기준:</strong> `;
+  feedback += `매출 발생 ${m.base_active_weeks}주(${(m.base_week_labels||[]).join(', ')}) 기준 — 전환율 <strong>${m.conversion_rate}%</strong>(${fmtNum(m.base_total_orders)}건/${fmtNum(m.base_total_weddings)}명), 객단가 <strong>${fmtKRW(m.avg_order_value)}</strong>. `;
   feedback += `전환율 상승 시 → 마케팅/크로스셀 효과, 객단가 상승 시 → 고가 상품 비중 증가로 해석할 수 있습니다. `;
   feedback += `시즌 전환기에는 두 지표가 급변할 수 있으며, 매주 자동 갱신됩니다.`;
 

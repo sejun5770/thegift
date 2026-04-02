@@ -633,10 +633,12 @@ async function apiForecast() {
     w.is_current = actDays > 0 && actDays < 7;
   }
 
-  // 4) 이동평균: 최근 완료 4주 기준 전환율 + 객단가 분리 산출
+  // 4) 이동평균: 매출 발생 주차 기준 전환율 + 객단가 분리 산출
   //    예상매출 = 예식건수 × 전환율 × 객단가
+  //    매출이 0인 주차는 제외 (비시즌 주차가 전환율을 희석시키는 것 방지)
   const completedWeeks = weeks.filter(w => w.is_past);
-  const baseWeeks = completedWeeks.slice(-BASE_WEEKS);
+  const activeWeeks = completedWeeks.filter(w => w.actual_orders > 0);
+  const baseWeeks = activeWeeks.slice(-BASE_WEEKS);
   let baseTotalRevenue = 0, baseTotalOrders = 0, baseTotalWeddings = 0;
   for (const bw of baseWeeks) {
     baseTotalRevenue += bw.actual_weekly_revenue;
@@ -680,6 +682,8 @@ async function apiForecast() {
       base_weeks: BASE_WEEKS,
       conversion_rate: Math.round(conversionRate * 10000) / 100, // % 단위 (소수점 2자리)
       avg_order_value: Math.round(avgOrderValue),
+      base_active_weeks: baseWeeks.length,
+      base_week_labels: baseWeeks.map(w => w.week_no + '주차'),
       base_total_revenue: baseTotalRevenue,
       base_total_orders: baseTotalOrders,
       base_total_weddings: baseTotalWeddings,
