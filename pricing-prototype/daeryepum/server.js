@@ -1310,6 +1310,7 @@ const server = http.createServer(async (req, res) => {
             content: body.content || body.activities || '',
             memo: body.memo || '',
             category: body.category || 'other',
+            sites: body.sites || [],
             tags: body.tags || [],
             metrics: metrics,
           };

@@ -616,13 +616,23 @@ nav a:hover{color:var(--gray-900)}
   <!-- 입력 폼 -->
   <div class="section">
     <div class="card" style="margin-bottom:20px">
+      <input type="hidden" id="wl-edit-id" value="">
       <div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap">
         <div style="flex:0 0 auto">
           <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">날짜</label>
           <input type="date" id="wl-date" class="wl-input" style="padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px;width:150px">
         </div>
         <div style="flex:0 0 auto">
-          <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">카테고리</label>
+          <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">적용 사이트</label>
+          <div style="display:flex;gap:8px;align-items:center;height:36px">
+            <label style="display:flex;align-items:center;gap:3px;font-size:12px;cursor:pointer"><input type="checkbox" class="wl-site" value="바른손카드" checked> 바른손카드</label>
+            <label style="display:flex;align-items:center;gap:3px;font-size:12px;cursor:pointer"><input type="checkbox" class="wl-site" value="바른손몰" checked> 바른손몰</label>
+            <label style="display:flex;align-items:center;gap:3px;font-size:12px;cursor:pointer"><input type="checkbox" class="wl-site" value="바른손M카드"> 바른손M카드</label>
+            <label style="display:flex;align-items:center;gap:3px;font-size:12px;cursor:pointer"><input type="checkbox" class="wl-site" value="디얼디어"> 디얼디어</label>
+          </div>
+        </div>
+        <div style="flex:0 0 auto">
+          <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">카테고리 <span id="wl-auto-cat" style="color:var(--primary);font-size:10px"></span></label>
           <select id="wl-category" style="padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px;width:140px">
             <option value="marketing">마케팅</option>
             <option value="operations">운영</option>
@@ -632,11 +642,14 @@ nav a:hover{color:var(--gray-900)}
             <option value="other">기타</option>
           </select>
         </div>
+      </div>
+      <div style="display:flex;gap:12px;align-items:end;margin-top:10px;flex-wrap:wrap">
         <div style="flex:1;min-width:200px">
           <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">업무 내용</label>
-          <input type="text" id="wl-content" placeholder="오늘의 주요 업무를 입력하세요..." style="padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px;width:100%">
+          <input type="text" id="wl-content" placeholder="오늘의 주요 업무를 입력하세요..." oninput="autoDetectCategory()" style="padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px;width:100%">
         </div>
-        <button class="btn btn-primary" onclick="saveWorklogEntry()" style="white-space:nowrap">💾 저장</button>
+        <button class="btn btn-primary" onclick="saveWorklogEntry()" id="wl-save-btn" style="white-space:nowrap">💾 저장</button>
+        <button class="btn" onclick="cancelWorklogEdit()" id="wl-cancel-btn" style="white-space:nowrap;display:none">취소</button>
       </div>
       <div style="margin-top:10px">
         <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">메모 (선택)</label>
@@ -2397,8 +2410,70 @@ function showToast(msg) {
 // --- Worklog (일지) ---
 const CATEGORY_LABELS = {marketing:'마케팅',operations:'운영',product:'상품관리',cs:'고객응대',planning:'기획',other:'기타'};
 const CATEGORY_COLORS = {marketing:'#2563eb',operations:'#16a34a',product:'#ea580c',cs:'#7c3aed',planning:'#0891b2',other:'#6b7280'};
+const WL_SITES = ['바른손카드','바른손몰','바른손M카드','디얼디어'];
+// 키워드 → 카테고리 자동 매핑
+const CATEGORY_KEYWORDS = {
+  marketing: ['광고','마케팅','SNS','인스타','블로그','키워드','프로모션','이벤트','쿠폰','할인','배너','콘텐츠','캠페인','네이버','카카오','홍보','소재','해시태그','노출','CPC','CPM','ROAS','전환율','리타겟'],
+  operations: ['운영','배송','출고','재고','입고','포장','발송','택배','CS처리','정산','반품','교환','환불','물류','창고'],
+  product: ['상품','신상','등록','가격','원가','디자인','촬영','샘플','제작','소싱','입점','MD','카탈로그','리뉴얼'],
+  cs: ['고객','문의','클레임','전화','응대','리뷰','평점','VOC','불만','상담','답변'],
+  planning: ['기획','분석','보고','회의','전략','제안','리서치','조사','데이터','KPI','목표','계획','프로젝트'],
+};
 let worklogData = [];
 let wlMetricsChart = null;
+
+// 업무 내용 기반 카테고리 자동 감지
+function autoDetectCategory() {
+  const text = document.getElementById('wl-content').value;
+  if (!text || text.length < 2) { document.getElementById('wl-auto-cat').textContent = ''; return; }
+  const scores = {};
+  for (const [cat, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+    scores[cat] = 0;
+    for (const kw of keywords) {
+      if (text.includes(kw)) scores[cat]++;
+    }
+  }
+  const best = Object.entries(scores).sort((a,b) => b[1]-a[1])[0];
+  if (best && best[1] > 0) {
+    document.getElementById('wl-category').value = best[0];
+    document.getElementById('wl-auto-cat').textContent = '(자동감지)';
+  } else {
+    document.getElementById('wl-auto-cat').textContent = '';
+  }
+}
+
+// 수정 모드 진입
+function editWorklogEntry(id) {
+  const entry = worklogData.find(e => e.id === id);
+  if (!entry) return;
+  document.getElementById('wl-edit-id').value = entry.id;
+  document.getElementById('wl-date').value = entry.date;
+  document.getElementById('wl-content').value = entry.content || '';
+  document.getElementById('wl-memo').value = entry.memo || '';
+  document.getElementById('wl-category').value = entry.category || 'other';
+  // 사이트 체크박스 복원
+  document.querySelectorAll('.wl-site').forEach(cb => {
+    cb.checked = entry.sites ? entry.sites.includes(cb.value) : false;
+  });
+  document.getElementById('wl-save-btn').textContent = '✏️ 수정';
+  document.getElementById('wl-cancel-btn').style.display = '';
+  document.getElementById('wl-content').focus();
+}
+
+function cancelWorklogEdit() {
+  document.getElementById('wl-edit-id').value = '';
+  document.getElementById('wl-content').value = '';
+  document.getElementById('wl-memo').value = '';
+  document.getElementById('wl-category').value = 'marketing';
+  document.getElementById('wl-auto-cat').textContent = '';
+  document.querySelectorAll('.wl-site').forEach(cb => { cb.checked = cb.value === '바른손카드' || cb.value === '바른손몰'; });
+  document.getElementById('wl-save-btn').textContent = '💾 저장';
+  document.getElementById('wl-cancel-btn').style.display = 'none';
+}
+
+function getSelectedSites() {
+  return [...document.querySelectorAll('.wl-site:checked')].map(cb => cb.value);
+}
 
 async function loadWorklog() {
   try {
@@ -2416,22 +2491,26 @@ async function loadWorklog() {
 }
 
 async function saveWorklogEntry() {
+  const editId = document.getElementById('wl-edit-id').value;
   const date = document.getElementById('wl-date').value;
   const category = document.getElementById('wl-category').value;
   const content = document.getElementById('wl-content').value.trim();
   const memo = document.getElementById('wl-memo').value.trim();
+  const sites = getSelectedSites();
   if (!date || !content) { showToast('날짜와 업무 내용을 입력하세요'); return; }
+
+  const payload = { date, category, content, memo, sites };
+  if (editId) payload.id = editId;
 
   try {
     const res = await fetch(`${API}/api/worklog`, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ date, category, content, memo })
+      body: JSON.stringify(payload)
     });
     if (!res.ok) throw new Error('저장 실패');
-    document.getElementById('wl-content').value = '';
-    document.getElementById('wl-memo').value = '';
-    showToast('일지가 저장되었습니다');
+    cancelWorklogEdit(); // 폼 초기화
+    showToast(editId ? '일지가 수정되었습니다' : '일지가 저장되었습니다');
     loadWorklog();
   } catch(e) { showToast('저장 실패: ' + e.message); }
 }
@@ -2482,13 +2561,18 @@ function renderWorklogTimeline() {
     entries.forEach(e => {
       const catColor = CATEGORY_COLORS[e.category] || '#6b7280';
       const catLabel = CATEGORY_LABELS[e.category] || e.category;
+      const siteTags = (e.sites && e.sites.length) ? e.sites.map(s => `<span style="font-size:10px;padding:1px 5px;border-radius:4px;background:var(--gray-100);color:var(--gray-500);white-space:nowrap">${s}</span>`).join(' ') : '';
       html += `<div style="display:flex;gap:10px;align-items:start;padding:8px 0;border-top:1px solid var(--gray-100)">
         <span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;background:${catColor}15;color:${catColor};white-space:nowrap;margin-top:2px">${catLabel}</span>
         <div style="flex:1">
           <div style="font-size:13px">${e.content}</div>
+          ${siteTags ? `<div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap">${siteTags}</div>` : ''}
           ${e.memo ? `<div style="font-size:12px;color:var(--gray-500);margin-top:4px">${e.memo}</div>` : ''}
         </div>
-        <button onclick="deleteWorklogEntry('${e.id}')" style="background:none;border:none;cursor:pointer;color:var(--gray-300);font-size:14px;padding:2px" title="삭제">&times;</button>
+        <div style="display:flex;gap:2px">
+          <button onclick="editWorklogEntry('${e.id}')" style="background:none;border:none;cursor:pointer;color:var(--gray-400);font-size:12px;padding:2px" title="수정">✏️</button>
+          <button onclick="deleteWorklogEntry('${e.id}')" style="background:none;border:none;cursor:pointer;color:var(--gray-300);font-size:14px;padding:2px" title="삭제">&times;</button>
+        </div>
       </div>`;
     });
 
