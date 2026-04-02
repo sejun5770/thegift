@@ -177,6 +177,59 @@ const CATEGORY_FILTERS = {
 // D01 category = 답례품 (기본, 대시보드용)
 const D01_FILTER = `c.Card_Div = 'D01'`;
 
+// --- Worklog JSON 파일 스토리지 ---
+const WORKLOG_PATH = path.join(__dirname, 'worklog.json');
+function readWorklog() {
+  try { return JSON.parse(fs.readFileSync(WORKLOG_PATH, 'utf8')); }
+  catch { return { entries: [] }; }
+}
+function saveWorklog(data) {
+  fs.writeFileSync(WORKLOG_PATH, JSON.stringify(data, null, 2), 'utf8');
+}
+
+// 일별 메트릭 스냅샷 (해당 날짜의 주요 지표 캡처)
+async function getDailyMetricsSnapshot(dateStr) {
+  const p = await getPool();
+  const result = await p.request()
+    .input('targetDate', sql.Date, dateStr)
+    .query(`
+      SELECT
+        COUNT(DISTINCT o.order_seq) AS order_count,
+        COUNT(DISTINCT o.member_id) AS member_count,
+        ISNULL(SUM(CAST(oi.card_sale_price AS float)), 0) AS revenue,
+        ISNULL(SUM(oi.order_count), 0) AS total_qty
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+        AND CAST(o.order_date AS date) = @targetDate
+    `);
+  const row = result.recordset[0] || {};
+  // 상위 상품
+  const topProducts = await p.request()
+    .input('targetDate', sql.Date, dateStr)
+    .query(`
+      SELECT TOP 3 c.Card_Name AS product_name,
+             SUM(oi.order_count) AS qty,
+             SUM(CAST(oi.card_sale_price AS float)) AS amount
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+        AND CAST(o.order_date AS date) = @targetDate
+      GROUP BY c.Card_Name
+      ORDER BY SUM(CAST(oi.card_sale_price AS float)) DESC
+    `);
+  return {
+    date: dateStr,
+    order_count: row.order_count || 0,
+    member_count: row.member_count || 0,
+    revenue: row.revenue || 0,
+    total_qty: row.total_qty || 0,
+    top_products: topProducts.recordset || [],
+  };
+}
+
 function getCategoryFilter(category) {
   const cat = CATEGORY_FILTERS[category];
   return cat ? cat.filter : D01_FILTER;
@@ -1010,68 +1063,93 @@ async function apiMarketing() {
     ORDER BY order_count DESC
   `);
 
-  // 6) 재주문 분석
-  // 조건: 동일 member_id가 2건 이상 유효 주문(취소 제외) → 재주문 회원
+  // 6) 재주문 분석 (최소 시간 구간별)
+  // 배송지 분리 주문과 실질적 재주문을 구분하기 위해 시간 기준 적용
+  // 구간: 12시간, 24시간, 48시간, 72시간+ 이후 재주문만 카운트
   // 주문 후 취소 → 재주문은 해당안됨 (취소주문 자체를 제외하므로 자동 충족)
   const reorderResult = await p.request().query(`
-    WITH member_orders AS (
-      SELECT
-        o.member_id,
-        COUNT(DISTINCT o.order_seq) AS order_cnt,
-        MIN(o.order_date) AS first_order_date,
-        MAX(o.order_date) AS last_order_date,
-        SUM(CAST(oi.card_sale_price AS float)) AS total_amount
-      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
-      GROUP BY o.member_id
-    )
-    SELECT
-      COUNT(*) AS total_members,
-      SUM(CASE WHEN order_cnt >= 2 THEN 1 ELSE 0 END) AS reorder_members,
-      SUM(CASE WHEN order_cnt >= 3 THEN 1 ELSE 0 END) AS reorder_3plus,
-      AVG(CASE WHEN order_cnt >= 2 THEN DATEDIFF(day, first_order_date, last_order_date) END) AS avg_reorder_days,
-      AVG(CAST(order_cnt AS FLOAT)) AS avg_orders_per_member,
-      AVG(CASE WHEN order_cnt >= 2 THEN total_amount END) AS avg_reorder_amount,
-      AVG(CASE WHEN order_cnt = 1 THEN total_amount END) AS avg_single_amount
-    FROM member_orders
-  `);
-
-  // 재주문 회원의 시간대별 분포 (첫주문→재주문 간격)
-  const reorderIntervalResult = await p.request().query(`
-    WITH ordered AS (
-      SELECT o.member_id, o.order_seq, o.order_date,
-             ROW_NUMBER() OVER (PARTITION BY o.member_id ORDER BY o.order_date) AS rn
+    WITH distinct_orders AS (
+      SELECT DISTINCT o.member_id, o.order_seq, o.order_date, o.settle_price
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
     ),
+    member_gaps AS (
+      SELECT a.member_id,
+             MIN(DATEDIFF(hour, a.order_date, b.order_date)) AS min_gap_hours
+      FROM distinct_orders a
+      INNER JOIN distinct_orders b ON a.member_id = b.member_id AND b.order_date > a.order_date
+                                      AND a.order_seq != b.order_seq
+      GROUP BY a.member_id
+    ),
+    member_stats AS (
+      SELECT o.member_id,
+             COUNT(DISTINCT o.order_seq) AS order_cnt,
+             MIN(o.order_date) AS first_order_date,
+             MAX(o.order_date) AS last_order_date,
+             SUM(o.settle_price) AS total_amount
+      FROM distinct_orders o
+      GROUP BY o.member_id
+    )
+    SELECT
+      (SELECT COUNT(*) FROM member_stats) AS total_members,
+      SUM(CASE WHEN mg.min_gap_hours >= 12 THEN 1 ELSE 0 END) AS reorder_12h,
+      SUM(CASE WHEN mg.min_gap_hours >= 24 THEN 1 ELSE 0 END) AS reorder_24h,
+      SUM(CASE WHEN mg.min_gap_hours >= 48 THEN 1 ELSE 0 END) AS reorder_48h,
+      SUM(CASE WHEN mg.min_gap_hours >= 72 THEN 1 ELSE 0 END) AS reorder_72h,
+      COUNT(*) AS reorder_any,
+      AVG(mg.min_gap_hours) AS avg_gap_hours,
+      AVG(CASE WHEN mg.min_gap_hours >= 12 THEN ms.total_amount END) AS avg_reorder_amount_12h,
+      (SELECT AVG(total_amount) FROM member_stats WHERE order_cnt = 1) AS avg_single_amount
+    FROM member_gaps mg
+    INNER JOIN member_stats ms ON mg.member_id = ms.member_id
+  `);
+
+  // 재주문 간격 분포 (시간 단위로 세분화)
+  const reorderIntervalResult = await p.request().query(`
+    WITH distinct_orders AS (
+      SELECT DISTINCT o.member_id, o.order_seq, o.order_date
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+    ),
+    ordered AS (
+      SELECT member_id, order_seq, order_date,
+             ROW_NUMBER() OVER (PARTITION BY member_id ORDER BY order_date) AS rn
+      FROM distinct_orders
+    ),
     reorder_gap AS (
       SELECT a.member_id,
-             DATEDIFF(day, a.order_date, b.order_date) AS gap_days
+             DATEDIFF(hour, a.order_date, b.order_date) AS gap_hours
       FROM ordered a
       INNER JOIN ordered b ON a.member_id = b.member_id AND a.rn = 1 AND b.rn = 2
     )
     SELECT
       CASE
-        WHEN gap_days <= 7 THEN '1주 이내'
-        WHEN gap_days <= 30 THEN '1개월 이내'
-        WHEN gap_days <= 90 THEN '3개월 이내'
-        WHEN gap_days <= 180 THEN '6개월 이내'
-        ELSE '6개월 초과'
+        WHEN gap_hours < 12 THEN '12시간 미만 (배송지분리)'
+        WHEN gap_hours < 24 THEN '12~24시간'
+        WHEN gap_hours < 48 THEN '24~48시간'
+        WHEN gap_hours < 72 THEN '48~72시간'
+        WHEN gap_hours < 168 THEN '3일~1주'
+        WHEN gap_hours < 720 THEN '1주~1개월'
+        ELSE '1개월 이상'
       END AS interval_label,
-      COUNT(*) AS cnt
+      COUNT(*) AS cnt,
+      CASE WHEN gap_hours < 12 THEN 0 ELSE 1 END AS is_reorder
     FROM reorder_gap
     GROUP BY CASE
-        WHEN gap_days <= 7 THEN '1주 이내'
-        WHEN gap_days <= 30 THEN '1개월 이내'
-        WHEN gap_days <= 90 THEN '3개월 이내'
-        WHEN gap_days <= 180 THEN '6개월 이내'
-        ELSE '6개월 초과'
-      END
-    ORDER BY MIN(gap_days)
+        WHEN gap_hours < 12 THEN '12시간 미만 (배송지분리)'
+        WHEN gap_hours < 24 THEN '12~24시간'
+        WHEN gap_hours < 48 THEN '24~48시간'
+        WHEN gap_hours < 72 THEN '48~72시간'
+        WHEN gap_hours < 168 THEN '3일~1주'
+        WHEN gap_hours < 720 THEN '1주~1개월'
+        ELSE '1개월 이상'
+      END,
+      CASE WHEN gap_hours < 12 THEN 0 ELSE 1 END
+    ORDER BY MIN(gap_hours)
   `);
 
   return {
@@ -1184,6 +1262,59 @@ const server = http.createServer(async (req, res) => {
         data = await apiOrderFiles(parsed.query);
       } else if (pathname === '/api/categories') {
         data = Object.entries(CATEGORY_FILTERS).map(([key, val]) => ({ key, label: val.label }));
+      } else if (pathname === '/api/worklog') {
+        if (req.method === 'GET') {
+          const wl = readWorklog();
+          data = wl.entries.sort((a, b) => b.date.localeCompare(a.date));
+        } else if (req.method === 'POST') {
+          const body = await new Promise((resolve) => {
+            let raw = '';
+            req.on('data', c => raw += c);
+            req.on('end', () => resolve(JSON.parse(raw)));
+          });
+          const wl = readWorklog();
+          const existing = wl.entries.findIndex(e => e.id === body.id);
+          // 메트릭 스냅샷 자동 캡처
+          let metrics = body.metrics_snapshot;
+          if (!metrics || !metrics.order_count) {
+            try { metrics = await getDailyMetricsSnapshot(body.date); } catch(e) { metrics = { error: e.message }; }
+          }
+          const entry = {
+            id: body.id || `${body.date}_${Date.now()}`,
+            date: body.date,
+            author: body.author || session?.email || 'unknown',
+            author_name: body.author_name || session?.name || '',
+            created_at: existing >= 0 ? wl.entries[existing].created_at : new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            content: body.content || body.activities || '',
+            memo: body.memo || '',
+            category: body.category || 'other',
+            tags: body.tags || [],
+            metrics: metrics,
+          };
+          if (existing >= 0) wl.entries[existing] = entry;
+          else wl.entries.push(entry);
+          saveWorklog(wl);
+          data = entry;
+        } else if (req.method === 'DELETE') {
+          let id = parsed.query.id;
+          if (!id) {
+            const body = await new Promise((resolve) => {
+              let raw = '';
+              req.on('data', c => raw += c);
+              req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+            });
+            id = body.id;
+          }
+          const wl = readWorklog();
+          wl.entries = wl.entries.filter(e => e.id !== id);
+          saveWorklog(wl);
+          data = { ok: true };
+        }
+      } else if (pathname === '/api/worklog/metrics') {
+        const dateStr = parsed.query.date;
+        if (!dateStr) { data = { error: 'date required' }; }
+        else { data = await getDailyMetricsSnapshot(dateStr); }
       } else {
         res.writeHead(404);
         res.end(JSON.stringify({ error: 'Not found' }));
