@@ -9,11 +9,16 @@ RUN npm init -y && npm install mssql
 COPY pricing-prototype/daeryepum/server.js ./
 COPY pricing-prototype/daeryepum/index.html ./
 
+RUN mkdir -p /app/data
+
 RUN addgroup --system --gid 1001 appgroup
 RUN adduser --system --uid 1001 appuser
 RUN chown -R appuser:appgroup /app
 
 USER appuser
+
+# Docker Manager 볼륨 마운트 경로: /app/data (배포 시 데이터 보존)
+VOLUME /app/data
 
 EXPOSE 3000
 

@@ -178,7 +178,9 @@ const CATEGORY_FILTERS = {
 const D01_FILTER = `c.Card_Div = 'D01'`;
 
 // --- Worklog JSON 파일 스토리지 ---
-const WORKLOG_PATH = path.join(__dirname, 'worklog.json');
+// /app/data 디렉토리는 Docker Manager 볼륨 마운트 경로 (배포 시 데이터 보존)
+const DATA_DIR = process.env.DATA_DIR || (process.env.NODE_ENV === 'production' ? '/app/data' : __dirname);
+const WORKLOG_PATH = path.join(DATA_DIR, 'worklog.json');
 function readWorklog() {
   try { return JSON.parse(fs.readFileSync(WORKLOG_PATH, 'utf8')); }
   catch { return { entries: [] }; }
