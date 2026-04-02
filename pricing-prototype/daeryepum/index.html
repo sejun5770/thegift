@@ -1590,14 +1590,17 @@ function renderConversionTable() {
   const el = document.getElementById('conversion-table-view');
   if (!_conversionData) return;
   const weeks = _conversionData.weeks;
-  el.innerHTML = `<table class="mk-table">
-    <thead><tr><th>주차</th><th class="num">예식수</th><th class="num">답례품 주문</th><th class="num">전환율</th></tr></thead>
+  const sites = _conversionData.sites || ['바른손카드','바른손몰','디얼디어','기타'];
+  const activeSites = sites.filter(s => weeks.some(w => w.wedding_by_site && w.wedding_by_site[s] > 0));
+  el.innerHTML = `<div style="overflow-x:auto"><table class="mk-table">
+    <thead><tr><th>주차</th>${activeSites.map(s => `<th class="num" style="font-size:10px">${s}</th>`).join('')}<th class="num" style="font-weight:700">예식합계</th><th class="num">답례품</th><th class="num">전환율</th></tr></thead>
     <tbody>${weeks.map(w => `<tr>
       <td>${w.week_label}</td>
-      <td class="num">${fmtNum(w.wedding_count)}</td>
+      ${activeSites.map(s => `<td class="num" style="color:${SITE_COLORS[s]||'#666'}">${fmtNum((w.wedding_by_site && w.wedding_by_site[s]) || 0)}</td>`).join('')}
+      <td class="num" style="font-weight:700">${fmtNum(w.wedding_count)}</td>
       <td class="num">${fmtNum(w.order_count)}</td>
       <td class="num">${w.conversion_pct}%</td>
-    </tr>`).join('')}</tbody></table>`;
+    </tr>`).join('')}</tbody></table></div>`;
 }
 
 function renderReorderTable() {
@@ -1666,38 +1669,57 @@ function renderSampleTable() {
 
 // --- 전환율 차트 ---
 let conversionChart = null;
+const SITE_COLORS = {'바른손카드':'#3b82f6','바른손몰':'#10b981','디얼디어':'#f59e0b','기타':'#a1a1aa'};
 function renderConversion(data) {
   _conversionData = data;
   const weeks = data.weeks;
+  const sites = data.sites || ['바른손카드','바른손몰','디얼디어','기타'];
   const labels = weeks.map(w => w.week_label);
   if (conversionChart) conversionChart.destroy();
+
+  // 사이트별 예식수 스택 바 + 답례품 주문 바 + 전환율 라인
+  const siteDatasets = sites.map(site => ({
+    label: site + ' 예식',
+    data: weeks.map(w => (w.wedding_by_site && w.wedding_by_site[site]) || 0),
+    backgroundColor: SITE_COLORS[site] || '#a1a1aa',
+    borderRadius: 0,
+    yAxisID: 'y',
+    stack: 'wedding',
+    order: 3,
+  }));
+
   conversionChart = new Chart(document.getElementById('conversionChart'), {
     type: 'bar',
     data: {
       labels,
       datasets: [
-        { label: '예식수', data: weeks.map(w => w.wedding_count), backgroundColor: '#93c5fd', borderRadius: 4, yAxisID: 'y' },
-        { label: '답례품 주문수', data: weeks.map(w => w.order_count), backgroundColor: '#3b82f6', borderRadius: 4, yAxisID: 'y' },
-        { label: '전환율(%)', data: weeks.map(w => w.conversion_pct), type: 'line', borderColor: '#f97316', backgroundColor: '#f97316', pointRadius: 4, pointBackgroundColor: '#f97316', borderWidth: 2, yAxisID: 'y1', tension: 0.3 },
+        ...siteDatasets,
+        { label: '답례품 주문수', data: weeks.map(w => w.order_count), backgroundColor: '#f97316', borderRadius: 4, yAxisID: 'y', stack: 'order', order: 2 },
+        { label: '전환율(%)', data: weeks.map(w => w.conversion_pct), type: 'line', borderColor: '#dc2626', backgroundColor: '#dc2626', pointRadius: 4, pointBackgroundColor: '#dc2626', borderWidth: 2, yAxisID: 'y1', tension: 0.3, order: 1 },
       ]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'bottom', labels: { font: { size: 11 }, usePointStyle: true } },
+        legend: { position: 'bottom', labels: { font: { size: 10 }, usePointStyle: true, boxWidth: 12 } },
         tooltip: {
           callbacks: {
             label: function(ctx) {
               if (ctx.dataset.label === '전환율(%)') return ctx.dataset.label + ': ' + ctx.raw + '%';
               return ctx.dataset.label + ': ' + ctx.raw.toLocaleString() + '건';
+            },
+            afterBody: function(tooltipItems) {
+              const idx = tooltipItems[0].dataIndex;
+              const w = weeks[idx];
+              return ['합계 예식: ' + (w.wedding_count || 0).toLocaleString() + '건'];
             }
           }
         }
       },
       scales: {
-        x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
-        y: { beginAtZero: true, position: 'left', title: { display: true, text: '건수' } },
+        x: { ticks: { font: { size: 10 }, maxRotation: 45 }, stacked: true },
+        y: { beginAtZero: true, position: 'left', title: { display: true, text: '건수' }, stacked: true },
         y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '전환율(%)' } }
       }
     }
@@ -1708,7 +1730,12 @@ function renderConversion(data) {
   const avgConv = recent.length ? Math.round(recent.reduce((s,w) => s + w.conversion_pct, 0) / recent.length * 10) / 10 : 0;
   const totalWed = recent.reduce((s,w) => s + w.wedding_count, 0);
   const totalOrd = recent.reduce((s,w) => s + w.order_count, 0);
-  let fb = `최근 4주 평균 전환율 <strong>${avgConv}%</strong> (예식 ${fmtNum(totalWed)}건 중 답례품 주문 ${fmtNum(totalOrd)}건). `;
+  // 사이트별 합계
+  const siteTotals = {};
+  sites.forEach(s => { siteTotals[s] = recent.reduce((sum, w) => sum + ((w.wedding_by_site && w.wedding_by_site[s]) || 0), 0); });
+  const siteBreakdown = sites.filter(s => siteTotals[s] > 0).map(s => `${s} ${fmtNum(siteTotals[s])}`).join(' / ');
+  let fb = `최근 4주 평균 전환율 <strong>${avgConv}%</strong> (예식 ${fmtNum(totalWed)}건 → 답례품 ${fmtNum(totalOrd)}건).<br>`;
+  fb += `<span style="font-size:11px;color:var(--gray-500)">예식 구성: ${siteBreakdown}</span><br>`;
   if (avgConv < 1) fb += '전환율이 낮습니다. 청첩장 주문 후 답례품 추천 메시지 등 크로스셀 강화가 필요합니다.';
   else if (avgConv < 3) fb += '전환율이 보통 수준입니다. 예식 2~3주 전 타겟 마케팅이 효과적일 수 있습니다.';
   else fb += '전환율이 양호합니다. 현재 마케팅 전략이 잘 작동하고 있습니다.';

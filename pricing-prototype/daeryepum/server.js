@@ -753,25 +753,30 @@ async function apiConversion() {
   const startDate = fmtDate(addDays(thisSunday, -7 * 11));
   const endDate = fmtDate(addDays(thisSunday, 7)); // 이번주 토요일까지
 
-  // 1) 주차별 예식수 (wedding date 기준, 중복 member 제거)
+  // 1) 주차별 예식수 (wedding date 기준, 사이트별 분리, 중복 member 제거)
+  // COMPANY.SALES_GUBUN → SiteInfo.SiteCode로 사이트 분류
   const weddings = await p.request()
     .input('ws', sql.VarChar, startDate)
     .input('we', sql.VarChar, endDate)
     .query(`
       SELECT
         wd,
+        site_name,
         COUNT(*) AS wedding_count
       FROM (
         SELECT DISTINCT co.member_id,
-          CONVERT(varchar(10), TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date), 120) AS wd
+          CONVERT(varchar(10), TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date), 120) AS wd,
+          ISNULL(si.SiteName, '기타') AS site_name
         FROM custom_order co WITH (NOLOCK)
         INNER JOIN custom_order_WeddInfo w WITH (NOLOCK) ON co.order_seq = w.order_seq
+        LEFT JOIN COMPANY comp WITH (NOLOCK) ON co.company_Seq = comp.COMPANY_SEQ
+        LEFT JOIN SiteInfo si WITH (NOLOCK) ON comp.SALES_GUBUN = si.SiteCode
         WHERE co.status_seq >= 1
           AND w.event_year IS NOT NULL AND LEN(w.event_year) = 4
           AND TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) >= @ws
           AND TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) < @we
       ) t
-      GROUP BY wd
+      GROUP BY wd, site_name
       ORDER BY wd
     `);
 
@@ -799,9 +804,16 @@ async function apiConversion() {
       GROUP BY CONVERT(varchar(10), co.order_date, 120)
     `);
 
-  // 일별 → 주차별 집계
+  // 일별 → 주차별 집계 (사이트별)
+  // weddingMap: { 'YYYY-MM-DD': { total: N, '바른손카드': N, '바른손몰': N, ... } }
+  const MAIN_SITES = ['바른손카드', '바른손몰', '디얼디어'];
   const weddingMap = {};
-  weddings.recordset.forEach(r => { weddingMap[r.wd] = (weddingMap[r.wd]||0) + r.wedding_count; });
+  weddings.recordset.forEach(r => {
+    if (!weddingMap[r.wd]) weddingMap[r.wd] = { total: 0 };
+    weddingMap[r.wd].total += r.wedding_count;
+    const site = MAIN_SITES.includes(r.site_name) ? r.site_name : '기타';
+    weddingMap[r.wd][site] = (weddingMap[r.wd][site] || 0) + r.wedding_count;
+  });
   const orderMap = {};
   orders.recordset.forEach(r => { orderMap[r.od] = (orderMap[r.od]||0) + r.order_count; });
 
@@ -811,20 +823,29 @@ async function apiConversion() {
     const saturday = addDays(sunday, 6);
     const weekLabel = `${fmtDate(sunday).slice(5)}~${fmtDate(saturday).slice(5)}`;
     let weddCount = 0, ordCount = 0;
+    const bySite = {};
+    for (const s of [...MAIN_SITES, '기타']) bySite[s] = 0;
     for (let d = 0; d < 7; d++) {
       const key = fmtDate(addDays(sunday, d));
-      weddCount += weddingMap[key] || 0;
+      const dayData = weddingMap[key];
+      if (dayData) {
+        weddCount += dayData.total;
+        for (const s of Object.keys(bySite)) {
+          bySite[s] += dayData[s] || 0;
+        }
+      }
       ordCount += orderMap[key] || 0;
     }
     weeks.push({
       week_label: weekLabel,
       week_start: fmtDate(sunday),
       wedding_count: weddCount,
+      wedding_by_site: bySite,
       order_count: ordCount,
       conversion_pct: weddCount > 0 ? Math.round(ordCount / weddCount * 1000) / 10 : 0,
     });
   }
-  return { weeks };
+  return { weeks, sites: [...MAIN_SITES, '기타'] };
 }
 
 // === 샘플 주문 (수량=1) 일별 추이 ===
