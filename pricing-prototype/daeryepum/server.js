@@ -13,6 +13,7 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const ALLOWED_DOMAIN = 'barunn.net';
 const SESSION_MAX_AGE = 24 * 60 * 60 * 1000; // 24시간
+const EXPORT_API_KEY = process.env.EXPORT_API_KEY || '';
 
 // --- Session Store ---
 const sessions = new Map();
@@ -46,6 +47,13 @@ function parseCookies(req) {
     if (key) cookies[key.trim()] = decodeURIComponent(val.join('='));
   });
   return cookies;
+}
+
+// --- Export API key validation ---
+function validateApiKey(req) {
+  if (!EXPORT_API_KEY) return false;
+  const authHeader = req.headers['authorization'] || '';
+  return authHeader.startsWith('Bearer ') && authHeader.slice(7) === EXPORT_API_KEY;
 }
 
 // --- Google JWT verification (no npm) ---
@@ -1264,6 +1272,26 @@ const server = http.createServer(async (req, res) => {
     } else {
       res.writeHead(401, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Not authenticated' }));
+    }
+    return;
+  }
+
+  // --- Export API (API key auth, no session required) ---
+  if (pathname === '/api/export/orders' && req.method === 'GET') {
+    if (!validateApiKey(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid or missing API key' }));
+      return;
+    }
+    try {
+      const data = await apiOrders(parsed.query);
+      const filtered = data.filter(r => r.status_seq !== 3 && r.status_seq !== 5);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(filtered));
+    } catch (err) {
+      console.error('Export API Error:', err);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
     }
     return;
   }
