@@ -730,14 +730,26 @@ let dashViewMode = 'card';
 let tableTabMode = 'daily';
 let currentCategory = 'daeryepum';
 
-// --- 수집완료 상태 관리 (localStorage) ---
-const COLLECTED_KEY = 'daeryepum_collected';
-function getCollectedSet() {
-  try { return new Set(JSON.parse(localStorage.getItem(COLLECTED_KEY) || '[]')); }
-  catch { return new Set(); }
+// --- 수집완료 상태 관리 (서버 공유) ---
+let _collectedSet = new Set();
+let _collectedLoaded = false;
+function getCollectedSet() { return _collectedSet; }
+async function loadCollectedFromServer() {
+  try {
+    const res = await fetch(API + '/api/collected');
+    const data = await res.json();
+    _collectedSet = new Set((data.order_seqs || []).map(String));
+    _collectedLoaded = true;
+  } catch(e) { console.warn('수집완료 로드 실패:', e); }
 }
-function saveCollectedSet(s) {
-  localStorage.setItem(COLLECTED_KEY, JSON.stringify([...s]));
+async function saveCollectedToServer(addSeqs, removeSeqs) {
+  try {
+    await fetch(API + '/api/collected', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ add: addSeqs || [], remove: removeSeqs || [] })
+    });
+  } catch(e) { console.warn('수집완료 저장 실패:', e); }
 }
 // 주문상태 매핑 (bar_shop1 status_seq)
 const STATUS_MAP = {
@@ -780,16 +792,18 @@ function init() {
   document.getElementById('chart-end').value = end;
 
   buildColSelector();
-  loadDashboard();
-  loadChart();
-  loadOrders();
+  loadCollectedFromServer().then(() => {
+    loadDashboard();
+    loadChart();
+    loadOrders();
+  });
 
   // URL hash 기반 페이지 전환
   const hash = location.hash.replace('#', '') || 'dashboard';
   if (['dashboard', 'orders', 'sns', 'worklog'].includes(hash)) showPage(hash);
 }
 
-function fmt(d) { return d.toISOString().slice(0,10); }
+function fmt(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function fmtKRW(n) { return (n||0).toLocaleString('ko-KR') + '원'; }
 function fmtNum(n) { return (n||0).toLocaleString('ko-KR'); }
 function pctChange(cur,prev) { if(!prev) return cur > 0 ? 100 : 0; return Math.round((cur-prev)/prev*100); }
@@ -932,23 +946,23 @@ function getSelectedRows() {
 }
 
 // --- 수집완료 마킹 ---
-function markCollected() {
+async function markCollected() {
   const rows = getCheckedRows();
   if (!rows.length) { showToast('선택된 주문이 없습니다'); return; }
-  const collected = getCollectedSet();
-  rows.forEach(r => collected.add(String(r.order_seq)));
-  saveCollectedSet(collected);
+  const seqs = rows.map(r => String(r.order_seq));
+  seqs.forEach(s => _collectedSet.add(s));
   renderOrderTable();
+  await saveCollectedToServer(seqs, []);
   showToast(`${rows.length}건 수집완료 처리`);
 }
 
-function unmarkCollected() {
+async function unmarkCollected() {
   const rows = getCheckedRows();
   if (!rows.length) { showToast('선택된 주문이 없습니다'); return; }
-  const collected = getCollectedSet();
-  rows.forEach(r => collected.delete(String(r.order_seq)));
-  saveCollectedSet(collected);
+  const seqs = rows.map(r => String(r.order_seq));
+  seqs.forEach(s => _collectedSet.delete(s));
   renderOrderTable();
+  await saveCollectedToServer([], seqs);
   showToast(`${rows.length}건 수집해제 처리`);
 }
 
@@ -2204,7 +2218,9 @@ function renderDailyTable(data, topProducts) {
   const productRows = topProducts.map((p, i) => {
     const pCells = days.map(d => {
       const v = dayMap[d].products[p] || {amount:0,qty:0};
-      return `<td class="num" style="font-size:12px">${v.amount ? fmtKRW(v.amount) : '<span style="color:var(--gray-200)">-</span>'}</td>`;
+      const dayTotal = dayMap[d].amount || 0;
+      const pct = dayTotal > 0 ? Math.round(v.amount / dayTotal * 1000) / 10 : 0;
+      return `<td class="num" style="font-size:12px">${v.amount ? fmtKRW(v.amount)+' <span style="color:var(--gray-500);font-size:10px">('+pct+'%, '+fmtNum(v.qty)+'개)</span>' : '<span style="color:var(--gray-200)">-</span>'}</td>`;
     }).join('');
     const pTotal = days.reduce((s,d)=>s+((dayMap[d].products[p]||{amount:0}).amount||0),0);
     const pTotalQty = days.reduce((s,d)=>s+((dayMap[d].products[p]||{qty:0}).qty||0),0);
@@ -2312,7 +2328,9 @@ function renderWeeklyTable(data, topProducts) {
   const productRows = topProducts.map((p, i) => {
     const pCells = weeks.map(w => {
       const v = weekMap[w].products[p] || {amount:0,qty:0};
-      return `<td class="num" style="font-size:12px">${v.amount ? fmtKRW(v.amount) : '<span style="color:var(--gray-200)">-</span>'}</td>`;
+      const wkTotal = weekMap[w].amount || 0;
+      const pct = wkTotal > 0 ? Math.round(v.amount / wkTotal * 1000) / 10 : 0;
+      return `<td class="num" style="font-size:12px">${v.amount ? fmtKRW(v.amount)+' <span style="color:var(--gray-500);font-size:10px">('+pct+'%, '+fmtNum(v.qty)+'개)</span>' : '<span style="color:var(--gray-200)">-</span>'}</td>`;
     }).join('');
     const pTotal = weeks.reduce((s,w)=>s+((weekMap[w].products[p]||{amount:0}).amount||0), 0);
     const pTotalQty = weeks.reduce((s,w)=>s+((weekMap[w].products[p]||{qty:0}).qty||0), 0);

@@ -185,7 +185,7 @@ const CATEGORY_FILTERS = {
 // D01 category = 답례품 (기본, 대시보드용)
 const D01_FILTER = `c.Card_Div = 'D01'`;
 
-// --- Worklog JSON 파일 스토리지 ---
+// --- JSON 파일 스토리지 ---
 // /app/data 디렉토리는 Docker Manager 볼륨 마운트 경로 (배포 시 데이터 보존)
 const DATA_DIR = process.env.DATA_DIR || (process.env.NODE_ENV === 'production' ? '/app/data' : __dirname);
 const WORKLOG_PATH = path.join(DATA_DIR, 'worklog.json');
@@ -195,6 +195,16 @@ function readWorklog() {
 }
 function saveWorklog(data) {
   fs.writeFileSync(WORKLOG_PATH, JSON.stringify(data, null, 2), 'utf8');
+}
+
+// --- 수집완료 상태 (공유 저장소) ---
+const COLLECTED_PATH = path.join(DATA_DIR, 'collected.json');
+function readCollected() {
+  try { return JSON.parse(fs.readFileSync(COLLECTED_PATH, 'utf8')); }
+  catch { return { order_seqs: [], updated_by: '', updated_at: '' }; }
+}
+function saveCollected(data) {
+  fs.writeFileSync(COLLECTED_PATH, JSON.stringify(data, null, 2), 'utf8');
 }
 
 // 일별 메트릭 스냅샷 (해당 날짜의 주요 지표 캡처)
@@ -1377,6 +1387,25 @@ const server = http.createServer(async (req, res) => {
           wl.entries = wl.entries.filter(e => e.id !== id);
           saveWorklog(wl);
           data = { ok: true };
+        }
+      } else if (pathname === '/api/collected') {
+        if (req.method === 'GET') {
+          data = readCollected();
+        } else if (req.method === 'POST') {
+          const body = await new Promise((resolve) => {
+            let raw = '';
+            req.on('data', c => raw += c);
+            req.on('end', () => resolve(JSON.parse(raw)));
+          });
+          const col = readCollected();
+          const set = new Set(col.order_seqs);
+          (body.add || []).forEach(seq => set.add(String(seq)));
+          (body.remove || []).forEach(seq => set.delete(String(seq)));
+          col.order_seqs = [...set];
+          col.updated_by = session?.email || 'unknown';
+          col.updated_at = new Date().toISOString();
+          saveCollected(col);
+          data = col;
         }
       } else if (pathname === '/api/worklog/metrics') {
         const dateStr = parsed.query.date;
