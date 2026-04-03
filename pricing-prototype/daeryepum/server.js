@@ -417,7 +417,7 @@ async function apiDashboardComparison() {
       .query(`
         SELECT
           COUNT(DISTINCT o.order_seq) AS order_count,
-          ISNULL((SELECT SUM(t.settle_price) FROM (SELECT DISTINCT o2.order_seq, o2.settle_price FROM CUSTOM_ETC_ORDER o2 WITH (NOLOCK) INNER JOIN CUSTOM_ETC_ORDER_ITEM oi2 WITH (NOLOCK) ON o2.order_seq = oi2.order_seq INNER JOIN S2_Card c2 WITH (NOLOCK) ON oi2.card_seq = c2.Card_Seq WHERE ${D01_FILTER.replace(/c\./g,'c2.')} AND o2.order_date >= @s AND o2.order_date < @e AND o2.status_seq >= 1 AND o2.status_seq NOT IN (3, 5)) t),0) AS total_amount,
+          ISNULL(SUM(oi.card_sale_price),0) AS total_amount,
           ISNULL(SUM(oi.order_count),0) AS total_qty
         FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
         INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
@@ -430,7 +430,7 @@ async function apiDashboardComparison() {
       .query(`
         SELECT
           COUNT(DISTINCT co.order_seq) AS order_count,
-          ISNULL((SELECT SUM(t.settle_price) FROM (SELECT DISTINCT co2.order_seq, co2.settle_price FROM custom_order co2 WITH (NOLOCK) INNER JOIN custom_order_item coi2 WITH (NOLOCK) ON co2.order_seq = coi2.order_seq INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq WHERE ${D01_FILTER.replace(/c\./g,'c2.')} AND co2.order_date >= @s AND co2.order_date < @e AND co2.status_seq >= 1 AND co2.status_seq NOT IN (3, 5)) t),0) AS total_amount,
+          ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count),0) AS total_amount,
           ISNULL(SUM(coi.item_count),0) AS total_qty
         FROM custom_order co WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
