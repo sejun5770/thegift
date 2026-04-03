@@ -792,7 +792,7 @@ function init() {
   document.getElementById('chart-end').value = end;
 
   buildColSelector();
-  loadCollectedFromServer().then(() => {
+  loadCollectedFromServer().catch(() => {}).finally(() => {
     loadDashboard();
     loadChart();
     loadOrders();
