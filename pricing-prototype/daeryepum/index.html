@@ -2142,8 +2142,9 @@ function renderDailyTable(data, topProducts) {
     dayMap[day].amount += r.total_amount||0;
     dayMap[day].qty += r.total_qty||0;
     dayMap[day].orders += r.order_count||0;
-    if (!dayMap[day].products[name]) dayMap[day].products[name] = 0;
-    dayMap[day].products[name] += r.total_amount||0;
+    if (!dayMap[day].products[name]) dayMap[day].products[name] = {amount:0, qty:0};
+    dayMap[day].products[name].amount += r.total_amount||0;
+    dayMap[day].products[name].qty += r.total_qty||0;
   });
   // 날짜 오름차순 (왼쪽=오래된 날짜, 오른쪽=최신)
   const days = Object.keys(dayMap).sort();
@@ -2202,17 +2203,18 @@ function renderDailyTable(data, topProducts) {
   // 상품별 행
   const productRows = topProducts.map((p, i) => {
     const pCells = days.map(d => {
-      const v = dayMap[d].products[p] || 0;
-      return `<td class="num" style="font-size:12px">${v ? fmtKRW(v) : '<span style="color:var(--gray-200)">-</span>'}</td>`;
+      const v = dayMap[d].products[p] || {amount:0,qty:0};
+      return `<td class="num" style="font-size:12px">${v.amount ? fmtKRW(v.amount) : '<span style="color:var(--gray-200)">-</span>'}</td>`;
     }).join('');
-    const pTotal = days.reduce((s,d)=>s+(dayMap[d].products[p]||0),0);
+    const pTotal = days.reduce((s,d)=>s+((dayMap[d].products[p]||{amount:0}).amount||0),0);
+    const pTotalQty = days.reduce((s,d)=>s+((dayMap[d].products[p]||{qty:0}).qty||0),0);
     const pPct = totalAmt > 0 ? Math.round(pTotal / totalAmt * 1000) / 10 : 0;
     const label = p.length > 16 ? p.slice(0,16)+'…' : p;
     const bg = i % 2 === 0 ? '#fff' : '#fafafa';
     return `<tr>
       <td style="${STICKY}background:${bg};font-size:12px;color:var(--gray-700);padding-left:16px;white-space:nowrap">${label}</td>
       ${pCells}
-      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${pTotal ? fmtKRW(pTotal)+' <span style="color:var(--gray-500)">('+pPct+'%)</span>' : '-'}</td>
+      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${pTotal ? fmtKRW(pTotal)+' <span style="color:var(--gray-500)">('+pPct+'%, '+fmtNum(pTotalQty)+'개)</span>' : '-'}</td>
     </tr>`;
   }).join('');
 
@@ -2236,8 +2238,9 @@ function renderWeeklyTable(data, topProducts) {
     weekMap[wk].amount += r.total_amount||0;
     weekMap[wk].qty += r.total_qty||0;
     weekMap[wk].orders += r.order_count||0;
-    if (!weekMap[wk].products[name]) weekMap[wk].products[name] = 0;
-    weekMap[wk].products[name] += r.total_amount||0;
+    if (!weekMap[wk].products[name]) weekMap[wk].products[name] = {amount:0, qty:0};
+    weekMap[wk].products[name].amount += r.total_amount||0;
+    weekMap[wk].products[name].qty += r.total_qty||0;
   });
   // 주차 오름차순 (왼쪽=오래된 주, 오른쪽=최신)
   const weeks = Object.keys(weekMap).sort();
@@ -2308,17 +2311,18 @@ function renderWeeklyTable(data, topProducts) {
 
   const productRows = topProducts.map((p, i) => {
     const pCells = weeks.map(w => {
-      const v = weekMap[w].products[p] || 0;
-      return `<td class="num" style="font-size:12px">${v ? fmtKRW(v) : '<span style="color:var(--gray-200)">-</span>'}</td>`;
+      const v = weekMap[w].products[p] || {amount:0,qty:0};
+      return `<td class="num" style="font-size:12px">${v.amount ? fmtKRW(v.amount) : '<span style="color:var(--gray-200)">-</span>'}</td>`;
     }).join('');
-    const pTotal = weeks.reduce((s,w)=>s+(weekMap[w].products[p]||0), 0);
+    const pTotal = weeks.reduce((s,w)=>s+((weekMap[w].products[p]||{amount:0}).amount||0), 0);
+    const pTotalQty = weeks.reduce((s,w)=>s+((weekMap[w].products[p]||{qty:0}).qty||0), 0);
     const pPct = totalAmt > 0 ? Math.round(pTotal / totalAmt * 1000) / 10 : 0;
     const label = p.length > 16 ? p.slice(0,16)+'…' : p;
     const bg = i % 2 === 0 ? '#fff' : '#fafafa';
     return `<tr>
       <td style="${STICKY}background:${bg};font-size:12px;color:var(--gray-700);padding-left:16px;white-space:nowrap">${label}</td>
       ${pCells}
-      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${pTotal ? fmtKRW(pTotal)+' <span style="color:var(--gray-500)">('+pPct+'%)</span>' : '-'}</td>
+      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${pTotal ? fmtKRW(pTotal)+' <span style="color:var(--gray-500)">('+pPct+'%, '+fmtNum(pTotalQty)+'개)</span>' : '-'}</td>
     </tr>`;
   }).join('');
 
