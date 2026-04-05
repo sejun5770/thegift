@@ -423,40 +423,59 @@ async function apiDashboardComparison() {
   const dayNames = ['일','월','화','수','목','금','토'];
   const todayDow = dayNames[today().getDay()];
 
-  // 각 기간별 ETC+CARD 합산 헬퍼
+  // 각 기간별 ETC+CARD 합산 헬퍼 (사이트별 분리 포함)
   async function getPeriodTotal(startStr, endStr) {
     const r = await p.request()
       .input('s', sql.VarChar, startStr)
       .input('e', sql.VarChar, endStr)
       .query(`
         SELECT
+          ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
           COUNT(DISTINCT o.order_seq) AS order_count,
           ISNULL(SUM(CAST(oi.card_sale_price AS float) * oi.order_count),0) AS total_amount,
           ISNULL(SUM(oi.order_count),0) AS total_qty
         FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
         INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+        LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
         WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+        GROUP BY ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
       `);
     const r2 = await p.request()
       .input('s', sql.VarChar, startStr)
       .input('e', sql.VarChar, endStr)
       .query(`
         SELECT
+          ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
           COUNT(DISTINCT co.order_seq) AS order_count,
           ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count),0) AS total_amount,
           ISNULL(SUM(coi.item_count),0) AS total_qty
         FROM custom_order co WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+        LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
         WHERE ${D01_FILTER} AND co.order_date >= @s AND co.order_date < @e AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
+        GROUP BY ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR))
       `);
-    const a = r.recordset[0] || {};
-    const b = r2.recordset[0] || {};
+    // 사이트별 합산
+    const siteMap = {};
+    for (const row of [...r.recordset, ...r2.recordset]) {
+      const sn = row.site_name || '기타';
+      if (!siteMap[sn]) siteMap[sn] = { order_count:0, total_amount:0, total_qty:0 };
+      siteMap[sn].order_count += row.order_count||0;
+      siteMap[sn].total_amount += row.total_amount||0;
+      siteMap[sn].total_qty += row.total_qty||0;
+    }
+    // 전체 합계
+    let order_count=0, total_amount=0, total_qty=0;
+    for (const v of Object.values(siteMap)) {
+      order_count += v.order_count;
+      total_amount += v.total_amount;
+      total_qty += v.total_qty;
+    }
     return {
-      order_count: (a.order_count||0) + (b.order_count||0),
-      total_amount: (a.total_amount||0) + (b.total_amount||0),
-      total_qty: (a.total_qty||0) + (b.total_qty||0),
+      order_count, total_amount, total_qty,
+      by_site: siteMap,
     };
   }
 
@@ -492,14 +511,16 @@ async function apiDashboardSummary(query) {
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
         CONVERT(varchar(10), o.order_date, 120) AS order_day,
+        ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
         COUNT(DISTINCT o.order_seq) AS order_count,
         SUM(oi.order_count) AS total_qty,
         SUM(CAST(oi.card_sale_price AS float) * oi.order_count) AS total_amount
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
       WHERE ${D01_FILTER} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
-      GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), o.order_date, 120)
+      GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
 
       UNION ALL
 
@@ -507,14 +528,16 @@ async function apiDashboardSummary(query) {
         c.Card_Name,
         c.Card_Code,
         CONVERT(varchar(10), co.order_date, 120) AS order_day,
+        ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
         COUNT(DISTINCT co.order_seq),
         SUM(coi.item_count),
         SUM(CAST(coi.item_sale_price AS float) * coi.item_count)
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
       WHERE ${D01_FILTER} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
-      GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), co.order_date, 120)
+      GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR))
 
       ORDER BY order_day DESC, total_amount DESC
     `);

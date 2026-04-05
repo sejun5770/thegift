@@ -201,7 +201,7 @@ nav a:hover{color:var(--gray-900)}
   <div id="dash-card-view">
   <!-- Summary Cards -->
   <div class="card-grid card-grid-4" id="summary-cards">
-    <div class="card"><h3>총 매출</h3><div class="value" id="s-revenue">-</div><div class="sub" id="s-revenue-sub"></div></div>
+    <div class="card"><h3>총 매출</h3><div class="value" id="s-revenue">-</div><div class="sub" id="s-revenue-sub"></div><div id="s-revenue-sites"></div></div>
     <div class="card"><h3>총 수량</h3><div class="value" id="s-qty">-</div><div class="sub" id="s-qty-sub"></div></div>
     <div class="card"><h3>주문 건수</h3><div class="value" id="s-orders">-</div><div class="sub" id="s-orders-sub"></div></div>
     <div class="card"><h3>평균 리드타임</h3><div class="value" id="s-leadtime">-</div><div class="sub" id="s-leadtime-sub"></div></div>
@@ -230,6 +230,7 @@ nav a:hover{color:var(--gray-900)}
           <div class="compare-row"><span class="compare-label">매출</span><span class="compare-value" id="cmp-y-amount">-</span></div>
           <div class="compare-row"><span class="compare-label">수량</span><span class="compare-value" id="cmp-y-qty">-</span></div>
           <div class="compare-row"><span class="compare-label">건수</span><span class="compare-value" id="cmp-y-orders">-</span></div>
+          <div id="cmp-y-site-breakdown"></div>
         </div>
         <div class="compare-vs">VS</div>
         <div class="compare-col today">
@@ -237,6 +238,7 @@ nav a:hover{color:var(--gray-900)}
           <div class="compare-row"><span class="compare-label">매출</span><span class="compare-value" id="cmp-t-amount">-</span></div>
           <div class="compare-row"><span class="compare-label">수량</span><span class="compare-value" id="cmp-t-qty">-</span></div>
           <div class="compare-row"><span class="compare-label">건수</span><span class="compare-value" id="cmp-t-orders">-</span></div>
+          <div id="cmp-t-site-breakdown"></div>
         </div>
       </div>
       <div class="feedback" id="cmp-feedback"></div>
@@ -253,6 +255,7 @@ nav a:hover{color:var(--gray-900)}
           <div class="compare-row"><span class="compare-label">매출</span><span class="compare-value" id="wow-l-amount">-</span></div>
           <div class="compare-row"><span class="compare-label">수량</span><span class="compare-value" id="wow-l-qty">-</span></div>
           <div class="compare-row"><span class="compare-label">건수</span><span class="compare-value" id="wow-l-orders">-</span></div>
+          <div id="wow-l-site-breakdown"></div>
         </div>
         <div class="compare-vs">VS</div>
         <div class="compare-col today">
@@ -260,6 +263,7 @@ nav a:hover{color:var(--gray-900)}
           <div class="compare-row"><span class="compare-label">매출</span><span class="compare-value" id="wow-t-amount">-</span></div>
           <div class="compare-row"><span class="compare-label">수량</span><span class="compare-value" id="wow-t-qty">-</span></div>
           <div class="compare-row"><span class="compare-label">건수</span><span class="compare-value" id="wow-t-orders">-</span></div>
+          <div id="wow-t-site-breakdown"></div>
         </div>
       </div>
       <div class="feedback" id="wow-feedback"></div>
@@ -1040,6 +1044,30 @@ function renderSummary(summary, lt) {
   const totalOrders = summary.reduce((s,r)=>s+(r.order_count||0),0);
   document.getElementById('s-revenue').textContent = fmtKRW(totalAmt);
   document.getElementById('s-revenue-sub').textContent = `조회 기간 내`;
+  // 사이트별 매출 집계
+  const siteTotals = {};
+  summary.forEach(r => {
+    const sn = r.site_name || '기타';
+    if (!siteTotals[sn]) siteTotals[sn] = { amount:0, qty:0, orders:0 };
+    siteTotals[sn].amount += r.total_amount||0;
+    siteTotals[sn].qty += r.total_qty||0;
+    siteTotals[sn].orders += r.order_count||0;
+  });
+  const siteEntries = Object.entries(siteTotals).sort((a,b) => b[1].amount - a[1].amount);
+  if (siteEntries.length > 1) {
+    document.getElementById('s-revenue-sites').innerHTML = siteEntries.map(([s, v]) => {
+      const color = SITE_COLORS[s] || '#a1a1aa';
+      const pct = totalAmt > 0 ? Math.round(v.amount / totalAmt * 100) : 0;
+      return `<div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:1px 0">
+        <span style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0"></span>
+        <span style="color:var(--gray-600)">${s}</span>
+        <span style="font-weight:600;margin-left:auto">${fmtKRW(v.amount)}</span>
+        <span style="color:var(--gray-400)">${pct}%</span>
+      </div>`;
+    }).join('');
+  } else {
+    document.getElementById('s-revenue-sites').innerHTML = '';
+  }
   document.getElementById('s-qty').textContent = fmtNum(totalQty);
   document.getElementById('s-qty-sub').textContent = `${uniqueDays}일간`;
   document.getElementById('s-orders').textContent = fmtNum(totalOrders);
@@ -1080,6 +1108,26 @@ function renderSummary(summary, lt) {
   document.getElementById('summary-feedback').innerHTML = fb;
 }
 
+function renderSiteBreakdown(data, prefix) {
+  const container = document.getElementById(prefix + '-site-breakdown');
+  if (!container) return;
+  const bySite = data.by_site || {};
+  const sites = Object.keys(bySite).sort((a,b) => (bySite[b].total_amount||0) - (bySite[a].total_amount||0));
+  if (sites.length <= 1) { container.innerHTML = ''; return; }
+  const html = sites.map(s => {
+    const v = bySite[s];
+    const color = SITE_COLORS[s] || '#a1a1aa';
+    return `<div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0">
+      <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
+      <span style="color:var(--gray-600);min-width:60px">${s}</span>
+      <span style="font-weight:600;margin-left:auto">${fmtKRW(v.total_amount)}</span>
+      <span style="color:var(--gray-500)">${fmtNum(v.total_qty)}개</span>
+      <span style="color:var(--gray-400)">${fmtNum(v.order_count)}건</span>
+    </div>`;
+  }).join('');
+  container.innerHTML = `<div style="border-top:1px solid var(--gray-100);padding-top:6px;margin-top:6px">${html}</div>`;
+}
+
 function renderComparison(cmp) {
   const t = cmp.today, y = cmp.yesterday;
   document.getElementById('cmp-yesterday-date').textContent = `어제 (${cmp.date.yesterday})`;
@@ -1090,6 +1138,8 @@ function renderComparison(cmp) {
   document.getElementById('cmp-t-amount').textContent = fmtKRW(t.total_amount);
   document.getElementById('cmp-t-qty').textContent = fmtNum(t.total_qty);
   document.getElementById('cmp-t-orders').textContent = fmtNum(t.order_count) + '건';
+  renderSiteBreakdown(y, 'cmp-y');
+  renderSiteBreakdown(t, 'cmp-t');
 
   const pct = pctChange(t.total_amount, y.total_amount);
   const badge = document.getElementById('cmp-badge');
@@ -1138,6 +1188,8 @@ function renderComparison(cmp) {
   document.getElementById('wow-t-amount').textContent = fmtKRW(t.total_amount);
   document.getElementById('wow-t-qty').textContent = fmtNum(t.total_qty);
   document.getElementById('wow-t-orders').textContent = fmtNum(t.order_count) + '건';
+  renderSiteBreakdown(lw, 'wow-l');
+  renderSiteBreakdown(t, 'wow-t');
 
   const wowPct = pctChange(t.total_amount, lw.total_amount);
   const wowBadge = document.getElementById('wow-badge');
@@ -2149,9 +2201,11 @@ function renderDashTable() {
 
 function renderDailyTable(data, topProducts) {
   const dayMap = {};
+  const daySiteMap = {}; // day -> site -> {amount, qty, orders}
   data.forEach(r => {
     const day = r.order_day;
     const name = (r.card_name||'').replace(/^\[.*?\]\s*/g,'');
+    const sn = r.site_name || '기타';
     if (!dayMap[day]) dayMap[day] = { amount:0, qty:0, orders:0, products:{} };
     dayMap[day].amount += r.total_amount||0;
     dayMap[day].qty += r.total_qty||0;
@@ -2159,7 +2213,20 @@ function renderDailyTable(data, topProducts) {
     if (!dayMap[day].products[name]) dayMap[day].products[name] = {amount:0, qty:0};
     dayMap[day].products[name].amount += r.total_amount||0;
     dayMap[day].products[name].qty += r.total_qty||0;
+    // 사이트별
+    if (!daySiteMap[day]) daySiteMap[day] = {};
+    if (!daySiteMap[day][sn]) daySiteMap[day][sn] = {amount:0, qty:0, orders:0};
+    daySiteMap[day][sn].amount += r.total_amount||0;
+    daySiteMap[day][sn].qty += r.total_qty||0;
+    daySiteMap[day][sn].orders += r.order_count||0;
   });
+  // 활성 사이트 목록 (매출순)
+  const allSiteTotals = {};
+  data.forEach(r => {
+    const sn = r.site_name || '기타';
+    allSiteTotals[sn] = (allSiteTotals[sn]||0) + (r.total_amount||0);
+  });
+  const activeSites = Object.keys(allSiteTotals).sort((a,b) => allSiteTotals[b] - allSiteTotals[a]);
   // 날짜 오름차순 (왼쪽=오래된 날짜, 오른쪽=최신)
   const days = Object.keys(dayMap).sort();
 
@@ -2207,6 +2274,31 @@ function renderDailyTable(data, topProducts) {
     return `<td class="num" style="font-size:12px">${avg ? fmtKRW(avg) : '<span style="color:var(--gray-300)">-</span>'}</td>`;
   }).join('');
 
+  // 사이트별 매출 행
+  const siteDivider = activeSites.length > 1 ? `<tr style="background:var(--gray-100)">
+    <td style="${STICKY}background:var(--gray-100);font-size:10px;color:var(--gray-500);padding:3px 12px;font-weight:600;letter-spacing:.5px">사이트별 매출</td>
+    ${days.map(()=>`<td style="background:var(--gray-100)"></td>`).join('')}
+    <td style="background:#fef9c3;border-left:2px solid var(--gray-200)"></td>
+  </tr>` : '';
+  const siteRows = activeSites.length > 1 ? activeSites.map(site => {
+    const color = SITE_COLORS[site] || '#a1a1aa';
+    const sTotal = days.reduce((s,d) => s + ((daySiteMap[d]&&daySiteMap[d][site])?daySiteMap[d][site].amount:0), 0);
+    const sTotalQty = days.reduce((s,d) => s + ((daySiteMap[d]&&daySiteMap[d][site])?daySiteMap[d][site].qty:0), 0);
+    const sPct = totalAmt > 0 ? Math.round(sTotal / totalAmt * 1000) / 10 : 0;
+    const sCells = days.map(d => {
+      const sv = (daySiteMap[d]&&daySiteMap[d][site]) || {amount:0,qty:0};
+      const dayTotal = dayMap[d].amount || 0;
+      const pct = dayTotal > 0 ? Math.round(sv.amount / dayTotal * 1000) / 10 : 0;
+      return `<td class="num" style="font-size:12px">${sv.amount ? fmtKRW(sv.amount)+' <span style="color:var(--gray-500);font-size:10px">('+pct+'%)</span>' : '<span style="color:var(--gray-200)">-</span>'}</td>`;
+    }).join('');
+    const label = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};margin-right:4px"></span>${site}`;
+    return `<tr>
+      <td style="${STICKY}background:#fff;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${label}</td>
+      ${sCells}
+      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${sTotal ? fmtKRW(sTotal)+' <span style="color:var(--gray-500)">('+sPct+'%)</span>' : '-'}</td>
+    </tr>`;
+  }).join('') : '';
+
   // 상품별 행 구분선
   const divider = `<tr style="background:var(--gray-100)">
     <td style="${STICKY}background:var(--gray-100);font-size:10px;color:var(--gray-500);padding:3px 12px;font-weight:600;letter-spacing:.5px">상품별 매출</td>
@@ -2239,6 +2331,7 @@ function renderDailyTable(data, topProducts) {
     mkRow('주문건수', orderCells, fmtNum(totalOrders)+'건') +
     mkRow('주문수량', qtyCells, fmtNum(totalQty)) +
     mkRow('객단가', avgCells, fmtKRW(totalAvg)) +
+    siteDivider + siteRows +
     divider +
     productRows;
 
@@ -2247,9 +2340,11 @@ function renderDailyTable(data, topProducts) {
 
 function renderWeeklyTable(data, topProducts) {
   const weekMap = {};
+  const weekSiteMap = {}; // week -> site -> {amount, qty, orders}
   data.forEach(r => {
     const wk = getWeekMondayStr(r.order_day);
     const name = (r.card_name||'').replace(/^\[.*?\]\s*/g,'');
+    const sn = r.site_name || '기타';
     if (!weekMap[wk]) weekMap[wk] = { amount:0, qty:0, orders:0, products:{} };
     weekMap[wk].amount += r.total_amount||0;
     weekMap[wk].qty += r.total_qty||0;
@@ -2257,7 +2352,17 @@ function renderWeeklyTable(data, topProducts) {
     if (!weekMap[wk].products[name]) weekMap[wk].products[name] = {amount:0, qty:0};
     weekMap[wk].products[name].amount += r.total_amount||0;
     weekMap[wk].products[name].qty += r.total_qty||0;
+    // 사이트별
+    if (!weekSiteMap[wk]) weekSiteMap[wk] = {};
+    if (!weekSiteMap[wk][sn]) weekSiteMap[wk][sn] = {amount:0, qty:0, orders:0};
+    weekSiteMap[wk][sn].amount += r.total_amount||0;
+    weekSiteMap[wk][sn].qty += r.total_qty||0;
+    weekSiteMap[wk][sn].orders += r.order_count||0;
   });
+  // 활성 사이트 목록
+  const allSiteTotals = {};
+  data.forEach(r => { const sn = r.site_name||'기타'; allSiteTotals[sn] = (allSiteTotals[sn]||0) + (r.total_amount||0); });
+  const activeSites = Object.keys(allSiteTotals).sort((a,b) => allSiteTotals[b] - allSiteTotals[a]);
   // 주차 오름차순 (왼쪽=오래된 주, 오른쪽=최신)
   const weeks = Object.keys(weekMap).sort();
 
@@ -2318,6 +2423,30 @@ function renderWeeklyTable(data, topProducts) {
     return `<td class="num" style="font-size:12px">${avg ? fmtKRW(avg) : '<span style="color:var(--gray-300)">-</span>'}</td>`;
   }).join('');
 
+  // 사이트별 매출 행
+  const siteDivider = activeSites.length > 1 ? `<tr style="background:var(--gray-100)">
+    <td style="${STICKY}background:var(--gray-100);font-size:10px;color:var(--gray-500);padding:3px 12px;font-weight:600;letter-spacing:.5px">사이트별 매출</td>
+    ${weeks.map(()=>`<td style="background:var(--gray-100)"></td>`).join('')}
+    <td style="background:#fef9c3;border-left:2px solid var(--gray-200)"></td>
+  </tr>` : '';
+  const siteRows = activeSites.length > 1 ? activeSites.map(site => {
+    const color = SITE_COLORS[site] || '#a1a1aa';
+    const sTotal = weeks.reduce((s,w) => s + ((weekSiteMap[w]&&weekSiteMap[w][site])?weekSiteMap[w][site].amount:0), 0);
+    const sPct = totalAmt > 0 ? Math.round(sTotal / totalAmt * 1000) / 10 : 0;
+    const sCells = weeks.map(w => {
+      const sv = (weekSiteMap[w]&&weekSiteMap[w][site]) || {amount:0};
+      const wkTotal = weekMap[w].amount || 0;
+      const pct = wkTotal > 0 ? Math.round(sv.amount / wkTotal * 1000) / 10 : 0;
+      return `<td class="num" style="font-size:12px">${sv.amount ? fmtKRW(sv.amount)+' <span style="color:var(--gray-500);font-size:10px">('+pct+'%)</span>' : '<span style="color:var(--gray-200)">-</span>'}</td>`;
+    }).join('');
+    const label = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};margin-right:4px"></span>${site}`;
+    return `<tr>
+      <td style="${STICKY}background:#fff;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${label}</td>
+      ${sCells}
+      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${sTotal ? fmtKRW(sTotal)+' <span style="color:var(--gray-500)">('+sPct+'%)</span>' : '-'}</td>
+    </tr>`;
+  }).join('') : '';
+
   // 상품별 구분선 + 행
   const divider = `<tr style="background:var(--gray-100)">
     <td style="${STICKY}background:var(--gray-100);font-size:10px;color:var(--gray-500);padding:3px 12px;font-weight:600;letter-spacing:.5px">상품별 매출</td>
@@ -2350,6 +2479,7 @@ function renderWeeklyTable(data, topProducts) {
     mkRow('주문건수', orderCells, fmtNum(totalOrders)+'건') +
     mkRow('주문수량', qtyCells, fmtNum(totalQty)) +
     mkRow('객단가', avgCells, fmtKRW(totalAvg)) +
+    siteDivider + siteRows +
     divider +
     productRows;
 
