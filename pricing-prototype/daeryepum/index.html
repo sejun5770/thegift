@@ -855,13 +855,6 @@ async function loadOrders() {
     ordersData = Array.isArray(jsonData) ? jsonData : [];
     ordersData.forEach(r => {
       r.order_date_fmt = r.order_date ? r.order_date.replace('T',' ').slice(0,16) : '';
-      // 바른손몰 보정: item_amount가 단가만 나온 경우 settle_price로 보정
-      if (r.item_count > 1 && r.settle_price > 0 && r.item_amount > 0) {
-        const unitFromSettle = r.settle_price / r.item_count;
-        if (Math.abs(r.item_amount - unitFromSettle) < unitFromSettle * 0.05) {
-          r.item_amount = r.settle_price;
-        }
-      }
       r.item_amount_fmt = fmtKRW(r.item_amount);
       r.settle_price_fmt = fmtKRW(r.settle_price);
       r.order_type_label = r.order_type === 'ETC' ? '부가상품' : '청첩장+답례품';
