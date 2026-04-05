@@ -221,6 +221,7 @@ async function getDailyMetricsSnapshot(dateStr) {
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
       WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
         AND CAST(o.order_date AS date) = @targetDate
     `);
@@ -235,6 +236,7 @@ async function getDailyMetricsSnapshot(dateStr) {
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
       WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
         AND CAST(o.order_date AS date) = @targetDate
       GROUP BY c.Card_Name
@@ -411,12 +413,12 @@ function mergeNames(recvName, orderName) {
   return `${r}(${o})`;
 }
 
-// 바른손몰 ETC 주문: card_sale_price가 단가/수량으로 저장되어 card_sale_price*order_count=단가만 됨
-// 보정: card_sale_price*order_count < settle_price*0.1 이면 card_sale_price*order_count² 사용
+// ETC 결제금액 계산: 바른손카드(SiteInfo 매칭) vs 바른손몰(제휴사, SiteInfo 미매칭)
+// 바른손카드: card_sale_price = 상품단가 → 단가 × 수량
+// 바른손몰:   card_sale_price = 단가/수량 → 단가/수량 × 수량 × 수량 = 단가 × 수량
 const ETC_AMOUNT_EXPR = `
   CASE
-    WHEN oi.order_count > 1
-      AND CAST(oi.card_sale_price AS float) * oi.order_count < o.settle_price * 0.1
+    WHEN si.SiteName IS NULL
     THEN CAST(oi.card_sale_price AS float) * CAST(oi.order_count AS bigint) * oi.order_count
     ELSE CAST(oi.card_sale_price AS float) * oi.order_count
   END`;
