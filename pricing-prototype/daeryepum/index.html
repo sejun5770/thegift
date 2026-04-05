@@ -855,12 +855,15 @@ async function loadOrders() {
     ordersData = Array.isArray(jsonData) ? jsonData : [];
     ordersData.forEach(r => {
       r.order_date_fmt = r.order_date ? r.order_date.replace('T',' ').slice(0,16) : '';
+      // 바른손몰 보정: item_amount가 단가만 나온 경우 settle_price로 보정
+      if (r.item_count > 1 && r.settle_price > 0 && r.item_amount > 0) {
+        const unitFromSettle = r.settle_price / r.item_count;
+        if (Math.abs(r.item_amount - unitFromSettle) < unitFromSettle * 0.05) {
+          r.item_amount = r.settle_price;
+        }
+      }
       r.item_amount_fmt = fmtKRW(r.item_amount);
-      // settle_price가 단가만 저장된 경우(바른손몰 등) item_amount로 보정
-      // settle_price ≈ card_sale_price(단가)이고 item_count > 1이면 총액 사용
-      const settleIsUnitPrice = r.settle_price && r.item_amount && r.item_count > 1
-        && Math.abs(r.settle_price * r.item_count - r.item_amount) < 1;
-      r.settle_price_fmt = fmtKRW(settleIsUnitPrice ? r.item_amount : r.settle_price);
+      r.settle_price_fmt = fmtKRW(r.settle_price);
       r.order_type_label = r.order_type === 'ETC' ? '부가상품' : '청첩장+답례품';
       r.status_label = STATUS_MAP[r.status_seq] || `상태${r.status_seq ?? '?'}`;
       r.file_count_fmt = r.file_count > 0

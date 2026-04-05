@@ -216,7 +216,7 @@ async function getDailyMetricsSnapshot(dateStr) {
       SELECT
         COUNT(DISTINCT o.order_seq) AS order_count,
         COUNT(DISTINCT o.member_id) AS member_count,
-        ISNULL(SUM(CAST(oi.card_sale_price AS float) * oi.order_count), 0) AS revenue,
+        ISNULL(SUM(${ETC_AMOUNT_EXPR}), 0) AS revenue,
         ISNULL(SUM(oi.order_count), 0) AS total_qty
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
@@ -231,14 +231,14 @@ async function getDailyMetricsSnapshot(dateStr) {
     .query(`
       SELECT TOP 3 c.Card_Name AS product_name,
              SUM(oi.order_count) AS qty,
-             SUM(CAST(oi.card_sale_price AS float) * oi.order_count) AS amount
+             SUM(${ETC_AMOUNT_EXPR}) AS amount
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
         AND CAST(o.order_date AS date) = @targetDate
       GROUP BY c.Card_Name
-      ORDER BY SUM(CAST(oi.card_sale_price AS float) * oi.order_count) DESC
+      ORDER BY SUM(${ETC_AMOUNT_EXPR}) DESC
     `);
   return {
     date: dateStr,
@@ -304,7 +304,7 @@ async function apiOrders(query) {
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
         oi.order_count AS item_count,
-        CAST(oi.card_sale_price AS float) * oi.order_count AS item_amount,
+        ${ETC_AMOUNT_EXPR} AS item_amount,
         o.settle_price AS settle_price,
         o.status_seq AS status_seq,
         cw.event_year + '-' + RIGHT('0'+cw.event_month,2) + '-' + RIGHT('0'+cw.event_Day,2) AS wedding_date,
@@ -411,6 +411,16 @@ function mergeNames(recvName, orderName) {
   return `${r}(${o})`;
 }
 
+// 바른손몰 ETC 주문: card_sale_price가 단가/수량으로 저장되어 card_sale_price*order_count=단가만 됨
+// 보정: card_sale_price*order_count < settle_price*0.1 이면 card_sale_price*order_count² 사용
+const ETC_AMOUNT_EXPR = `
+  CASE
+    WHEN oi.order_count > 1
+      AND CAST(oi.card_sale_price AS float) * oi.order_count < o.settle_price * 0.1
+    THEN CAST(oi.card_sale_price AS float) * CAST(oi.order_count AS bigint) * oi.order_count
+    ELSE CAST(oi.card_sale_price AS float) * oi.order_count
+  END`;
+
 async function apiDashboardComparison() {
   const p = await getPool();
   const todayStr = fmtDate(today());
@@ -432,7 +442,7 @@ async function apiDashboardComparison() {
         SELECT
           ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
           COUNT(DISTINCT o.order_seq) AS order_count,
-          ISNULL(SUM(CAST(oi.card_sale_price AS float) * oi.order_count),0) AS total_amount,
+          ISNULL(SUM(${ETC_AMOUNT_EXPR}),0) AS total_amount,
           ISNULL(SUM(oi.order_count),0) AS total_qty
         FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
         INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
@@ -514,7 +524,7 @@ async function apiDashboardSummary(query) {
         ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
         COUNT(DISTINCT o.order_seq) AS order_count,
         SUM(oi.order_count) AS total_qty,
-        SUM(CAST(oi.card_sale_price AS float) * oi.order_count) AS total_amount
+        SUM(${ETC_AMOUNT_EXPR}) AS total_amount
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
