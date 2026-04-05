@@ -343,11 +343,7 @@ async function apiOrders(query) {
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
         coi.item_count,
-        CAST(coi.item_sale_price AS float) *
-          CASE WHEN c.Unit_Value > 1
-            THEN CEILING(CAST(coi.item_count AS float) / c.Unit_Value)
-            ELSE coi.item_count
-          END AS item_amount,
+        CAST(coi.item_sale_price AS float) * coi.item_count AS item_amount,
         co.settle_price,
         co.status_seq,
         w.event_year + '-' + RIGHT('0'+w.event_month,2) + '-' + RIGHT('0'+w.event_Day,2) AS wedding_date,
