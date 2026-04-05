@@ -1353,6 +1353,35 @@ const server = http.createServer(async (req, res) => {
         data = await apiConversion();
       } else if (pathname === '/api/dashboard/samples') {
         data = await apiSamples();
+      } else if (pathname === '/api/debug-order') {
+        // 주문 원시 데이터 확인용 (order_seq 파라미터)
+        const seq = parseInt(parsed.query.order_seq);
+        if (seq) {
+          const pp = await getPool();
+          const etc = await pp.request().input('seq', sql.Int, seq).query(`
+            SELECT o.order_seq, o.settle_price, o.company_Seq,
+              oi.card_sale_price, oi.order_count, oi.card_seq,
+              c.Card_Name, c.Card_Code,
+              ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name
+            FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+            INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+            INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+            LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+            WHERE o.order_seq = @seq
+          `);
+          const card = await pp.request().input('seq', sql.Int, seq).query(`
+            SELECT co.order_seq, co.settle_price, co.company_Seq,
+              coi.item_sale_price, coi.item_count, coi.card_seq,
+              c.Card_Name, c.Card_Code,
+              ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name
+            FROM custom_order co WITH (NOLOCK)
+            INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+            INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+            LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+            WHERE co.order_seq = @seq
+          `);
+          data = { etc: etc.recordset, card: card.recordset };
+        } else { data = { error: 'order_seq required' }; }
       } else if (pathname === '/api/order-files') {
         data = await apiOrderFiles(parsed.query);
       } else if (pathname === '/api/categories') {
