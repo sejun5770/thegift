@@ -304,7 +304,7 @@ async function apiOrders(query) {
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
         oi.order_count AS item_count,
-        oi.card_sale_price AS item_amount,
+        CAST(oi.card_sale_price AS float) * oi.order_count AS item_amount,
         o.settle_price AS settle_price,
         o.status_seq AS status_seq,
         cw.event_year + '-' + RIGHT('0'+cw.event_month,2) + '-' + RIGHT('0'+cw.event_Day,2) AS wedding_date,
