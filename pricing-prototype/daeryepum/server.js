@@ -216,7 +216,7 @@ async function getDailyMetricsSnapshot(dateStr) {
       SELECT
         COUNT(DISTINCT o.order_seq) AS order_count,
         COUNT(DISTINCT o.member_id) AS member_count,
-        ISNULL(SUM(CAST(oi.card_sale_price AS float)), 0) AS revenue,
+        ISNULL(SUM(CAST(oi.card_sale_price AS float) * oi.order_count), 0) AS revenue,
         ISNULL(SUM(oi.order_count), 0) AS total_qty
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
@@ -231,14 +231,14 @@ async function getDailyMetricsSnapshot(dateStr) {
     .query(`
       SELECT TOP 3 c.Card_Name AS product_name,
              SUM(oi.order_count) AS qty,
-             SUM(CAST(oi.card_sale_price AS float)) AS amount
+             SUM(CAST(oi.card_sale_price AS float) * oi.order_count) AS amount
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
         AND CAST(o.order_date AS date) = @targetDate
       GROUP BY c.Card_Name
-      ORDER BY SUM(CAST(oi.card_sale_price AS float)) DESC
+      ORDER BY SUM(CAST(oi.card_sale_price AS float) * oi.order_count) DESC
     `);
   return {
     date: dateStr,
@@ -435,7 +435,7 @@ async function apiDashboardComparison() {
       .query(`
         SELECT
           COUNT(DISTINCT o.order_seq) AS order_count,
-          ISNULL(SUM(oi.card_sale_price),0) AS total_amount,
+          ISNULL(SUM(CAST(oi.card_sale_price AS float) * oi.order_count),0) AS total_amount,
           ISNULL(SUM(oi.order_count),0) AS total_qty
         FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
         INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
@@ -498,7 +498,7 @@ async function apiDashboardSummary(query) {
         CONVERT(varchar(10), o.order_date, 120) AS order_day,
         COUNT(DISTINCT o.order_seq) AS order_count,
         SUM(oi.order_count) AS total_qty,
-        SUM(oi.card_sale_price) AS total_amount
+        SUM(CAST(oi.card_sale_price AS float) * oi.order_count) AS total_amount
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
