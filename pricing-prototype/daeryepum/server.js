@@ -415,11 +415,11 @@ function mergeNames(recvName, orderName) {
 
 // ETC 결제금액 계산: 바른손카드(SiteInfo 매칭) vs 바른손몰(제휴사, SiteInfo 미매칭)
 // 바른손카드: card_sale_price = 총액(단가×수량) → 그대로 사용
-// 바른손몰:   card_sale_price = 단가/수량 → × 수량² = 단가 × 수량
+// 바른손몰:   card_sale_price = 단가 → × 수량 = 총액
 const ETC_AMOUNT_EXPR = `
   CASE
     WHEN si.SiteName IS NULL
-    THEN CAST(oi.card_sale_price AS float) * CAST(oi.order_count AS bigint) * oi.order_count
+    THEN CAST(oi.card_sale_price AS float) * oi.order_count
     ELSE CAST(oi.card_sale_price AS float)
   END`;
 
