@@ -345,8 +345,8 @@ async function apiOrders(query) {
         di.DELIVERY_MEMO AS recv_msg,
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
-        ISNULL(dd.item_count, coi.item_count) AS item_count,
-        CAST(coi.item_sale_price AS float) * ISNULL(dd.item_count, coi.item_count) AS item_amount,
+        ISNULL(di.dd_count, coi.item_count) AS item_count,
+        CAST(coi.item_sale_price AS float) * ISNULL(di.dd_count, coi.item_count) AS item_amount,
         co.settle_price,
         co.status_seq,
         w.event_year + '-' + RIGHT('0'+w.event_month,2) + '-' + RIGHT('0'+w.event_Day,2) AS wedding_date,
@@ -356,14 +356,29 @@ async function apiOrders(query) {
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
-      LEFT JOIN DELIVERY_INFO di WITH (NOLOCK) ON co.order_seq = di.ORDER_SEQ
-      LEFT JOIN DELIVERY_INFO_DETAIL dd WITH (NOLOCK)
-        ON dd.delivery_id = di.ID AND dd.item_title = N'답례품'
+      INNER JOIN (
+        -- 배송지별 답례품 수량: DELIVERY_INFO_DETAIL 있으면 배송지별, 없으면 첫 배송지 1건
+        SELECT di.ORDER_SEQ, di.NAME, di.HPHONE, di.PHONE, di.ADDR, di.ADDR_DETAIL,
+               di.DELIVERY_MEMO, dd.item_count AS dd_count
+        FROM DELIVERY_INFO di WITH (NOLOCK)
+        INNER JOIN DELIVERY_INFO_DETAIL dd WITH (NOLOCK)
+          ON dd.delivery_id = di.ID AND dd.item_title = N'답례품' AND dd.item_count > 0
+        UNION ALL
+        -- DELIVERY_INFO_DETAIL에 답례품 기록이 없는 주문: 첫 배송지만
+        SELECT di.ORDER_SEQ, di.NAME, di.HPHONE, di.PHONE, di.ADDR, di.ADDR_DETAIL,
+               di.DELIVERY_MEMO, NULL AS dd_count
+        FROM DELIVERY_INFO di WITH (NOLOCK)
+        WHERE di.DELIVERY_SEQ = 1
+          AND NOT EXISTS (
+            SELECT 1 FROM DELIVERY_INFO d2 WITH (NOLOCK)
+            INNER JOIN DELIVERY_INFO_DETAIL dd2 WITH (NOLOCK) ON dd2.delivery_id = d2.ID
+            WHERE d2.ORDER_SEQ = di.ORDER_SEQ AND dd2.item_title = N'답례품'
+          )
+      ) di ON di.ORDER_SEQ = co.order_seq
       LEFT JOIN custom_order_WeddInfo w WITH (NOLOCK) ON co.order_seq = w.order_seq
       WHERE ${categoryFilter}
         AND co.order_date >= @startDate AND co.order_date < @endDate
         AND co.status_seq >= 1
-        AND (dd.item_count > 0 OR dd.item_count IS NULL)
 
       ORDER BY order_date DESC, order_seq DESC
     `);
