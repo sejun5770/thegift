@@ -1397,22 +1397,24 @@ const server = http.createServer(async (req, res) => {
             LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
             WHERE co.order_seq = @seq
           `);
-          // 배송지 정보
+          // 배송지 정보 (컬럼 전체 조회)
           const delivery = await pp.request().input('seq', sql.Int, seq).query(`
-            SELECT di.ORDER_SEQ, di.DELIVERY_SEQ, di.NAME, di.HPHONE, di.ADDR, di.ADDR_DETAIL
-            FROM DELIVERY_INFO di WITH (NOLOCK)
-            WHERE di.ORDER_SEQ = @seq
-            ORDER BY di.DELIVERY_SEQ
+            SELECT * FROM DELIVERY_INFO WITH (NOLOCK) WHERE ORDER_SEQ = @seq
+          `);
+          // DELIVERY_INFO_DETAIL 컬럼 구조 확인
+          const ddCols = await pp.request().query(`
+            SELECT TOP 0 * FROM DELIVERY_INFO_DETAIL WITH (NOLOCK)
           `);
           // 배송지별 상품 상세
           const deliveryDetail = await pp.request().input('seq', sql.Int, seq).query(`
-            SELECT dd.*
-            FROM DELIVERY_INFO di WITH (NOLOCK)
-            INNER JOIN DELIVERY_INFO_DETAIL dd WITH (NOLOCK) ON di.ORDER_SEQ = dd.ORDER_SEQ AND di.DELIVERY_SEQ = dd.DELIVERY_SEQ
-            WHERE di.ORDER_SEQ = @seq
-            ORDER BY di.DELIVERY_SEQ
+            SELECT * FROM DELIVERY_INFO_DETAIL WITH (NOLOCK) WHERE ORDER_SEQ = @seq
           `);
-          data = { etc: etc.recordset, card: card.recordset, delivery: delivery.recordset, deliveryDetail: deliveryDetail.recordset };
+          data = {
+            etc: etc.recordset, card: card.recordset,
+            delivery: delivery.recordset,
+            deliveryDetailColumns: Object.keys(ddCols.recordset.columns || {}),
+            deliveryDetail: deliveryDetail.recordset
+          };
         } else { data = { error: 'order_seq required' }; }
       } else if (pathname === '/api/order-files') {
         data = await apiOrderFiles(parsed.query);
