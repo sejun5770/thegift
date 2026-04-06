@@ -355,7 +355,12 @@ async function apiOrders(query) {
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
-      LEFT JOIN DELIVERY_INFO di WITH (NOLOCK) ON co.order_seq = di.ORDER_SEQ
+      OUTER APPLY (
+        SELECT TOP 1 d.NAME, d.HPHONE, d.PHONE, d.ADDR, d.ADDR_DETAIL, d.DELIVERY_MEMO
+        FROM DELIVERY_INFO d WITH (NOLOCK)
+        WHERE d.ORDER_SEQ = co.order_seq
+        ORDER BY d.DELIVERY_SEQ
+      ) di
       LEFT JOIN custom_order_WeddInfo w WITH (NOLOCK) ON co.order_seq = w.order_seq
       WHERE ${categoryFilter}
         AND co.order_date >= @startDate AND co.order_date < @endDate
