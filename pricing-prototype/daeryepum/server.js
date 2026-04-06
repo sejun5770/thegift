@@ -331,6 +331,7 @@ async function apiOrders(query) {
       UNION ALL
 
       -- 청첩장과 함께 주문 (custom_order)
+      -- 나눔배송: DELIVERY_INFO × DELIVERY_INFO_DETAIL로 배송지별 답례품 수량 표시
       SELECT
         co.order_seq,
         co.member_id AS member_id,
@@ -344,8 +345,8 @@ async function apiOrders(query) {
         di.DELIVERY_MEMO AS recv_msg,
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
-        coi.item_count,
-        CAST(coi.item_sale_price AS float) * coi.item_count AS item_amount,
+        ISNULL(dd.item_count, coi.item_count) AS item_count,
+        CAST(coi.item_sale_price AS float) * ISNULL(dd.item_count, coi.item_count) AS item_amount,
         co.settle_price,
         co.status_seq,
         w.event_year + '-' + RIGHT('0'+w.event_month,2) + '-' + RIGHT('0'+w.event_Day,2) AS wedding_date,
@@ -355,16 +356,14 @@ async function apiOrders(query) {
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
-      OUTER APPLY (
-        SELECT TOP 1 d.NAME, d.HPHONE, d.PHONE, d.ADDR, d.ADDR_DETAIL, d.DELIVERY_MEMO
-        FROM DELIVERY_INFO d WITH (NOLOCK)
-        WHERE d.ORDER_SEQ = co.order_seq
-        ORDER BY d.DELIVERY_SEQ
-      ) di
+      LEFT JOIN DELIVERY_INFO di WITH (NOLOCK) ON co.order_seq = di.ORDER_SEQ
+      LEFT JOIN DELIVERY_INFO_DETAIL dd WITH (NOLOCK)
+        ON dd.delivery_id = di.ID AND dd.item_title = N'답례품'
       LEFT JOIN custom_order_WeddInfo w WITH (NOLOCK) ON co.order_seq = w.order_seq
       WHERE ${categoryFilter}
         AND co.order_date >= @startDate AND co.order_date < @endDate
         AND co.status_seq >= 1
+        AND (dd.item_count > 0 OR dd.item_count IS NULL)
 
       ORDER BY order_date DESC, order_seq DESC
     `);
