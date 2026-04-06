@@ -308,6 +308,7 @@ async function apiOrders(query) {
         oi.order_count AS item_count,
         ${ETC_AMOUNT_EXPR} AS item_amount,
         o.settle_price AS settle_price,
+        ISNULL(o.coupon_price, 0) AS coupon_price,
         o.status_seq AS status_seq,
         cw.event_year + '-' + RIGHT('0'+cw.event_month,2) + '-' + RIGHT('0'+cw.event_Day,2) AS wedding_date,
         ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
@@ -348,6 +349,7 @@ async function apiOrders(query) {
         ISNULL(di.dd_count, coi.item_count) AS item_count,
         CAST(coi.item_sale_price AS float) * ISNULL(di.dd_count, coi.item_count) AS item_amount,
         co.settle_price,
+        0 AS coupon_price,
         co.status_seq,
         w.event_year + '-' + RIGHT('0'+w.event_month,2) + '-' + RIGHT('0'+w.event_Day,2) AS wedding_date,
         ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
@@ -435,11 +437,12 @@ function mergeNames(recvName, orderName) {
 // ETC 결제금액 계산: 바른손카드(SiteInfo 매칭) vs 바른손몰(제휴사, SiteInfo 미매칭)
 // 바른손카드: card_sale_price = 총액(단가×수량) → 그대로 사용
 // 바른손몰:   card_sale_price = 단가 → × 수량 = 총액
+// 쿠폰 할인: coupon_price를 차감하여 실결제금액 반영
 const ETC_AMOUNT_EXPR = `
   CASE
     WHEN si.SiteName IS NULL
-    THEN CAST(oi.card_sale_price AS float) * oi.order_count
-    ELSE CAST(oi.card_sale_price AS float)
+    THEN CAST(oi.card_sale_price AS float) * oi.order_count - ISNULL(o.coupon_price, 0)
+    ELSE CAST(oi.card_sale_price AS float) - ISNULL(o.coupon_price, 0)
   END`;
 
 async function apiDashboardComparison() {

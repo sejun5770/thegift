@@ -718,6 +718,7 @@ const ALL_COLS = [
   {key:'card_code',label:'상품코드',default:false},
   {key:'item_count',label:'상품수량',default:true,num:true},
   {key:'item_amount_fmt',label:'결제금액',default:true,num:true},
+  {key:'coupon_price_fmt',label:'쿠폰할인',default:false,num:true},
   {key:'settle_price_fmt',label:'주문총액',default:false,num:true},
   {key:'wedding_date',label:'예식일',default:false},
   {key:'lead_days',label:'리드타임(일)',default:false,num:true},
@@ -856,6 +857,7 @@ async function loadOrders() {
     ordersData.forEach(r => {
       r.order_date_fmt = r.order_date ? r.order_date.replace('T',' ').slice(0,16) : '';
       r.item_amount_fmt = fmtKRW(r.item_amount);
+      r.coupon_price_fmt = r.coupon_price > 0 ? '-' + fmtKRW(r.coupon_price) : '';
       r.settle_price_fmt = fmtKRW(r.settle_price);
       r.order_type_label = r.order_type === 'ETC' ? '부가상품' : '청첩장+답례품';
       r.status_label = STATUS_MAP[r.status_seq] || `상태${r.status_seq ?? '?'}`;
