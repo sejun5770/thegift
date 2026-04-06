@@ -173,7 +173,27 @@ async function getPool() {
   pool.on('error', (err) => { console.error('Pool error:', err.message); pool = null; });
   await pool.connect();
   console.log('Connected to Barunson DB');
+  // 제휴사명 캐시 로드 (최초 연결 시)
+  if (Object.keys(companyNameMap).length === 0) {
+    try {
+      const res = await pool.request().query(`SELECT COMPANY_SEQ, COMPANY_NAME FROM COMPANY WITH (NOLOCK) WHERE COMPANY_NAME IS NOT NULL`);
+      res.recordset.forEach(r => { companyNameMap[String(r.COMPANY_SEQ)] = r.COMPANY_NAME; });
+      console.log(`Loaded ${Object.keys(companyNameMap).length} company names`);
+    } catch (e) { console.error('Failed to load company names:', e.message); }
+  }
   return pool;
+}
+
+// 제휴사명 캐시: company_Seq → COMPANY_NAME
+const companyNameMap = {};
+// site_name이 숫자(제휴사 코드)인 경우 "제휴사명(코드)" 형태로 변환
+function formatSiteName(siteName) {
+  if (!siteName) return siteName;
+  const s = String(siteName).trim();
+  if (/^\d+$/.test(s) && companyNameMap[s]) {
+    return `${companyNameMap[s]}(${s})`;
+  }
+  return siteName;
 }
 
 // 카테고리 필터 정의
@@ -390,6 +410,7 @@ async function apiOrders(query) {
     card_name: cleanName(r.card_name),
     order_date: r.order_date,
     settle_date: r.settle_date,
+    site_name: formatSiteName(r.site_name),
     // 주문자명/받는사람 합치기
     display_name: mergeNames(r.recv_name, r.order_name),
   }));
@@ -494,7 +515,7 @@ async function apiDashboardComparison() {
     // 사이트별 합산
     const siteMap = {};
     for (const row of [...r.recordset, ...r2.recordset]) {
-      const sn = row.site_name || '기타';
+      const sn = formatSiteName(row.site_name) || '기타';
       if (!siteMap[sn]) siteMap[sn] = { order_count:0, total_amount:0, total_qty:0 };
       siteMap[sn].order_count += row.order_count||0;
       siteMap[sn].total_amount += row.total_amount||0;
@@ -577,7 +598,7 @@ async function apiDashboardSummary(query) {
     `);
 
   // Clean names
-  const rows = result.recordset.map(r => ({ ...r, card_name: cleanName(r.card_name) }));
+  const rows = result.recordset.map(r => ({ ...r, card_name: cleanName(r.card_name), site_name: formatSiteName(r.site_name) }));
   return rows;
 }
 
