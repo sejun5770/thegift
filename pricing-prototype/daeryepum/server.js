@@ -1390,8 +1390,7 @@ const server = http.createServer(async (req, res) => {
         if (seq) {
           const pp = await getPool();
           const etc = await pp.request().input('seq', sql.Int, seq).query(`
-            SELECT o.order_seq, o.settle_price, o.company_Seq,
-              oi.card_sale_price, oi.order_count, oi.card_seq,
+            SELECT o.*, oi.card_sale_price, oi.order_count, oi.card_seq,
               c.Card_Name, c.Card_Code,
               ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name
             FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
