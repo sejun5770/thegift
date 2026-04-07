@@ -684,7 +684,8 @@ async function apiForecast() {
 
       SELECT order_day, COUNT(*) AS order_count, SUM(settle_price) AS total_amount, SUM(total_qty) AS total_qty
       FROM (
-        SELECT DISTINCT co.order_seq, CONVERT(varchar(10), co.order_date, 120) AS order_day, co.settle_price,
+        SELECT DISTINCT co.order_seq, CONVERT(varchar(10), co.order_date, 120) AS order_day,
+          (SELECT ISNULL(SUM(CAST(coi2.item_sale_price AS float) * coi2.item_count), 0) FROM custom_order_item coi2 WITH (NOLOCK) INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq=c2.Card_Seq WHERE coi2.order_seq=co.order_seq AND ${D01_FILTER.replace(/c\./g,'c2.')}) AS settle_price,
           (SELECT SUM(coi2.item_count) FROM custom_order_item coi2 WITH (NOLOCK) INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq=c2.Card_Seq WHERE coi2.order_seq=co.order_seq AND ${D01_FILTER.replace(/c\./g,'c2.')}) AS total_qty
         FROM custom_order co WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
@@ -758,7 +759,7 @@ async function apiForecast() {
       : null;
   }
 
-  // 5) 실제 최근 일평균 매출 (검증용)
+  // 5) 실제 최근 일평균 매출 (검증용) - ETC + CARD 통합
   const actualStats = await p.request()
     .input('start30', sql.VarChar, fmtDate(addDays(today(), -30)))
     .input('today', sql.VarChar, todayStr)
@@ -770,6 +771,16 @@ async function apiForecast() {
         INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
         WHERE ${D01_FILTER} AND o.order_date >= @start30 AND o.order_date < DATEADD(day,1,@today) AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+
+        UNION ALL
+
+        SELECT DISTINCT co.order_seq,
+          (SELECT ISNULL(SUM(CAST(coi2.item_sale_price AS float) * coi2.item_count), 0) FROM custom_order_item coi2 WITH (NOLOCK) INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq=c2.Card_Seq WHERE coi2.order_seq=co.order_seq AND ${D01_FILTER.replace(/c\./g,'c2.')}) AS settle_price,
+          CONVERT(varchar(10), co.order_date, 120) AS order_day
+        FROM custom_order co WITH (NOLOCK)
+        INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+        WHERE ${D01_FILTER} AND co.order_date >= @start30 AND co.order_date < DATEADD(day,1,@today) AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
       ) t
     `);
 
@@ -820,10 +831,12 @@ function getISOWeek(d) {
 
 async function apiLeadtime() {
   const p = await getPool();
+  // ETC + CARD 답례품 리드타임 통합
   const result = await p.request().query(`
-    SELECT order_seq, order_date, wedding_date, lead_days FROM (
+    SELECT order_key, order_date, wedding_date, lead_days FROM (
+      -- ETC: 별도 주문 → 같은 member의 청첩장 예식일 참조
       SELECT
-        o.order_seq,
+        CONCAT('E', o.order_seq) AS order_key,
         o.order_date,
         TRY_CAST(cw.event_year+'-'+RIGHT('0'+cw.event_month,2)+'-'+RIGHT('0'+cw.event_Day,2) AS date) AS wedding_date,
         DATEDIFF(day, o.order_date, TRY_CAST(cw.event_year+'-'+RIGHT('0'+cw.event_month,2)+'-'+RIGHT('0'+cw.event_Day,2) AS date)) AS lead_days,
@@ -842,6 +855,24 @@ async function apiLeadtime() {
       WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
         AND TRY_CAST(cw.event_year+'-'+RIGHT('0'+cw.event_month,2)+'-'+RIGHT('0'+cw.event_Day,2) AS date) IS NOT NULL
         AND o.order_date >= DATEADD(day, -180, GETDATE())
+
+      UNION ALL
+
+      -- CARD: 청첩장+답례품 동시주문 → 같은 주문의 예식일 직접 참조
+      SELECT
+        CONCAT('C', co.order_seq) AS order_key,
+        co.order_date,
+        TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) AS wedding_date,
+        DATEDIFF(day, co.order_date, TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date)) AS lead_days,
+        ROW_NUMBER() OVER (PARTITION BY co.order_seq ORDER BY co.order_seq) AS rn
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      INNER JOIN custom_order_WeddInfo w WITH (NOLOCK) ON co.order_seq = w.order_seq
+      WHERE ${D01_FILTER} AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
+        AND w.event_year IS NOT NULL AND LEN(w.event_year) = 4
+        AND TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) IS NOT NULL
+        AND co.order_date >= DATEADD(day, -180, GETDATE())
     ) t WHERE rn = 1
     ORDER BY order_date DESC
   `);
