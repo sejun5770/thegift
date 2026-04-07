@@ -725,20 +725,28 @@ async function apiForecast() {
     w.is_current = actDays > 0 && actDays < 7;
   }
 
-  // 4) 이동평균: 매출 발생 주차 기준 전환율 + 객단가 분리 산출
+  // 4) 가중 이동평균: 최근 주차에 높은 가중치로 시즌 트렌드 반영
   //    예상매출 = 예식건수 × 전환율 × 객단가
   //    매출이 0인 주차는 제외 (비시즌 주차가 전환율을 희석시키는 것 방지)
+  //    가중치: 가장 오래된 주 1, ..., 가장 최근 주 N (선형 가중)
   const completedWeeks = weeks.filter(w => w.is_past);
   const activeWeeks = completedWeeks.filter(w => w.actual_orders > 0);
   const baseWeeks = activeWeeks.slice(-BASE_WEEKS);
   let baseTotalRevenue = 0, baseTotalOrders = 0, baseTotalWeddings = 0;
-  for (const bw of baseWeeks) {
+  let weightedOrders = 0, weightedWeddings = 0, weightedRevenue = 0, weightSum = 0;
+  baseWeeks.forEach((bw, i) => {
+    const weight = i + 1; // 1, 2, 3, 4 (최근일수록 높은 가중치)
+    weightSum += weight;
+    weightedOrders += bw.actual_orders * weight;
+    weightedWeddings += bw.wedding_pool * weight;
+    weightedRevenue += bw.actual_weekly_revenue * weight;
+    // 단순 합계도 유지 (참고용)
     baseTotalRevenue += bw.actual_weekly_revenue;
     baseTotalOrders += bw.actual_orders;
     baseTotalWeddings += bw.wedding_pool;
-  }
-  const conversionRate = baseTotalWeddings > 0 ? baseTotalOrders / baseTotalWeddings : 0;
-  const avgOrderValue = baseTotalOrders > 0 ? baseTotalRevenue / baseTotalOrders : 0;
+  });
+  const conversionRate = weightedWeddings > 0 ? weightedOrders / weightedWeddings : 0;
+  const avgOrderValue = weightedOrders > 0 ? weightedRevenue / weightedOrders : 0;
 
   // 예측 적용 + 오차율
   for (const w of weeks) {
@@ -767,9 +775,19 @@ async function apiForecast() {
   const actual = actualStats.recordset[0] || {};
   const actualDailyAvg = actual.active_days > 0 ? Math.round(actual.total_amount / actual.active_days) : 0;
 
+  // 주차별 전환율 트렌드 (대시보드 표시용)
+  const weeklyConversionTrend = activeWeeks.slice(-6).map(w => ({
+    week_no: w.week_no,
+    week_start: w.week_start,
+    wedding_pool: w.wedding_pool,
+    actual_orders: w.actual_orders,
+    conversion_rate: w.wedding_pool > 0 ? Math.round(w.actual_orders / w.wedding_pool * 10000) / 100 : 0,
+    avg_order_value: w.actual_orders > 0 ? Math.round(w.actual_weekly_revenue / w.actual_orders) : 0,
+  }));
+
   return {
     model: {
-      type: 'moving_average',
+      type: 'weighted_moving_average',
       window_days: WINDOW,
       base_weeks: BASE_WEEKS,
       conversion_rate: Math.round(conversionRate * 10000) / 100, // % 단위 (소수점 2자리)
@@ -779,6 +797,7 @@ async function apiForecast() {
       base_total_revenue: baseTotalRevenue,
       base_total_orders: baseTotalOrders,
       base_total_weddings: baseTotalWeddings,
+      weekly_conversion_trend: weeklyConversionTrend,
     },
     weeks,
     actual_30d: {
