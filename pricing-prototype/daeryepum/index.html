@@ -757,11 +757,18 @@ async function saveCollectedToServer(addSeqs, removeSeqs) {
   } catch(e) { console.warn('수집완료 저장 실패:', e); }
 }
 // 주문상태 매핑 (bar_shop1 status_seq)
+// ETC (CUSTOM_ETC_ORDER) 상태
 const STATUS_MAP = {
   0:'주문접수', 1:'결제대기', 2:'입금확인', 3:'결제취소', 4:'결제확인',
   5:'주문취소', 6:'제작준비', 7:'인쇄대기', 8:'인쇄중',
   9:'제본중', 10:'포장중', 11:'배송준비', 12:'배송완료',
   13:'수령확인', 14:'환불요청', 15:'환불완료'
+};
+// CARD (custom_order) 상태 - status_seq 체계가 다름
+const STATUS_MAP_CARD = {
+  '-1':'임시저장', 0:'주문접수', 1:'결제대기', 3:'결제취소',
+  5:'주문취소', 6:'제작준비', 7:'인쇄대기', 8:'인쇄중',
+  9:'제본중', 10:'포장중', 11:'배송준비', 12:'배송완료', 15:'발송완료'
 };
 // 취소 상태 (status_seq 3=결제취소, 5=주문취소)
 function isCancelled(r) { return r.status_seq === 3 || r.status_seq === 5; }
@@ -860,7 +867,7 @@ async function loadOrders() {
       r.coupon_price_fmt = r.coupon_price > 0 ? '-' + fmtKRW(r.coupon_price) : '';
       r.settle_price_fmt = fmtKRW(r.settle_price);
       r.order_type_label = r.order_type === 'ETC' ? '부가상품' : '청첩장+답례품';
-      r.status_label = STATUS_MAP[r.status_seq] || `상태${r.status_seq ?? '?'}`;
+      r.status_label = (r.order_type === 'CARD' ? STATUS_MAP_CARD : STATUS_MAP)[r.status_seq] || `상태${r.status_seq ?? '?'}`;
       r.file_count_fmt = r.file_count > 0
         ? `<a href="#" onclick="showOrderFiles(${r.order_seq});return false" style="color:var(--primary);text-decoration:underline">📎 ${r.file_count}건</a>`
         : '';
