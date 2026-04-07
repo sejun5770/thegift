@@ -729,8 +729,9 @@ async function apiForecast() {
   //    예상매출 = 예식건수 × 전환율 × 객단가
   //    매출이 0인 주차는 제외 (비시즌 주차가 전환율을 희석시키는 것 방지)
   //    가중치: 가장 오래된 주 1, ..., 가장 최근 주 N (선형 가중)
+  const MIN_WEEKLY_ORDERS = 20; // 오퍼레이팅 초기 등 비정상 주차 제외 기준
   const completedWeeks = weeks.filter(w => w.is_past);
-  const activeWeeks = completedWeeks.filter(w => w.actual_orders > 0);
+  const activeWeeks = completedWeeks.filter(w => w.actual_orders >= MIN_WEEKLY_ORDERS);
   const baseWeeks = activeWeeks.slice(-BASE_WEEKS);
   let baseTotalRevenue = 0, baseTotalOrders = 0, baseTotalWeddings = 0;
   let weightedOrders = 0, weightedWeddings = 0, weightedRevenue = 0, weightSum = 0;
