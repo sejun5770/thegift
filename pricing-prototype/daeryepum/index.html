@@ -770,8 +770,8 @@ const STATUS_MAP_CARD = {
   5:'주문취소', 6:'제작준비', 7:'인쇄대기', 8:'인쇄중',
   9:'제본중', 10:'포장중', 11:'배송준비', 12:'배송완료', 15:'발송완료'
 };
-// 취소 상태 (status_seq 3=결제취소, 5=주문취소)
-function isCancelled(r) { return r.status_seq === 3 || r.status_seq === 5; }
+// 수집 제외 상태 (1=결제대기, 3=결제취소, 5=주문취소)
+function isCancelled(r) { return r.status_seq === 1 || r.status_seq === 3 || r.status_seq === 5; }
 
 // --- Auth ---
 function loadUserInfo() {
