@@ -327,7 +327,20 @@ nav a:hover{color:var(--gray-900)}
 
   <!-- Marketing Analytics -->
   <div class="section">
-    <div class="section-title">📊 마케팅 분석 (최근 90일)</div>
+    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span>📊 마케팅 분석</span>
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400">
+        <button class="btn btn-sm" onclick="setMkPeriod(30)" id="mk-p30">30일</button>
+        <button class="btn btn-sm" onclick="setMkPeriod(60)" id="mk-p60">60일</button>
+        <button class="btn btn-sm btn-primary" onclick="setMkPeriod(90)" id="mk-p90">90일</button>
+        <button class="btn btn-sm" onclick="setMkPeriod(180)" id="mk-p180">180일</button>
+        <span style="color:#cbd5e1">|</span>
+        <input type="date" id="mk-start" style="font-size:12px;padding:4px 6px;border:1px solid #e2e8f0;border-radius:6px" />
+        <span style="color:#94a3b8">~</span>
+        <input type="date" id="mk-end" style="font-size:12px;padding:4px 6px;border:1px solid #e2e8f0;border-radius:6px" />
+        <button class="btn btn-sm btn-primary" onclick="loadMarketing()">조회</button>
+      </div>
+    </div>
     <!-- 유입채널별 분석 -->
     <div class="card" style="margin-bottom:16px;position:relative">
       <div class="view-toggle">
@@ -824,6 +837,8 @@ function init() {
   document.getElementById('dash-end').value = end;
   document.getElementById('chart-start').value = start30;
   document.getElementById('chart-end').value = end;
+  // 마케팅 분석 기본 기간 (90일)
+  initMkDates(90);
 
   buildColSelector();
   loadCollectedFromServer().catch(() => {}).finally(() => {
@@ -1049,7 +1064,7 @@ async function loadDashboard() {
     renderForecast(forecast);
     renderLeadtime(leadtime);
     // 마케팅 분석 (별도 로드 - 무거운 쿼리)
-    fetch(`${API}/api/dashboard/marketing`).then(r=>r.json()).then(renderMarketing).catch(e=>console.warn('Marketing load failed:', e));
+    loadMarketing();
     // 전환율 + 샘플 (별도 로드)
     fetch(`${API}/api/dashboard/conversion`).then(r=>r.json()).then(renderConversion).catch(e=>console.warn('Conversion load failed:', e));
     fetch(`${API}/api/dashboard/samples`).then(r=>r.json()).then(renderSamples).catch(e=>console.warn('Samples load failed:', e));
@@ -1387,8 +1402,54 @@ function renderLeadtime(lt) {
 let hourlyChart = null, weeklyChart = null;
 let channelDonutChart = null, channelTrendChart = null;
 const CHANNEL_COLORS = {'CRM/광고':'#ef4444','퍼널/오가닉':'#3b82f6','청첩장동시구매':'#10b981'};
+let _mkPeriodDays = 90; // 현재 선택된 프리셋 일수
+
+function initMkDates(days) {
+  const end = new Date();
+  const start = new Date(end.getTime() - days * 86400000);
+  document.getElementById('mk-start').value = fmt(start);
+  document.getElementById('mk-end').value = fmt(end);
+}
+
+function setMkPeriod(days) {
+  _mkPeriodDays = days;
+  // 프리셋 버튼 active 상태
+  [30,60,90,180].forEach(d => {
+    const btn = document.getElementById('mk-p' + d);
+    if (btn) { btn.className = d === days ? 'btn btn-sm btn-primary' : 'btn btn-sm'; }
+  });
+  initMkDates(days);
+  loadMarketing();
+}
+
+async function loadMarketing() {
+  const startVal = document.getElementById('mk-start').value;
+  const endVal = document.getElementById('mk-end').value;
+  if (!startVal || !endVal) return;
+  const endPlus = fmt(new Date(new Date(endVal).getTime() + 86400000));
+  // 프리셋 버튼 active 상태 해제 (커스텀 날짜 입력시)
+  const diffDays = Math.round((new Date(endVal) - new Date(startVal)) / 86400000);
+  [30,60,90,180].forEach(d => {
+    const btn = document.getElementById('mk-p' + d);
+    if (btn) { btn.className = d === diffDays ? 'btn btn-sm btn-primary' : 'btn btn-sm'; }
+  });
+  try {
+    const mk = await fetch(`${API}/api/dashboard/marketing?start_date=${startVal}&end_date=${endPlus}`).then(r => r.json());
+    // 기간 표시 업데이트
+    _mkData = null; // 테이블 뷰 캐시 초기화 (재렌더링 허용)
+    renderMarketing(mk);
+  } catch(e) { console.warn('Marketing load failed:', e); }
+}
+
 function renderMarketing(mk) {
   _mkData = mk; // 테이블 뷰용 캐시
+  // 테이블 뷰 캐시 초기화 (기간 변경 시 재렌더링 허용)
+  ['channel','conv','region','hourly','weekly','site'].forEach(id => {
+    const el = document.getElementById(`mk-${id}-table`);
+    if (el) el.innerHTML = '';
+  });
+  const reorderTableEl = document.getElementById('reorder-table-view');
+  if (reorderTableEl) reorderTableEl.innerHTML = '';
   const c = mk.conversion;
   document.getElementById('mk-card-members').textContent = fmtNum(c.card_members) + '명';
   document.getElementById('mk-cross').textContent = fmtNum(c.cross_buy) + '명';
@@ -2077,7 +2138,7 @@ function renderSamples(data) {
 async function loadSnsInsight() {
   try {
     const [mk, summary, lt] = await Promise.all([
-      fetch(`${API}/api/dashboard/marketing`).then(r => r.json()),
+      fetch(`${API}/api/dashboard/marketing?start_date=${document.getElementById('mk-start').value}&end_date=${fmt(new Date(new Date(document.getElementById('mk-end').value).getTime()+86400000))}`).then(r => r.json()),
       fetch(`${API}/api/dashboard/summary?start_date=${fmt(new Date(Date.now() - 30*86400000))}&end_date=${fmt(new Date(Date.now() + 86400000))}`).then(r => r.json()),
       fetch(`${API}/api/dashboard/leadtime`).then(r => r.json()),
     ]);
