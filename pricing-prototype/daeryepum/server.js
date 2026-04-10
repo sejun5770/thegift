@@ -1405,6 +1405,73 @@ async function apiMarketing() {
     ORDER BY MIN(gap_hours)
   `);
 
+  // 7) 유입채널별 분석 (상품명 프리픽스 기반) - ETC + CARD 답례품 통합
+  // [시크릿특가]=CRM/광고, [n%할인가]=퍼널/오가닉, 없음=청첩장동시구매
+  const CHANNEL_CASE = `CASE
+    WHEN c.Card_Name LIKE '[[]시크릿특가]%' THEN 'CRM/광고'
+    WHEN c.Card_Name LIKE '[[][0-9]%할인가]%' THEN '퍼널/오가닉'
+    ELSE '청첩장동시구매'
+  END`;
+
+  const channelResult = await p.request().query(`
+    SELECT channel, COUNT(DISTINCT order_key) AS order_count, SUM(item_count) AS item_count, SUM(revenue) AS revenue FROM (
+      SELECT CONCAT('E', o.order_seq) AS order_key,
+        ${CHANNEL_CASE} AS channel,
+        oi.order_count AS item_count,
+        ${ETC_AMOUNT_EXPR} AS revenue
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+        AND o.order_date >= DATEADD(day,-90,GETDATE())
+      UNION ALL
+      SELECT CONCAT('C', co.order_seq) AS order_key,
+        ${CHANNEL_CASE} AS channel,
+        coi.item_count AS item_count,
+        CAST(coi.item_sale_price AS float) * coi.item_count AS revenue
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
+        AND co.order_date >= DATEADD(day,-90,GETDATE())
+    ) t GROUP BY channel ORDER BY revenue DESC
+  `);
+
+  // 주차별 유입채널 트렌드
+  const channelTrendResult = await p.request().query(`
+    SELECT
+      CONVERT(varchar(10), DATEADD(week, DATEDIFF(week, 0, order_date), 0), 120) AS week_start,
+      channel,
+      COUNT(DISTINCT order_key) AS order_count,
+      SUM(item_count) AS item_count,
+      SUM(revenue) AS revenue
+    FROM (
+      SELECT o.order_date, CONCAT('E', o.order_seq) AS order_key,
+        ${CHANNEL_CASE} AS channel,
+        oi.order_count AS item_count,
+        ${ETC_AMOUNT_EXPR} AS revenue
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+        AND o.order_date >= DATEADD(day,-90,GETDATE())
+      UNION ALL
+      SELECT co.order_date, CONCAT('C', co.order_seq) AS order_key,
+        ${CHANNEL_CASE} AS channel,
+        coi.item_count AS item_count,
+        CAST(coi.item_sale_price AS float) * coi.item_count AS revenue
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
+        AND co.order_date >= DATEADD(day,-90,GETDATE())
+    ) t
+    GROUP BY CONVERT(varchar(10), DATEADD(week, DATEDIFF(week, 0, order_date), 0), 120), channel
+    ORDER BY week_start, channel
+  `);
+
   return {
     hourly: hourMap,
     weekly: dayMap,
@@ -1415,6 +1482,8 @@ async function apiMarketing() {
     siteCross: siteCrossResult.recordset,
     reorder: reorderResult.recordset[0] || {},
     reorderInterval: reorderIntervalResult.recordset,
+    channelMix: channelResult.recordset,
+    channelTrend: channelTrendResult.recordset,
     period: '최근 90일',
   };
 }
