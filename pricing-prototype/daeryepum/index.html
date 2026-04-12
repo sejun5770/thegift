@@ -201,7 +201,7 @@ nav a:hover{color:var(--gray-900)}
   <div id="dash-card-view">
   <!-- Summary Cards -->
   <div class="card-grid card-grid-4" id="summary-cards">
-    <div class="card"><h3>총 매출</h3><div class="value" id="s-revenue">-</div><div class="sub" id="s-revenue-sub"></div><div id="s-revenue-sites"></div></div>
+    <div class="card"><h3>총 매출</h3><div class="value" id="s-revenue">-</div><div class="sub" id="s-revenue-sub"></div><div id="s-revenue-type-split"></div><div id="s-revenue-sites"></div></div>
     <div class="card"><h3>총 수량</h3><div class="value" id="s-qty">-</div><div class="sub" id="s-qty-sub"></div></div>
     <div class="card"><h3>주문 건수</h3><div class="value" id="s-orders">-</div><div class="sub" id="s-orders-sub"></div></div>
     <div class="card"><h3>평균 리드타임</h3><div class="value" id="s-leadtime">-</div><div class="sub" id="s-leadtime-sub"></div></div>
@@ -228,6 +228,8 @@ nav a:hover{color:var(--gray-900)}
         <div class="compare-col yesterday">
           <div class="compare-header"><span id="cmp-yesterday-date">어제</span></div>
           <div class="compare-row"><span class="compare-label">매출</span><span class="compare-value" id="cmp-y-amount">-</span></div>
+          <div class="compare-row" style="padding-left:8px;font-size:12px;color:var(--gray-600)"><span class="compare-label">├ 동시구매</span><span class="compare-value" id="cmp-y-copurchase" style="font-size:12px">-</span></div>
+          <div class="compare-row" style="padding-left:8px;font-size:12px;color:var(--gray-600)"><span class="compare-label">└ 단독주문</span><span class="compare-value" id="cmp-y-standalone" style="font-size:12px">-</span></div>
           <div class="compare-row"><span class="compare-label">수량</span><span class="compare-value" id="cmp-y-qty">-</span></div>
           <div class="compare-row"><span class="compare-label">건수</span><span class="compare-value" id="cmp-y-orders">-</span></div>
           <div id="cmp-y-site-breakdown"></div>
@@ -236,6 +238,8 @@ nav a:hover{color:var(--gray-900)}
         <div class="compare-col today">
           <div class="compare-header"><span id="cmp-today-date">오늘</span> <span id="cmp-badge"></span></div>
           <div class="compare-row"><span class="compare-label">매출</span><span class="compare-value" id="cmp-t-amount">-</span></div>
+          <div class="compare-row" style="padding-left:8px;font-size:12px;color:var(--gray-600)"><span class="compare-label">├ 동시구매</span><span class="compare-value" id="cmp-t-copurchase" style="font-size:12px">-</span></div>
+          <div class="compare-row" style="padding-left:8px;font-size:12px;color:var(--gray-600)"><span class="compare-label">└ 단독주문</span><span class="compare-value" id="cmp-t-standalone" style="font-size:12px">-</span></div>
           <div class="compare-row"><span class="compare-label">수량</span><span class="compare-value" id="cmp-t-qty">-</span></div>
           <div class="compare-row"><span class="compare-label">건수</span><span class="compare-value" id="cmp-t-orders">-</span></div>
           <div id="cmp-t-site-breakdown"></div>
@@ -253,6 +257,8 @@ nav a:hover{color:var(--gray-900)}
         <div class="compare-col yesterday">
           <div class="compare-header"><span id="wow-last-date">전주</span></div>
           <div class="compare-row"><span class="compare-label">매출</span><span class="compare-value" id="wow-l-amount">-</span></div>
+          <div class="compare-row" style="padding-left:8px;font-size:12px;color:var(--gray-600)"><span class="compare-label">├ 동시구매</span><span class="compare-value" id="wow-l-copurchase" style="font-size:12px">-</span></div>
+          <div class="compare-row" style="padding-left:8px;font-size:12px;color:var(--gray-600)"><span class="compare-label">└ 단독주문</span><span class="compare-value" id="wow-l-standalone" style="font-size:12px">-</span></div>
           <div class="compare-row"><span class="compare-label">수량</span><span class="compare-value" id="wow-l-qty">-</span></div>
           <div class="compare-row"><span class="compare-label">건수</span><span class="compare-value" id="wow-l-orders">-</span></div>
           <div id="wow-l-site-breakdown"></div>
@@ -261,6 +267,8 @@ nav a:hover{color:var(--gray-900)}
         <div class="compare-col today">
           <div class="compare-header"><span id="wow-today-date">오늘</span> <span id="wow-badge"></span></div>
           <div class="compare-row"><span class="compare-label">매출</span><span class="compare-value" id="wow-t-amount">-</span></div>
+          <div class="compare-row" style="padding-left:8px;font-size:12px;color:var(--gray-600)"><span class="compare-label">├ 동시구매</span><span class="compare-value" id="wow-t-copurchase" style="font-size:12px">-</span></div>
+          <div class="compare-row" style="padding-left:8px;font-size:12px;color:var(--gray-600)"><span class="compare-label">└ 단독주문</span><span class="compare-value" id="wow-t-standalone" style="font-size:12px">-</span></div>
           <div class="compare-row"><span class="compare-label">수량</span><span class="compare-value" id="wow-t-qty">-</span></div>
           <div class="compare-row"><span class="compare-label">건수</span><span class="compare-value" id="wow-t-orders">-</span></div>
           <div id="wow-t-site-breakdown"></div>
@@ -1090,6 +1098,29 @@ function renderSummary(summary, lt) {
   const totalOrders = summary.reduce((s,r)=>s+(r.order_count||0),0);
   document.getElementById('s-revenue').textContent = fmtKRW(totalAmt);
   document.getElementById('s-revenue-sub').textContent = `조회 기간 내`;
+  // 동시구매/단독주문 분리 집계
+  let copurchaseAmt = 0, standaloneAmt = 0;
+  summary.forEach(r => {
+    if (r.order_type === '동시구매') copurchaseAmt += r.total_amount||0;
+    else standaloneAmt += r.total_amount||0;
+  });
+  const cpPct = totalAmt > 0 ? Math.round(copurchaseAmt / totalAmt * 100) : 0;
+  const saPct = totalAmt > 0 ? Math.round(standaloneAmt / totalAmt * 100) : 0;
+  document.getElementById('s-revenue-type-split').innerHTML = `
+    <div style="border-top:1px solid var(--gray-100);padding-top:4px;margin-top:4px">
+      <div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:1px 0">
+        <span style="width:7px;height:7px;border-radius:50%;background:#8b5cf6;flex-shrink:0"></span>
+        <span style="color:var(--gray-600)">동시구매</span>
+        <span style="font-weight:600;margin-left:auto">${fmtKRW(copurchaseAmt)}</span>
+        <span style="color:var(--gray-400)">${cpPct}%</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:1px 0">
+        <span style="width:7px;height:7px;border-radius:50%;background:#f59e0b;flex-shrink:0"></span>
+        <span style="color:var(--gray-600)">단독주문</span>
+        <span style="font-weight:600;margin-left:auto">${fmtKRW(standaloneAmt)}</span>
+        <span style="color:var(--gray-400)">${saPct}%</span>
+      </div>
+    </div>`;
   // 사이트별 매출 집계
   const siteTotals = {};
   summary.forEach(r => {
@@ -1147,6 +1178,13 @@ function renderSummary(summary, lt) {
     else if (sorted.length >= 3) fb += `상위 3개 상품(${sorted.slice(0,3).map(s=>s[0]).join(', ')})이 고르게 분포하여 건강한 포트폴리오입니다. `;
   }
 
+  // 동시구매/단독 비율 피드백
+  if (copurchaseAmt > 0 || standaloneAmt > 0) {
+    fb += `주문유형별로는 <strong>청첩장 동시구매 ${fmtKRW(copurchaseAmt)}(${cpPct}%)</strong>, <strong>단독주문 ${fmtKRW(standaloneAmt)}(${saPct}%)</strong>입니다. `;
+    if (cpPct > 60) fb += '청첩장 동시구매 비중이 높아 청첩장 연계 마케팅이 매우 효과적입니다. ';
+    else if (saPct > 60) fb += '단독주문 비중이 높아 답례품 전용 마케팅 채널(SNS, 퍼널 등)의 기여도가 큽니다. ';
+  }
+
   if (lt.median_days <= 7) fb += '📌 리드타임 중앙값이 <strong>7일 이내</strong>로, 급주문 비율이 높아 재고/물류 대응력이 중요합니다.';
   else if (lt.median_days <= 21) fb += '📌 리드타임 중앙값이 <strong>2~3주</strong>로, 청첩장 발송과 연동된 계획형 주문 패턴입니다.';
   else fb += '📌 리드타임 중앙값이 <strong>3주 이상</strong>으로, 사전 준비형 고객이 많습니다. 얼리버드 할인이 효과적일 수 있습니다.';
@@ -1179,9 +1217,13 @@ function renderComparison(cmp) {
   document.getElementById('cmp-yesterday-date').textContent = `어제 (${cmp.date.yesterday})`;
   document.getElementById('cmp-today-date').textContent = `오늘 (${cmp.date.today})`;
   document.getElementById('cmp-y-amount').textContent = fmtKRW(y.total_amount);
+  document.getElementById('cmp-y-copurchase').textContent = fmtKRW((y.copurchase||{}).amount||0);
+  document.getElementById('cmp-y-standalone').textContent = fmtKRW((y.standalone||{}).amount||0);
   document.getElementById('cmp-y-qty').textContent = fmtNum(y.total_qty);
   document.getElementById('cmp-y-orders').textContent = fmtNum(y.order_count) + '건';
   document.getElementById('cmp-t-amount').textContent = fmtKRW(t.total_amount);
+  document.getElementById('cmp-t-copurchase').textContent = fmtKRW((t.copurchase||{}).amount||0);
+  document.getElementById('cmp-t-standalone').textContent = fmtKRW((t.standalone||{}).amount||0);
   document.getElementById('cmp-t-qty').textContent = fmtNum(t.total_qty);
   document.getElementById('cmp-t-orders').textContent = fmtNum(t.order_count) + '건';
   renderSiteBreakdown(y, 'cmp-y');
@@ -1229,9 +1271,13 @@ function renderComparison(cmp) {
   document.getElementById('wow-last-date').textContent = `전주 ${dow}요일 (${cmp.date.last_week_same_day})`;
   document.getElementById('wow-today-date').textContent = `오늘 ${dow}요일 (${cmp.date.today})`;
   document.getElementById('wow-l-amount').textContent = fmtKRW(lw.total_amount);
+  document.getElementById('wow-l-copurchase').textContent = fmtKRW((lw.copurchase||{}).amount||0);
+  document.getElementById('wow-l-standalone').textContent = fmtKRW((lw.standalone||{}).amount||0);
   document.getElementById('wow-l-qty').textContent = fmtNum(lw.total_qty);
   document.getElementById('wow-l-orders').textContent = fmtNum(lw.order_count) + '건';
   document.getElementById('wow-t-amount').textContent = fmtKRW(t.total_amount);
+  document.getElementById('wow-t-copurchase').textContent = fmtKRW((t.copurchase||{}).amount||0);
+  document.getElementById('wow-t-standalone').textContent = fmtKRW((t.standalone||{}).amount||0);
   document.getElementById('wow-t-qty').textContent = fmtNum(t.total_qty);
   document.getElementById('wow-t-orders').textContent = fmtNum(t.order_count) + '건';
   renderSiteBreakdown(lw, 'wow-l');
@@ -2439,6 +2485,7 @@ function renderDashTable() {
 function renderDailyTable(data, topProducts) {
   const dayMap = {};
   const daySiteMap = {}; // day -> site -> {amount, qty, orders}
+  const dayTypeMap = {}; // day -> {copurchase:{amount,orders}, standalone:{amount,orders}}
   data.forEach(r => {
     const day = r.order_day;
     const name = (r.card_name||'').replace(/^\[.*?\]\s*/g,'');
@@ -2456,6 +2503,11 @@ function renderDailyTable(data, topProducts) {
     daySiteMap[day][sn].amount += r.total_amount||0;
     daySiteMap[day][sn].qty += r.total_qty||0;
     daySiteMap[day][sn].orders += r.order_count||0;
+    // 동시구매/단독주문별
+    if (!dayTypeMap[day]) dayTypeMap[day] = { copurchase:{amount:0,orders:0}, standalone:{amount:0,orders:0} };
+    const typeKey = r.order_type === '동시구매' ? 'copurchase' : 'standalone';
+    dayTypeMap[day][typeKey].amount += r.total_amount||0;
+    dayTypeMap[day][typeKey].orders += r.order_count||0;
   });
   // 활성 사이트 목록 (매출순)
   const allSiteTotals = {};
@@ -2563,11 +2615,47 @@ function renderDailyTable(data, topProducts) {
     </tr>`;
   }).join('');
 
+  // 동시구매/단독주문 행
+  const totalCopurchase = days.reduce((s,d) => s + ((dayTypeMap[d]||{copurchase:{amount:0}}).copurchase.amount), 0);
+  const totalStandalone = days.reduce((s,d) => s + ((dayTypeMap[d]||{standalone:{amount:0}}).standalone.amount), 0);
+  const copurchaseCells = days.map(d => {
+    const v = (dayTypeMap[d]||{copurchase:{amount:0}}).copurchase.amount;
+    const dayTotal = dayMap[d].amount || 0;
+    const pct = dayTotal > 0 ? Math.round(v / dayTotal * 100) : 0;
+    return `<td class="num" style="font-size:12px">${v ? fmtKRW(v)+' <span style="color:var(--gray-500);font-size:10px">('+pct+'%)</span>' : '<span style="color:var(--gray-300)">-</span>'}</td>`;
+  }).join('');
+  const standaloneCells = days.map(d => {
+    const v = (dayTypeMap[d]||{standalone:{amount:0}}).standalone.amount;
+    const dayTotal = dayMap[d].amount || 0;
+    const pct = dayTotal > 0 ? Math.round(v / dayTotal * 100) : 0;
+    return `<td class="num" style="font-size:12px">${v ? fmtKRW(v)+' <span style="color:var(--gray-500);font-size:10px">('+pct+'%)</span>' : '<span style="color:var(--gray-300)">-</span>'}</td>`;
+  }).join('');
+  const cpPctTotal = totalAmt > 0 ? Math.round(totalCopurchase / totalAmt * 100) : 0;
+  const saPctTotal = totalAmt > 0 ? Math.round(totalStandalone / totalAmt * 100) : 0;
+
+  const typeDivider = `<tr style="background:var(--gray-100)">
+    <td style="${STICKY}background:var(--gray-100);font-size:10px;color:var(--gray-500);padding:3px 12px;font-weight:600;letter-spacing:.5px">주문유형별 매출</td>
+    ${days.map(()=>`<td style="background:var(--gray-100)"></td>`).join('')}
+    <td style="background:#fef9c3;border-left:2px solid var(--gray-200)"></td>
+  </tr>`;
+  const typeRows =
+    `<tr>
+      <td style="${STICKY}background:#fff;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#8b5cf6;margin-right:4px"></span>동시구매</td>
+      ${copurchaseCells}
+      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalCopurchase ? fmtKRW(totalCopurchase)+' <span style="color:var(--gray-500)">('+cpPctTotal+'%)</span>' : '-'}</td>
+    </tr>
+    <tr>
+      <td style="${STICKY}background:#fafafa;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#f59e0b;margin-right:4px"></span>단독주문</td>
+      ${standaloneCells}
+      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalStandalone ? fmtKRW(totalStandalone)+' <span style="color:var(--gray-500)">('+saPctTotal+'%)</span>' : '-'}</td>
+    </tr>`;
+
   const tbody =
     mkRow('총 매출', amtCells, fmtKRW(totalAmt)) +
     mkRow('주문건수', orderCells, fmtNum(totalOrders)+'건') +
     mkRow('주문수량', qtyCells, fmtNum(totalQty)) +
     mkRow('객단가', avgCells, fmtKRW(totalAvg)) +
+    typeDivider + typeRows +
     siteDivider + siteRows +
     divider +
     productRows;
@@ -2578,6 +2666,7 @@ function renderDailyTable(data, topProducts) {
 function renderWeeklyTable(data, topProducts) {
   const weekMap = {};
   const weekSiteMap = {}; // week -> site -> {amount, qty, orders}
+  const weekTypeMap = {}; // week -> {copurchase:{amount,orders}, standalone:{amount,orders}}
   data.forEach(r => {
     const wk = getWeekMondayStr(r.order_day);
     const name = (r.card_name||'').replace(/^\[.*?\]\s*/g,'');
@@ -2595,6 +2684,11 @@ function renderWeeklyTable(data, topProducts) {
     weekSiteMap[wk][sn].amount += r.total_amount||0;
     weekSiteMap[wk][sn].qty += r.total_qty||0;
     weekSiteMap[wk][sn].orders += r.order_count||0;
+    // 동시구매/단독주문별
+    if (!weekTypeMap[wk]) weekTypeMap[wk] = { copurchase:{amount:0,orders:0}, standalone:{amount:0,orders:0} };
+    const typeKey = r.order_type === '동시구매' ? 'copurchase' : 'standalone';
+    weekTypeMap[wk][typeKey].amount += r.total_amount||0;
+    weekTypeMap[wk][typeKey].orders += r.order_count||0;
   });
   // 활성 사이트 목록
   const allSiteTotals = {};
@@ -2710,12 +2804,47 @@ function renderWeeklyTable(data, topProducts) {
     </tr>`;
   }).join('');
 
+  // 동시구매/단독주문 행
+  const totalCopurchase = weeks.reduce((s,w) => s + ((weekTypeMap[w]||{copurchase:{amount:0}}).copurchase.amount), 0);
+  const totalStandalone = weeks.reduce((s,w) => s + ((weekTypeMap[w]||{standalone:{amount:0}}).standalone.amount), 0);
+  const copurchaseCells = weeks.map(w => {
+    const v = (weekTypeMap[w]||{copurchase:{amount:0}}).copurchase.amount;
+    const wkTotal = weekMap[w].amount || 0;
+    const pct = wkTotal > 0 ? Math.round(v / wkTotal * 100) : 0;
+    return `<td class="num" style="font-size:12px">${v ? fmtKRW(v)+' <span style="color:var(--gray-500);font-size:10px">('+pct+'%)</span>' : '<span style="color:var(--gray-300)">-</span>'}</td>`;
+  }).join('');
+  const standaloneCells = weeks.map(w => {
+    const v = (weekTypeMap[w]||{standalone:{amount:0}}).standalone.amount;
+    const wkTotal = weekMap[w].amount || 0;
+    const pct = wkTotal > 0 ? Math.round(v / wkTotal * 100) : 0;
+    return `<td class="num" style="font-size:12px">${v ? fmtKRW(v)+' <span style="color:var(--gray-500);font-size:10px">('+pct+'%)</span>' : '<span style="color:var(--gray-300)">-</span>'}</td>`;
+  }).join('');
+  const cpPctTotal = totalAmt > 0 ? Math.round(totalCopurchase / totalAmt * 100) : 0;
+  const saPctTotal = totalAmt > 0 ? Math.round(totalStandalone / totalAmt * 100) : 0;
+  const typeDivider = `<tr style="background:var(--gray-100)">
+    <td style="${STICKY}background:var(--gray-100);font-size:10px;color:var(--gray-500);padding:3px 12px;font-weight:600;letter-spacing:.5px">주문유형별 매출</td>
+    ${weeks.map(()=>`<td style="background:var(--gray-100)"></td>`).join('')}
+    <td style="background:#fef9c3;border-left:2px solid var(--gray-200)"></td>
+  </tr>`;
+  const typeRows =
+    `<tr>
+      <td style="${STICKY}background:#fff;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#8b5cf6;margin-right:4px"></span>동시구매</td>
+      ${copurchaseCells}
+      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalCopurchase ? fmtKRW(totalCopurchase)+' <span style="color:var(--gray-500)">('+cpPctTotal+'%)</span>' : '-'}</td>
+    </tr>
+    <tr>
+      <td style="${STICKY}background:#fafafa;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#f59e0b;margin-right:4px"></span>단독주문</td>
+      ${standaloneCells}
+      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalStandalone ? fmtKRW(totalStandalone)+' <span style="color:var(--gray-500)">('+saPctTotal+'%)</span>' : '-'}</td>
+    </tr>`;
+
   const tbody =
     mkRow('총 매출', amtCells, fmtKRW(totalAmt)) +
     mkRow('WoW%', wowCells, '-') +
     mkRow('주문건수', orderCells, fmtNum(totalOrders)+'건') +
     mkRow('주문수량', qtyCells, fmtNum(totalQty)) +
     mkRow('객단가', avgCells, fmtKRW(totalAvg)) +
+    typeDivider + typeRows +
     siteDivider + siteRows +
     divider +
     productRows;

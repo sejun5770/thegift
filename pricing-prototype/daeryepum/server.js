@@ -478,8 +478,9 @@ async function apiDashboardComparison() {
   const dayNames = ['일','월','화','수','목','금','토'];
   const todayDow = dayNames[today().getDay()];
 
-  // 각 기간별 ETC+CARD 합산 헬퍼 (사이트별 분리 포함)
+  // 각 기간별 ETC+CARD 합산 헬퍼 (사이트별 분리 + 동시구매/단독주문 분리)
   async function getPeriodTotal(startStr, endStr) {
+    // ETC 주문 = 항상 단독주문
     const r = await p.request()
       .input('s', sql.VarChar, startStr)
       .input('e', sql.VarChar, endStr)
@@ -496,12 +497,18 @@ async function apiDashboardComparison() {
         WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
         GROUP BY ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
       `);
+    // CARD 주문 = 같은 주문에 A01(청첩장)이 있으면 동시구매, 없으면 단독주문
     const r2 = await p.request()
       .input('s', sql.VarChar, startStr)
       .input('e', sql.VarChar, endStr)
       .query(`
         SELECT
           ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM custom_order_item coi2 WITH (NOLOCK)
+            INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+            WHERE coi2.order_seq = co.order_seq AND c2.Card_Div = 'A01'
+          ) THEN 1 ELSE 0 END AS is_copurchase,
           COUNT(DISTINCT co.order_seq) AS order_count,
           ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count),0) AS total_amount,
           ISNULL(SUM(coi.item_count),0) AS total_qty
@@ -510,16 +517,45 @@ async function apiDashboardComparison() {
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
         WHERE ${D01_FILTER} AND co.order_date >= @s AND co.order_date < @e AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
-        GROUP BY ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR))
+        GROUP BY ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
+          CASE WHEN EXISTS (
+            SELECT 1 FROM custom_order_item coi2 WITH (NOLOCK)
+            INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+            WHERE coi2.order_seq = co.order_seq AND c2.Card_Div = 'A01'
+          ) THEN 1 ELSE 0 END
       `);
     // 사이트별 합산
     const siteMap = {};
-    for (const row of [...r.recordset, ...r2.recordset]) {
+    // 동시구매/단독주문 분리 집계
+    let copurchase_amount = 0, copurchase_orders = 0, copurchase_qty = 0;
+    let standalone_amount = 0, standalone_orders = 0, standalone_qty = 0;
+    for (const row of r.recordset) {
       const sn = formatSiteName(row.site_name) || '기타';
       if (!siteMap[sn]) siteMap[sn] = { order_count:0, total_amount:0, total_qty:0 };
       siteMap[sn].order_count += row.order_count||0;
       siteMap[sn].total_amount += row.total_amount||0;
       siteMap[sn].total_qty += row.total_qty||0;
+      // ETC = 항상 단독
+      standalone_amount += row.total_amount||0;
+      standalone_orders += row.order_count||0;
+      standalone_qty += row.total_qty||0;
+    }
+    for (const row of r2.recordset) {
+      const sn = formatSiteName(row.site_name) || '기타';
+      if (!siteMap[sn]) siteMap[sn] = { order_count:0, total_amount:0, total_qty:0 };
+      siteMap[sn].order_count += row.order_count||0;
+      siteMap[sn].total_amount += row.total_amount||0;
+      siteMap[sn].total_qty += row.total_qty||0;
+      // CARD: is_copurchase 플래그에 따라 분리
+      if (row.is_copurchase) {
+        copurchase_amount += row.total_amount||0;
+        copurchase_orders += row.order_count||0;
+        copurchase_qty += row.total_qty||0;
+      } else {
+        standalone_amount += row.total_amount||0;
+        standalone_orders += row.order_count||0;
+        standalone_qty += row.total_qty||0;
+      }
     }
     // 전체 합계
     let order_count=0, total_amount=0, total_qty=0;
@@ -531,6 +567,8 @@ async function apiDashboardComparison() {
     return {
       order_count, total_amount, total_qty,
       by_site: siteMap,
+      copurchase: { amount: copurchase_amount, orders: copurchase_orders, qty: copurchase_qty },
+      standalone: { amount: standalone_amount, orders: standalone_orders, qty: standalone_qty },
     };
   }
 
@@ -567,6 +605,7 @@ async function apiDashboardSummary(query) {
         c.Card_Code AS card_code,
         CONVERT(varchar(10), o.order_date, 120) AS order_day,
         ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
+        N'단독주문' AS order_type,
         COUNT(DISTINCT o.order_seq) AS order_count,
         SUM(oi.order_count) AS total_qty,
         SUM(${ETC_AMOUNT_EXPR}) AS total_amount
@@ -584,6 +623,11 @@ async function apiDashboardSummary(query) {
         c.Card_Code,
         CONVERT(varchar(10), co.order_date, 120) AS order_day,
         ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
+        CASE WHEN EXISTS (
+          SELECT 1 FROM custom_order_item coi2 WITH (NOLOCK)
+          INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+          WHERE coi2.order_seq = co.order_seq AND c2.Card_Div = 'A01'
+        ) THEN N'동시구매' ELSE N'단독주문' END AS order_type,
         COUNT(DISTINCT co.order_seq),
         SUM(coi.item_count),
         SUM(CAST(coi.item_sale_price AS float) * coi.item_count)
@@ -592,7 +636,12 @@ async function apiDashboardSummary(query) {
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
       WHERE ${D01_FILTER} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
-      GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR))
+      GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
+        CASE WHEN EXISTS (
+          SELECT 1 FROM custom_order_item coi2 WITH (NOLOCK)
+          INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+          WHERE coi2.order_seq = co.order_seq AND c2.Card_Div = 'A01'
+        ) THEN N'동시구매' ELSE N'단독주문' END
 
       ORDER BY order_day DESC, total_amount DESC
     `);
