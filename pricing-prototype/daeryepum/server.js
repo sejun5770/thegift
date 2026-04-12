@@ -498,17 +498,20 @@ async function apiDashboardComparison() {
         GROUP BY ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
       `);
     // CARD 주문 = 같은 주문에 A01(청첩장)이 있으면 동시구매, 없으면 단독주문
+    // CTE로 사전 계산하여 correlated subquery 회피 (성능 최적화)
     const r2 = await p.request()
       .input('s', sql.VarChar, startStr)
       .input('e', sql.VarChar, endStr)
       .query(`
+        WITH copurchase_orders AS (
+          SELECT DISTINCT coi2.order_seq
+          FROM custom_order_item coi2 WITH (NOLOCK)
+          INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+          WHERE c2.Card_Div = 'A01'
+        )
         SELECT
           ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
-          CASE WHEN EXISTS (
-            SELECT 1 FROM custom_order_item coi2 WITH (NOLOCK)
-            INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
-            WHERE coi2.order_seq = co.order_seq AND c2.Card_Div = 'A01'
-          ) THEN 1 ELSE 0 END AS is_copurchase,
+          CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
           COUNT(DISTINCT co.order_seq) AS order_count,
           ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count),0) AS total_amount,
           ISNULL(SUM(coi.item_count),0) AS total_qty
@@ -516,13 +519,10 @@ async function apiDashboardComparison() {
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+        LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
         WHERE ${D01_FILTER} AND co.order_date >= @s AND co.order_date < @e AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
         GROUP BY ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
-          CASE WHEN EXISTS (
-            SELECT 1 FROM custom_order_item coi2 WITH (NOLOCK)
-            INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
-            WHERE coi2.order_seq = co.order_seq AND c2.Card_Div = 'A01'
-          ) THEN 1 ELSE 0 END
+          CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
       `);
     // 사이트별 합산
     const siteMap = {};
@@ -600,6 +600,12 @@ async function apiDashboardSummary(query) {
     .input('startDate', sql.VarChar, startDate)
     .input('endDate', sql.VarChar, endDate)
     .query(`
+      WITH copurchase_orders AS (
+        SELECT DISTINCT coi2.order_seq
+        FROM custom_order_item coi2 WITH (NOLOCK)
+        INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+        WHERE c2.Card_Div = 'A01'
+      )
       SELECT
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
@@ -623,11 +629,7 @@ async function apiDashboardSummary(query) {
         c.Card_Code,
         CONVERT(varchar(10), co.order_date, 120) AS order_day,
         ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
-        CASE WHEN EXISTS (
-          SELECT 1 FROM custom_order_item coi2 WITH (NOLOCK)
-          INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
-          WHERE coi2.order_seq = co.order_seq AND c2.Card_Div = 'A01'
-        ) THEN N'동시구매' ELSE N'단독주문' END AS order_type,
+        CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END AS order_type,
         COUNT(DISTINCT co.order_seq),
         SUM(coi.item_count),
         SUM(CAST(coi.item_sale_price AS float) * coi.item_count)
@@ -635,13 +637,10 @@ async function apiDashboardSummary(query) {
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+      LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
       WHERE ${D01_FILTER} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
       GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
-        CASE WHEN EXISTS (
-          SELECT 1 FROM custom_order_item coi2 WITH (NOLOCK)
-          INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
-          WHERE coi2.order_seq = co.order_seq AND c2.Card_Div = 'A01'
-        ) THEN N'동시구매' ELSE N'단독주문' END
+        CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
 
       ORDER BY order_day DESC, total_amount DESC
     `);
