@@ -3649,9 +3649,13 @@ let bgStickers = [];
 
 async function loadBgStickers() {
   try {
-    const r = await fetch(API + '/api/bg/stickers');
-    const d = await r.json();
-    bgStickers = d.stickers || [];
+    // 상품설정도 함께 로드 (스티커 테이블에서 상품명 표시용)
+    const [sr, pr] = await Promise.all([
+      fetch(API + '/api/bg/stickers'),
+      bgProductSettings.length ? Promise.resolve(null) : fetch(API + '/api/bg/products/settings'),
+    ]);
+    bgStickers = (await sr.json()).stickers || [];
+    if (pr) bgProductSettings = (await pr.json()).settings || [];
     renderBgStickers();
   } catch(e) { console.error('loadBgStickers:', e); }
 }
@@ -3671,7 +3675,10 @@ function renderBgStickers() {
     <td style="font-size:12px">${s.brand || '-'}</td>
     <td style="font-weight:500;font-size:12px">${s.name}</td>
     <td style="font-size:11px;color:var(--gray-500)">${s.usage || '-'}</td>
-    <td style="font-family:monospace;font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis">${(s.product_codes||[]).join(', ') || '-'}</td>
+    <td style="font-size:10px;max-width:160px;overflow:hidden;text-overflow:ellipsis">${(s.product_codes||[]).map(pc => {
+      const ps = bgProductSettings.find(p => p.product_id === pc);
+      return '<span style="font-family:monospace">' + pc + '</span>' + (ps ? ' <span style="color:var(--gray-500)">(' + (ps.product_name||'') + ')</span>' : '');
+    }).join('<br>') || '-'}</td>
     <td><span class="badge ${s.is_active ? 'badge-up' : 'badge-neutral'}">${s.is_active ? '활성' : '비활성'}</span></td>
     <td>
       <button class="btn btn-sm" onclick="editBgSticker('${s.id}')" title="수정">✏️</button>
