@@ -371,7 +371,7 @@ async function apiOrders(query) {
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
         ISNULL(di.dd_count, coi.item_count) AS item_count,
-        CAST(coi.item_sale_price AS float) * ISNULL(di.dd_count, coi.item_count) AS item_amount,
+        CAST(coi.item_sale_price AS float) * ISNULL(di.dd_count, coi.item_count) / ISNULL(NULLIF(c.Unit_Value, 0), 1) AS item_amount,
         co.settle_price,
         0 AS coupon_price,
         co.status_seq,
@@ -461,12 +461,13 @@ function mergeNames(recvName, orderName) {
 
 // ETC 결제금액 계산: 바른손카드(SiteInfo 매칭) vs 바른손몰(제휴사, SiteInfo 미매칭)
 // 바른손카드: card_sale_price = 총액(단가×수량) → 그대로 사용
-// 바른손몰:   card_sale_price = 단가 → × 수량 = 총액
+// 바른손몰:   card_sale_price = 단가 → × 수량 / 판매단위 = 총액
 // 쿠폰 할인: coupon_price를 차감하여 실결제금액 반영
+// Unit_Value: S2_Card.Unit_Value (판매단위 수량, 예: 소프트터치=50개 단위)
 const ETC_AMOUNT_EXPR = `
   CASE
     WHEN si.SiteName IS NULL
-    THEN CAST(oi.card_sale_price AS float) * oi.order_count - ISNULL(o.coupon_price, 0)
+    THEN CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1) - ISNULL(o.coupon_price, 0)
     ELSE CAST(oi.card_sale_price AS float) - ISNULL(o.coupon_price, 0)
   END`;
 
@@ -517,7 +518,7 @@ async function apiDashboardComparison() {
           ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
           CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
           COUNT(DISTINCT co.order_seq) AS order_count,
-          ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count),0) AS total_amount,
+          ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)),0) AS total_amount,
           ISNULL(SUM(coi.item_count),0) AS total_qty
         FROM custom_order co WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
@@ -636,7 +637,7 @@ async function apiDashboardSummary(query) {
         CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END AS order_type,
         COUNT(DISTINCT co.order_seq),
         SUM(coi.item_count),
-        SUM(CAST(coi.item_sale_price AS float) * coi.item_count)
+        SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1))
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
@@ -779,7 +780,7 @@ async function apiForecast() {
       SELECT order_day, COUNT(*) AS order_count, SUM(settle_price) AS total_amount, SUM(total_qty) AS total_qty
       FROM (
         SELECT DISTINCT co.order_seq, CONVERT(varchar(10), co.order_date, 120) AS order_day,
-          (SELECT ISNULL(SUM(CAST(coi2.item_sale_price AS float) * coi2.item_count), 0) FROM custom_order_item coi2 WITH (NOLOCK) INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq=c2.Card_Seq WHERE coi2.order_seq=co.order_seq AND ${D01_FILTER.replace(/c\./g,'c2.')}) AS settle_price,
+          (SELECT ISNULL(SUM(CAST(coi2.item_sale_price AS float) * coi2.item_count / ISNULL(NULLIF(c2.Unit_Value, 0), 1)), 0) FROM custom_order_item coi2 WITH (NOLOCK) INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq=c2.Card_Seq WHERE coi2.order_seq=co.order_seq AND ${D01_FILTER.replace(/c\./g,'c2.')}) AS settle_price,
           (SELECT SUM(coi2.item_count) FROM custom_order_item coi2 WITH (NOLOCK) INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq=c2.Card_Seq WHERE coi2.order_seq=co.order_seq AND ${D01_FILTER.replace(/c\./g,'c2.')}) AS total_qty
         FROM custom_order co WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
@@ -869,7 +870,7 @@ async function apiForecast() {
         UNION ALL
 
         SELECT DISTINCT co.order_seq,
-          (SELECT ISNULL(SUM(CAST(coi2.item_sale_price AS float) * coi2.item_count), 0) FROM custom_order_item coi2 WITH (NOLOCK) INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq=c2.Card_Seq WHERE coi2.order_seq=co.order_seq AND ${D01_FILTER.replace(/c\./g,'c2.')}) AS settle_price,
+          (SELECT ISNULL(SUM(CAST(coi2.item_sale_price AS float) * coi2.item_count / ISNULL(NULLIF(c2.Unit_Value, 0), 1)), 0) FROM custom_order_item coi2 WITH (NOLOCK) INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq=c2.Card_Seq WHERE coi2.order_seq=co.order_seq AND ${D01_FILTER.replace(/c\./g,'c2.')}) AS settle_price,
           CONVERT(varchar(10), co.order_date, 120) AS order_day
         FROM custom_order co WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
@@ -1535,7 +1536,7 @@ async function apiMarketing(query = {}) {
       SELECT CONCAT('C', co.order_seq) AS order_key,
         ${CHANNEL_CASE} AS channel,
         coi.item_count AS item_count,
-        CAST(coi.item_sale_price AS float) * coi.item_count AS revenue
+        CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1) AS revenue
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
@@ -1567,7 +1568,7 @@ async function apiMarketing(query = {}) {
       SELECT co.order_date, CONCAT('C', co.order_seq) AS order_key,
         ${CHANNEL_CASE} AS channel,
         coi.item_count AS item_count,
-        CAST(coi.item_sale_price AS float) * coi.item_count AS revenue
+        CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1) AS revenue
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
