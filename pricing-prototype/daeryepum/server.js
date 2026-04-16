@@ -1661,20 +1661,17 @@ const server = http.createServer(async (req, res) => {
   }
 
   // --- 바른기프트 라우트 (고객 페이지: 인증 불필요 / 관리 API: 인증 필요) ---
-  if (pathname.startsWith('/barungift/')) {
-    // 고객 페이지 (정적 HTML) - 인증 불필요
-    if (pathname === '/barungift/order-info') {
-      const bgHtml = fs.readFileSync(path.join(__dirname, 'barungift', 'order-info.html'), 'utf-8');
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(bgHtml);
-      return;
-    }
-    // 관리자 페이지 → 대시보드(index.html) 안에 통합됨 (#bg-stickers, #bg-products 해시로 접근)
-    // API 라우트
-    if (pathname.startsWith('/barungift/api/')) {
-      const handled = await handleBarungiftApi(pathname, req, res, parsed.query, { getPool, sql, session });
-      if (handled !== false) return;
-    }
+  // 고객 페이지 (정적 HTML) - 인증 불필요
+  if (pathname === '/order-info') {
+    const bgHtml = fs.readFileSync(path.join(__dirname, 'barungift', 'order-info.html'), 'utf-8');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(bgHtml);
+    return;
+  }
+  // API 라우트
+  if (pathname.startsWith('/api/bg/')) {
+    const handled = await handleBarungiftApi(pathname, req, res, parsed.query, { getPool, sql, session });
+    if (handled !== false) return;
   }
 
   // --- Export API (API key auth, no session required) ---
