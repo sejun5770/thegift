@@ -8,10 +8,14 @@ const crypto = require('crypto');
 const PORT = parseInt(process.env.PORT || '3457');
 const BASE_PATH = process.env.BASE_PATH || '';  // 예: /c/barungift
 
+// --- 바른기프트 모듈 ---
+const { handleBarungiftApi } = require('./barungift/api');
+
 // --- Google OAuth2 ---
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const ALLOWED_DOMAIN = 'barunn.net';
+const DEV_SKIP_AUTH = !GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID === 'test'; // 개발모드: 인증 우회
 const SESSION_MAX_AGE = 24 * 60 * 60 * 1000; // 24시간
 const EXPORT_API_KEY = process.env.EXPORT_API_KEY || '';
 
@@ -173,7 +177,27 @@ async function getPool() {
   pool.on('error', (err) => { console.error('Pool error:', err.message); pool = null; });
   await pool.connect();
   console.log('Connected to Barunson DB');
+  // 제휴사명 캐시 로드 (최초 연결 시)
+  if (Object.keys(companyNameMap).length === 0) {
+    try {
+      const res = await pool.request().query(`SELECT COMPANY_SEQ, COMPANY_NAME FROM COMPANY WITH (NOLOCK) WHERE COMPANY_NAME IS NOT NULL`);
+      res.recordset.forEach(r => { companyNameMap[String(r.COMPANY_SEQ)] = r.COMPANY_NAME; });
+      console.log(`Loaded ${Object.keys(companyNameMap).length} company names`);
+    } catch (e) { console.error('Failed to load company names:', e.message); }
+  }
   return pool;
+}
+
+// 제휴사명 캐시: company_Seq → COMPANY_NAME
+const companyNameMap = {};
+// site_name이 숫자(제휴사 코드)인 경우 "제휴사명(코드)" 형태로 변환
+function formatSiteName(siteName) {
+  if (!siteName) return siteName;
+  const s = String(siteName).trim();
+  if (/^\d+$/.test(s) && companyNameMap[s]) {
+    return `${companyNameMap[s]}(${s})`;
+  }
+  return siteName;
 }
 
 // 카테고리 필터 정의
@@ -222,7 +246,7 @@ async function getDailyMetricsSnapshot(dateStr) {
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
-      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
         AND CAST(o.order_date AS date) = @targetDate
     `);
   const row = result.recordset[0] || {};
@@ -237,7 +261,7 @@ async function getDailyMetricsSnapshot(dateStr) {
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
-      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
         AND CAST(o.order_date AS date) = @targetDate
       GROUP BY c.Card_Name
       ORDER BY SUM(${ETC_AMOUNT_EXPR}) DESC
@@ -308,6 +332,7 @@ async function apiOrders(query) {
         oi.order_count AS item_count,
         ${ETC_AMOUNT_EXPR} AS item_amount,
         o.settle_price AS settle_price,
+        ISNULL(o.coupon_price, 0) AS coupon_price,
         o.status_seq AS status_seq,
         cw.event_year + '-' + RIGHT('0'+cw.event_month,2) + '-' + RIGHT('0'+cw.event_Day,2) AS wedding_date,
         ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
@@ -331,6 +356,7 @@ async function apiOrders(query) {
       UNION ALL
 
       -- 청첩장과 함께 주문 (custom_order)
+      -- 나눔배송: DELIVERY_INFO × DELIVERY_INFO_DETAIL로 배송지별 답례품 수량 표시
       SELECT
         co.order_seq,
         co.member_id AS member_id,
@@ -344,9 +370,10 @@ async function apiOrders(query) {
         di.DELIVERY_MEMO AS recv_msg,
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
-        coi.item_count,
-        CAST(coi.item_sale_price AS float) * coi.item_count AS item_amount,
+        ISNULL(di.dd_count, coi.item_count) AS item_count,
+        CAST(coi.item_sale_price AS float) * ISNULL(di.dd_count, coi.item_count) / ISNULL(NULLIF(c.Unit_Value, 0), 1) AS item_amount,
         co.settle_price,
+        0 AS coupon_price,
         co.status_seq,
         w.event_year + '-' + RIGHT('0'+w.event_month,2) + '-' + RIGHT('0'+w.event_Day,2) AS wedding_date,
         ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
@@ -355,7 +382,25 @@ async function apiOrders(query) {
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
-      LEFT JOIN DELIVERY_INFO di WITH (NOLOCK) ON co.order_seq = di.ORDER_SEQ
+      INNER JOIN (
+        -- 배송지별 답례품 수량: DELIVERY_INFO_DETAIL 있으면 배송지별, 없으면 첫 배송지 1건
+        SELECT di.ORDER_SEQ, di.NAME, di.HPHONE, di.PHONE, di.ADDR, di.ADDR_DETAIL,
+               di.DELIVERY_MEMO, dd.item_count AS dd_count
+        FROM DELIVERY_INFO di WITH (NOLOCK)
+        INNER JOIN DELIVERY_INFO_DETAIL dd WITH (NOLOCK)
+          ON dd.delivery_id = di.ID AND dd.item_title = N'답례품' AND dd.item_count > 0
+        UNION ALL
+        -- DELIVERY_INFO_DETAIL에 답례품 기록이 없는 주문: 첫 배송지만
+        SELECT di.ORDER_SEQ, di.NAME, di.HPHONE, di.PHONE, di.ADDR, di.ADDR_DETAIL,
+               di.DELIVERY_MEMO, NULL AS dd_count
+        FROM DELIVERY_INFO di WITH (NOLOCK)
+        WHERE di.DELIVERY_SEQ = 1
+          AND NOT EXISTS (
+            SELECT 1 FROM DELIVERY_INFO d2 WITH (NOLOCK)
+            INNER JOIN DELIVERY_INFO_DETAIL dd2 WITH (NOLOCK) ON dd2.delivery_id = d2.ID
+            WHERE d2.ORDER_SEQ = di.ORDER_SEQ AND dd2.item_title = N'답례품'
+          )
+      ) di ON di.ORDER_SEQ = co.order_seq
       LEFT JOIN custom_order_WeddInfo w WITH (NOLOCK) ON co.order_seq = w.order_seq
       WHERE ${categoryFilter}
         AND co.order_date >= @startDate AND co.order_date < @endDate
@@ -369,6 +414,7 @@ async function apiOrders(query) {
     card_name: cleanName(r.card_name),
     order_date: r.order_date,
     settle_date: r.settle_date,
+    site_name: formatSiteName(r.site_name),
     // 주문자명/받는사람 합치기
     display_name: mergeNames(r.recv_name, r.order_name),
   }));
@@ -414,13 +460,15 @@ function mergeNames(recvName, orderName) {
 }
 
 // ETC 결제금액 계산: 바른손카드(SiteInfo 매칭) vs 바른손몰(제휴사, SiteInfo 미매칭)
-// 바른손카드: card_sale_price = 상품단가 → 단가 × 수량
-// 바른손몰:   card_sale_price = 단가/수량 → 단가/수량 × 수량 × 수량 = 단가 × 수량
+// 바른손카드: card_sale_price = 총액(단가×수량) → 그대로 사용
+// 바른손몰:   card_sale_price = 단가 → × 수량 / 판매단위 = 총액
+// 쿠폰 할인: coupon_price를 차감하여 실결제금액 반영
+// Unit_Value: S2_Card.Unit_Value (판매단위 수량, 예: 소프트터치=50개 단위)
 const ETC_AMOUNT_EXPR = `
   CASE
     WHEN si.SiteName IS NULL
-    THEN CAST(oi.card_sale_price AS float) * CAST(oi.order_count AS bigint) * oi.order_count
-    ELSE CAST(oi.card_sale_price AS float) * oi.order_count
+    THEN CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1) - ISNULL(o.coupon_price, 0)
+    ELSE CAST(oi.card_sale_price AS float) - ISNULL(o.coupon_price, 0)
   END`;
 
 async function apiDashboardComparison() {
@@ -435,8 +483,9 @@ async function apiDashboardComparison() {
   const dayNames = ['일','월','화','수','목','금','토'];
   const todayDow = dayNames[today().getDay()];
 
-  // 각 기간별 ETC+CARD 합산 헬퍼 (사이트별 분리 포함)
+  // 각 기간별 ETC+CARD 합산 헬퍼 (사이트별 분리 + 동시구매/단독주문 분리)
   async function getPeriodTotal(startStr, endStr) {
+    // ETC 주문 = 항상 단독주문
     const r = await p.request()
       .input('s', sql.VarChar, startStr)
       .input('e', sql.VarChar, endStr)
@@ -450,33 +499,68 @@ async function apiDashboardComparison() {
         INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
-        WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+        WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
         GROUP BY ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
       `);
+    // CARD 주문 = 같은 주문에 A01(청첩장)이 있으면 동시구매, 없으면 단독주문
+    // CTE로 사전 계산하여 correlated subquery 회피 (성능 최적화)
     const r2 = await p.request()
       .input('s', sql.VarChar, startStr)
       .input('e', sql.VarChar, endStr)
       .query(`
+        WITH copurchase_orders AS (
+          SELECT DISTINCT coi2.order_seq
+          FROM custom_order_item coi2 WITH (NOLOCK)
+          INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+          WHERE c2.Card_Div = 'A01'
+        )
         SELECT
           ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
+          CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
           COUNT(DISTINCT co.order_seq) AS order_count,
-          ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count),0) AS total_amount,
+          ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)),0) AS total_amount,
           ISNULL(SUM(coi.item_count),0) AS total_qty
         FROM custom_order co WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
-        WHERE ${D01_FILTER} AND co.order_date >= @s AND co.order_date < @e AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
-        GROUP BY ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR))
+        LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
+        WHERE ${D01_FILTER} AND co.order_date >= @s AND co.order_date < @e AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+        GROUP BY ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
+          CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
       `);
     // 사이트별 합산
     const siteMap = {};
-    for (const row of [...r.recordset, ...r2.recordset]) {
-      const sn = row.site_name || '기타';
+    // 동시구매/단독주문 분리 집계
+    let copurchase_amount = 0, copurchase_orders = 0, copurchase_qty = 0;
+    let standalone_amount = 0, standalone_orders = 0, standalone_qty = 0;
+    for (const row of r.recordset) {
+      const sn = formatSiteName(row.site_name) || '기타';
       if (!siteMap[sn]) siteMap[sn] = { order_count:0, total_amount:0, total_qty:0 };
       siteMap[sn].order_count += row.order_count||0;
       siteMap[sn].total_amount += row.total_amount||0;
       siteMap[sn].total_qty += row.total_qty||0;
+      // ETC = 항상 단독
+      standalone_amount += row.total_amount||0;
+      standalone_orders += row.order_count||0;
+      standalone_qty += row.total_qty||0;
+    }
+    for (const row of r2.recordset) {
+      const sn = formatSiteName(row.site_name) || '기타';
+      if (!siteMap[sn]) siteMap[sn] = { order_count:0, total_amount:0, total_qty:0 };
+      siteMap[sn].order_count += row.order_count||0;
+      siteMap[sn].total_amount += row.total_amount||0;
+      siteMap[sn].total_qty += row.total_qty||0;
+      // CARD: is_copurchase 플래그에 따라 분리
+      if (row.is_copurchase) {
+        copurchase_amount += row.total_amount||0;
+        copurchase_orders += row.order_count||0;
+        copurchase_qty += row.total_qty||0;
+      } else {
+        standalone_amount += row.total_amount||0;
+        standalone_orders += row.order_count||0;
+        standalone_qty += row.total_qty||0;
+      }
     }
     // 전체 합계
     let order_count=0, total_amount=0, total_qty=0;
@@ -488,6 +572,8 @@ async function apiDashboardComparison() {
     return {
       order_count, total_amount, total_qty,
       by_site: siteMap,
+      copurchase: { amount: copurchase_amount, orders: copurchase_orders, qty: copurchase_qty },
+      standalone: { amount: standalone_amount, orders: standalone_orders, qty: standalone_qty },
     };
   }
 
@@ -519,11 +605,18 @@ async function apiDashboardSummary(query) {
     .input('startDate', sql.VarChar, startDate)
     .input('endDate', sql.VarChar, endDate)
     .query(`
+      WITH copurchase_orders AS (
+        SELECT DISTINCT coi2.order_seq
+        FROM custom_order_item coi2 WITH (NOLOCK)
+        INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+        WHERE c2.Card_Div = 'A01'
+      )
       SELECT
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
         CONVERT(varchar(10), o.order_date, 120) AS order_day,
         ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
+        N'단독주문' AS order_type,
         COUNT(DISTINCT o.order_seq) AS order_count,
         SUM(oi.order_count) AS total_qty,
         SUM(${ETC_AMOUNT_EXPR}) AS total_amount
@@ -531,7 +624,7 @@ async function apiDashboardSummary(query) {
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
-      WHERE ${D01_FILTER} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
       GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
 
       UNION ALL
@@ -541,22 +634,67 @@ async function apiDashboardSummary(query) {
         c.Card_Code,
         CONVERT(varchar(10), co.order_date, 120) AS order_day,
         ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
+        CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END AS order_type,
         COUNT(DISTINCT co.order_seq),
         SUM(coi.item_count),
-        SUM(CAST(coi.item_sale_price AS float) * coi.item_count)
+        SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1))
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
-      WHERE ${D01_FILTER} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
-      GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR))
+      LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
+      WHERE ${D01_FILTER} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+      GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
+        CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
 
       ORDER BY order_day DESC, total_amount DESC
     `);
 
   // Clean names
-  const rows = result.recordset.map(r => ({ ...r, card_name: cleanName(r.card_name) }));
-  return rows;
+  const rows = result.recordset.map(r => ({ ...r, card_name: cleanName(r.card_name), site_name: formatSiteName(r.site_name) }));
+
+  // 주문번호 기준 건수 (상품 그루핑 없이 day/site/type별 COUNT DISTINCT)
+  const countResult = await p.request()
+    .input('startDate', sql.VarChar, startDate)
+    .input('endDate', sql.VarChar, endDate)
+    .query(`
+      WITH copurchase_orders AS (
+        SELECT DISTINCT coi2.order_seq
+        FROM custom_order_item coi2 WITH (NOLOCK)
+        INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+        WHERE c2.Card_Div = 'A01'
+      )
+      SELECT
+        CONVERT(varchar(10), o.order_date, 120) AS order_day,
+        ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
+        N'단독주문' AS order_type,
+        COUNT(DISTINCT o.order_seq) AS distinct_order_count
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+      WHERE ${D01_FILTER} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+      GROUP BY CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
+
+      UNION ALL
+
+      SELECT
+        CONVERT(varchar(10), co.order_date, 120) AS order_day,
+        ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
+        CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END AS order_type,
+        COUNT(DISTINCT co.order_seq) AS distinct_order_count
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+      LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
+      WHERE ${D01_FILTER} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+      GROUP BY CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
+        CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
+    `);
+
+  const orderCounts = countResult.recordset.map(r => ({ ...r, site_name: formatSiteName(r.site_name) }));
+  return { summary: rows, order_counts: orderCounts };
 }
 
 async function apiForecast() {
@@ -634,19 +772,20 @@ async function apiForecast() {
         FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
         INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-        WHERE ${D01_FILTER} AND o.order_date >= @awStart AND o.order_date < @awEnd AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+        WHERE ${D01_FILTER} AND o.order_date >= @awStart AND o.order_date < @awEnd AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
       ) t GROUP BY order_day
 
       UNION ALL
 
       SELECT order_day, COUNT(*) AS order_count, SUM(settle_price) AS total_amount, SUM(total_qty) AS total_qty
       FROM (
-        SELECT DISTINCT co.order_seq, CONVERT(varchar(10), co.order_date, 120) AS order_day, co.settle_price,
+        SELECT DISTINCT co.order_seq, CONVERT(varchar(10), co.order_date, 120) AS order_day,
+          (SELECT ISNULL(SUM(CAST(coi2.item_sale_price AS float) * coi2.item_count / ISNULL(NULLIF(c2.Unit_Value, 0), 1)), 0) FROM custom_order_item coi2 WITH (NOLOCK) INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq=c2.Card_Seq WHERE coi2.order_seq=co.order_seq AND ${D01_FILTER.replace(/c\./g,'c2.')}) AS settle_price,
           (SELECT SUM(coi2.item_count) FROM custom_order_item coi2 WITH (NOLOCK) INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq=c2.Card_Seq WHERE coi2.order_seq=co.order_seq AND ${D01_FILTER.replace(/c\./g,'c2.')}) AS total_qty
         FROM custom_order co WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-        WHERE ${D01_FILTER} AND co.order_date >= @awStart AND co.order_date < @awEnd AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
+        WHERE ${D01_FILTER} AND co.order_date >= @awStart AND co.order_date < @awEnd AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
       ) t GROUP BY order_day
     `);
 
@@ -682,20 +821,29 @@ async function apiForecast() {
     w.is_current = actDays > 0 && actDays < 7;
   }
 
-  // 4) 이동평균: 매출 발생 주차 기준 전환율 + 객단가 분리 산출
+  // 4) 가중 이동평균: 최근 주차에 높은 가중치로 시즌 트렌드 반영
   //    예상매출 = 예식건수 × 전환율 × 객단가
   //    매출이 0인 주차는 제외 (비시즌 주차가 전환율을 희석시키는 것 방지)
+  //    가중치: 가장 오래된 주 1, ..., 가장 최근 주 N (선형 가중)
+  const MIN_WEEKLY_ORDERS = 20; // 오퍼레이팅 초기 등 비정상 주차 제외 기준
   const completedWeeks = weeks.filter(w => w.is_past);
-  const activeWeeks = completedWeeks.filter(w => w.actual_orders > 0);
+  const activeWeeks = completedWeeks.filter(w => w.actual_orders >= MIN_WEEKLY_ORDERS);
   const baseWeeks = activeWeeks.slice(-BASE_WEEKS);
   let baseTotalRevenue = 0, baseTotalOrders = 0, baseTotalWeddings = 0;
-  for (const bw of baseWeeks) {
+  let weightedOrders = 0, weightedWeddings = 0, weightedRevenue = 0, weightSum = 0;
+  baseWeeks.forEach((bw, i) => {
+    const weight = i + 1; // 1, 2, 3, 4 (최근일수록 높은 가중치)
+    weightSum += weight;
+    weightedOrders += bw.actual_orders * weight;
+    weightedWeddings += bw.wedding_pool * weight;
+    weightedRevenue += bw.actual_weekly_revenue * weight;
+    // 단순 합계도 유지 (참고용)
     baseTotalRevenue += bw.actual_weekly_revenue;
     baseTotalOrders += bw.actual_orders;
     baseTotalWeddings += bw.wedding_pool;
-  }
-  const conversionRate = baseTotalWeddings > 0 ? baseTotalOrders / baseTotalWeddings : 0;
-  const avgOrderValue = baseTotalOrders > 0 ? baseTotalRevenue / baseTotalOrders : 0;
+  });
+  const conversionRate = weightedWeddings > 0 ? weightedOrders / weightedWeddings : 0;
+  const avgOrderValue = weightedOrders > 0 ? weightedRevenue / weightedOrders : 0;
 
   // 예측 적용 + 오차율
   for (const w of weeks) {
@@ -706,7 +854,7 @@ async function apiForecast() {
       : null;
   }
 
-  // 5) 실제 최근 일평균 매출 (검증용)
+  // 5) 실제 최근 일평균 매출 (검증용) - ETC + CARD 통합
   const actualStats = await p.request()
     .input('start30', sql.VarChar, fmtDate(addDays(today(), -30)))
     .input('today', sql.VarChar, todayStr)
@@ -717,16 +865,36 @@ async function apiForecast() {
         FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
         INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-        WHERE ${D01_FILTER} AND o.order_date >= @start30 AND o.order_date < DATEADD(day,1,@today) AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+        WHERE ${D01_FILTER} AND o.order_date >= @start30 AND o.order_date < DATEADD(day,1,@today) AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+
+        UNION ALL
+
+        SELECT DISTINCT co.order_seq,
+          (SELECT ISNULL(SUM(CAST(coi2.item_sale_price AS float) * coi2.item_count / ISNULL(NULLIF(c2.Unit_Value, 0), 1)), 0) FROM custom_order_item coi2 WITH (NOLOCK) INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq=c2.Card_Seq WHERE coi2.order_seq=co.order_seq AND ${D01_FILTER.replace(/c\./g,'c2.')}) AS settle_price,
+          CONVERT(varchar(10), co.order_date, 120) AS order_day
+        FROM custom_order co WITH (NOLOCK)
+        INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+        WHERE ${D01_FILTER} AND co.order_date >= @start30 AND co.order_date < DATEADD(day,1,@today) AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
       ) t
     `);
 
   const actual = actualStats.recordset[0] || {};
   const actualDailyAvg = actual.active_days > 0 ? Math.round(actual.total_amount / actual.active_days) : 0;
 
+  // 주차별 전환율 트렌드 (대시보드 표시용)
+  const weeklyConversionTrend = activeWeeks.slice(-6).map(w => ({
+    week_no: w.week_no,
+    week_start: w.week_start,
+    wedding_pool: w.wedding_pool,
+    actual_orders: w.actual_orders,
+    conversion_rate: w.wedding_pool > 0 ? Math.round(w.actual_orders / w.wedding_pool * 10000) / 100 : 0,
+    avg_order_value: w.actual_orders > 0 ? Math.round(w.actual_weekly_revenue / w.actual_orders) : 0,
+  }));
+
   return {
     model: {
-      type: 'moving_average',
+      type: 'weighted_moving_average',
       window_days: WINDOW,
       base_weeks: BASE_WEEKS,
       conversion_rate: Math.round(conversionRate * 10000) / 100, // % 단위 (소수점 2자리)
@@ -736,6 +904,7 @@ async function apiForecast() {
       base_total_revenue: baseTotalRevenue,
       base_total_orders: baseTotalOrders,
       base_total_weddings: baseTotalWeddings,
+      weekly_conversion_trend: weeklyConversionTrend,
     },
     weeks,
     actual_30d: {
@@ -757,10 +926,12 @@ function getISOWeek(d) {
 
 async function apiLeadtime() {
   const p = await getPool();
+  // ETC + CARD 답례품 리드타임 통합
   const result = await p.request().query(`
-    SELECT order_seq, order_date, wedding_date, lead_days FROM (
+    SELECT order_key, order_date, wedding_date, lead_days FROM (
+      -- ETC: 별도 주문 → 같은 member의 청첩장 예식일 참조
       SELECT
-        o.order_seq,
+        CONCAT('E', o.order_seq) AS order_key,
         o.order_date,
         TRY_CAST(cw.event_year+'-'+RIGHT('0'+cw.event_month,2)+'-'+RIGHT('0'+cw.event_Day,2) AS date) AS wedding_date,
         DATEDIFF(day, o.order_date, TRY_CAST(cw.event_year+'-'+RIGHT('0'+cw.event_month,2)+'-'+RIGHT('0'+cw.event_Day,2) AS date)) AS lead_days,
@@ -776,9 +947,27 @@ async function apiLeadtime() {
           AND w2.event_year IS NOT NULL AND LEN(w2.event_year) = 4
         ORDER BY co2.order_seq DESC
       ) cw
-      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
         AND TRY_CAST(cw.event_year+'-'+RIGHT('0'+cw.event_month,2)+'-'+RIGHT('0'+cw.event_Day,2) AS date) IS NOT NULL
         AND o.order_date >= DATEADD(day, -180, GETDATE())
+
+      UNION ALL
+
+      -- CARD: 청첩장+답례품 동시주문 → 같은 주문의 예식일 직접 참조
+      SELECT
+        CONCAT('C', co.order_seq) AS order_key,
+        co.order_date,
+        TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) AS wedding_date,
+        DATEDIFF(day, co.order_date, TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date)) AS lead_days,
+        ROW_NUMBER() OVER (PARTITION BY co.order_seq ORDER BY co.order_seq) AS rn
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      INNER JOIN custom_order_WeddInfo w WITH (NOLOCK) ON co.order_seq = w.order_seq
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+        AND w.event_year IS NOT NULL AND LEN(w.event_year) = 4
+        AND TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) IS NOT NULL
+        AND co.order_date >= DATEADD(day, -180, GETDATE())
     ) t WHERE rn = 1
     ORDER BY order_date DESC
   `);
@@ -856,7 +1045,7 @@ async function apiConversion() {
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       WHERE ${D01_FILTER} AND o.order_date >= @os AND o.order_date < @oe
-        AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+        AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
       GROUP BY CONVERT(varchar(10), o.order_date, 120)
 
       UNION ALL
@@ -866,7 +1055,7 @@ async function apiConversion() {
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       WHERE ${D01_FILTER} AND co.order_date >= @os AND co.order_date < @oe
-        AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
+        AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
       GROUP BY CONVERT(varchar(10), co.order_date, 120)
     `);
 
@@ -932,7 +1121,7 @@ async function apiSamples() {
         INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
         WHERE ${D01_FILTER} AND o.order_date >= @ss AND o.order_date < @se
-          AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+          AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
           AND oi.order_count = 1
 
         UNION ALL
@@ -943,7 +1132,7 @@ async function apiSamples() {
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
         WHERE ${D01_FILTER} AND co.order_date >= @ss AND co.order_date < @se
-          AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
+          AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
           AND coi.item_count = 1
       ) t
       GROUP BY order_day, card_name, card_code
@@ -973,7 +1162,7 @@ async function apiSamples() {
         INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
         WHERE ${D01_FILTER} AND o.order_date >= @sos AND o.order_date < @soe
-          AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+          AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
           AND oi.order_count = 1
 
         UNION
@@ -983,7 +1172,7 @@ async function apiSamples() {
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
         WHERE ${D01_FILTER} AND co.order_date >= @sos AND co.order_date < @soe
-          AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
+          AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
           AND coi.item_count = 1
       ) t
       GROUP BY order_day
@@ -995,53 +1184,97 @@ async function apiSamples() {
   return { byProduct, byOrder };
 }
 
-async function apiMarketing() {
+async function apiMarketing(query = {}) {
   const p = await getPool();
+  const mkStart = query.start_date || fmtDate(addDays(today(), -90));
+  const mkEnd = query.end_date || fmtDate(addDays(today(), 1));
+  // Validate date format (prevent SQL injection)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(mkStart) || !/^\d{4}-\d{2}-\d{2}$/.test(mkEnd)) {
+    throw new Error('Invalid date format');
+  }
+  const MK_FROM = `'${mkStart}'`;
+  const MK_TO = `'${mkEnd}'`;
 
-  // 1) 시간대별 주문 분포
+  // 1) 시간대별 주문 분포 (ETC + CARD 답례품 통합)
   const hourly = await p.request().query(`
-    SELECT DATEPART(hour, o.order_date) AS hr, COUNT(DISTINCT o.order_seq) AS cnt
-    FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-    INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-    INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-    WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5) AND o.order_date >= DATEADD(day,-90,GETDATE())
-    GROUP BY DATEPART(hour, o.order_date)
-    ORDER BY hr
+    SELECT hr, SUM(cnt) AS cnt FROM (
+      SELECT DATEPART(hour, o.order_date) AS hr, COUNT(DISTINCT o.order_seq) AS cnt
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15) AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
+      GROUP BY DATEPART(hour, o.order_date)
+      UNION ALL
+      SELECT DATEPART(hour, co.order_date) AS hr, COUNT(DISTINCT co.order_seq) AS cnt
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14) AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
+      GROUP BY DATEPART(hour, co.order_date)
+    ) t GROUP BY hr ORDER BY hr
   `);
 
-  // 2) 요일별 주문 분포
+  // 2) 요일별 주문 분포 (ETC + CARD 답례품 통합)
   const weekly = await p.request().query(`
-    SELECT DATEPART(weekday, o.order_date) AS dow, COUNT(DISTINCT o.order_seq) AS cnt
-    FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-    INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-    INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-    WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5) AND o.order_date >= DATEADD(day,-90,GETDATE())
-    GROUP BY DATEPART(weekday, o.order_date)
-    ORDER BY dow
+    SELECT dow, SUM(cnt) AS cnt FROM (
+      SELECT DATEPART(weekday, o.order_date) AS dow, COUNT(DISTINCT o.order_seq) AS cnt
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15) AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
+      GROUP BY DATEPART(weekday, o.order_date)
+      UNION ALL
+      SELECT DATEPART(weekday, co.order_date) AS dow, COUNT(DISTINCT co.order_seq) AS cnt
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14) AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
+      GROUP BY DATEPART(weekday, co.order_date)
+    ) t GROUP BY dow ORDER BY dow
   `);
 
-  // 3) 지역별 (ETC 단독주문)
+  // 3) 지역별 (ETC + CARD 답례품 통합)
   const region = await p.request().query(`
-    SELECT TOP 12
-      LEFT(o.recv_address, CHARINDEX(' ', o.recv_address + ' ') - 1) AS region,
-      COUNT(DISTINCT o.order_seq) AS cnt
-    FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-    INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-    INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-    WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5) AND o.order_date >= DATEADD(day,-90,GETDATE())
-      AND o.recv_address IS NOT NULL AND LEN(o.recv_address) > 2
-    GROUP BY LEFT(o.recv_address, CHARINDEX(' ', o.recv_address + ' ') - 1)
-    ORDER BY cnt DESC
+    SELECT TOP 12 region, SUM(cnt) AS cnt FROM (
+      SELECT LEFT(o.recv_address, CHARINDEX(' ', o.recv_address + ' ') - 1) AS region,
+             COUNT(DISTINCT o.order_seq) AS cnt
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15) AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
+        AND o.recv_address IS NOT NULL AND LEN(o.recv_address) > 2
+      GROUP BY LEFT(o.recv_address, CHARINDEX(' ', o.recv_address + ' ') - 1)
+      UNION ALL
+      SELECT LEFT(di.ADDR, CHARINDEX(' ', di.ADDR + ' ') - 1) AS region,
+             COUNT(DISTINCT co.order_seq) AS cnt
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      LEFT JOIN DELIVERY_INFO di WITH (NOLOCK) ON co.order_seq = di.ORDER_SEQ AND di.DELIVERY_SEQ = 1
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14) AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
+        AND di.ADDR IS NOT NULL AND LEN(di.ADDR) > 2
+      GROUP BY LEFT(di.ADDR, CHARINDEX(' ', di.ADDR + ' ') - 1)
+    ) t GROUP BY region ORDER BY cnt DESC
   `);
 
   // 4) 전환율 (2단계 - 답례품 구매자 member_id → 청첩장 주문자 교차)
+  // ETC + CARD 답례품 구매자 통합 (CARD 주문에 답례품 포함된 고객도 gift_member로 계산)
   const giftMembers = await p.request().query(`
-    SELECT DISTINCT o.member_id
-    FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-    INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-    INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-    WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5) AND o.order_date >= DATEADD(day,-90,GETDATE())
-      AND o.member_id IS NOT NULL AND o.member_id != ''
+    SELECT DISTINCT member_id FROM (
+      SELECT o.member_id
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15) AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
+        AND o.member_id IS NOT NULL AND o.member_id != ''
+      UNION
+      SELECT co.member_id
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14) AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
+        AND co.member_id IS NOT NULL AND co.member_id != ''
+    ) t
   `);
   const giftSet = new Set(giftMembers.recordset.map(r => r.member_id));
 
@@ -1050,7 +1283,7 @@ async function apiMarketing() {
     FROM custom_order co WITH (NOLOCK)
     INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
     INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-    WHERE c.Card_Div = 'A01' AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5) AND co.order_date >= DATEADD(day,-90,GETDATE())
+    WHERE c.Card_Div = 'A01' AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14) AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
       AND co.member_id IS NOT NULL AND co.member_id != ''
   `);
   const cardSet = new Set(cardMembers.recordset.map(r => r.member_id));
@@ -1079,41 +1312,59 @@ async function apiMarketing() {
   for (let i = 1; i <= 7; i++) dayMap[dayNames[i]] = 0;
   weekly.recordset.forEach(r => { dayMap[dayNames[r.dow]] = r.cnt; });
 
-  // 5) 사이트 분포 (주문사이트 + 가입사이트)
+  // 5) 사이트 분포 (주문사이트 + 가입사이트) - ETC + CARD 답례품 통합
   // COMPANY.SALES_GUBUN → SiteInfo.SiteCode 매핑으로 제휴사도 올바른 사이트 분류
-  // 주문사이트: COMPANY.SALES_GUBUN 기준 (제휴사도 소속 사이트로 분류)
-  // 가입사이트: 첫 주문의 사이트를 가입사이트로 간주
   const siteResult = await p.request().query(`
-    SELECT
-      ISNULL(os_si.SiteName, ISNULL(co.COMPANY_NAME, '기타')) AS order_site,
-      COUNT(DISTINCT o.order_seq) AS order_count,
-      COUNT(DISTINCT o.member_id) AS member_count
-    FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-    INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-    INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-    LEFT JOIN COMPANY co WITH (NOLOCK) ON o.company_Seq = co.COMPANY_SEQ
-    LEFT JOIN SiteInfo os_si ON co.SALES_GUBUN = os_si.SiteCode
-    WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
-      AND o.order_date >= DATEADD(day,-90,GETDATE())
-    GROUP BY ISNULL(os_si.SiteName, ISNULL(co.COMPANY_NAME, '기타'))
-    ORDER BY order_count DESC
+    SELECT order_site, COUNT(DISTINCT order_key) AS order_count, COUNT(DISTINCT member_id) AS member_count FROM (
+      SELECT DISTINCT
+        ISNULL(os_si.SiteName, ISNULL(co.COMPANY_NAME, '기타')) AS order_site,
+        CONCAT('E', o.order_seq) AS order_key, o.member_id
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      LEFT JOIN COMPANY co WITH (NOLOCK) ON o.company_Seq = co.COMPANY_SEQ
+      LEFT JOIN SiteInfo os_si ON co.SALES_GUBUN = os_si.SiteCode
+      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+        AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
+      UNION ALL
+      SELECT DISTINCT
+        ISNULL(os_si.SiteName, ISNULL(comp.COMPANY_NAME, '기타')) AS order_site,
+        CONCAT('C', cord.order_seq) AS order_key, cord.member_id
+      FROM custom_order cord WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      LEFT JOIN COMPANY comp WITH (NOLOCK) ON cord.company_Seq = comp.COMPANY_SEQ
+      LEFT JOIN SiteInfo os_si ON comp.SALES_GUBUN = os_si.SiteCode
+      WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5, 14)
+        AND cord.order_date >= ${MK_FROM} AND cord.order_date < ${MK_TO}
+    ) t GROUP BY order_site ORDER BY order_count DESC
   `);
 
-  // 가입사이트 = 회원의 최초 주문 사이트 기준
+  // 가입사이트 = 회원의 최초 답례품 주문 사이트 기준 (ETC + CARD 통합)
   const signupSiteResult = await p.request().query(`
     SELECT
       ISNULL(first_si.SiteName, '기타') AS signup_site,
       COUNT(*) AS member_count
     FROM (
-      SELECT o.member_id,
-             co.SALES_GUBUN,
-             ROW_NUMBER() OVER (PARTITION BY o.member_id ORDER BY o.order_date ASC) AS rn
-      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-      LEFT JOIN COMPANY co WITH (NOLOCK) ON o.company_Seq = co.COMPANY_SEQ
-      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
-        AND o.order_date >= DATEADD(day,-90,GETDATE())
+      SELECT member_id, SALES_GUBUN,
+             ROW_NUMBER() OVER (PARTITION BY member_id ORDER BY order_date ASC) AS rn
+      FROM (
+        SELECT o.member_id, co.SALES_GUBUN, o.order_date
+        FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+        INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+        LEFT JOIN COMPANY co WITH (NOLOCK) ON o.company_Seq = co.COMPANY_SEQ
+        WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+          AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
+        UNION ALL
+        SELECT cord.member_id, comp.SALES_GUBUN, cord.order_date
+        FROM custom_order cord WITH (NOLOCK)
+        INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+        LEFT JOIN COMPANY comp WITH (NOLOCK) ON cord.company_Seq = comp.COMPANY_SEQ
+        WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5, 14)
+          AND cord.order_date >= ${MK_FROM} AND cord.order_date < ${MK_TO}
+      ) all_orders
     ) first_order
     LEFT JOIN SiteInfo first_si ON first_order.SALES_GUBUN = first_si.SiteCode
     WHERE first_order.rn = 1
@@ -1121,58 +1372,72 @@ async function apiMarketing() {
     ORDER BY member_count DESC
   `);
 
-  // 사이트 상관관계 (가입사이트 → 주문사이트 크로스탭)
+  // 사이트 상관관계 (가입사이트 → 주문사이트 크로스탭) - ETC + CARD 통합
   const siteCrossResult = await p.request().query(`
-    WITH first_site AS (
-      SELECT o.member_id, co.SALES_GUBUN AS first_sg,
-             ROW_NUMBER() OVER (PARTITION BY o.member_id ORDER BY o.order_date ASC) AS rn
+    WITH all_gift_orders AS (
+      SELECT o.member_id, o.order_seq, o.order_date, co.SALES_GUBUN, CONCAT('E', o.order_seq) AS order_key
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       LEFT JOIN COMPANY co WITH (NOLOCK) ON o.company_Seq = co.COMPANY_SEQ
-      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
-        AND o.order_date >= DATEADD(day,-90,GETDATE())
+      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+        AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
+      UNION ALL
+      SELECT cord.member_id, cord.order_seq, cord.order_date, comp.SALES_GUBUN, CONCAT('C', cord.order_seq) AS order_key
+      FROM custom_order cord WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      LEFT JOIN COMPANY comp WITH (NOLOCK) ON cord.company_Seq = comp.COMPANY_SEQ
+      WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5, 14)
+        AND cord.order_date >= ${MK_FROM} AND cord.order_date < ${MK_TO}
+    ),
+    first_site AS (
+      SELECT member_id, SALES_GUBUN AS first_sg,
+             ROW_NUMBER() OVER (PARTITION BY member_id ORDER BY order_date ASC) AS rn
+      FROM all_gift_orders
     )
     SELECT
       ISNULL(fs_si.SiteName, '기타') AS signup_site,
       ISNULL(os_si.SiteName, '기타') AS order_site,
-      COUNT(DISTINCT o.order_seq) AS order_count
-    FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-    INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-    INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-    LEFT JOIN COMPANY co WITH (NOLOCK) ON o.company_Seq = co.COMPANY_SEQ
-    LEFT JOIN SiteInfo os_si ON co.SALES_GUBUN = os_si.SiteCode
-    INNER JOIN first_site fs ON o.member_id = fs.member_id AND fs.rn = 1
+      COUNT(DISTINCT ago.order_key) AS order_count
+    FROM all_gift_orders ago
+    LEFT JOIN SiteInfo os_si ON ago.SALES_GUBUN = os_si.SiteCode
+    INNER JOIN first_site fs ON ago.member_id = fs.member_id AND fs.rn = 1
     LEFT JOIN SiteInfo fs_si ON fs.first_sg = fs_si.SiteCode
-    WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
-      AND o.order_date >= DATEADD(day,-90,GETDATE())
     GROUP BY ISNULL(fs_si.SiteName, '기타'), ISNULL(os_si.SiteName, '기타')
     ORDER BY order_count DESC
   `);
 
-  // 6) 재주문 분석 (최소 시간 구간별)
+  // 6) 재주문 분석 (최소 시간 구간별) - ETC + CARD 답례품 통합
   // 배송지 분리 주문과 실질적 재주문을 구분하기 위해 시간 기준 적용
   // 구간: 12시간, 24시간, 48시간, 72시간+ 이후 재주문만 카운트
-  // 주문 후 취소 → 재주문은 해당안됨 (취소주문 자체를 제외하므로 자동 충족)
   const reorderResult = await p.request().query(`
     WITH distinct_orders AS (
-      SELECT DISTINCT o.member_id, o.order_seq, o.order_date, o.settle_price
+      SELECT DISTINCT o.member_id, CONCAT('E', o.order_seq) AS order_key, o.order_date, o.settle_price
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+        AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
+      UNION ALL
+      SELECT DISTINCT co.member_id, CONCAT('C', co.order_seq) AS order_key, co.order_date, co.settle_price
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+        AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
     ),
     member_gaps AS (
       SELECT a.member_id,
              MIN(DATEDIFF(hour, a.order_date, b.order_date)) AS min_gap_hours
       FROM distinct_orders a
       INNER JOIN distinct_orders b ON a.member_id = b.member_id AND b.order_date > a.order_date
-                                      AND a.order_seq != b.order_seq
+                                      AND a.order_key != b.order_key
       GROUP BY a.member_id
     ),
     member_stats AS (
       SELECT o.member_id,
-             COUNT(DISTINCT o.order_seq) AS order_cnt,
+             COUNT(DISTINCT o.order_key) AS order_cnt,
              MIN(o.order_date) AS first_order_date,
              MAX(o.order_date) AS last_order_date,
              SUM(o.settle_price) AS total_amount
@@ -1193,17 +1458,25 @@ async function apiMarketing() {
     INNER JOIN member_stats ms ON mg.member_id = ms.member_id
   `);
 
-  // 재주문 간격 분포 (시간 단위로 세분화)
+  // 재주문 간격 분포 (시간 단위로 세분화) - ETC + CARD 답례품 통합
   const reorderIntervalResult = await p.request().query(`
     WITH distinct_orders AS (
-      SELECT DISTINCT o.member_id, o.order_seq, o.order_date
+      SELECT DISTINCT o.member_id, CONCAT('E', o.order_seq) AS order_key, o.order_date
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+        AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
+      UNION ALL
+      SELECT DISTINCT co.member_id, CONCAT('C', co.order_seq) AS order_key, co.order_date
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+        AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
     ),
     ordered AS (
-      SELECT member_id, order_seq, order_date,
+      SELECT member_id, order_key, order_date,
              ROW_NUMBER() OVER (PARTITION BY member_id ORDER BY order_date) AS rn
       FROM distinct_orders
     ),
@@ -1239,6 +1512,73 @@ async function apiMarketing() {
     ORDER BY MIN(gap_hours)
   `);
 
+  // 7) 유입채널별 분석 (상품명 프리픽스 기반) - ETC + CARD 답례품 통합
+  // [시크릿특가]=CRM/광고, [n%할인가]=퍼널/오가닉, 없음=청첩장동시구매
+  const CHANNEL_CASE = `CASE
+    WHEN c.Card_Name LIKE '[[]시크릿특가]%' THEN 'CRM/광고'
+    WHEN c.Card_Name LIKE '[[][0-9]%할인가]%' THEN '퍼널/오가닉'
+    ELSE '청첩장동시구매'
+  END`;
+
+  const channelResult = await p.request().query(`
+    SELECT channel, COUNT(DISTINCT order_key) AS order_count, SUM(item_count) AS item_count, SUM(revenue) AS revenue FROM (
+      SELECT CONCAT('E', o.order_seq) AS order_key,
+        ${CHANNEL_CASE} AS channel,
+        oi.order_count AS item_count,
+        ${ETC_AMOUNT_EXPR} AS revenue
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+        AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
+      UNION ALL
+      SELECT CONCAT('C', co.order_seq) AS order_key,
+        ${CHANNEL_CASE} AS channel,
+        coi.item_count AS item_count,
+        CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1) AS revenue
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+        AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
+    ) t GROUP BY channel ORDER BY revenue DESC
+  `);
+
+  // 주차별 유입채널 트렌드
+  const channelTrendResult = await p.request().query(`
+    SELECT
+      CONVERT(varchar(10), DATEADD(week, DATEDIFF(week, 0, order_date), 0), 120) AS week_start,
+      channel,
+      COUNT(DISTINCT order_key) AS order_count,
+      SUM(item_count) AS item_count,
+      SUM(revenue) AS revenue
+    FROM (
+      SELECT o.order_date, CONCAT('E', o.order_seq) AS order_key,
+        ${CHANNEL_CASE} AS channel,
+        oi.order_count AS item_count,
+        ${ETC_AMOUNT_EXPR} AS revenue
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+        AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
+      UNION ALL
+      SELECT co.order_date, CONCAT('C', co.order_seq) AS order_key,
+        ${CHANNEL_CASE} AS channel,
+        coi.item_count AS item_count,
+        CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1) AS revenue
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+        AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
+    ) t
+    GROUP BY CONVERT(varchar(10), DATEADD(week, DATEDIFF(week, 0, order_date), 0), 120), channel
+    ORDER BY week_start, channel
+  `);
+
   return {
     hourly: hourMap,
     weekly: dayMap,
@@ -1249,7 +1589,10 @@ async function apiMarketing() {
     siteCross: siteCrossResult.recordset,
     reorder: reorderResult.recordset[0] || {},
     reorderInterval: reorderIntervalResult.recordset,
-    period: '최근 90일',
+    channelMix: channelResult.recordset,
+    channelTrend: channelTrendResult.recordset,
+    period: `${mkStart} ~ ${mkEnd}`,
+    mkStart, mkEnd,
   };
 }
 
@@ -1317,6 +1660,23 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // --- 바른기프트 라우트 (고객 페이지: 인증 불필요 / 관리 API: 인증 필요) ---
+  if (pathname.startsWith('/barungift/')) {
+    // 고객 페이지 (정적 HTML) - 인증 불필요
+    if (pathname === '/barungift/order-info') {
+      const bgHtml = fs.readFileSync(path.join(__dirname, 'barungift', 'order-info.html'), 'utf-8');
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(bgHtml);
+      return;
+    }
+    // 관리자 페이지 → 대시보드(index.html) 안에 통합됨 (#bg-stickers, #bg-products 해시로 접근)
+    // API 라우트
+    if (pathname.startsWith('/barungift/api/')) {
+      const handled = await handleBarungiftApi(pathname, req, res, parsed.query, { getPool, sql, session });
+      if (handled !== false) return;
+    }
+  }
+
   // --- Export API (API key auth, no session required) ---
   if (pathname === '/api/export/orders' && req.method === 'GET') {
     if (!validateApiKey(req)) {
@@ -1337,8 +1697,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // --- Auth gate: require login for all other routes ---
-  if (!session) {
+  // --- Auth gate: require login for all other routes (개발모드 우회) ---
+  if (!session && !DEV_SKIP_AUTH) {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(getLoginPageHtml());
     return;
@@ -1360,7 +1720,7 @@ const server = http.createServer(async (req, res) => {
       } else if (pathname === '/api/dashboard/leadtime') {
         data = await apiLeadtime();
       } else if (pathname === '/api/dashboard/marketing') {
-        data = await apiMarketing();
+        data = await apiMarketing(parsed.query);
       } else if (pathname === '/api/dashboard/conversion') {
         data = await apiConversion();
       } else if (pathname === '/api/dashboard/samples') {
@@ -1371,8 +1731,7 @@ const server = http.createServer(async (req, res) => {
         if (seq) {
           const pp = await getPool();
           const etc = await pp.request().input('seq', sql.Int, seq).query(`
-            SELECT o.order_seq, o.settle_price, o.company_Seq,
-              oi.card_sale_price, oi.order_count, oi.card_seq,
+            SELECT o.*, oi.card_sale_price, oi.order_count, oi.card_seq,
               c.Card_Name, c.Card_Code,
               ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name
             FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
@@ -1392,7 +1751,24 @@ const server = http.createServer(async (req, res) => {
             LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
             WHERE co.order_seq = @seq
           `);
-          data = { etc: etc.recordset, card: card.recordset };
+          // 배송지 정보 (컬럼 전체 조회)
+          const delivery = await pp.request().input('seq', sql.Int, seq).query(`
+            SELECT * FROM DELIVERY_INFO WITH (NOLOCK) WHERE ORDER_SEQ = @seq
+          `);
+          // DELIVERY_INFO_DETAIL 컬럼 구조 확인
+          const ddCols = await pp.request().query(`
+            SELECT TOP 0 * FROM DELIVERY_INFO_DETAIL WITH (NOLOCK)
+          `);
+          // 배송지별 상품 상세
+          const deliveryDetail = await pp.request().input('seq', sql.Int, seq).query(`
+            SELECT * FROM DELIVERY_INFO_DETAIL WITH (NOLOCK) WHERE ORDER_SEQ = @seq
+          `);
+          data = {
+            etc: etc.recordset, card: card.recordset,
+            delivery: delivery.recordset,
+            deliveryDetailColumns: Object.keys(ddCols.recordset.columns || {}),
+            deliveryDetail: deliveryDetail.recordset
+          };
         } else { data = { error: 'order_seq required' }; }
       } else if (pathname === '/api/order-files') {
         data = await apiOrderFiles(parsed.query);

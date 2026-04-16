@@ -8,6 +8,7 @@ RUN npm init -y && npm install mssql
 # 답례품 앱 복사
 COPY pricing-prototype/daeryepum/server.js ./
 COPY pricing-prototype/daeryepum/index.html ./
+COPY pricing-prototype/daeryepum/barungift/ ./barungift/
 
 RUN mkdir -p /app/data
 

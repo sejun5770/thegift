@@ -1,0 +1,1361 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>바른손더기프트 - 주문정보 입력</title>
+  <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
+    body { font-family: 'Noto Sans KR', sans-serif; }
+    input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
+    .step-line { height: 2px; }
+    .fade-in { animation: fadeIn 0.25s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .spinner { border: 3px solid #E5E7EB; border-top-color: #3B82F6; border-radius: 50%; width: 40px; height: 40px; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .card-select { transition: all 0.15s ease; }
+    .card-select:hover { border-color: #93C5FD; }
+    .card-select.selected { border-color: #3B82F6; background-color: #EFF6FF; box-shadow: 0 0 0 2px #3B82F6; }
+    .card-select.disabled { opacity: 0.45; pointer-events: none; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<!-- Order Search Screen (oid 없을 때) -->
+<div id="searchScreen" class="hidden min-h-screen bg-gray-50 pb-8">
+  <div class="max-w-lg mx-auto">
+    <!-- Header -->
+    <header class="bg-white border-b border-gray-200 sticky top-0 z-30">
+      <div class="flex items-center gap-3 px-4 py-3">
+        <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
+          <span class="text-white font-bold text-xs">G</span>
+        </div>
+        <div>
+          <h1 class="text-sm font-semibold text-gray-900 leading-tight">바른손더기프트</h1>
+          <p class="text-xs text-gray-400">주문정보 입력</p>
+        </div>
+      </div>
+    </header>
+
+    <div class="px-4 pt-6">
+      <h2 class="text-lg font-bold text-gray-900 mb-1">주문 내역 조회</h2>
+      <p class="text-sm text-gray-500 mb-4">로그인하시면 주문 내역을 확인할 수 있습니다.</p>
+
+      <!-- 탭 -->
+      <div class="flex border-b border-gray-200 mb-4">
+        <button id="tabLogin" onclick="switchSearchTab('login')" class="flex-1 py-2.5 text-sm font-semibold text-blue-600 border-b-2 border-blue-500">바른손카드 로그인</button>
+        <button id="tabSearch" onclick="switchSearchTab('search')" class="flex-1 py-2.5 text-sm font-medium text-gray-400 border-b-2 border-transparent">전화번호/이름 검색</button>
+      </div>
+
+      <!-- 로그인 폼 -->
+      <div id="loginForm" class="bg-white rounded-xl border border-gray-200 p-4 mb-4 shadow-sm">
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">아이디</label>
+            <input type="text" id="loginUid" placeholder="바른손카드 아이디" autocomplete="username"
+              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">비밀번호</label>
+            <input type="password" id="loginPwd" placeholder="비밀번호" autocomplete="current-password"
+              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          </div>
+        </div>
+        <div id="loginError" class="hidden mt-3 text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2"></div>
+        <button id="loginBtn" onclick="loginBarunson()"
+          class="w-full mt-4 py-2.5 bg-blue-500 text-white text-sm font-semibold rounded-lg hover:bg-blue-600 transition disabled:opacity-50 disabled:cursor-not-allowed">
+          로그인
+        </button>
+        <p class="text-center text-xs text-gray-400 mt-3">바른손카드 통합 회원 계정으로 로그인합니다.</p>
+      </div>
+
+      <!-- 검색 폼 (숨김 상태) -->
+      <div id="searchForm" class="hidden bg-white rounded-xl border border-gray-200 p-4 mb-4 shadow-sm">
+        <p class="text-xs text-gray-400 mb-3">주문 시 입력한 이름과 전화번호를 모두 입력해주세요.</p>
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">주문자명 <span class="text-red-400">*</span></label>
+            <input type="text" id="searchName" placeholder="홍길동"
+              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-600 mb-1">휴대폰번호 <span class="text-red-400">*</span></label>
+            <input type="tel" id="searchPhone" inputmode="numeric" placeholder="01012345678"
+              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              oninput="this.value=this.value.replace(/\D/g,'')">
+          </div>
+        </div>
+        <button id="searchBtn" onclick="searchOrders()"
+          class="w-full mt-4 py-2.5 bg-blue-500 text-white text-sm font-semibold rounded-lg hover:bg-blue-600 transition disabled:opacity-50 disabled:cursor-not-allowed">
+          주문 조회
+        </button>
+      </div>
+
+      <!-- 검색 결과 -->
+      <div id="searchLoading" class="hidden text-center py-8">
+        <div class="spinner mx-auto mb-3"></div>
+        <p class="text-sm text-gray-500">검색 중...</p>
+      </div>
+
+      <div id="searchResults" class="hidden space-y-2">
+        <h3 class="text-sm font-semibold text-gray-700 mb-2" id="searchResultCount"></h3>
+        <div id="searchResultList"></div>
+      </div>
+
+      <div id="searchEmpty" class="hidden text-center py-10">
+        <svg class="w-10 h-10 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        <p class="text-sm text-gray-500">검색 결과가 없습니다.</p>
+        <p class="text-xs text-gray-400 mt-1">전화번호 또는 이름을 다시 확인해주세요.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Loading Screen -->
+<div id="loadingScreen" class="flex items-center justify-center min-h-screen">
+  <div class="text-center">
+    <div class="spinner mx-auto mb-4"></div>
+    <p class="text-gray-500 text-sm">주문 정보를 불러오는 중...</p>
+  </div>
+</div>
+
+<!-- Error Screen -->
+<div id="errorScreen" class="hidden flex items-center justify-center min-h-screen px-4">
+  <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 max-w-sm w-full text-center">
+    <div class="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+      <svg class="w-7 h-7 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+    </div>
+    <h2 class="text-lg font-semibold text-gray-900 mb-2">오류가 발생했습니다</h2>
+    <p id="errorMessage" class="text-sm text-gray-500 mb-6"></p>
+    <div class="bg-gray-50 rounded-lg p-3 text-sm text-gray-600">
+      <p class="font-medium mb-1">고객센터 문의</p>
+      <p>전화: <a href="tel:1644-0708" class="font-medium text-blue-600">1644-0708</a></p>
+      <p>카카오 상담: <a href="https://open.kakao.com/o/stUy4gji" target="_blank" class="font-medium text-blue-600">오픈채팅 문의</a></p>
+    </div>
+  </div>
+</div>
+
+<!-- Already Completed Screen -->
+<div id="completedScreen" class="hidden flex items-center justify-center min-h-screen px-4">
+  <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 max-w-sm w-full text-center">
+    <div class="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+      <svg class="w-7 h-7 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+    </div>
+    <h2 class="text-lg font-semibold text-gray-900 mb-2">이미 입력이 완료되었습니다</h2>
+    <p class="text-sm text-gray-500 mb-4">해당 주문의 정보 입력이 이미 완료되었습니다.<br>수정이 필요하시면 고객센터로 연락해주세요.</p>
+    <div class="bg-gray-50 rounded-lg p-3 text-sm text-gray-600">
+      <p class="font-medium mb-1">고객센터 문의</p>
+      <p>전화: <a href="tel:1644-0708" class="font-medium text-blue-600">1644-0708</a></p>
+      <p>카카오 상담: <a href="https://open.kakao.com/o/stUy4gji" target="_blank" class="font-medium text-blue-600">오픈채팅 문의</a></p>
+    </div>
+  </div>
+</div>
+
+<!-- Success Screen -->
+<div id="successScreen" class="hidden flex items-center justify-center min-h-screen px-4">
+  <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 max-w-sm w-full text-center">
+    <div class="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+      <svg class="w-7 h-7 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+    </div>
+    <h2 class="text-lg font-semibold text-gray-900 mb-2">입력이 완료되었습니다!</h2>
+    <p class="text-sm text-gray-500 mb-2">주문 정보가 정상적으로 접수되었습니다.</p>
+    <p class="text-sm text-gray-500 mb-6">출고일이 확정되면 카카오톡으로 안내드리겠습니다.</p>
+    <div class="bg-blue-50 rounded-lg p-4 text-sm text-blue-700">
+      <p class="font-medium">주문번호</p>
+      <p id="successOrderNumber" class="text-lg font-bold mt-1"></p>
+    </div>
+  </div>
+</div>
+
+<!-- Main Form -->
+<div id="mainApp" class="hidden max-w-lg mx-auto pb-32">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200 sticky top-0 z-30">
+    <div class="flex items-center gap-3 px-4 py-3">
+      <div class="w-9 h-9 bg-blue-500 rounded-xl flex items-center justify-center flex-shrink-0">
+        <span class="text-white font-bold text-lg">G</span>
+      </div>
+      <div>
+        <h1 class="text-sm font-semibold text-gray-900 leading-tight">바른손더기프트</h1>
+        <p class="text-xs text-gray-400" id="headerOrderNumber"></p>
+      </div>
+    </div>
+
+    <!-- Step Indicator -->
+    <div class="px-4 pb-3">
+      <div class="flex items-center justify-between" id="stepIndicator"></div>
+    </div>
+  </header>
+
+  <!-- Step Content Area -->
+  <main class="px-4 pt-4" id="stepContent"></main>
+
+  <!-- Navigation Buttons -->
+  <div class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 z-30">
+    <div class="max-w-lg mx-auto flex gap-3">
+      <button id="btnBack" class="hidden flex-1 py-3.5 rounded-xl border border-gray-300 text-gray-700 font-medium text-sm hover:bg-gray-50 transition-colors">
+        이전
+      </button>
+      <button id="btnNext" class="flex-1 py-3.5 rounded-xl bg-blue-500 text-white font-medium text-sm hover:bg-blue-600 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed" disabled>
+        다음
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ============================================
+  // Constants
+  // ============================================
+  const STEP_LABELS = ['출고 방식', '희망출고일', '스티커 선택', '결제정보', '최종 확인'];
+  const RECEIPT_TYPES = { personal: '소득공제용 (휴대폰번호)', business: '지출증빙용 (사업자번호)' };
+  const HOLIDAYS_2026 = ['2026-01-01','2026-02-16','2026-02-17','2026-02-18','2026-03-01','2026-05-05','2026-05-24','2026-06-06','2026-08-15','2026-09-24','2026-09-25','2026-09-26','2026-10-03','2026-10-09','2026-12-25'];
+  const API_BASE = '';
+
+  // ============================================
+  // State
+  // ============================================
+  let orderData = null;
+  let currentStep = 0;
+  let formState = {
+    shipping_type: null,        // 'normal' | 'express'
+    desired_ship_date: null,    // 'YYYY-MM-DD'
+    sticker_id: null,           // selected sticker id
+    sticker_fields: {},         // { fieldName: value }
+    cash_receipt_yn: false,
+    receipt_type: null,         // 'personal' | 'business'
+    receipt_number: '',
+  };
+
+  // ============================================
+  // DOM refs
+  // ============================================
+  const $loading = document.getElementById('loadingScreen');
+  const $error = document.getElementById('errorScreen');
+  const $errorMsg = document.getElementById('errorMessage');
+  const $completed = document.getElementById('completedScreen');
+  const $success = document.getElementById('successScreen');
+  const $successOrderNum = document.getElementById('successOrderNumber');
+  const $main = document.getElementById('mainApp');
+  const $headerOrderNum = document.getElementById('headerOrderNumber');
+  const $stepIndicator = document.getElementById('stepIndicator');
+  const $stepContent = document.getElementById('stepContent');
+  const $btnBack = document.getElementById('btnBack');
+  const $btnNext = document.getElementById('btnNext');
+
+  // ============================================
+  // Utility functions
+  // ============================================
+  function getOrderId() {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('oid') || null;
+  }
+
+  function storageKey(orderId) {
+    return 'bg_form_' + orderId;
+  }
+
+  function saveFormState() {
+    if (!orderData) return;
+    try {
+      sessionStorage.setItem(storageKey(orderData.order_id), JSON.stringify({ currentStep, formState }));
+    } catch(e) { /* ignore */ }
+  }
+
+  function loadFormState() {
+    if (!orderData) return;
+    try {
+      const raw = sessionStorage.getItem(storageKey(orderData.order_id));
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (saved.formState) formState = { ...formState, ...saved.formState };
+        if (typeof saved.currentStep === 'number' && saved.currentStep >= 0 && saved.currentStep < STEP_LABELS.length) {
+          currentStep = saved.currentStep;
+        }
+      }
+    } catch(e) { /* ignore */ }
+  }
+
+  function formatDate(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr + 'T00:00:00');
+    const days = ['일','월','화','수','목','금','토'];
+    const y = d.getFullYear();
+    const m = d.getMonth() + 1;
+    const dd = d.getDate();
+    const dw = days[d.getDay()];
+    return y + '년 ' + m + '월 ' + dd + '일 (' + dw + ')';
+  }
+
+  function formatMoney(num) {
+    return (num || 0).toLocaleString('ko-KR') + '원';
+  }
+
+  // ============================================
+  // 날짜/캘린더 유틸 (새 상품설정 기반)
+  // ============================================
+  function addDays(dateStr, days) {
+    const d = new Date(dateStr + 'T00:00:00');
+    d.setDate(d.getDate() + days);
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
+
+  /** KST 기준 오늘 날짜 */
+  function todayStr() {
+    const kst = new Date(Date.now() + 9 * 3600000);
+    return kst.getUTCFullYear() + '-' + String(kst.getUTCMonth()+1).padStart(2,'0') + '-' + String(kst.getUTCDate()).padStart(2,'0');
+  }
+
+  /** KST 기준 현재 시:분 (분 단위) */
+  function nowMinutesKST() {
+    const kst = new Date(Date.now() + 9 * 3600000);
+    return kst.getUTCHours() * 60 + kst.getUTCMinutes();
+  }
+
+  function getSettings() {
+    return orderData?.product_settings || {};
+  }
+
+  /** 해당 날짜가 휴무일(출고불가)인지 확인 */
+  function isDateClosed(dateStr) {
+    const s = getSettings();
+    const d = new Date(dateStr + 'T00:00:00');
+    // 출고 불가 요일
+    const closedWeekdays = s.closed_weekdays || [0, 6];
+    if (closedWeekdays.includes(d.getDay())) return true;
+    // 출고 불가 일 (개별)
+    const closedDates = (s.closed_dates || []).map(cd => cd.date || cd);
+    if (closedDates.includes(dateStr)) return true;
+    // 레거시: blackout_dates
+    const blackout = s.blackout_dates || [];
+    if (blackout.includes(dateStr)) return true;
+    // 레거시: 공휴일
+    if (HOLIDAYS_2026.includes(dateStr)) return true;
+    return false;
+  }
+
+  // isDateDisabled 별칭 (기존 코드 호환)
+  function isDateDisabled(dateStr) { return isDateClosed(dateStr); }
+  function isWeekend(dateStr) {
+    const d = new Date(dateStr + 'T00:00:00');
+    return d.getDay() === 0 || d.getDay() === 6;
+  }
+  function isHoliday(dateStr) { return HOLIDAYS_2026.includes(dateStr); }
+
+  /** n 영업일 후 날짜 (접수일 미포함) */
+  function addBizDays(startDateStr, n) {
+    let cur = startDateStr;
+    let rem = n;
+    while (rem > 0) {
+      cur = addDays(cur, 1);
+      if (!isDateClosed(cur)) rem--;
+    }
+    return cur;
+  }
+
+  /** 다음 영업일 (해당일 포함) */
+  function nextBizDay(dateStr) {
+    let cur = dateStr;
+    let safety = 0;
+    while (isDateClosed(cur) && safety < 60) { cur = addDays(cur, 1); safety++; }
+    return cur;
+  }
+
+  /** 접수일 계산 (컷오프/영업일 기준, 고객 출고방식 선택 반영) */
+  function getReceiptDate() {
+    const s = getSettings();
+    const today = todayStr();
+    const isTodayBiz = !isDateClosed(today);
+    const isExpress = formState.shipping_type === 'express';
+
+    // 빠른출고(오늘출발) + 컷오프 설정 시
+    if (isExpress && s.shipping_type === 'today_shipping' && s.cutoff_enabled) {
+      const cutoffH = s.cutoff_hour ?? 14;
+      const cutoffM = s.cutoff_minute ?? 0;
+      const nowMin = nowMinutesKST();
+      const cutoffMin = cutoffH * 60 + cutoffM;
+
+      if (isTodayBiz && nowMin < cutoffMin) {
+        return today; // 컷오프 전 + 영업일 → 당일 접수
+      }
+      return nextBizDay(addDays(today, 1)); // 컷오프 후 또는 비영업일 → 익영업일
+    }
+
+    // 영업일이 아닌 날 주문 → 다음 영업일 접수
+    if (!isTodayBiz) return nextBizDay(addDays(today, 1));
+    return today;
+  }
+
+  /** 최소 선택 가능일 계산 */
+  function getMinDate() {
+    const s = getSettings();
+    const today = todayStr();
+    const leadTime = s.lead_time_days ?? 2;
+    const isExpress = formState.shipping_type === 'express';
+
+    if (isExpress && s.shipping_type === 'today_shipping') {
+      // 빠른출고(오늘출발): 컷오프 기준으로 접수일 결정 → 리드타임 적용
+      const receipt = getReceiptDate();
+      if (leadTime === 0) {
+        if (s.cutoff_enabled) return receipt; // 컷오프 전=당일, 후=익영업일
+        return nextBizDay(addDays(today, 1)); // 컷오프 OFF → 익영업일
+      }
+      return addBizDays(receipt, leadTime);
+    }
+
+    // 일반출고(희망출고): max(주문일+최소선택가능일, 접수일+리드타임영업일)
+    const minSelectDays = s.min_select_days ?? 3;
+    const calendarMin = addDays(today, minSelectDays);
+    const receipt = getReceiptDate();
+    const bizMin = addBizDays(receipt, leadTime);
+    const later = calendarMin > bizMin ? calendarMin : bizMin;
+    return nextBizDay(later);
+  }
+
+  function getMaxDate() {
+    const s = getSettings();
+    const isExpress = formState.shipping_type === 'express';
+
+    if (isExpress && s.shipping_type === 'today_shipping') {
+      // 빠른출고(오늘출발): 접수일 + 리드타임 영업일이 최대 (리드타임 범위 내만 선택)
+      const leadTime = s.lead_time_days ?? 2;
+      const receipt = getReceiptDate();
+      if (leadTime === 0) return nextBizDay(receipt);
+      return addBizDays(receipt, leadTime);
+    }
+
+    // 일반출고: 최대 선택가능일
+    const maxDays = s.max_select_days || 60;
+    return addDays(todayStr(), maxDays);
+  }
+
+  function getExpressFee() {
+    return orderData?.product_settings?.express_fee || 0;
+  }
+
+  function isExpressAvailable() {
+    const s = getSettings();
+    return s.shipping_type === 'today_shipping' || s.express_available === true;
+  }
+
+  /** 날짜 필수 여부 */
+  function isDateRequired() {
+    const s = getSettings();
+    return s.date_required !== false;
+  }
+
+  /** 안내문구 */
+  function getNoticeText() {
+    const s = getSettings();
+    if (s.notice_enabled && s.notice_text) return s.notice_text;
+    return '';
+  }
+
+  function getSelectedSticker() {
+    if (!formState.sticker_id || !orderData) return null;
+    return (orderData.available_stickers || []).find(s => s.id === formState.sticker_id) || null;
+  }
+
+  function getTotalAmount() {
+    const base = orderData?.total_amount || 0;
+    const express = formState.shipping_type === 'express' ? getExpressFee() : 0;
+    return base + express;
+  }
+
+  // ============================================
+  // Screen transitions
+  // ============================================
+  function showScreen(id) {
+    [$loading, $error, $completed, $success, $main].forEach(el => el.classList.add('hidden'));
+    document.getElementById(id).classList.remove('hidden');
+  }
+
+  function showError(msg) {
+    $errorMsg.textContent = msg;
+    showScreen('errorScreen');
+  }
+
+  // ============================================
+  // Step indicator
+  // ============================================
+  function renderStepIndicator() {
+    $stepIndicator.innerHTML = '';
+    STEP_LABELS.forEach((label, i) => {
+      // Circle
+      const isActive = i === currentStep;
+      const isDone = i < currentStep;
+      const circle = document.createElement('div');
+      circle.className = 'flex flex-col items-center flex-shrink-0 relative z-10';
+      const dot = document.createElement('div');
+      dot.className = 'w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold transition-colors ';
+      if (isDone) {
+        dot.className += 'bg-blue-500 text-white';
+        dot.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>';
+      } else if (isActive) {
+        dot.className += 'bg-blue-500 text-white';
+        dot.textContent = i + 1;
+      } else {
+        dot.className += 'bg-gray-200 text-gray-400';
+        dot.textContent = i + 1;
+      }
+      const labelEl = document.createElement('span');
+      labelEl.className = 'text-[10px] mt-1 whitespace-nowrap ' + (isActive ? 'text-blue-600 font-medium' : 'text-gray-400');
+      labelEl.textContent = label;
+      circle.appendChild(dot);
+      circle.appendChild(labelEl);
+      $stepIndicator.appendChild(circle);
+
+      // Line
+      if (i < STEP_LABELS.length - 1) {
+        const line = document.createElement('div');
+        line.className = 'step-line flex-1 mx-1 mt-1 self-start ' + (i < currentStep ? 'bg-blue-500' : 'bg-gray-200');
+        line.style.marginTop = '13px';
+        $stepIndicator.appendChild(line);
+      }
+    });
+  }
+
+  // ============================================
+  // Step validation
+  // ============================================
+  function isStepValid(step) {
+    switch (step) {
+      case 0: return !!formState.shipping_type;
+      case 1: {
+        if (!isDateRequired()) return true; // 선택 사항이면 항상 진행 가능
+        return !!formState.desired_ship_date && !isDateClosed(formState.desired_ship_date);
+      }
+      case 2: {
+        const stickers = orderData?.available_stickers || [];
+        if (stickers.length === 0) return true; // No stickers to select
+        if (!formState.sticker_id) return false;
+        const sticker = getSelectedSticker();
+        if (!sticker) return false;
+        // Check required custom fields
+        const fields = sticker.custom_fields || [];
+        for (const f of fields) {
+          if (f.required !== false) {
+            const val = formState.sticker_fields[f.name];
+            if (!val || String(val).trim() === '') return false;
+          }
+        }
+        return true;
+      }
+      case 3: {
+        if (formState.cash_receipt_yn) {
+          if (!formState.receipt_type) return false;
+          if (!formState.receipt_number || formState.receipt_number.trim() === '') return false;
+        }
+        return true;
+      }
+      case 4: return true;
+      default: return false;
+    }
+  }
+
+  function updateNavButtons() {
+    $btnBack.classList.toggle('hidden', currentStep === 0);
+    const isLast = currentStep === STEP_LABELS.length - 1;
+    $btnNext.textContent = isLast ? '제출하기' : '다음';
+    $btnNext.disabled = !isStepValid(currentStep);
+    if (isLast) {
+      $btnNext.classList.remove('bg-blue-500', 'hover:bg-blue-600', 'disabled:bg-gray-300');
+      $btnNext.classList.add('bg-green-500', 'hover:bg-green-600', 'disabled:bg-gray-300');
+    } else {
+      $btnNext.classList.remove('bg-green-500', 'hover:bg-green-600');
+      $btnNext.classList.add('bg-blue-500', 'hover:bg-blue-600', 'disabled:bg-gray-300');
+    }
+  }
+
+  // ============================================
+  // Step renderers
+  // ============================================
+
+  function renderStep0() {
+    const expressAvail = isExpressAvailable();
+    const expressFee = getExpressFee();
+    const isNormal = formState.shipping_type === 'normal';
+    const isExpress = formState.shipping_type === 'express';
+
+    return `
+      <div class="fade-in">
+        <h2 class="text-lg font-semibold text-gray-900 mb-1">출고 방식을 선택해주세요</h2>
+        <p class="text-sm text-gray-500 mb-5">주문하신 상품의 출고 방식을 선택합니다.</p>
+
+        <div class="space-y-3">
+          <div class="card-select cursor-pointer rounded-xl border-2 p-4 bg-white ${isNormal ? 'selected' : 'border-gray-200'}" data-action="selectShipping" data-value="normal">
+            <div class="flex items-start gap-3">
+              <div class="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0 mt-0.5">
+                <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+              </div>
+              <div class="flex-1">
+                <div class="flex items-center justify-between">
+                  <h3 class="font-semibold text-gray-900">일반출고</h3>
+                  <span class="text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">무료</span>
+                </div>
+                <p class="text-sm text-gray-500 mt-1">일반 제작 일정에 따라 출고됩니다.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="card-select ${!expressAvail ? 'disabled' : 'cursor-pointer'} rounded-xl border-2 p-4 bg-white ${isExpress ? 'selected' : 'border-gray-200'}" data-action="${expressAvail ? 'selectShipping' : ''}" data-value="express">
+            <div class="flex items-start gap-3">
+              <div class="w-10 h-10 rounded-lg ${expressAvail ? 'bg-orange-50' : 'bg-gray-100'} flex items-center justify-center flex-shrink-0 mt-0.5">
+                <svg class="w-5 h-5 ${expressAvail ? 'text-orange-500' : 'text-gray-400'}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              </div>
+              <div class="flex-1">
+                <div class="flex items-center justify-between">
+                  <h3 class="font-semibold ${expressAvail ? 'text-gray-900' : 'text-gray-400'}">빠른출고</h3>
+                  ${expressFee > 0
+                    ? '<span class="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">+' + formatMoney(expressFee) + '</span>'
+                    : '<span class="text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">무료</span>'}
+                </div>
+                <p class="text-sm ${expressAvail ? 'text-gray-500' : 'text-gray-400'} mt-1">
+                  ${expressAvail ? '빠른 일정으로 우선 제작 후 출고됩니다.' : '이 상품은 빠른출고가 불가합니다.'}
+                </p>
+                ${expressAvail && expressFee > 0 ? `
+                  <div class="mt-2 p-2 bg-orange-50 rounded-lg">
+                    <p class="text-xs text-orange-700">
+                      💰 빠른출고 추가 비용: <span class="font-bold">${formatMoney(expressFee)}</span>
+                    </p>
+                    <p class="text-[10px] text-orange-500 mt-0.5">추가금액이 발생합니다.</p>
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderStep1() {
+    const minDate = getMinDate();
+    const maxDate = getMaxDate();
+    const selectedDate = formState.desired_ship_date || '';
+    const s = getSettings();
+    const required = isDateRequired();
+    const notice = getNoticeText();
+    const isToday = s.shipping_type === 'today_shipping';
+
+    return `
+      <div class="fade-in">
+        <h2 class="text-lg font-semibold text-gray-900 mb-1">
+          희망출고일을 선택해주세요 ${required ? '<span class="text-red-500">*</span>' : '<span class="text-xs text-gray-400 font-normal">(선택)</span>'}
+        </h2>
+        <p class="text-sm text-gray-500 mb-5">
+          ${isToday
+            ? '컷오프 시간 기준으로 출고일이 결정됩니다.'
+            : '아래 캘린더에서 원하시는 출고일을 선택해주세요.'}
+        </p>
+
+        <div class="bg-white rounded-xl border border-gray-200 p-4">
+          <label class="block text-sm font-medium text-gray-700 mb-2">출고 희망일</label>
+          <input type="date"
+            id="dateInput"
+            class="w-full px-4 py-3 border border-gray-300 rounded-lg text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            min="${minDate}"
+            max="${maxDate}"
+            value="${selectedDate}"
+            data-action="selectDate"
+          />
+
+          ${selectedDate ? `
+            <div class="mt-3 p-3 bg-blue-50 rounded-lg">
+              <p class="text-sm text-blue-700">
+                <span class="font-medium">선택한 날짜:</span> ${formatDate(selectedDate)}
+              </p>
+              ${isDateClosed(selectedDate) ? `
+                <p class="text-sm text-red-600 mt-1 font-medium">
+                  * 해당 날짜는 출고 불가일로 선택할 수 없습니다.
+                </p>
+              ` : ''}
+            </div>
+          ` : ''}
+
+          <div class="mt-3 text-xs text-gray-400 space-y-1">
+            <p>* 휴무일(출고 불가 요일/날짜)은 선택할 수 없습니다.</p>
+            <p>* 선택 가능 기간: ${formatDate(minDate)} ~ ${formatDate(maxDate)}</p>
+            ${!required ? '<p class="text-blue-500">* 미선택 시 가장 빠른 출고일(' + formatDate(minDate) + ')이 자동 적용됩니다.</p>' : ''}
+          </div>
+          ${notice ? '<div class="mt-3 p-3 bg-amber-50 rounded-lg text-xs text-amber-700 whitespace-pre-wrap">' + notice + '</div>' : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderStep2() {
+    const stickers = orderData?.available_stickers || [];
+    const selectedId = formState.sticker_id;
+    const selectedSticker = getSelectedSticker();
+
+    if (stickers.length === 0) {
+      return `
+        <div class="fade-in">
+          <h2 class="text-lg font-semibold text-gray-900 mb-1">스티커 선택</h2>
+          <p class="text-sm text-gray-500 mb-5">이 상품은 스티커 옵션이 없습니다.</p>
+          <div class="bg-white rounded-xl border border-gray-200 p-6 text-center">
+            <div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            </div>
+            <p class="text-sm text-gray-500">스티커 없이 진행됩니다.</p>
+          </div>
+        </div>
+      `;
+    }
+
+    let stickerGrid = stickers.map(s => {
+      const isSelected = s.id === selectedId;
+      const color = s.preview_color || '#E5E7EB';
+      return `
+        <div class="card-select cursor-pointer rounded-xl border-2 p-3 bg-white ${isSelected ? 'selected' : 'border-gray-200'}" data-action="selectSticker" data-id="${s.id}">
+          <div class="w-full aspect-square rounded-lg mb-2 flex items-center justify-center" style="background-color: ${color}">
+            ${s.preview_image_url
+              ? '<img src="' + s.preview_image_url + '" class="w-full h-full object-contain rounded-lg" alt="' + (s.name || '') + '" />'
+              : '<span class="text-2xl font-bold text-white/70">' + (s.name || '?').charAt(0) + '</span>'}
+          </div>
+          <p class="text-xs font-medium text-gray-700 text-center truncate">${s.name || '스티커'}</p>
+        </div>
+      `;
+    }).join('');
+
+    let customFieldsHtml = '';
+    if (selectedSticker && selectedSticker.custom_fields && selectedSticker.custom_fields.length > 0) {
+      const fields = selectedSticker.custom_fields.map(f => {
+        const val = formState.sticker_fields[f.name] || '';
+        const requiredMark = f.required !== false ? '<span class="text-red-500">*</span>' : '';
+        let input = '';
+
+        if (f.field_type === 'select' && f.options) {
+          const opts = f.options.map(o => `<option value="${o}" ${val === o ? 'selected' : ''}>${o}</option>`).join('');
+          input = `<select class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white" data-action="stickerField" data-field="${f.name}">
+            <option value="">선택해주세요</option>${opts}
+          </select>`;
+        } else if (f.field_type === 'date') {
+          input = `<input type="date" value="${val}" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" data-action="stickerField" data-field="${f.name}" />`;
+        } else {
+          input = `<input type="text" value="${val}" placeholder="${f.placeholder || ''}" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" data-action="stickerField" data-field="${f.name}" />`;
+        }
+
+        return `
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">${f.label || f.name} ${requiredMark}</label>
+            ${f.description ? '<p class="text-xs text-gray-400 mb-1.5">' + f.description + '</p>' : ''}
+            ${input}
+          </div>
+        `;
+      }).join('');
+
+      customFieldsHtml = `
+        <div class="mt-4 bg-white rounded-xl border border-gray-200 p-4">
+          <h3 class="text-sm font-semibold text-gray-900 mb-3">스티커 정보 입력</h3>
+          <div class="space-y-3">${fields}</div>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="fade-in">
+        <h2 class="text-lg font-semibold text-gray-900 mb-1">스티커를 선택해주세요</h2>
+        <p class="text-sm text-gray-500 mb-5">답례품에 부착될 스티커를 선택합니다.</p>
+
+        <div class="grid grid-cols-3 gap-3">${stickerGrid}</div>
+
+        ${customFieldsHtml}
+      </div>
+    `;
+  }
+
+  function renderStep3() {
+    const bankInfo = orderData?.bank_info || { bank_name: '신한은행', account_number: '100-013-801261', account_holder: '바른컴퍼니' };
+    const total = getTotalAmount();
+    const baseAmount = orderData?.total_amount || 0;
+    const expressFee = formState.shipping_type === 'express' ? getExpressFee() : 0;
+
+    return `
+      <div class="fade-in">
+        <h2 class="text-lg font-semibold text-gray-900 mb-1">결제 정보</h2>
+        <p class="text-sm text-gray-500 mb-5">아래 계좌로 입금해주세요.</p>
+
+        <!-- Bank info card -->
+        <div class="bg-white rounded-xl border border-gray-200 p-4 mb-4">
+          <div class="flex items-center gap-2 mb-3">
+            <div class="w-8 h-8 bg-yellow-100 rounded-lg flex items-center justify-center">
+              <svg class="w-4 h-4 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>
+            </div>
+            <h3 class="text-sm font-semibold text-gray-900">입금 계좌 안내</h3>
+          </div>
+          <div class="bg-gray-50 rounded-lg p-3 space-y-2">
+            <div class="flex justify-between text-sm">
+              <span class="text-gray-500">은행</span>
+              <span class="font-medium text-gray-900">${bankInfo.bank_name}</span>
+            </div>
+            <div class="flex justify-between items-center text-sm">
+              <span class="text-gray-500">계좌번호</span>
+              <div class="flex items-center gap-2">
+                <span class="font-medium text-gray-900 font-mono">${bankInfo.account_number}</span>
+                <button class="text-xs text-blue-500 font-medium px-2 py-1 bg-blue-50 rounded hover:bg-blue-100 transition-colors" data-action="copyAccount">복사</button>
+              </div>
+            </div>
+            <div class="flex justify-between text-sm">
+              <span class="text-gray-500">예금주</span>
+              <span class="font-medium text-gray-900">${bankInfo.account_holder}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Amount card -->
+        <div class="bg-white rounded-xl border border-gray-200 p-4 mb-4">
+          <h3 class="text-sm font-semibold text-gray-900 mb-3">결제 금액</h3>
+          <div class="space-y-2">
+            <div class="flex justify-between text-sm">
+              <span class="text-gray-500">상품 금액</span>
+              <span class="text-gray-900">${formatMoney(baseAmount)}</span>
+            </div>
+            ${expressFee > 0 ? `
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-500">빠른출고 추가비용</span>
+                <span class="text-orange-600">+${formatMoney(expressFee)}</span>
+              </div>
+            ` : ''}
+            <div class="border-t border-gray-200 pt-2 flex justify-between">
+              <span class="font-semibold text-gray-900">총 결제금액</span>
+              <span class="font-bold text-blue-600 text-lg">${formatMoney(total)}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cash receipt -->
+        <div class="bg-white rounded-xl border border-gray-200 p-4">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-semibold text-gray-900">현금영수증 신청</h3>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" class="sr-only peer" ${formState.cash_receipt_yn ? 'checked' : ''} data-action="toggleReceipt" />
+              <div class="w-10 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500"></div>
+            </label>
+          </div>
+
+          ${formState.cash_receipt_yn ? `
+            <div class="space-y-3">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">발급 용도</label>
+                <div class="grid grid-cols-2 gap-2">
+                  <div class="card-select cursor-pointer rounded-lg border-2 p-3 text-center text-sm ${formState.receipt_type === 'personal' ? 'selected' : 'border-gray-200'}" data-action="selectReceiptType" data-value="personal">
+                    소득공제용
+                  </div>
+                  <div class="card-select cursor-pointer rounded-lg border-2 p-3 text-center text-sm ${formState.receipt_type === 'business' ? 'selected' : 'border-gray-200'}" data-action="selectReceiptType" data-value="business">
+                    지출증빙용
+                  </div>
+                </div>
+              </div>
+              ${formState.receipt_type ? `
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">
+                    ${formState.receipt_type === 'personal' ? '휴대폰 번호' : '사업자 등록번호'}
+                  </label>
+                  <input type="text"
+                    class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    placeholder="${formState.receipt_type === 'personal' ? '01012345678' : '1234567890'}"
+                    value="${formState.receipt_number || ''}"
+                    data-action="receiptNumber"
+                    inputmode="numeric"
+                  />
+                </div>
+              ` : ''}
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderStep4() {
+    const sticker = getSelectedSticker();
+    const total = getTotalAmount();
+    const bankInfo = orderData?.bank_info || {};
+    const expressFee = formState.shipping_type === 'express' ? getExpressFee() : 0;
+    const stickers = orderData?.available_stickers || [];
+
+    let stickerSummary = '';
+    if (sticker) {
+      let fieldSummary = '';
+      if (sticker.custom_fields && sticker.custom_fields.length > 0) {
+        fieldSummary = sticker.custom_fields.map(f => {
+          const val = formState.sticker_fields[f.name] || '-';
+          return `<div class="flex justify-between text-sm"><span class="text-gray-500">${f.label || f.name}</span><span class="text-gray-900">${val}</span></div>`;
+        }).join('');
+      }
+      stickerSummary = `
+        <div class="flex items-center gap-3 mb-2">
+          <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style="background-color: ${sticker.preview_color || '#E5E7EB'}">
+            <span class="text-sm font-bold text-white/80">${(sticker.name || '?').charAt(0)}</span>
+          </div>
+          <span class="text-sm font-medium text-gray-900">${sticker.name}</span>
+        </div>
+        ${fieldSummary ? '<div class="ml-13 space-y-1">' + fieldSummary + '</div>' : ''}
+      `;
+    } else if (stickers.length === 0) {
+      stickerSummary = '<p class="text-sm text-gray-400">스티커 없음</p>';
+    }
+
+    return `
+      <div class="fade-in">
+        <h2 class="text-lg font-semibold text-gray-900 mb-1">입력 내용을 확인해주세요</h2>
+        <p class="text-sm text-gray-500 mb-5">아래 내용이 맞는지 확인 후 제출해주세요.</p>
+
+        <div class="space-y-3">
+          <!-- Shipping type -->
+          <div class="bg-white rounded-xl border border-gray-200 p-4">
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">출고 방식</h3>
+              <button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="0">수정</button>
+            </div>
+            <p class="text-sm font-medium text-gray-900">
+              ${formState.shipping_type === 'express' ? '빠른출고' : '일반출고'}
+              ${expressFee > 0 ? ' <span class="text-orange-600">(+' + formatMoney(expressFee) + ')</span>' : ''}
+            </p>
+          </div>
+
+          <!-- Ship date -->
+          <div class="bg-white rounded-xl border border-gray-200 p-4">
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">희망출고일</h3>
+              <button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="1">수정</button>
+            </div>
+            <p class="text-sm font-medium text-gray-900">${formatDate(formState.desired_ship_date)}</p>
+          </div>
+
+          <!-- Sticker -->
+          <div class="bg-white rounded-xl border border-gray-200 p-4">
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">스티커</h3>
+              ${stickers.length > 0 ? '<button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="2">수정</button>' : ''}
+            </div>
+            ${stickerSummary}
+          </div>
+
+          <!-- Payment info -->
+          <div class="bg-white rounded-xl border border-gray-200 p-4">
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">결제정보</h3>
+              <button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="3">수정</button>
+            </div>
+            <div class="space-y-1.5">
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-500">총 결제금액</span>
+                <span class="font-bold text-blue-600">${formatMoney(total)}</span>
+              </div>
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-500">입금 계좌</span>
+                <span class="text-gray-900">${bankInfo.bank_name || ''} ${bankInfo.account_number || ''}</span>
+              </div>
+              ${formState.cash_receipt_yn ? `
+                <div class="flex justify-between text-sm">
+                  <span class="text-gray-500">현금영수증</span>
+                  <span class="text-gray-900">${RECEIPT_TYPES[formState.receipt_type] || '-'}</span>
+                </div>
+                <div class="flex justify-between text-sm">
+                  <span class="text-gray-500">발급번호</span>
+                  <span class="text-gray-900">${formState.receipt_number || '-'}</span>
+                </div>
+              ` : `
+                <div class="flex justify-between text-sm">
+                  <span class="text-gray-500">현금영수증</span>
+                  <span class="text-gray-400">미신청</span>
+                </div>
+              `}
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  const STEP_RENDERERS = [renderStep0, renderStep1, renderStep2, renderStep3, renderStep4];
+
+  function renderCurrentStep() {
+    $stepContent.innerHTML = STEP_RENDERERS[currentStep]();
+    renderStepIndicator();
+    updateNavButtons();
+    saveFormState();
+  }
+
+  // ============================================
+  // Event handling (delegation)
+  // ============================================
+  function handleAction(action, target) {
+    switch (action) {
+      case 'selectShipping': {
+        const val = target.closest('[data-value]')?.dataset?.value;
+        if (val) { formState.shipping_type = val; renderCurrentStep(); }
+        break;
+      }
+      case 'selectDate': {
+        const val = target.value;
+        if (val) {
+          if (isDateDisabled(val)) {
+            formState.desired_ship_date = val; // Show the error message
+          } else {
+            formState.desired_ship_date = val;
+          }
+          renderCurrentStep();
+        }
+        break;
+      }
+      case 'selectSticker': {
+        const id = target.closest('[data-id]')?.dataset?.id;
+        if (id) {
+          if (formState.sticker_id !== id) {
+            formState.sticker_id = id;
+            formState.sticker_fields = {};
+          }
+          renderCurrentStep();
+        }
+        break;
+      }
+      case 'stickerField': {
+        const field = target.dataset.field;
+        if (field) {
+          formState.sticker_fields[field] = target.value;
+          saveFormState();
+          updateNavButtons();
+        }
+        break;
+      }
+      case 'copyAccount': {
+        const acct = orderData?.bank_info?.account_number || '';
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(acct).then(() => {
+            target.textContent = '복사됨!';
+            target.classList.add('bg-green-50', 'text-green-600');
+            target.classList.remove('bg-blue-50', 'text-blue-500');
+            setTimeout(() => { target.textContent = '복사'; target.classList.remove('bg-green-50', 'text-green-600'); target.classList.add('bg-blue-50', 'text-blue-500'); }, 1500);
+          });
+        }
+        break;
+      }
+      case 'toggleReceipt': {
+        formState.cash_receipt_yn = target.checked;
+        if (!formState.cash_receipt_yn) {
+          formState.receipt_type = null;
+          formState.receipt_number = '';
+        }
+        renderCurrentStep();
+        break;
+      }
+      case 'selectReceiptType': {
+        const val = target.closest('[data-value]')?.dataset?.value;
+        if (val) { formState.receipt_type = val; formState.receipt_number = ''; renderCurrentStep(); }
+        break;
+      }
+      case 'receiptNumber': {
+        formState.receipt_number = target.value.replace(/[^0-9]/g, '');
+        saveFormState();
+        updateNavButtons();
+        break;
+      }
+      case 'goToStep': {
+        const step = parseInt(target.closest('[data-step]')?.dataset?.step);
+        if (!isNaN(step) && step >= 0 && step < STEP_LABELS.length) {
+          currentStep = step;
+          renderCurrentStep();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        break;
+      }
+    }
+  }
+
+  // Delegated click/change listeners on step content
+  $stepContent.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-action]');
+    if (el) handleAction(el.dataset.action, el);
+  });
+
+  $stepContent.addEventListener('change', (e) => {
+    const el = e.target.closest('[data-action]');
+    if (el) handleAction(el.dataset.action, el);
+  });
+
+  $stepContent.addEventListener('input', (e) => {
+    const el = e.target.closest('[data-action]');
+    if (el && (el.dataset.action === 'stickerField' || el.dataset.action === 'receiptNumber')) {
+      handleAction(el.dataset.action, el);
+    }
+  });
+
+  // Navigation buttons
+  $btnBack.addEventListener('click', () => {
+    if (currentStep > 0) {
+      currentStep--;
+      renderCurrentStep();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  });
+
+  $btnNext.addEventListener('click', async () => {
+    if (!isStepValid(currentStep)) return;
+    if (currentStep < STEP_LABELS.length - 1) {
+      currentStep++;
+      renderCurrentStep();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      // Submit
+      await submitForm();
+    }
+  });
+
+  // ============================================
+  // API calls
+  // ============================================
+  async function fetchOrder(orderId) {
+    const resp = await fetch(API_BASE + '/barungift/api/orders/' + encodeURIComponent(orderId));
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      throw new Error(body.error || '주문을 불러올 수 없습니다. (HTTP ' + resp.status + ')');
+    }
+    return resp.json();
+  }
+
+  async function submitForm() {
+    $btnNext.disabled = true;
+    $btnNext.textContent = '제출 중...';
+
+    const sticker = getSelectedSticker();
+    const payload = {
+      is_express: formState.shipping_type === 'express',
+      express_fee: formState.shipping_type === 'express' ? getExpressFee() : 0,
+      desired_ship_date: formState.desired_ship_date || (isDateRequired() ? null : getMinDate()),
+      sticker_selections: sticker ? [{
+        sticker_id: sticker.id,
+        sticker_name: sticker.name,
+        custom_values: { ...formState.sticker_fields },
+      }] : [],
+      cash_receipt_yn: formState.cash_receipt_yn,
+      receipt_type: formState.receipt_type,
+      receipt_number: formState.receipt_number || null,
+    };
+
+    try {
+      const resp = await fetch(API_BASE + '/barungift/api/orders/' + encodeURIComponent(orderData.order_id) + '/customer-info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body.error || '제출에 실패했습니다.');
+      }
+
+      // Clear session storage
+      try { sessionStorage.removeItem(storageKey(orderData.order_id)); } catch(e) {}
+
+      // Show success
+      $successOrderNum.textContent = orderData.order_number || '';
+      showScreen('successScreen');
+    } catch (err) {
+      alert(err.message || '제출 중 오류가 발생했습니다. 다시 시도해주세요.');
+      $btnNext.disabled = false;
+      $btnNext.textContent = '제출하기';
+    }
+  }
+
+  // ============================================
+  // Init
+  // ============================================
+  // ============================================
+  // Order search (주문 검색)
+  // ============================================
+  // ============================================
+  // Search tab switching
+  // ============================================
+  window.switchSearchTab = function(tab) {
+    const isLogin = tab === 'login';
+    document.getElementById('loginForm').classList.toggle('hidden', !isLogin);
+    document.getElementById('searchForm').classList.toggle('hidden', isLogin);
+    document.getElementById('tabLogin').className = isLogin
+      ? 'flex-1 py-2.5 text-sm font-semibold text-blue-600 border-b-2 border-blue-500'
+      : 'flex-1 py-2.5 text-sm font-medium text-gray-400 border-b-2 border-transparent';
+    document.getElementById('tabSearch').className = !isLogin
+      ? 'flex-1 py-2.5 text-sm font-semibold text-blue-600 border-b-2 border-blue-500'
+      : 'flex-1 py-2.5 text-sm font-medium text-gray-400 border-b-2 border-transparent';
+    // 결과 초기화
+    document.getElementById('searchResults').classList.add('hidden');
+    document.getElementById('searchEmpty').classList.add('hidden');
+    document.getElementById('loginError').classList.add('hidden');
+  };
+
+  // ============================================
+  // Barunson login
+  // ============================================
+  window.loginBarunson = async function() {
+    const uid = document.getElementById('loginUid').value.trim();
+    const pwd = document.getElementById('loginPwd').value;
+    const errEl = document.getElementById('loginError');
+    errEl.classList.add('hidden');
+
+    if (!uid || !pwd) { errEl.textContent = '아이디와 비밀번호를 입력해주세요.'; errEl.classList.remove('hidden'); return; }
+
+    document.getElementById('loginBtn').disabled = true;
+    document.getElementById('loginBtn').textContent = '로그인 중...';
+    document.getElementById('searchLoading').classList.remove('hidden');
+    document.getElementById('searchResults').classList.add('hidden');
+    document.getElementById('searchEmpty').classList.add('hidden');
+
+    try {
+      const resp = await fetch(API_BASE + '/barungift/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid, password: pwd }),
+      });
+      const data = await resp.json();
+      document.getElementById('searchLoading').classList.add('hidden');
+
+      if (!resp.ok) {
+        errEl.textContent = data.error || '로그인에 실패했습니다.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+
+      const orders = data.orders || [];
+      if (!orders.length) {
+        document.getElementById('searchEmpty').classList.remove('hidden');
+        return;
+      }
+
+      // 로그인 폼 숨기고 결과 표시
+      document.getElementById('loginForm').classList.add('hidden');
+      document.getElementById('searchForm').classList.add('hidden');
+      document.querySelectorAll('#searchScreen .flex.border-b').forEach(el => el.classList.add('hidden'));
+
+      renderOrderList(orders, data.user?.name ? data.user.name + '님의 주문' : null);
+    } catch (err) {
+      document.getElementById('searchLoading').classList.add('hidden');
+      errEl.textContent = '네트워크 오류가 발생했습니다.';
+      errEl.classList.remove('hidden');
+    } finally {
+      document.getElementById('loginBtn').disabled = false;
+      document.getElementById('loginBtn').textContent = '로그인';
+    }
+  };
+
+  // Enter 키로 로그인
+  document.getElementById('loginPwd')?.addEventListener('keydown', e => { if (e.key === 'Enter') loginBarunson(); });
+  document.getElementById('loginUid')?.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('loginPwd').focus(); });
+
+  // ============================================
+  // Render order list (공통)
+  // ============================================
+  function renderOrderList(orders, title) {
+    document.getElementById('searchResultCount').textContent = title || ('주문 ' + orders.length + '건');
+    document.getElementById('searchResultList').innerHTML = orders.map(o => {
+      const dateStr = o.order_date ? new Date(o.order_date).toLocaleDateString('ko-KR') : '';
+      const amount = (o.total_amount || 0).toLocaleString('ko-KR');
+      const isCancelled = o.status_seq === 3 || o.status_seq === 5;
+      const isDone = o.info_status === 'completed';
+      const statusBadge = isCancelled
+        ? '<span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-600">취소</span>'
+        : isDone
+          ? '<span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-600">입력완료</span>'
+          : '<span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">입력대기</span>';
+
+      return '<button onclick="selectOrder(\'' + o.order_id + '\')" ' + (isCancelled ? 'disabled' : '') +
+        ' class="w-full text-left bg-white rounded-xl border border-gray-200 p-4 hover:border-blue-300 transition shadow-sm ' + (isCancelled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer') + '">' +
+        '<div class="flex items-center justify-between mb-1.5">' +
+          '<span class="text-sm font-semibold text-gray-900">' + o.order_number + '</span>' + statusBadge +
+        '</div>' +
+        '<div class="text-xs text-gray-500 space-y-0.5">' +
+          '<div class="flex justify-between"><span>' + (o.customer_name || '') + (o.phone_last4 ? ' (' + o.phone_last4 + ')' : '') + '</span><span>' + dateStr + '</span></div>' +
+          '<div class="flex justify-between"><span class="text-gray-400">' + (o.product_name || '') + '</span><span class="font-medium text-gray-700">' + amount + '원</span></div>' +
+        '</div></button>';
+    }).join('');
+    document.getElementById('searchResults').classList.remove('hidden');
+  }
+
+  window.searchOrders = async function() {
+    const phone = document.getElementById('searchPhone').value.trim();
+    const name = document.getElementById('searchName').value.trim();
+    if (!phone || !name) { alert('주문자명과 전화번호를 모두 입력해주세요.'); return; }
+
+    document.getElementById('searchLoading').classList.remove('hidden');
+    document.getElementById('searchResults').classList.add('hidden');
+    document.getElementById('searchEmpty').classList.add('hidden');
+    document.getElementById('searchBtn').disabled = true;
+
+    try {
+      const params = new URLSearchParams();
+      if (phone) params.set('phone', phone);
+      if (name) params.set('name', name);
+      const resp = await fetch(API_BASE + '/barungift/api/orders/search?' + params.toString());
+      const data = await resp.json();
+      const orders = data.orders || [];
+
+      document.getElementById('searchLoading').classList.add('hidden');
+
+      if (!orders.length) {
+        document.getElementById('searchEmpty').classList.remove('hidden');
+        return;
+      }
+
+      renderOrderList(orders);
+    } catch(err) {
+      document.getElementById('searchLoading').classList.add('hidden');
+      alert(err.message || '검색 중 오류가 발생했습니다.');
+    } finally {
+      document.getElementById('searchBtn').disabled = false;
+    }
+  };
+
+  window.selectOrder = function(orderId) {
+    // URL을 변경하여 해당 주문으로 이동
+    const url = new URL(window.location);
+    url.searchParams.set('oid', orderId);
+    window.location.href = url.toString();
+  };
+
+  // Enter 키로 검색
+  document.getElementById('searchPhone')?.addEventListener('keydown', e => { if (e.key === 'Enter') searchOrders(); });
+  document.getElementById('searchName')?.addEventListener('keydown', e => { if (e.key === 'Enter') searchOrders(); });
+
+  async function init() {
+    const orderId = getOrderId();
+    if (!orderId) {
+      showScreen('searchScreen');
+      return;
+    }
+
+    try {
+      orderData = await fetchOrder(orderId);
+
+      // Already completed check
+      if (orderData.info_status === 'completed') {
+        showScreen('completedScreen');
+        return;
+      }
+
+      // Restore saved form state
+      loadFormState();
+
+      // Set header
+      $headerOrderNum.textContent = orderData.order_number || '';
+
+      // Show main app
+      showScreen('mainApp');
+      renderCurrentStep();
+    } catch (err) {
+      showError(err.message || '주문 정보를 불러올 수 없습니다.');
+    }
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>

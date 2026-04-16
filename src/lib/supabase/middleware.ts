@@ -33,11 +33,21 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // 바른기프트 고객용 공개 경로 체크
+  const isPublicBarungiftPath = (pathname: string) => {
+    // 고객 정보 입력 페이지
+    if (pathname.startsWith('/c/barungift/order-info')) return true;
+    // 고객용 주문 API (주문상세 조회 + 정보 저장)
+    if (/^\/c\/barungift\/api\/orders\/[^/]+/.test(pathname)) return true;
+    return false;
+  };
+
   // 로그인 페이지가 아닌 경우 인증 체크
   if (
     !user &&
     !request.nextUrl.pathname.startsWith('/login') &&
-    !request.nextUrl.pathname.startsWith('/auth')
+    !request.nextUrl.pathname.startsWith('/auth') &&
+    !isPublicBarungiftPath(request.nextUrl.pathname)
   ) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
