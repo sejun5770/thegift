@@ -216,7 +216,13 @@
   const STEP_LABELS = ['출고 방식', '희망출고일', '스티커 선택', '결제정보', '최종 확인'];
   const RECEIPT_TYPES = { personal: '소득공제용 (휴대폰번호)', business: '지출증빙용 (사업자번호)' };
   const HOLIDAYS_2026 = ['2026-01-01','2026-02-16','2026-02-17','2026-02-18','2026-03-01','2026-05-05','2026-05-24','2026-06-06','2026-08-15','2026-09-24','2026-09-25','2026-09-26','2026-10-03','2026-10-09','2026-12-25'];
-  const API_BASE = '';
+  // BASE_PATH 자동 감지: /c/barungift/barungift/order-info → '/c/barungift'
+  const API_BASE = (function() {
+    const path = window.location.pathname;
+    const idx = path.indexOf('/barungift/order-info');
+    if (idx > 0) return path.substring(0, idx); // '/c/barungift'
+    return '';
+  })();
 
   // ============================================
   // State
