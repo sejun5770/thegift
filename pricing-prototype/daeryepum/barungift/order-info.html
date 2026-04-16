@@ -103,10 +103,22 @@
         <div id="searchResultList"></div>
       </div>
 
-      <div id="searchEmpty" class="hidden text-center py-10">
-        <svg class="w-10 h-10 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-        <p class="text-sm text-gray-500">검색 결과가 없습니다.</p>
-        <p class="text-xs text-gray-400 mt-1">전화번호 또는 이름을 다시 확인해주세요.</p>
+      <div id="searchEmpty" class="hidden">
+        <div class="bg-white rounded-2xl border border-gray-200 p-8 text-center shadow-sm mt-4">
+          <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-2.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
+          </div>
+          <h3 class="text-lg font-bold text-gray-900 mb-2">주문하신 상품이 없습니다.</h3>
+          <p class="text-sm text-gray-500 mb-1">입력하신 정보로 조회된 답례품/꽃다발 주문이 없습니다.</p>
+          <p class="text-xs text-gray-400 mb-6">주문자명과 전화번호를 다시 확인해주세요.</p>
+          <button onclick="goBackToSearch()" class="w-full py-2.5 bg-blue-500 text-white text-sm font-semibold rounded-lg hover:bg-blue-600 transition">
+            되돌아가기
+          </button>
+          <div class="mt-4 text-xs text-gray-400">
+            <p>전화: <a href="tel:1644-0708" class="text-blue-500">1644-0708</a></p>
+            <p>카카오 상담: <a href="https://open.kakao.com/o/stUy4gji" target="_blank" class="text-blue-500">오픈채팅 문의</a></p>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -1232,6 +1244,9 @@
 
       const orders = data.orders || [];
       if (!orders.length) {
+        document.getElementById('loginForm').classList.add('hidden');
+        document.getElementById('searchForm').classList.add('hidden');
+        document.querySelectorAll('#searchScreen .flex.border-b').forEach(el => el.classList.add('hidden'));
         document.getElementById('searchEmpty').classList.remove('hidden');
         return;
       }
@@ -1306,6 +1321,10 @@
       document.getElementById('searchLoading').classList.add('hidden');
 
       if (!orders.length) {
+        // 검색폼/탭 숨기고 빈 상태 카드만 표시
+        document.getElementById('loginForm').classList.add('hidden');
+        document.getElementById('searchForm').classList.add('hidden');
+        document.querySelectorAll('#searchScreen .flex.border-b').forEach(el => el.classList.add('hidden'));
         document.getElementById('searchEmpty').classList.remove('hidden');
         return;
       }
@@ -1317,6 +1336,16 @@
     } finally {
       document.getElementById('searchBtn').disabled = false;
     }
+  };
+
+  window.goBackToSearch = function() {
+    document.getElementById('searchEmpty').classList.add('hidden');
+    document.getElementById('searchResults').classList.add('hidden');
+    document.getElementById('loginForm').classList.remove('hidden');
+    document.getElementById('searchForm').classList.remove('hidden');
+    // 탭 복원
+    document.querySelectorAll('#searchScreen .flex.border-b').forEach(el => el.classList.remove('hidden'));
+    switchSearchTab('login');
   };
 
   window.selectOrder = function(orderId) {
