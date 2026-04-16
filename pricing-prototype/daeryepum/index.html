@@ -760,12 +760,14 @@ nav a:hover{color:var(--gray-900)}
   <div class="card">
     <table class="data-table" id="bg-sticker-table">
       <thead><tr>
-        <th style="width:50px">미리보기</th>
+        <th style="width:40px">미리보기</th>
+        <th>스티커코드</th>
+        <th>브랜드</th>
         <th>스티커명</th>
-        <th>커스텀영역</th>
+        <th>용도</th>
+        <th>매핑코드</th>
         <th>상태</th>
-        <th>생성일</th>
-        <th style="width:80px">관리</th>
+        <th style="width:70px">관리</th>
       </tr></thead>
       <tbody id="bg-sticker-tbody"></tbody>
     </table>
@@ -846,11 +848,11 @@ nav a:hover{color:var(--gray-900)}
     <h3 style="font-size:14px;font-weight:600;margin-bottom:12px">상품 설정 목록</h3>
     <table class="data-table" id="bg-product-table">
       <thead><tr>
-        <th>상품코드</th>
+        <th>품목코드</th>
+        <th>브랜드</th>
+        <th>제품명</th>
         <th>출고방식</th>
         <th>리드타임</th>
-        <th>휴무요일</th>
-        <th>휴무일</th>
         <th>스티커</th>
         <th style="width:60px">관리</th>
       </tr></thead>
@@ -3664,11 +3666,13 @@ function renderBgStickers() {
   }
   empty.classList.add('hidden');
   tbody.innerHTML = bgStickers.map(s => `<tr>
-    <td><div style="width:32px;height:42px;border-radius:4px;border:1px solid var(--gray-200);background:${s.preview_image_url ? `url(${s.preview_image_url}) center/cover` : s.preview_color || '#fff'}"></div></td>
-    <td style="font-weight:500">${s.name}</td>
-    <td><span class="badge badge-neutral">${(s.custom_fields||[]).length}개</span></td>
+    <td><div style="width:28px;height:36px;border-radius:4px;border:1px solid var(--gray-200);background:${s.preview_image_url ? 'url(' + s.preview_image_url + ') center/cover' : s.preview_color || '#fff'}"></div></td>
+    <td style="font-family:monospace;font-size:11px">${s.sticker_code || '-'}</td>
+    <td style="font-size:12px">${s.brand || '-'}</td>
+    <td style="font-weight:500;font-size:12px">${s.name}</td>
+    <td style="font-size:11px;color:var(--gray-500)">${s.usage || '-'}</td>
+    <td style="font-family:monospace;font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis">${(s.product_codes||[]).join(', ') || '-'}</td>
     <td><span class="badge ${s.is_active ? 'badge-up' : 'badge-neutral'}">${s.is_active ? '활성' : '비활성'}</span></td>
-    <td style="font-size:12px;color:var(--gray-500)">${new Date(s.created_at).toLocaleDateString('ko-KR')}</td>
     <td>
       <button class="btn btn-sm" onclick="editBgSticker('${s.id}')" title="수정">✏️</button>
       <button class="btn btn-sm" onclick="deleteBgSticker('${s.id}')" title="비활성화" style="color:var(--red)">🗑️</button>
@@ -3807,14 +3811,12 @@ function renderBgProducts() {
   const WDAY = ['일','월','화','수','목','금','토'];
   tbody.innerHTML = bgProductSettings.map(s => {
     const type = s.shipping_type === 'today_shipping' ? '오늘출발' : '희망출고';
-    const closedW = (s.closed_weekdays||[]).map(d => WDAY[d]).join(',') || '-';
-    const closedD = (s.closed_dates||[]).length;
     return `<tr>
-      <td style="font-family:monospace;font-weight:500">${s.product_id}</td>
+      <td style="font-family:monospace;font-size:11px">${s.product_id}</td>
+      <td style="font-size:12px">${s.brand || '-'}</td>
+      <td style="font-size:12px;font-weight:500">${s.product_name || '-'}</td>
       <td><span class="badge ${s.shipping_type==='today_shipping'?'badge-up':'badge-neutral'}">${type}</span></td>
       <td>${s.lead_time_days}영업일</td>
-      <td style="font-size:11px">${closedW}</td>
-      <td>${closedD}일</td>
       <td>${(s.available_sticker_ids||[]).length}개</td>
       <td><button class="btn btn-sm" onclick="openBgProductForm('${s.product_id}')">편집</button></td>
     </tr>`;

@@ -1,0 +1,1219 @@
+[
+  {
+    "id": "6ea7a10c-3315-49ef-b62e-5c2aacdadb3d",
+    "name": "오설록 A",
+    "sticker_code": "TGOSL01S1",
+    "brand": "오설록",
+    "type": "A",
+    "usage": "(A)결혼",
+    "spec": "50*90",
+    "product_codes": [
+      "OSL002"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.749Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "17d01fda-daec-4ecf-a576-696c6eddf623",
+    "name": "오설록 A",
+    "sticker_code": "TGOSL01S2",
+    "brand": "오설록",
+    "type": "A",
+    "usage": "(B)돌",
+    "spec": "50*90",
+    "product_codes": [
+      "OSL002"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "bdd5b85a-8de9-43f5-9886-6a12a02ac204",
+    "name": "오설록 A",
+    "sticker_code": "TGOSL01S3",
+    "brand": "오설록",
+    "type": "A",
+    "usage": "(C)환갑",
+    "spec": "50*90",
+    "product_codes": [
+      "OSL002"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "a8444f33-e4e9-491c-ab49-73fe0c2a0dc0",
+    "name": "오설록 B",
+    "sticker_code": "TGOSL01S4",
+    "brand": "오설록",
+    "type": "B",
+    "usage": "(A)결혼",
+    "spec": "50*90",
+    "product_codes": [
+      "OSL002"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "8bd38ed4-37da-4c3c-83c8-11f0b646a89b",
+    "name": "오설록 B",
+    "sticker_code": "TGOSL01S5",
+    "brand": "오설록",
+    "type": "B",
+    "usage": "(B)돌",
+    "spec": "50*90",
+    "product_codes": [
+      "OSL002"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "f7fc9043-bd6b-4b87-becb-2a7e741e4359",
+    "name": "오설록 B",
+    "sticker_code": "TGOSL01S6",
+    "brand": "오설록",
+    "type": "B",
+    "usage": "(C)환갑",
+    "spec": "50*90",
+    "product_codes": [
+      "OSL002"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "93af42e3-4af0-48f4-85ba-df4aceeaa89b",
+    "name": "크렘드마롱 W (화이트)",
+    "sticker_code": "TGCMR01S1",
+    "brand": "크렘드마롱",
+    "type": "W (화이트)",
+    "usage": "(A)결혼",
+    "spec": "29*112",
+    "product_codes": [
+      "BTG_creme_78tube"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "48f29e78-1408-46e3-b600-45f066b24afb",
+    "name": "크렘드마롱 B (블루.필기체)",
+    "sticker_code": "TGCMR01S2",
+    "brand": "크렘드마롱",
+    "type": "B (블루.필기체)",
+    "usage": "(B)필기체",
+    "spec": "29*112",
+    "product_codes": [
+      "BTG_creme_78tube"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "aa55b9c9-b291-44a7-bbd3-fe68bf582823",
+    "name": "크렘드마롱 B (블루.땡큐)",
+    "sticker_code": "TGCMR01S3",
+    "brand": "크렘드마롱",
+    "type": "B (블루.땡큐)",
+    "usage": "(C)땡큐",
+    "spec": "29*112",
+    "product_codes": [
+      "BTG_creme_78tube"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "c8f83393-f546-4221-9527-7b0171021461",
+    "name": "정수당 옐로우",
+    "sticker_code": "TGJSD01S1",
+    "brand": "정수당",
+    "type": "옐로우",
+    "usage": "",
+    "spec": "45*45",
+    "product_codes": [
+      "TGJSD01",
+      "TGJSD04O1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "4a4c6105-44bc-475a-a73e-2b4ed13b6fb9",
+    "name": "정수당 블루",
+    "sticker_code": "TGJSD01S2",
+    "brand": "정수당",
+    "type": "블루",
+    "usage": "",
+    "spec": "45*45",
+    "product_codes": [
+      "TGJSD01"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "232160a6-906c-45a1-86ce-49cb044727c9",
+    "name": "정수당 브라운",
+    "sticker_code": "TGJSD01S3",
+    "brand": "정수당",
+    "type": "브라운",
+    "usage": "",
+    "spec": "45*45",
+    "product_codes": [
+      "TGJSD01"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "464b220a-96a5-4757-89f2-fd16ed0cd15d",
+    "name": "이코복스 브라운",
+    "sticker_code": "TGIKX01S1",
+    "brand": "이코복스",
+    "type": "브라운",
+    "usage": "",
+    "spec": "65X65mm",
+    "product_codes": [
+      "TGIKX01"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "df07e3f0-f11f-4c64-aabc-fe9cb6d6125c",
+    "name": "이코복스 화이트",
+    "sticker_code": "TGIKX01S2",
+    "brand": "이코복스",
+    "type": "화이트",
+    "usage": "",
+    "spec": "65X65mm",
+    "product_codes": [
+      "TGIKX01"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "951c89ed-5598-4528-855c-6795e533c2db",
+    "name": "정수당 결혼(하트)",
+    "sticker_code": "TGJSD02S1",
+    "brand": "정수당",
+    "type": "결혼(하트)",
+    "usage": "",
+    "spec": "55*194(mm)",
+    "product_codes": [
+      "TGJSD02D1"
+    ],
+    "note": "한글, 영문 이름 인쇄",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "18b90052-7a96-4421-96b0-d1ca7c4f113b",
+    "name": "정수당 특별한날(클로바)",
+    "sticker_code": "TGJSD02S2",
+    "brand": "정수당",
+    "type": "특별한날(클로바)",
+    "usage": "",
+    "spec": "55*194(mm)",
+    "product_codes": [
+      "TGJSD02D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "2670c2eb-25ff-41a2-a4ce-5134992d274a",
+    "name": "정수당 돌잔치(토끼)",
+    "sticker_code": "TGJSD02S3",
+    "brand": "정수당",
+    "type": "돌잔치(토끼)",
+    "usage": "",
+    "spec": "55*194(mm)",
+    "product_codes": [
+      "TGJSD02D1"
+    ],
+    "note": "한글, 영문 이름 인쇄",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "fd7e0493-4fff-4b9e-91df-ef75f23b7f24",
+    "name": "오설록 공용1 결혼(핑크)",
+    "sticker_code": "TGOSLRE01S1",
+    "brand": "오설록",
+    "type": "공용1 결혼(핑크)",
+    "usage": "",
+    "spec": "78X86mm",
+    "product_codes": [
+      "OSL003",
+      "OSL004",
+      "OSL006"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "89a5a62f-3721-4a5d-9947-629c12c28e28",
+    "name": "오설록 공용2 새(옐로우)",
+    "sticker_code": "TGOSLRE01S2",
+    "brand": "오설록",
+    "type": "공용2 새(옐로우)",
+    "usage": "",
+    "spec": "78X86mm",
+    "product_codes": [
+      "OSL003",
+      "OSL004",
+      "OSL006"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "e15f8e9b-3fe9-40bc-8699-4e1100f53789",
+    "name": "오설록 옐로우",
+    "sticker_code": "OSL005S1",
+    "brand": "오설록",
+    "type": "옐로우",
+    "usage": "",
+    "spec": "55X80mm",
+    "product_codes": [
+      "OSL005"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "aad4be5f-c0e8-47ed-a009-52f766919f69",
+    "name": "정수당 핑크",
+    "sticker_code": "TGJSD03S1",
+    "brand": "정수당",
+    "type": "핑크",
+    "usage": "",
+    "spec": "64X130mm",
+    "product_codes": [
+      "TGJSD03D1"
+    ],
+    "note": "결혼 스티커",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "5d99115d-6f3d-4978-9ccd-315a8e95050a",
+    "name": "정수당 옐로우",
+    "sticker_code": "TGJSD03S2",
+    "brand": "정수당",
+    "type": "옐로우",
+    "usage": "",
+    "spec": "64X130mm",
+    "product_codes": [
+      "TGJSD03D1"
+    ],
+    "note": "돌 스티커\n아기이름\n아빠, 엄마 이름",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "c4dd2239-d05c-4f94-a135-431c77ef3cef",
+    "name": "정수당 블루",
+    "sticker_code": "TGJSD03S3",
+    "brand": "정수당",
+    "type": "블루",
+    "usage": "",
+    "spec": "64X130mm",
+    "product_codes": [
+      "TGJSD03D1"
+    ],
+    "note": "돌 스티커",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "47405d53-ebf2-45ee-9c4b-9eaff66dd8e0",
+    "name": "노슈가애디드 옐로우_새로운시작",
+    "sticker_code": "TGNSG01S1",
+    "brand": "노슈가애디드",
+    "type": "옐로우_새로운시작",
+    "usage": "",
+    "spec": "122*64(mm)",
+    "product_codes": [
+      "TGNSG01"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "bb0df704-26c5-480a-b44d-a52768a83ec4",
+    "name": "노슈가애디드 그린_새로운시작",
+    "sticker_code": "TGNSG01S2",
+    "brand": "노슈가애디드",
+    "type": "그린_새로운시작",
+    "usage": "",
+    "spec": "122*64(mm)",
+    "product_codes": [
+      "TGNSG01"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "cfe7c4dc-31af-4024-8b9c-f82f3bd23fc6",
+    "name": "노슈가애디드 레드_감사합니다",
+    "sticker_code": "TGNSG01S3",
+    "brand": "노슈가애디드",
+    "type": "레드_감사합니다",
+    "usage": "",
+    "spec": "64*97(mm)",
+    "product_codes": [
+      "TGNSG01"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "56fb8843-16df-44ce-90df-7eef19b27670",
+    "name": "정백 1st_돌",
+    "sticker_code": "TGIBK01S1",
+    "brand": "정백",
+    "type": "1st_돌",
+    "usage": "",
+    "spec": "TGJBK04S2",
+    "product_codes": [
+      "TGIBK01D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "6fdfd014-9a83-48a8-abd5-2219bfe6d20f",
+    "name": "정백 thank_축하",
+    "sticker_code": "TGIBK01S2",
+    "brand": "정백",
+    "type": "thank_축하",
+    "usage": "",
+    "spec": "90X155mm",
+    "product_codes": [],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "4c9b6eee-4aed-4ba7-b1e7-3b5379a1bbc6",
+    "name": "정백 wedding",
+    "sticker_code": "TGIBK01S3",
+    "brand": "정백",
+    "type": "wedding",
+    "usage": "",
+    "spec": "90X155mm",
+    "product_codes": [],
+    "note": "한글, 영문 이름 인쇄",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "5e857c8b-65de-41f9-b1e0-4269fa445120",
+    "name": "정백 웨딩_감사",
+    "sticker_code": "TGJBK01S1",
+    "brand": "정백",
+    "type": "웨딩_감사",
+    "usage": "",
+    "spec": "60X112mm",
+    "product_codes": [
+      "TGJBK01O2"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "36907b12-304d-4d5c-8edf-be221df9d8df",
+    "name": "정백 웨딩_thank you",
+    "sticker_code": "TGJBK01S2",
+    "brand": "정백",
+    "type": "웨딩_thank you",
+    "usage": "",
+    "spec": "60X112mm",
+    "product_codes": [
+      "TGJBK01O2"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "cba97b2d-9c3f-42b2-9953-5c58a1e572ef",
+    "name": "정백 돌_첫돌",
+    "sticker_code": "TGJBK01S3",
+    "brand": "정백",
+    "type": "돌_첫돌",
+    "usage": "",
+    "spec": "60X112mm",
+    "product_codes": [
+      "TGJBK01O2"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "f24a6cb1-ef5a-4489-a127-50056f91af30",
+    "name": "정백 돌_1st",
+    "sticker_code": "TGJBK01S4",
+    "brand": "정백",
+    "type": "돌_1st",
+    "usage": "",
+    "spec": "60X112mm",
+    "product_codes": [
+      "TGJBK01O2"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "aa8c21b5-c0dd-4396-bcde-38bce3dab7f4",
+    "name": "정백 감사",
+    "sticker_code": "TGJBK03S1",
+    "brand": "정백",
+    "type": "감사",
+    "usage": "",
+    "spec": "60X112mm",
+    "product_codes": [
+      "TGJBK03D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "1ecfddf2-f550-4686-94aa-39723ac41dc6",
+    "name": "정백 thank you",
+    "sticker_code": "TGJBK03S2",
+    "brand": "정백",
+    "type": "thank you",
+    "usage": "",
+    "spec": "60X112mm",
+    "product_codes": [
+      "TGJBK03D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "80b34048-fdcd-4ca3-aaa4-4839e3d3fd0e",
+    "name": "정백 첫돌",
+    "sticker_code": "TGJBK03S3",
+    "brand": "정백",
+    "type": "첫돌",
+    "usage": "",
+    "spec": "60X112mm",
+    "product_codes": [
+      "TGJBK03D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "dfa98572-300a-4976-9152-c62b735c6f67",
+    "name": "정백 1st",
+    "sticker_code": "TGJBK03S4",
+    "brand": "정백",
+    "type": "1st",
+    "usage": "",
+    "spec": "60X112mm",
+    "product_codes": [
+      "TGJBK03D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "658cea8e-efc8-4d8a-bfe7-c9906d67bb35",
+    "name": "정백 웨딩_감사",
+    "sticker_code": "TGJBK04S1",
+    "brand": "정백",
+    "type": "웨딩_감사",
+    "usage": "",
+    "spec": "90X145mm",
+    "product_codes": [
+      "TGJBK04D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "8f8f615b-3cea-4836-8fe7-426b2482bcd6",
+    "name": "정백 웨딩_thank you",
+    "sticker_code": "TGJBK04S2",
+    "brand": "정백",
+    "type": "웨딩_thank you",
+    "usage": "",
+    "spec": "90X145mm",
+    "product_codes": [
+      "TGJBK04D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "ecaeb7ae-95bc-4b39-86d6-8ec8be55bac4",
+    "name": "정백 돌_첫돌",
+    "sticker_code": "TGJBK04S3",
+    "brand": "정백",
+    "type": "돌_첫돌",
+    "usage": "",
+    "spec": "90X145mm",
+    "product_codes": [
+      "TGJBK04D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "f29121c2-4aa8-4eec-a116-a4b983aded26",
+    "name": "정백 돌_1st",
+    "sticker_code": "TGJBK04S4",
+    "brand": "정백",
+    "type": "돌_1st",
+    "usage": "",
+    "spec": "90X145mm",
+    "product_codes": [
+      "TGJBK04D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "a984c8ba-94e9-4004-97c2-6116217ffb67",
+    "name": "정백 웨딩_감사",
+    "sticker_code": "TGJBK05S1",
+    "brand": "정백",
+    "type": "웨딩_감사",
+    "usage": "",
+    "spec": "90X145mm",
+    "product_codes": [
+      "TGJBK05D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "c89a8380-406e-469e-81c9-a403a0e012c7",
+    "name": "정백 웨딩_thank you",
+    "sticker_code": "TGJBK05S2",
+    "brand": "정백",
+    "type": "웨딩_thank you",
+    "usage": "",
+    "spec": "90X145mm",
+    "product_codes": [
+      "TGJBK05D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "971769ce-967e-4846-9cd7-1e312a7c9541",
+    "name": "정백 돌_첫돌",
+    "sticker_code": "TGJBK05S3",
+    "brand": "정백",
+    "type": "돌_첫돌",
+    "usage": "",
+    "spec": "90X145mm",
+    "product_codes": [
+      "TGJBK05D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "e27bb0bb-f9d6-45f6-8d15-8bb64b7c7785",
+    "name": "정백 돌_1st",
+    "sticker_code": "TGJBK05S4",
+    "brand": "정백",
+    "type": "돌_1st",
+    "usage": "",
+    "spec": "90X145mm",
+    "product_codes": [
+      "TGJBK05D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "e64ea844-5709-4456-acf8-27fcd0909522",
+    "name": "정수당 감사합니다",
+    "sticker_code": "TGJSD05S1",
+    "brand": "정수당",
+    "type": "감사합니다",
+    "usage": "",
+    "spec": "52X218mm",
+    "product_codes": [
+      "TGJSD05D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "047f21ba-3772-40d9-af90-cbaf129ce5e5",
+    "name": "정수당 1st_돌",
+    "sticker_code": "TGJSD05S2",
+    "brand": "정수당",
+    "type": "1st_돌",
+    "usage": "",
+    "spec": "52X218mm",
+    "product_codes": [
+      "TGJSD05D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "6c1ead40-94af-401a-bae0-e6f1825afe37",
+    "name": "정수당 60th_생신",
+    "sticker_code": "TGJSD05S3",
+    "brand": "정수당",
+    "type": "60th_생신",
+    "usage": "",
+    "spec": "52X218mm",
+    "product_codes": [
+      "TGJSD05D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "475cadc1-864e-4a54-bfb4-aa9656fe6eb1",
+    "name": "정백 웨딩_감사",
+    "sticker_code": "TGJBK02S1",
+    "brand": "정백",
+    "type": "웨딩_감사",
+    "usage": "",
+    "spec": "37X142mm",
+    "product_codes": [
+      "TGJBK02O1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "c2724ac7-fd16-4eed-9c5a-3f38d98a53b5",
+    "name": "정백 웨딩_thank you",
+    "sticker_code": "TGJBK02S2",
+    "brand": "정백",
+    "type": "웨딩_thank you",
+    "usage": "",
+    "spec": "37X142mm",
+    "product_codes": [
+      "TGJBK02O1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "44f6cd63-c5de-46ae-964d-67494dab2394",
+    "name": "정백 돌_첫돌",
+    "sticker_code": "TGJBK02S3",
+    "brand": "정백",
+    "type": "돌_첫돌",
+    "usage": "",
+    "spec": "37X142mm",
+    "product_codes": [
+      "TGJBK02O1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "cd5d737e-b043-47af-9d9a-49ce2a5ec243",
+    "name": "정백 돌_1st",
+    "sticker_code": "TGJBK02S4",
+    "brand": "정백",
+    "type": "돌_1st",
+    "usage": "",
+    "spec": "37X142mm",
+    "product_codes": [
+      "TGJBK02O1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "1dc5a4a9-2992-4f35-ba94-a1f55f66c8de",
+    "name": "알뮤터 (c)ThankYou_wedding",
+    "sticker_code": "TGAMT01S1",
+    "brand": "알뮤터",
+    "type": "(c)ThankYou_wedding",
+    "usage": "",
+    "spec": "75X62mm",
+    "product_codes": [
+      "TGAMT01O1"
+    ],
+    "note": "알뮤터 에스프레소 블록 커피 4p 선물세트",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "aceb29dd-1fdc-48e3-8f9d-35e8deae06c9",
+    "name": "알뮤터 (c)ThankYou_첫돌",
+    "sticker_code": "TGAMT01S2",
+    "brand": "알뮤터",
+    "type": "(c)ThankYou_첫돌",
+    "usage": "",
+    "spec": "75X62mm",
+    "product_codes": [
+      "TGAMT01O1"
+    ],
+    "note": "알뮤터 에스프레소 블록 커피 4p 선물세트",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "0591fa4a-760b-4847-9dfe-6da4e08e46a2",
+    "name": "알뮤터 (c)감사합니다_환갑",
+    "sticker_code": "TGAMT01S3",
+    "brand": "알뮤터",
+    "type": "(c)감사합니다_환갑",
+    "usage": "",
+    "spec": "75X62mm",
+    "product_codes": [
+      "TGAMT01O1"
+    ],
+    "note": "알뮤터 에스프레소 블록 커피 4p 선물세트",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "883f01c5-8652-4cd8-bf92-d95f02b7b011",
+    "name": "정수당 (c)결혼",
+    "sticker_code": "TGJSD08S1",
+    "brand": "정수당",
+    "type": "(c)결혼",
+    "usage": "",
+    "spec": "50X70mm",
+    "product_codes": [
+      "TGJSD08D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "826af81a-5557-4186-8600-f137c5d4e7d9",
+    "name": "정수당 (c)첫돌",
+    "sticker_code": "TGJSD08S2",
+    "brand": "정수당",
+    "type": "(c)첫돌",
+    "usage": "",
+    "spec": "50X70mm",
+    "product_codes": [
+      "TGJSD08D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "2dd7668d-0acb-4a99-8e2f-e0715aafa2dd",
+    "name": "정수당 (c)생신",
+    "sticker_code": "TGJSD08S3",
+    "brand": "정수당",
+    "type": "(c)생신",
+    "usage": "",
+    "spec": "50X70mm",
+    "product_codes": [
+      "TGJSD08D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "8fddb356-8268-4a74-afee-6a2d8933100b",
+    "name": "정수당 (c)하트_돌",
+    "sticker_code": "TGJSD06S1",
+    "brand": "정수당",
+    "type": "(c)하트_돌",
+    "usage": "",
+    "spec": "90x32mm",
+    "product_codes": [
+      "TGJSD06D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "a34ae950-eae8-4f9c-85ef-f348a44b476c",
+    "name": "정수당 (c)클로버_환갑",
+    "sticker_code": "TGJSD06S2",
+    "brand": "정수당",
+    "type": "(c)클로버_환갑",
+    "usage": "",
+    "spec": "90x32mm",
+    "product_codes": [
+      "TGJSD06D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "3e9f7f8c-0a2c-47e0-85b6-580d923f065e",
+    "name": "정수당 (c)스마일_결혼",
+    "sticker_code": "TGJSD06S3",
+    "brand": "정수당",
+    "type": "(c)스마일_결혼",
+    "usage": "",
+    "spec": "90x32mm",
+    "product_codes": [
+      "TGJSD06D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "df4a659a-59b5-42e0-8dc0-b59748a7bab4",
+    "name": "정수당 (c)ThankYou_첫돌",
+    "sticker_code": "TGJSD07S1",
+    "brand": "정수당",
+    "type": "(c)ThankYou_첫돌",
+    "usage": "",
+    "spec": "60x29.5mm",
+    "product_codes": [
+      "TGJSD07D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "f4c671d0-075a-4699-a1ee-be7fb0b40822",
+    "name": "정수당 (c)감사합니다_환갑",
+    "sticker_code": "TGJSD07S2",
+    "brand": "정수당",
+    "type": "(c)감사합니다_환갑",
+    "usage": "",
+    "spec": "60x29.5mm",
+    "product_codes": [
+      "TGJSD07D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  },
+  {
+    "id": "dbb0997c-e88d-4c1e-bde8-e60edce45d71",
+    "name": "정수당 (c)ThankYou_wedding",
+    "sticker_code": "TGJSD07S3",
+    "brand": "정수당",
+    "type": "(c)ThankYou_wedding",
+    "usage": "",
+    "spec": "60x29.5mm",
+    "product_codes": [
+      "TGJSD07D1"
+    ],
+    "note": "",
+    "preview_image_url": null,
+    "preview_color": "#FFFFFF",
+    "custom_fields": [],
+    "is_active": true,
+    "created_at": "2026-04-16T11:39:19.751Z",
+    "updated_at": "2026-04-16T11:39:19.751Z"
+  }
+]
