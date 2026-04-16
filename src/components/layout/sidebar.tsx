@@ -11,6 +11,7 @@ import {
   Box,
   Gift,
   Settings,
+  MessageSquare,
 } from 'lucide-react';
 
 const navItems = [
@@ -19,6 +20,7 @@ const navItems = [
   { href: '/products', label: '상품관리', icon: Package },
   { href: '/stickers', label: '스티커관리', icon: Sticker },
   { href: '/box-types', label: '박스타입', icon: Box },
+  { href: '/alimtalk', label: '답례품 알림톡', icon: MessageSquare },
 ];
 
 const barungiftNavItems = [
