@@ -303,12 +303,19 @@
   function addDays(dateStr, days) {
     const d = new Date(dateStr + 'T00:00:00');
     d.setDate(d.getDate() + days);
-    return d.toISOString().split('T')[0];
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
   }
 
+  /** KST 기준 오늘 날짜 */
   function todayStr() {
-    const d = new Date();
-    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    const kst = new Date(Date.now() + 9 * 3600000);
+    return kst.getUTCFullYear() + '-' + String(kst.getUTCMonth()+1).padStart(2,'0') + '-' + String(kst.getUTCDate()).padStart(2,'0');
+  }
+
+  /** KST 기준 현재 시:분 (분 단위) */
+  function nowMinutesKST() {
+    const kst = new Date(Date.now() + 9 * 3600000);
+    return kst.getUTCHours() * 60 + kst.getUTCMinutes();
   }
 
   function getSettings() {
@@ -360,24 +367,24 @@
     return cur;
   }
 
-  /** 접수일 계산 (컷오프/영업일 기준) */
+  /** 접수일 계산 (컷오프/영업일 기준, 고객 출고방식 선택 반영) */
   function getReceiptDate() {
     const s = getSettings();
     const today = todayStr();
     const isTodayBiz = !isDateClosed(today);
-    const cutoffOn = s.cutoff_enabled === true;
-    const cutoffH = s.cutoff_hour ?? 14;
-    const cutoffM = s.cutoff_minute ?? 0;
-    const now = new Date();
-    const nowMin = now.getHours() * 60 + now.getMinutes();
-    const cutoffMin = cutoffH * 60 + cutoffM;
+    const isExpress = formState.shipping_type === 'express';
 
-    if (s.shipping_type === 'today_shipping' && cutoffOn) {
-      // 오늘출발 + 컷오프 설정
+    // 빠른출고(오늘출발) + 컷오프 설정 시
+    if (isExpress && s.shipping_type === 'today_shipping' && s.cutoff_enabled) {
+      const cutoffH = s.cutoff_hour ?? 14;
+      const cutoffM = s.cutoff_minute ?? 0;
+      const nowMin = nowMinutesKST();
+      const cutoffMin = cutoffH * 60 + cutoffM;
+
       if (isTodayBiz && nowMin < cutoffMin) {
         return today; // 컷오프 전 + 영업일 → 당일 접수
       }
-      return nextBizDay(addDays(today, 1)); // 컷오프 후 → 익영업일
+      return nextBizDay(addDays(today, 1)); // 컷오프 후 또는 비영업일 → 익영업일
     }
 
     // 영업일이 아닌 날 주문 → 다음 영업일 접수
@@ -390,33 +397,40 @@
     const s = getSettings();
     const today = todayStr();
     const leadTime = s.lead_time_days ?? 2;
+    const isExpress = formState.shipping_type === 'express';
 
-    if (s.shipping_type === 'today_shipping') {
-      // 오늘출발: 접수일 + 리드타임 영업일
+    if (isExpress && s.shipping_type === 'today_shipping') {
+      // 빠른출고(오늘출발): 컷오프 기준으로 접수일 결정 → 리드타임 적용
       const receipt = getReceiptDate();
       if (leadTime === 0) {
-        // 당일출고
-        if (s.cutoff_enabled) {
-          return receipt; // 컷오프 기준 당일 or 익영업일
-        }
-        // 컷오프 OFF + 리드타임 0 → 무조건 익영업일
-        return nextBizDay(addDays(today, 1));
+        if (s.cutoff_enabled) return receipt; // 컷오프 전=당일, 후=익영업일
+        return nextBizDay(addDays(today, 1)); // 컷오프 OFF → 익영업일
       }
       return addBizDays(receipt, leadTime);
     }
 
-    // 희망출고: max(주문일+최소선택가능일, 접수일+리드타임영업일)
+    // 일반출고(희망출고): max(주문일+최소선택가능일, 접수일+리드타임영업일)
     const minSelectDays = s.min_select_days ?? 3;
     const calendarMin = addDays(today, minSelectDays);
     const receipt = getReceiptDate();
     const bizMin = addBizDays(receipt, leadTime);
-    // 둘 중 늦은 날짜
     const later = calendarMin > bizMin ? calendarMin : bizMin;
     return nextBizDay(later);
   }
 
   function getMaxDate() {
     const s = getSettings();
+    const isExpress = formState.shipping_type === 'express';
+
+    if (isExpress && s.shipping_type === 'today_shipping') {
+      // 빠른출고(오늘출발): 접수일 + 리드타임 영업일이 최대 (리드타임 범위 내만 선택)
+      const leadTime = s.lead_time_days ?? 2;
+      const receipt = getReceiptDate();
+      if (leadTime === 0) return nextBizDay(receipt);
+      return addBizDays(receipt, leadTime);
+    }
+
+    // 일반출고: 최대 선택가능일
     const maxDays = s.max_select_days || 60;
     return addDays(todayStr(), maxDays);
   }
