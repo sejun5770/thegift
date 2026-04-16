@@ -597,9 +597,9 @@ nav a:hover{color:var(--gray-900)}
   </div>
   <div class="col-selector" id="col-selector"></div>
   <div class="col-selector" id="status-filter" style="gap:8px;align-items:center">
-    <span style="font-weight:600;font-size:12px;color:var(--gray-700);white-space:nowrap">주문상태</span>
-    <label style="border-color:var(--primary);background:var(--primary-light)"><input type="radio" name="status-mode" value="all" checked onchange="renderOrderTable()"><span>전체</span></label>
-    <label style="border-color:#fca5a5;background:#fef2f2"><input type="radio" name="status-mode" value="exclude-cancel" onchange="renderOrderTable()"><span>취소주문 제외</span></label>
+    <span style="font-weight:600;font-size:12px;color:var(--gray-700);white-space:nowrap">제외 필터</span>
+    <label style="border-color:#fca5a5;background:#fef2f2"><input type="checkbox" id="exclude-cancel" onchange="renderOrderTable()"><span>취소주문 제외</span></label>
+    <label style="border-color:#fdba74;background:#fff7ed"><input type="checkbox" id="exclude-pending" onchange="renderOrderTable()"><span>결제대기 제외</span></label>
   </div>
   <div class="card" style="padding:0;overflow-x:auto">
     <table class="data-table">
@@ -1235,16 +1235,21 @@ async function loadOrders() {
 }
 
 function isExcludeCancel() {
-  const radio = document.querySelector('input[name="status-mode"]:checked');
-  return radio && radio.value === 'exclude-cancel';
+  return document.getElementById('exclude-cancel')?.checked || false;
+}
+function isExcludePending() {
+  return document.getElementById('exclude-pending')?.checked || false;
 }
 
 function getFilteredOrders() {
   const q = (document.getElementById('ord-code-search')?.value || '').trim().toLowerCase();
   const excludeCancel = isExcludeCancel();
+  const excludePending = isExcludePending();
   return ordersData.filter(r => {
-    // 취소주문 제외
-    if (excludeCancel && isCancelled(r)) return false;
+    // 취소주문 제외 (3=결제취소, 5=주문취소)
+    if (excludeCancel && (r.status_seq === 3 || r.status_seq === 5)) return false;
+    // 결제대기 제외 (1=결제대기)
+    if (excludePending && r.status_seq === 1) return false;
     // 상품코드/명 검색
     if (q) {
       const code = (r.card_code || '').toLowerCase();
