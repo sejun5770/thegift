@@ -4081,18 +4081,52 @@ function updatePreview() {
 
   renderPreviewCalendar(cfg, minDate, maxDate);
 
-  // 노출 설정
+  // 선택한 날짜 표시
   const selEl = document.getElementById('bg-p-preview-selected');
   if (previewSelectedDate) {
     selEl.style.display = 'block';
-    selEl.textContent = '선택: ' + previewSelectedDate;
-  } else { selEl.style.display = 'none'; }
+    selEl.innerHTML = '<span style="color:var(--primary)">📅 선택한 희망출고일: <b>' + previewSelectedDate + '</b></span>';
+  } else if (!cfg.dateRequired) {
+    selEl.style.display = 'block';
+    selEl.innerHTML = '<span style="color:var(--gray-500)">미선택 시 가장 빠른 출고일 <b>' + fmt(minDate) + '</b> 자동 적용</span>';
+  } else {
+    selEl.style.display = 'none';
+  }
 
+  // 안내문구
   const notEl = document.getElementById('bg-p-preview-notice');
+  let noticeHtml = '';
+
+  // 선택 가능 기간 안내
+  noticeHtml += '<div style="font-size:10px;color:var(--gray-400);margin-bottom:4px">선택 가능: ' + fmt(minDate) + ' ~ ' + fmt(maxDate) + '</div>';
+
+  // 컷오프 상태 안내 (오늘출발일 때)
+  if (cfg.shipType === 'today_shipping' && cfg.cutoffOn) {
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const cutMin = cfg.cutoffH * 60 + cfg.cutoffM;
+    const cutLabel = String(cfg.cutoffH).padStart(2,'0') + ':' + String(cfg.cutoffM).padStart(2,'0');
+    if (nowMin < cutMin) {
+      noticeHtml += '<div style="font-size:10px;color:var(--green)">⏰ 컷오프 ' + cutLabel + ' 이전 — 당일 접수 가능</div>';
+    } else {
+      noticeHtml += '<div style="font-size:10px;color:var(--orange)">⏰ 컷오프 ' + cutLabel + ' 초과 — 익영업일 접수</div>';
+    }
+  }
+
+  // 리드타임 안내
+  if (cfg.leadTime === 0) {
+    noticeHtml += '<div style="font-size:10px;color:var(--gray-500)">당일출고 상품' + (cfg.cutoffOn ? ' (컷오프 기준)' : ' (익일출고)') + '</div>';
+  } else {
+    noticeHtml += '<div style="font-size:10px;color:var(--gray-500)">리드타임 ' + cfg.leadTime + '영업일 (접수일 미포함)</div>';
+  }
+
+  // 사용자 안내문구
   if (cfg.noticeOn && cfg.noticeText) {
-    notEl.style.display = 'block';
-    notEl.textContent = cfg.noticeText;
-  } else { notEl.style.display = 'none'; }
+    noticeHtml += '<div style="margin-top:6px;padding:6px 8px;background:#fffbeb;border-radius:4px;color:#92400e;font-size:10px;white-space:pre-wrap">' + cfg.noticeText + '</div>';
+  }
+
+  notEl.style.display = 'block';
+  notEl.innerHTML = noticeHtml;
 }
 
 function renderPreviewCalendar(cfg, minDate, maxDate) {

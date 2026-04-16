@@ -9,6 +9,8 @@ import {
   Package,
   Sticker,
   Box,
+  Gift,
+  Settings,
 } from 'lucide-react';
 
 const navItems = [
@@ -17,6 +19,11 @@ const navItems = [
   { href: '/products', label: '상품관리', icon: Package },
   { href: '/stickers', label: '스티커관리', icon: Sticker },
   { href: '/box-types', label: '박스타입', icon: Box },
+];
+
+const barungiftNavItems = [
+  { href: '/c/barungift/admin/stickers', label: '스티커관리', icon: Sticker },
+  { href: '/c/barungift/admin/products', label: '상품설정', icon: Settings },
 ];
 
 export function Sidebar() {
@@ -61,6 +68,37 @@ export function Sidebar() {
           );
         })}
       </nav>
+
+      {/* 바른기프트 섹션 */}
+      <div className="mx-4 border-t border-slate-700" />
+      <div className="px-3 pt-2 pb-1">
+        <div className="flex items-center gap-1.5 px-3 py-1.5">
+          <Gift className="h-3.5 w-3.5 text-slate-500" />
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            바른기프트
+          </span>
+        </div>
+        <div className="space-y-0.5">
+          {barungiftNavItems.map((item) => {
+            const isActive = pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  'flex items-center gap-3 rounded-lg px-3 py-2 text-[13px] font-medium transition-all',
+                  isActive
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
+                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                )}
+              >
+                <item.icon className={cn('h-4 w-4', isActive ? 'text-white' : 'text-slate-500')} />
+                {item.label}
+              </Link>
+            );
+          })}
+        </div>
+      </div>
 
       {/* 하단 */}
       <div className="border-t border-slate-700 px-4 py-3">
