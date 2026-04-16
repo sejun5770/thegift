@@ -1,0 +1,15 @@
+[
+  {
+    "id": "420ba532-ccc8-462b-888f-59ff866122fc",
+    "product_id": "TGJSD01",
+    "lead_time_days": 5,
+    "express_available": true,
+    "express_fee": 30000,
+    "express_cutoff_time": "11:00",
+    "available_sticker_ids": [],
+    "blackout_dates": [],
+    "max_select_days": 60,
+    "created_at": "2026-04-15T11:22:20.700Z",
+    "updated_at": "2026-04-15T11:22:20.700Z"
+  }
+]

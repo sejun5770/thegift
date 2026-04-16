@@ -1,0 +1,15 @@
+[
+  {
+    "id": "70f08a68-ba05-4a41-9dda-e9480ca373a6",
+    "order_id": "4731751",
+    "is_express": false,
+    "express_fee": 0,
+    "desired_ship_date": "2026-04-20",
+    "sticker_selections": [],
+    "cash_receipt_yn": true,
+    "receipt_type": "business",
+    "receipt_number": "001010101",
+    "submitted_at": "2026-04-15T09:31:36.229Z",
+    "created_at": "2026-04-15T09:31:36.229Z"
+  }
+]

@@ -8,10 +8,14 @@ const crypto = require('crypto');
 const PORT = parseInt(process.env.PORT || '3457');
 const BASE_PATH = process.env.BASE_PATH || '';  // 예: /c/barungift
 
+// --- 바른기프트 모듈 ---
+const { handleBarungiftApi } = require('./barungift/api');
+
 // --- Google OAuth2 ---
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const ALLOWED_DOMAIN = 'barunn.net';
+const DEV_SKIP_AUTH = !GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID === 'test'; // 개발모드: 인증 우회
 const SESSION_MAX_AGE = 24 * 60 * 60 * 1000; // 24시간
 const EXPORT_API_KEY = process.env.EXPORT_API_KEY || '';
 
@@ -647,7 +651,49 @@ async function apiDashboardSummary(query) {
 
   // Clean names
   const rows = result.recordset.map(r => ({ ...r, card_name: cleanName(r.card_name), site_name: formatSiteName(r.site_name) }));
-  return rows;
+
+  // 주문번호 기준 건수 (상품 그루핑 없이 day/site/type별 COUNT DISTINCT)
+  const countResult = await p.request()
+    .input('startDate', sql.VarChar, startDate)
+    .input('endDate', sql.VarChar, endDate)
+    .query(`
+      WITH copurchase_orders AS (
+        SELECT DISTINCT coi2.order_seq
+        FROM custom_order_item coi2 WITH (NOLOCK)
+        INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+        WHERE c2.Card_Div = 'A01'
+      )
+      SELECT
+        CONVERT(varchar(10), o.order_date, 120) AS order_day,
+        ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
+        N'단독주문' AS order_type,
+        COUNT(DISTINCT o.order_seq) AS distinct_order_count
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+      WHERE ${D01_FILTER} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+      GROUP BY CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
+
+      UNION ALL
+
+      SELECT
+        CONVERT(varchar(10), co.order_date, 120) AS order_day,
+        ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
+        CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END AS order_type,
+        COUNT(DISTINCT co.order_seq) AS distinct_order_count
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+      LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
+      WHERE ${D01_FILTER} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+      GROUP BY CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
+        CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
+    `);
+
+  const orderCounts = countResult.recordset.map(r => ({ ...r, site_name: formatSiteName(r.site_name) }));
+  return { summary: rows, order_counts: orderCounts };
 }
 
 async function apiForecast() {
@@ -1613,6 +1659,23 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // --- 바른기프트 라우트 (고객 페이지: 인증 불필요 / 관리 API: 인증 필요) ---
+  if (pathname.startsWith('/barungift/')) {
+    // 고객 페이지 (정적 HTML) - 인증 불필요
+    if (pathname === '/barungift/order-info') {
+      const bgHtml = fs.readFileSync(path.join(__dirname, 'barungift', 'order-info.html'), 'utf-8');
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(bgHtml);
+      return;
+    }
+    // 관리자 페이지 → 대시보드(index.html) 안에 통합됨 (#bg-stickers, #bg-products 해시로 접근)
+    // API 라우트
+    if (pathname.startsWith('/barungift/api/')) {
+      const handled = await handleBarungiftApi(pathname, req, res, parsed.query, { getPool, sql, session });
+      if (handled !== false) return;
+    }
+  }
+
   // --- Export API (API key auth, no session required) ---
   if (pathname === '/api/export/orders' && req.method === 'GET') {
     if (!validateApiKey(req)) {
@@ -1633,8 +1696,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // --- Auth gate: require login for all other routes ---
-  if (!session) {
+  // --- Auth gate: require login for all other routes (개발모드 우회) ---
+  if (!session && !DEV_SKIP_AUTH) {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(getLoginPageHtml());
     return;

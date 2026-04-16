@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>바른기프트 - 상품 설정 관리</title>
+  <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
+    body { font-family: 'Noto Sans KR', sans-serif; }
+
+    /* Modal backdrop */
+    .modal-backdrop {
+      background: rgba(0,0,0,0.4);
+      animation: fadeInBg 0.2s ease;
+    }
+    @keyframes fadeInBg { from { opacity: 0; } to { opacity: 1; } }
+
+    .modal-content {
+      animation: slideUp 0.25s ease;
+    }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Toast */
+    .toast {
+      animation: toastIn 0.3s ease, toastOut 0.3s ease 2.7s forwards;
+    }
+    @keyframes toastIn  { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes toastOut { from { opacity: 1; } to { opacity: 0; } }
+
+    /* Spinner */
+    .spinner {
+      border: 3px solid #E5E7EB;
+      border-top-color: #3B82F6;
+      border-radius: 50%;
+      width: 32px; height: 32px;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+  <!-- Toast container -->
+  <div id="toastContainer" class="fixed top-4 right-4 z-[100] flex flex-col gap-2"></div>
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200 sticky top-0 z-50">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+      <h1 class="text-xl font-bold text-gray-900">바른기프트 상품 설정</h1>
+      <nav class="flex items-center gap-3 text-sm">
+        <a href="/barungift/admin" class="text-gray-500 hover:text-blue-600 transition-colors flex items-center gap-1">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1"/></svg>
+          대시보드
+        </a>
+        <span class="text-gray-300">|</span>
+        <a href="/barungift/admin/stickers" class="text-gray-500 hover:text-blue-600 transition-colors flex items-center gap-1">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"/></svg>
+          스티커 관리
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Main content -->
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+
+    <!-- Add / lookup section -->
+    <section class="bg-white rounded-xl border border-gray-200 p-5 mb-6">
+      <h2 class="text-sm font-semibold text-gray-700 mb-3">상품 설정 추가 / 수정</h2>
+      <div class="flex items-center gap-3">
+        <input
+          id="inputProductId"
+          type="text"
+          placeholder="상품코드 입력 (예: PROD-001)"
+          class="flex-1 max-w-sm border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        />
+        <button
+          id="btnAddEdit"
+          onclick="openFormForProduct()"
+          class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+        >
+          설정 추가/수정
+        </button>
+      </div>
+    </section>
+
+    <!-- Settings list table -->
+    <section class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-gray-700">상품 설정 목록</h2>
+        <button onclick="loadSettings()" class="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          새로고침
+        </button>
+      </div>
+
+      <!-- Loading state -->
+      <div id="tableLoading" class="flex items-center justify-center py-16">
+        <div class="text-center">
+          <div class="spinner mx-auto mb-3"></div>
+          <p class="text-sm text-gray-400">설정 목록을 불러오는 중...</p>
+        </div>
+      </div>
+
+      <!-- Empty state -->
+      <div id="tableEmpty" class="hidden text-center py-16">
+        <svg class="w-12 h-12 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
+        <p class="text-sm text-gray-400">등록된 상품 설정이 없습니다.</p>
+        <p class="text-xs text-gray-300 mt-1">위에서 상품코드를 입력하여 새 설정을 추가하세요.</p>
+      </div>
+
+      <!-- Table -->
+      <div id="tableContainer" class="hidden overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50 text-gray-500">
+            <tr>
+              <th class="text-left px-5 py-3 font-medium">상품코드</th>
+              <th class="text-center px-3 py-3 font-medium">리드타임</th>
+              <th class="text-center px-3 py-3 font-medium">빠른출고</th>
+              <th class="text-right px-3 py-3 font-medium">추가비용</th>
+              <th class="text-center px-3 py-3 font-medium">스티커수</th>
+              <th class="text-center px-3 py-3 font-medium">블랙아웃</th>
+              <th class="text-center px-5 py-3 font-medium">관리</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody" class="divide-y divide-gray-100"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal backdrop + form -->
+  <div id="modalBackdrop" class="hidden fixed inset-0 z-60 modal-backdrop flex items-start justify-center pt-12 px-4 overflow-y-auto pb-12">
+    <div class="modal-content bg-white rounded-2xl shadow-xl border border-gray-200 w-full max-w-lg">
+      <!-- Modal header -->
+      <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+        <h3 id="modalTitle" class="text-base font-bold text-gray-900">상품 설정</h3>
+        <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Modal body -->
+      <div class="px-6 py-5 space-y-5">
+
+        <!-- 상품코드 -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">상품코드</label>
+          <input id="formProductId" type="text" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white disabled:bg-gray-100 disabled:text-gray-500" />
+        </div>
+
+        <!-- 리드타임 + 최대선택기간 -->
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">리드타임 (영업일)</label>
+            <input id="formLeadTime" type="number" min="1" max="90" value="5" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">최대 선택 기간 (일)</label>
+            <input id="formMaxSelectDays" type="number" min="1" max="365" value="60" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+          </div>
+        </div>
+
+        <!-- 빠른출고 -->
+        <div class="bg-gray-50 rounded-lg p-4 space-y-3">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input id="formExpressAvailable" type="checkbox" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" onchange="toggleExpressFields()" />
+            <span class="text-sm font-medium text-gray-700">빠른출고 가능</span>
+          </label>
+          <div id="expressFields" class="hidden grid grid-cols-2 gap-4 pt-1">
+            <div>
+              <label class="block text-xs font-medium text-gray-500 mb-1">추가비용 (원)</label>
+              <input id="formExpressFee" type="number" min="0" step="1000" value="5000" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-500 mb-1">컷오프 시간</label>
+              <input id="formCutoffTime" type="time" value="14:00" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 사용 가능 스티커 -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-2">사용 가능 스티커</label>
+          <div id="stickerCheckboxes" class="border border-gray-200 rounded-lg p-3 max-h-40 overflow-y-auto">
+            <p class="text-xs text-gray-400">스티커 목록을 불러오는 중...</p>
+          </div>
+        </div>
+
+        <!-- 블랙아웃 날짜 -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">블랙아웃 날짜</label>
+          <textarea
+            id="formBlackoutDates"
+            rows="2"
+            placeholder="쉼표로 구분 (예: 2026-05-01, 2026-12-31)"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+          ></textarea>
+          <p class="text-xs text-gray-400 mt-1">YYYY-MM-DD 형식, 쉼표로 구분하여 입력</p>
+        </div>
+      </div>
+
+      <!-- Modal footer -->
+      <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50 rounded-b-2xl">
+        <button onclick="closeModal()" class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 transition-colors">
+          취소
+        </button>
+        <button id="btnSave" onclick="saveSettings()" class="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors flex items-center gap-2">
+          <span id="btnSaveText">저장</span>
+          <div id="btnSaveSpinner" class="hidden w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ── State ──
+    let allSettings = [];
+    let allStickers = [];
+    let editingProductId = null; // null = new, string = editing
+
+    // ── Init ──
+    document.addEventListener('DOMContentLoaded', () => {
+      loadStickers();
+      loadSettings();
+    });
+
+    // ── Toast ──
+    function showToast(message, type = 'success') {
+      const container = document.getElementById('toastContainer');
+      const colors = {
+        success: 'bg-green-600',
+        error: 'bg-red-600',
+        info: 'bg-blue-600',
+      };
+      const icons = {
+        success: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>',
+        error: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>',
+        info: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>',
+      };
+      const el = document.createElement('div');
+      el.className = `toast ${colors[type] || colors.info} text-white text-sm px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 max-w-sm`;
+      el.innerHTML = `<svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">${icons[type] || icons.info}</svg><span>${escapeHtml(message)}</span>`;
+      container.appendChild(el);
+      setTimeout(() => el.remove(), 3200);
+    }
+
+    // ── API helpers ──
+    async function apiFetch(url, opts = {}) {
+      const res = await fetch(url, {
+        headers: { 'Content-Type': 'application/json', ...opts.headers },
+        ...opts,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || body.message || `HTTP ${res.status}`);
+      }
+      return res.json();
+    }
+
+    // ── Load stickers ──
+    async function loadStickers() {
+      try {
+        const data = await apiFetch('/barungift/api/stickers?active_only=true');
+        allStickers = data.stickers || [];
+      } catch (e) {
+        console.error('Failed to load stickers:', e);
+        allStickers = [];
+      }
+    }
+
+    // ── Load settings list ──
+    async function loadSettings() {
+      const loading = document.getElementById('tableLoading');
+      const empty = document.getElementById('tableEmpty');
+      const container = document.getElementById('tableContainer');
+
+      loading.classList.remove('hidden');
+      empty.classList.add('hidden');
+      container.classList.add('hidden');
+
+      try {
+        const data = await apiFetch('/barungift/api/products/settings');
+        allSettings = data.settings || [];
+        renderTable();
+      } catch (e) {
+        showToast('설정 목록 로딩 실패: ' + e.message, 'error');
+        allSettings = [];
+        renderTable();
+      }
+    }
+
+    // ── Render table ──
+    function renderTable() {
+      const loading = document.getElementById('tableLoading');
+      const empty = document.getElementById('tableEmpty');
+      const container = document.getElementById('tableContainer');
+      const tbody = document.getElementById('tableBody');
+
+      loading.classList.add('hidden');
+
+      if (allSettings.length === 0) {
+        empty.classList.remove('hidden');
+        container.classList.add('hidden');
+        return;
+      }
+
+      empty.classList.add('hidden');
+      container.classList.remove('hidden');
+
+      tbody.innerHTML = allSettings.map(s => `
+        <tr class="hover:bg-gray-50 transition-colors">
+          <td class="px-5 py-3 font-medium text-gray-900">${escapeHtml(s.product_id)}</td>
+          <td class="text-center px-3 py-3 text-gray-600">${s.lead_time_days}일</td>
+          <td class="text-center px-3 py-3">
+            ${s.express_available
+              ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">가능</span>'
+              : '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">불가</span>'}
+          </td>
+          <td class="text-right px-3 py-3 text-gray-600">${s.express_available ? formatWon(s.express_fee) : '-'}</td>
+          <td class="text-center px-3 py-3 text-gray-600">${(s.available_sticker_ids || []).length}개</td>
+          <td class="text-center px-3 py-3 text-gray-600">${(s.blackout_dates || []).length}일</td>
+          <td class="text-center px-5 py-3">
+            <button onclick="openFormForEdit('${escapeHtml(s.product_id)}')" class="text-blue-600 hover:text-blue-800 text-xs font-medium transition-colors">편집</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    // ── Open form: new or from input ──
+    function openFormForProduct() {
+      const pid = document.getElementById('inputProductId').value.trim();
+      if (!pid) {
+        showToast('상품코드를 입력해주세요.', 'error');
+        return;
+      }
+      // Check if already exists
+      const existing = allSettings.find(s => s.product_id === pid);
+      if (existing) {
+        openFormForEdit(pid);
+      } else {
+        openModal(pid, null);
+      }
+    }
+
+    // ── Open form: edit existing ──
+    function openFormForEdit(productId) {
+      const existing = allSettings.find(s => s.product_id === productId);
+      openModal(productId, existing || null);
+    }
+
+    // ── Open modal ──
+    function openModal(productId, data) {
+      editingProductId = data ? productId : null;
+
+      const isEdit = !!data;
+      document.getElementById('modalTitle').textContent = isEdit ? '상품 설정 수정' : '새 상품 설정';
+
+      const formPid = document.getElementById('formProductId');
+      formPid.value = productId;
+      formPid.disabled = isEdit;
+
+      document.getElementById('formLeadTime').value = data ? data.lead_time_days : 5;
+      document.getElementById('formMaxSelectDays').value = data ? data.max_select_days : 60;
+
+      const expressChk = document.getElementById('formExpressAvailable');
+      expressChk.checked = data ? data.express_available : false;
+      toggleExpressFields();
+
+      document.getElementById('formExpressFee').value = data ? data.express_fee : 5000;
+      document.getElementById('formCutoffTime').value = data ? data.express_cutoff_time : '14:00';
+      document.getElementById('formBlackoutDates').value = data ? (data.blackout_dates || []).join(', ') : '';
+
+      renderStickerCheckboxes(data ? (data.available_sticker_ids || []) : []);
+
+      document.getElementById('modalBackdrop').classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+
+    // ── Close modal ──
+    function closeModal() {
+      document.getElementById('modalBackdrop').classList.add('hidden');
+      document.body.style.overflow = '';
+      editingProductId = null;
+    }
+
+    // close on backdrop click
+    document.getElementById('modalBackdrop').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) closeModal();
+    });
+
+    // close on Escape
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeModal();
+    });
+
+    // ── Toggle express fields ──
+    function toggleExpressFields() {
+      const checked = document.getElementById('formExpressAvailable').checked;
+      document.getElementById('expressFields').classList.toggle('hidden', !checked);
+    }
+
+    // ── Render sticker checkboxes ──
+    function renderStickerCheckboxes(selectedIds) {
+      const container = document.getElementById('stickerCheckboxes');
+
+      if (allStickers.length === 0) {
+        container.innerHTML = '<p class="text-xs text-gray-400">등록된 스티커가 없습니다.</p>';
+        return;
+      }
+
+      container.innerHTML = allStickers.map(st => {
+        const checked = selectedIds.includes(st.id) ? 'checked' : '';
+        return `
+          <label class="flex items-center gap-2 py-1 cursor-pointer hover:bg-gray-50 px-1 rounded">
+            <input type="checkbox" class="sticker-chk w-4 h-4 text-blue-600 rounded focus:ring-blue-500" value="${escapeHtml(st.id)}" ${checked} />
+            <span class="text-sm text-gray-700">${escapeHtml(st.name || st.id)}</span>
+            ${st.code ? `<span class="text-xs text-gray-400">(${escapeHtml(st.code)})</span>` : ''}
+          </label>
+        `;
+      }).join('');
+    }
+
+    // ── Save settings ──
+    async function saveSettings() {
+      const productId = document.getElementById('formProductId').value.trim();
+      if (!productId) {
+        showToast('상품코드가 비어있습니다.', 'error');
+        return;
+      }
+
+      const leadTime = parseInt(document.getElementById('formLeadTime').value, 10);
+      if (isNaN(leadTime) || leadTime < 1 || leadTime > 90) {
+        showToast('리드타임은 1~90 사이 숫자를 입력해주세요.', 'error');
+        return;
+      }
+
+      const maxSelectDays = parseInt(document.getElementById('formMaxSelectDays').value, 10);
+      if (isNaN(maxSelectDays) || maxSelectDays < 1) {
+        showToast('최대 선택 기간을 입력해주세요.', 'error');
+        return;
+      }
+
+      const expressAvailable = document.getElementById('formExpressAvailable').checked;
+      const expressFee = parseInt(document.getElementById('formExpressFee').value, 10) || 0;
+      const cutoffTime = document.getElementById('formCutoffTime').value || '14:00';
+
+      // Gather selected sticker IDs
+      const selectedStickers = Array.from(document.querySelectorAll('.sticker-chk:checked')).map(cb => cb.value);
+
+      // Parse blackout dates
+      const blackoutRaw = document.getElementById('formBlackoutDates').value.trim();
+      let blackoutDates = [];
+      if (blackoutRaw) {
+        blackoutDates = blackoutRaw.split(',').map(d => d.trim()).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+        const invalidEntries = blackoutRaw.split(',').map(d => d.trim()).filter(d => d && !/^\d{4}-\d{2}-\d{2}$/.test(d));
+        if (invalidEntries.length > 0) {
+          showToast('블랙아웃 날짜 형식이 올바르지 않습니다: ' + invalidEntries.join(', '), 'error');
+          return;
+        }
+      }
+
+      const payload = {
+        product_id: productId,
+        lead_time_days: leadTime,
+        max_select_days: maxSelectDays,
+        express_available: expressAvailable,
+        express_fee: expressAvailable ? expressFee : 0,
+        express_cutoff_time: expressAvailable ? cutoffTime : '14:00',
+        available_sticker_ids: selectedStickers,
+        blackout_dates: blackoutDates,
+      };
+
+      // Disable save button
+      const btn = document.getElementById('btnSave');
+      const btnText = document.getElementById('btnSaveText');
+      const btnSpinner = document.getElementById('btnSaveSpinner');
+      btn.disabled = true;
+      btnText.textContent = '저장 중...';
+      btnSpinner.classList.remove('hidden');
+
+      try {
+        await apiFetch(`/barungift/api/products/${encodeURIComponent(productId)}/settings`, {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        });
+
+        showToast('상품 설정이 저장되었습니다.', 'success');
+        closeModal();
+        await loadSettings();
+      } catch (e) {
+        showToast('저장 실패: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btnText.textContent = '저장';
+        btnSpinner.classList.add('hidden');
+      }
+    }
+
+    // ── Utilities ──
+    function escapeHtml(str) {
+      if (!str) return '';
+      const div = document.createElement('div');
+      div.textContent = String(str);
+      return div.innerHTML;
+    }
+
+    function formatWon(n) {
+      if (n == null) return '-';
+      return Number(n).toLocaleString('ko-KR') + '원';
+    }
+  </script>
+</body>
+</html>
