@@ -97,8 +97,13 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
           ORDER BY co.order_date DESC
         `);
 
+      // 배치 조회로 N+1 쿼리 방지
+      const orderSeqs = ordersResult.recordset.map(r => String(r.order_seq));
+      const customerInfos = await store.getCustomerInfoBatch(orderSeqs);
+      const infoMap = new Map(customerInfos.map(i => [i.order_id, i]));
+
       const orders = ordersResult.recordset.map(r => {
-        const existing = store.getCustomerInfo(String(r.order_seq));
+        const existing = infoMap.get(String(r.order_seq));
         return {
           order_id: String(r.order_seq),
           order_number: 'BRS-' + r.order_seq,
@@ -157,9 +162,13 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         ORDER BY co.order_date DESC
       `);
 
-      // 고객 입력 상태 확인
+      // 배치 조회로 N+1 쿼리 방지
+      const orderSeqs = result.recordset.map(r => String(r.order_seq));
+      const customerInfos = await store.getCustomerInfoBatch(orderSeqs);
+      const infoMap = new Map(customerInfos.map(i => [i.order_id, i]));
+
       const orders = result.recordset.map(r => {
-        const existing = store.getCustomerInfo(String(r.order_seq));
+        const existing = infoMap.get(String(r.order_seq));
         return {
           order_id: String(r.order_seq),
           order_number: 'BRS-' + r.order_seq,
@@ -210,14 +219,15 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       }
 
       const row = result.recordset[0];
-      const existingInfo = store.getCustomerInfo(orderId);
+      const existingInfo = await store.getCustomerInfo(orderId);
 
       // 상품코드로 product_settings 조회
-      const productSettings = row.Card_Code ? store.getProductSettings(row.Card_Code) : null;
+      const productSettings = row.Card_Code ? await store.getProductSettings(row.Card_Code) : null;
       const stickerIds = productSettings?.available_sticker_ids || [];
+      const allActiveStickers = await store.getAllStickers(true);
       const availableStickers = stickerIds.length > 0
-        ? store.getAllStickers(true).filter(s => stickerIds.includes(s.id))
-        : store.getAllStickers(true);
+        ? allActiveStickers.filter(s => stickerIds.includes(s.id))
+        : allActiveStickers;
 
       // 모든 아이템 수집
       const products = result.recordset.map(r => ({
@@ -265,7 +275,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         return json(res, { error: '희망출고일을 선택해주세요.' }, 400);
       }
 
-      const saved = store.saveCustomerInfo(orderId, body);
+      const saved = await store.saveCustomerInfo(orderId, body);
       return json(res, saved, 201);
     } catch (err) {
       if (err.message === 'ALREADY_SUBMITTED') {
@@ -289,14 +299,14 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   // GET /barungift/api/stickers - 스티커 목록
   if (pathname === '/barungift/api/stickers' && method === 'GET') {
     const activeOnly = query.active_only === 'true';
-    return json(res, { stickers: store.getAllStickers(activeOnly) });
+    return json(res, { stickers: await store.getAllStickers(activeOnly) });
   }
 
   // POST /barungift/api/stickers - 스티커 생성
   if (pathname === '/barungift/api/stickers' && method === 'POST') {
     const body = await parseBody(req);
     if (!body.name) return json(res, { error: '스티커명을 입력해주세요.' }, 400);
-    const sticker = store.createSticker(body);
+    const sticker = await store.createSticker(body);
     return json(res, sticker, 201);
   }
 
@@ -304,33 +314,33 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   const stickerUpdateMatch = pathname.match(/^\/barungift\/api\/stickers\/([^/]+)$/);
   if (stickerUpdateMatch && method === 'PUT') {
     const body = await parseBody(req);
-    const sticker = store.updateSticker(stickerUpdateMatch[1], body);
+    const sticker = await store.updateSticker(stickerUpdateMatch[1], body);
     if (!sticker) return json(res, { error: '스티커를 찾을 수 없습니다.' }, 404);
     return json(res, sticker);
   }
 
   // DELETE /barungift/api/stickers/:id - 스티커 삭제
   if (stickerUpdateMatch && method === 'DELETE') {
-    store.deleteSticker(stickerUpdateMatch[1]);
+    await store.deleteSticker(stickerUpdateMatch[1]);
     return json(res, { success: true });
   }
 
   // GET /barungift/api/products/settings - 전체 상품 설정 목록
   if (pathname === '/barungift/api/products/settings' && method === 'GET') {
-    return json(res, { settings: store.getAllProductSettings() });
+    return json(res, { settings: await store.getAllProductSettings() });
   }
 
   // GET /barungift/api/products/:productId/settings
   const productSettingsMatch = pathname.match(/^\/barungift\/api\/products\/([^/]+)\/settings$/);
   if (productSettingsMatch && method === 'GET') {
-    const settings = store.getProductSettings(decodeURIComponent(productSettingsMatch[1]));
+    const settings = await store.getProductSettings(decodeURIComponent(productSettingsMatch[1]));
     return json(res, { settings });
   }
 
   // PUT /barungift/api/products/:productId/settings
   if (productSettingsMatch && method === 'PUT') {
     const body = await parseBody(req);
-    const settings = store.upsertProductSettings(
+    const settings = await store.upsertProductSettings(
       decodeURIComponent(productSettingsMatch[1]), body
     );
     return json(res, settings);
@@ -338,7 +348,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
   // GET /barungift/api/customer-infos - 전체 고객 입력 목록 (관리자)
   if (pathname === '/barungift/api/customer-infos' && method === 'GET') {
-    return json(res, { infos: store.getAllCustomerInfos() });
+    return json(res, { infos: await store.getAllCustomerInfos() });
   }
 
   return false; // 미처리 → 다른 핸들러로
