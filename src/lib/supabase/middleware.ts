@@ -37,8 +37,8 @@ export async function updateSession(request: NextRequest) {
   const isPublicBarungiftPath = (pathname: string) => {
     // 고객 정보 입력 페이지
     if (pathname.startsWith('/c/barungift/order-info')) return true;
-    // 고객용 주문 API (주문상세 조회 + 정보 저장)
-    if (/^\/c\/barungift\/api\/orders\/[^/]+/.test(pathname)) return true;
+    // 고객용 API
+    if (pathname.startsWith('/c/barungift/api/bg/')) return true;
     return false;
   };
 

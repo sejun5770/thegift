@@ -46,8 +46,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   // 고객용 API (인증 불필요)
   // ============================================
 
-  // POST /barungift/api/auth/login - 바른손카드 회원 로그인
-  if (pathname === '/barungift/api/auth/login' && method === 'POST') {
+  // POST /api/bg/auth/login - 바른손카드 회원 로그인
+  if (pathname === '/api/bg/auth/login' && method === 'POST') {
     try {
       const body = await parseBody(req);
       const { uid, password } = body;
@@ -128,8 +128,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
   }
 
-  // GET /barungift/api/orders/search?phone=xxx&name=xxx - 고객 주문 검색 (AND 조건)
-  if (pathname === '/barungift/api/orders/search' && method === 'GET') {
+  // GET /api/bg/orders/search?phone=xxx&name=xxx - 고객 주문 검색 (AND 조건)
+  if (pathname === '/api/bg/orders/search' && method === 'GET') {
     const phone = (query.phone || '').replace(/\D/g, '');
     const name = (query.name || '').trim();
     if (!phone || !name) {
@@ -189,8 +189,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
   }
 
-  // GET /barungift/api/orders/:orderId - 주문 상세 (고객용)
-  const orderDetailMatch = pathname.match(/^\/barungift\/api\/orders\/([^/]+)$/);
+  // GET /api/bg/orders/:orderId - 주문 상세 (고객용)
+  const orderDetailMatch = pathname.match(/^\/api\/bg\/orders\/([^/]+)$/);
   if (orderDetailMatch && method === 'GET') {
     const orderId = decodeURIComponent(orderDetailMatch[1]);
     try {
@@ -263,8 +263,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
   }
 
-  // POST /barungift/api/orders/:orderId/customer-info - 고객 입력 저장
-  const customerInfoMatch = pathname.match(/^\/barungift\/api\/orders\/([^/]+)\/customer-info$/);
+  // POST /api/bg/orders/:orderId/customer-info - 고객 입력 저장
+  const customerInfoMatch = pathname.match(/^\/api\/bg\/orders\/([^/]+)\/customer-info$/);
   if (customerInfoMatch && method === 'POST') {
     const orderId = decodeURIComponent(customerInfoMatch[1]);
     try {
@@ -292,26 +292,26 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
   // 관리자 API는 인증 필요 (개발모드에서는 우회)
   const DEV_SKIP_AUTH = !process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID === 'test';
-  if (pathname.startsWith('/barungift/api/') && !session && !DEV_SKIP_AUTH) {
+  if (pathname.startsWith('/api/bg/') && !session && !DEV_SKIP_AUTH) {
     return json(res, { error: '인증이 필요합니다.' }, 401);
   }
 
-  // GET /barungift/api/stickers - 스티커 목록
-  if (pathname === '/barungift/api/stickers' && method === 'GET') {
+  // GET /api/bg/stickers - 스티커 목록
+  if (pathname === '/api/bg/stickers' && method === 'GET') {
     const activeOnly = query.active_only === 'true';
     return json(res, { stickers: await store.getAllStickers(activeOnly) });
   }
 
-  // POST /barungift/api/stickers - 스티커 생성
-  if (pathname === '/barungift/api/stickers' && method === 'POST') {
+  // POST /api/bg/stickers - 스티커 생성
+  if (pathname === '/api/bg/stickers' && method === 'POST') {
     const body = await parseBody(req);
     if (!body.name) return json(res, { error: '스티커명을 입력해주세요.' }, 400);
     const sticker = await store.createSticker(body);
     return json(res, sticker, 201);
   }
 
-  // PUT /barungift/api/stickers/:id - 스티커 수정
-  const stickerUpdateMatch = pathname.match(/^\/barungift\/api\/stickers\/([^/]+)$/);
+  // PUT /api/bg/stickers/:id - 스티커 수정
+  const stickerUpdateMatch = pathname.match(/^\/api\/bg\/stickers\/([^/]+)$/);
   if (stickerUpdateMatch && method === 'PUT') {
     const body = await parseBody(req);
     const sticker = await store.updateSticker(stickerUpdateMatch[1], body);
@@ -319,25 +319,25 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     return json(res, sticker);
   }
 
-  // DELETE /barungift/api/stickers/:id - 스티커 삭제
+  // DELETE /api/bg/stickers/:id - 스티커 삭제
   if (stickerUpdateMatch && method === 'DELETE') {
     await store.deleteSticker(stickerUpdateMatch[1]);
     return json(res, { success: true });
   }
 
-  // GET /barungift/api/products/settings - 전체 상품 설정 목록
-  if (pathname === '/barungift/api/products/settings' && method === 'GET') {
+  // GET /api/bg/products/settings - 전체 상품 설정 목록
+  if (pathname === '/api/bg/products/settings' && method === 'GET') {
     return json(res, { settings: await store.getAllProductSettings() });
   }
 
-  // GET /barungift/api/products/:productId/settings
-  const productSettingsMatch = pathname.match(/^\/barungift\/api\/products\/([^/]+)\/settings$/);
+  // GET /api/bg/products/:productId/settings
+  const productSettingsMatch = pathname.match(/^\/api\/bg\/products\/([^/]+)\/settings$/);
   if (productSettingsMatch && method === 'GET') {
     const settings = await store.getProductSettings(decodeURIComponent(productSettingsMatch[1]));
     return json(res, { settings });
   }
 
-  // PUT /barungift/api/products/:productId/settings
+  // PUT /api/bg/products/:productId/settings
   if (productSettingsMatch && method === 'PUT') {
     const body = await parseBody(req);
     const settings = await store.upsertProductSettings(
@@ -346,8 +346,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     return json(res, settings);
   }
 
-  // GET /barungift/api/customer-infos - 전체 고객 입력 목록 (관리자)
-  if (pathname === '/barungift/api/customer-infos' && method === 'GET') {
+  // GET /api/bg/customer-infos - 전체 고객 입력 목록 (관리자)
+  if (pathname === '/api/bg/customer-infos' && method === 'GET') {
     return json(res, { infos: await store.getAllCustomerInfos() });
   }
 

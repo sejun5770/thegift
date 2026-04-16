@@ -216,10 +216,10 @@
   const STEP_LABELS = ['출고 방식', '희망출고일', '스티커 선택', '결제정보', '최종 확인'];
   const RECEIPT_TYPES = { personal: '소득공제용 (휴대폰번호)', business: '지출증빙용 (사업자번호)' };
   const HOLIDAYS_2026 = ['2026-01-01','2026-02-16','2026-02-17','2026-02-18','2026-03-01','2026-05-05','2026-05-24','2026-06-06','2026-08-15','2026-09-24','2026-09-25','2026-09-26','2026-10-03','2026-10-09','2026-12-25'];
-  // BASE_PATH 자동 감지: /c/barungift/barungift/order-info → '/c/barungift'
+  // BASE_PATH 자동 감지: /c/barungift/order-info → '/c/barungift'
   const API_BASE = (function() {
     const path = window.location.pathname;
-    const idx = path.indexOf('/barungift/order-info');
+    const idx = path.indexOf('/order-info');
     if (idx > 0) return path.substring(0, idx); // '/c/barungift'
     return '';
   })();
@@ -1121,7 +1121,7 @@
   // API calls
   // ============================================
   async function fetchOrder(orderId) {
-    const resp = await fetch(API_BASE + '/barungift/api/orders/' + encodeURIComponent(orderId));
+    const resp = await fetch(API_BASE + '/api/bg/orders/' + encodeURIComponent(orderId));
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({}));
       throw new Error(body.error || '주문을 불러올 수 없습니다. (HTTP ' + resp.status + ')');
@@ -1149,7 +1149,7 @@
     };
 
     try {
-      const resp = await fetch(API_BASE + '/barungift/api/orders/' + encodeURIComponent(orderData.order_id) + '/customer-info', {
+      const resp = await fetch(API_BASE + '/api/bg/orders/' + encodeURIComponent(orderData.order_id) + '/customer-info', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -1216,7 +1216,7 @@
     document.getElementById('searchEmpty').classList.add('hidden');
 
     try {
-      const resp = await fetch(API_BASE + '/barungift/api/auth/login', {
+      const resp = await fetch(API_BASE + '/api/bg/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uid, password: pwd }),
@@ -1299,7 +1299,7 @@
       const params = new URLSearchParams();
       if (phone) params.set('phone', phone);
       if (name) params.set('name', name);
-      const resp = await fetch(API_BASE + '/barungift/api/orders/search?' + params.toString());
+      const resp = await fetch(API_BASE + '/api/bg/orders/search?' + params.toString());
       const data = await resp.json();
       const orders = data.orders || [];
 

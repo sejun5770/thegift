@@ -3647,7 +3647,7 @@ let bgStickers = [];
 
 async function loadBgStickers() {
   try {
-    const r = await fetch(API + '/barungift/api/stickers');
+    const r = await fetch(API + '/api/bg/stickers');
     const d = await r.json();
     bgStickers = d.stickers || [];
     renderBgStickers();
@@ -3763,7 +3763,7 @@ async function saveBgSticker() {
   };
   if (!body.name) { alert('스티커명을 입력해주세요.'); return; }
   try {
-    const url = id ? API + '/barungift/api/stickers/' + id : API + '/barungift/api/stickers';
+    const url = id ? API + '/api/bg/stickers/' + id : API + '/api/bg/stickers';
     const method = id ? 'PUT' : 'POST';
     const r = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     if (!r.ok) throw new Error((await r.json()).error || '저장 실패');
@@ -3776,7 +3776,7 @@ async function saveBgSticker() {
 async function deleteBgSticker(id) {
   if (!confirm('이 스티커를 비활성화하시겠습니까?')) return;
   try {
-    await fetch(API + '/barungift/api/stickers/' + id, { method: 'DELETE' });
+    await fetch(API + '/api/bg/stickers/' + id, { method: 'DELETE' });
     showToast('스티커가 비활성화되었습니다.');
     loadBgStickers();
   } catch(e) { alert(e.message); }
@@ -3792,7 +3792,7 @@ let previewSelectedDate = null;
 
 async function loadBgProducts() {
   try {
-    const r = await fetch(API + '/barungift/api/products/settings');
+    const r = await fetch(API + '/api/bg/products/settings');
     const d = await r.json();
     bgProductSettings = d.settings || [];
     renderBgProducts();
@@ -3831,8 +3831,8 @@ async function openBgProductForm(productId) {
 
   try {
     const [settingsRes, stickersRes] = await Promise.all([
-      fetch(API + '/barungift/api/products/' + encodeURIComponent(productId) + '/settings'),
-      fetch(API + '/barungift/api/stickers?active_only=true'),
+      fetch(API + '/api/bg/products/' + encodeURIComponent(productId) + '/settings'),
+      fetch(API + '/api/bg/stickers?active_only=true'),
     ]);
     const s = (await settingsRes.json()).settings;
     const stickers = (await stickersRes.json()).stickers || [];
@@ -4195,7 +4195,7 @@ async function saveBgProduct() {
   };
 
   try {
-    const r = await fetch(API + '/barungift/api/products/' + encodeURIComponent(productId) + '/settings', {
+    const r = await fetch(API + '/api/bg/products/' + encodeURIComponent(productId) + '/settings', {
       method: 'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
     });
     if (!r.ok) throw new Error((await r.json()).error || '저장 실패');
