@@ -77,6 +77,12 @@ nav a:hover{color:var(--gray-900)}
 .data-table tr.row-cancel-alert{background:#fef2f2}
 .data-table tr.row-cancel-alert:hover{background:#fee2e2}
 .data-table tr.row-cancel-alert td{color:#dc2626;font-weight:600}
+.data-table tr.row-cancelled{background:#fff1f2}
+.data-table tr.row-cancelled:hover{background:#ffe4e6}
+.data-table tr.row-cancelled td{color:#be123c}
+.data-table tr.row-pending{background:#f0f9ff}
+.data-table tr.row-pending:hover{background:#e0f2fe}
+.data-table tr.row-pending td{color:#0369a1}
 .data-table .num{text-align:right;font-variant-numeric:tabular-nums}
 /* COLUMN SELECTOR */
 .col-selector{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;padding:12px;background:var(--gray-50);border-radius:var(--radius)}
@@ -179,6 +185,7 @@ nav a:hover{color:var(--gray-900)}
   <a href="#worklog" onclick="showPage('worklog')">📝 일지</a>
   <a href="#bg-stickers" onclick="showPage('bg-stickers')">🏷️ 스티커</a>
   <a href="#bg-products" onclick="showPage('bg-products')">⚙️ 상품설정</a>
+  <a href="#bg-shipping" onclick="showPage('bg-shipping')">📅 출고일설정</a>
   <div class="user-area" id="user-area"></div>
 </nav>
 
@@ -854,7 +861,7 @@ nav a:hover{color:var(--gray-900)}
         <th>출고방식</th>
         <th>리드타임</th>
         <th>스티커</th>
-        <th style="width:60px">관리</th>
+        <th style="width:80px">관리</th>
       </tr></thead>
       <tbody id="bg-product-tbody"></tbody>
     </table>
@@ -864,171 +871,180 @@ nav a:hover{color:var(--gray-900)}
   </div>
 </div>
 
-<!-- 상품 설정 모달 (v2) -->
+<!-- 상품 설정 모달 (v3 - 스티커 연결만) -->
 <div id="bg-product-modal" onclick="if(event.target===this)closeBgProductForm()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
-  <div style="background:#fff;border-radius:12px;max-width:780px;width:95%;max-height:90vh;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+  <div style="background:#fff;border-radius:12px;max-width:480px;width:95%;max-height:90vh;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200);position:sticky;top:0;background:#fff;z-index:10;border-radius:12px 12px 0 0">
       <h3 id="bg-product-modal-title" style="margin:0;font-size:16px">상품 설정</h3>
       <button onclick="closeBgProductForm()" style="border:none;background:none;font-size:20px;cursor:pointer;color:var(--gray-500)">&times;</button>
     </div>
-    <div style="padding:20px;display:grid;grid-template-columns:1fr 320px;gap:20px" id="bg-p-body">
-      <!-- 왼쪽: 설정 -->
-      <div>
-        <div style="margin-bottom:12px">
-          <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">상품코드</label>
-          <input type="text" id="bg-p-code" readonly style="width:100%;padding:8px 12px;border:1px solid var(--gray-200);border-radius:var(--radius);font-size:13px;background:var(--gray-50)">
-        </div>
-
-        <!-- 1. 기본설정 -->
-        <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px;margin-bottom:16px">
-          <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">1. 기본설정</h4>
-
-          <div style="margin-bottom:12px">
-            <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">출고방식</label>
-            <div style="padding:8px 12px;border:1px solid var(--gray-200);border-radius:var(--radius);background:var(--gray-50);font-size:13px;font-weight:500;margin-bottom:6px">📦 희망출고 <span style="font-size:11px;color:var(--gray-500);font-weight:400">(기본)</span></div>
-            <label style="display:flex;align-items:center;gap:6px;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);cursor:pointer;font-size:12px">
-              <input type="checkbox" id="bg-p-today-shipping" onchange="onShipTypeChange()"> ⚡ 오늘출발 옵션 활성화
-            </label>
-          </div>
-
-          <!-- 컷오프 (오늘출발 시) -->
-          <div id="bg-p-cutoff-section" style="display:none;margin-bottom:12px;padding:10px;background:var(--gray-50);border-radius:var(--radius)">
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-bottom:8px">
-              <input type="checkbox" id="bg-p-cutoff-on" onchange="onCutoffChange()"> <b>컷오프 설정</b>
-            </label>
-            <div id="bg-p-cutoff-fields" style="display:none;display:grid;grid-template-columns:1fr 1fr;gap:8px">
-              <div>
-                <label style="font-size:11px;color:var(--gray-500)">시</label>
-                <input type="number" id="bg-p-cutoff-h" value="14" min="0" max="23" style="width:100%;padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px" oninput="updatePreview()">
-              </div>
-              <div>
-                <label style="font-size:11px;color:var(--gray-500)">분</label>
-                <input type="number" id="bg-p-cutoff-m" value="0" min="0" max="59" style="width:100%;padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px" oninput="updatePreview()">
-              </div>
-            </div>
-            <p style="font-size:10px;color:var(--gray-500);margin-top:6px">컷오프 이전: 당일 접수 / 이후: 익영업일 접수</p>
-          </div>
-
-          <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:8px">
-            <div>
-              <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">리드타임 (영업일, 접수일 미포함)</label>
-              <input type="number" id="bg-p-leadtime" value="2" min="0" max="90" style="width:100%;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px" oninput="updatePreview()">
-              <p style="font-size:10px;color:var(--gray-500);margin-top:2px">0 = 당일출고 (컷오프 시간 참조)</p>
-            </div>
-          </div>
-
-          <!-- 선택가능일 (희망출고 시) -->
-          <div id="bg-p-range-section" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <div>
-              <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">선택 가능일 최소 (일)</label>
-              <input type="number" id="bg-p-mindays" value="3" min="0" max="365" style="width:100%;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px" oninput="updatePreview()">
-            </div>
-            <div>
-              <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">선택 가능일 최대 (일)</label>
-              <input type="number" id="bg-p-maxdays" value="60" min="1" max="365" style="width:100%;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px" oninput="updatePreview()">
-            </div>
-          </div>
-        </div>
-
-        <!-- 2. 휴무일 설정 -->
-        <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px;margin-bottom:16px">
-          <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">2. 휴무일 설정</h4>
-
-          <div style="margin-bottom:12px">
-            <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:6px">출고 불가 요일 (반복)</label>
-            <div style="display:flex;gap:4px;flex-wrap:wrap" id="bg-p-weekdays">
-              <label style="display:flex;align-items:center;gap:3px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:4px;font-size:12px;cursor:pointer"><input type="checkbox" value="0" onchange="updatePreview()"> 일</label>
-              <label style="display:flex;align-items:center;gap:3px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:4px;font-size:12px;cursor:pointer"><input type="checkbox" value="1" onchange="updatePreview()"> 월</label>
-              <label style="display:flex;align-items:center;gap:3px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:4px;font-size:12px;cursor:pointer"><input type="checkbox" value="2" onchange="updatePreview()"> 화</label>
-              <label style="display:flex;align-items:center;gap:3px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:4px;font-size:12px;cursor:pointer"><input type="checkbox" value="3" onchange="updatePreview()"> 수</label>
-              <label style="display:flex;align-items:center;gap:3px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:4px;font-size:12px;cursor:pointer"><input type="checkbox" value="4" onchange="updatePreview()"> 목</label>
-              <label style="display:flex;align-items:center;gap:3px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:4px;font-size:12px;cursor:pointer"><input type="checkbox" value="5" onchange="updatePreview()"> 금</label>
-              <label style="display:flex;align-items:center;gap:3px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:4px;font-size:12px;cursor:pointer"><input type="checkbox" value="6" onchange="updatePreview()"> 토</label>
-            </div>
-          </div>
-
-          <div>
-            <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:6px">출고 불가 일 (캘린더에서 날짜 클릭)</label>
-            <!-- 미니 캘린더 -->
-            <div style="background:#fff;border:1px solid var(--gray-200);border-radius:var(--radius);padding:10px;margin-bottom:8px">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-                <button class="btn btn-sm" onclick="closedCalPrev()">&lt;</button>
-                <span id="bg-p-closed-cal-month" style="font-size:13px;font-weight:600"></span>
-                <button class="btn btn-sm" onclick="closedCalNext()">&gt;</button>
-              </div>
-              <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;text-align:center;font-size:10px;margin-bottom:3px;color:var(--gray-500)">
-                <div style="color:var(--red)">일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div style="color:var(--primary)">토</div>
-              </div>
-              <div id="bg-p-closed-cal-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;text-align:center"></div>
-            </div>
-            <!-- 사유 입력 (선택된 날짜에 대해) -->
-            <div id="bg-p-cd-reason-box" style="display:none;margin-bottom:8px">
-              <div style="display:flex;gap:6px">
-                <input type="text" id="bg-p-cd-reason" placeholder="사유 입력 (선택, 예: 명절 연휴)" style="flex:1;padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
-                <button class="btn btn-sm" onclick="closedReasonApply()">적용</button>
-              </div>
-            </div>
-            <!-- 등록된 불가일 목록 -->
-            <div id="bg-p-closed-list" style="max-height:180px;overflow-y:auto"></div>
-          </div>
-        </div>
-
-        <!-- 3. 고객 노출 설정 -->
-        <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px;margin-bottom:16px">
-          <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">3. 고객 노출 설정</h4>
-
-          <div style="margin-bottom:12px">
-            <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">날짜 지정</label>
-            <div style="display:flex;gap:6px">
-              <label style="flex:1;display:flex;align-items:center;gap:6px;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);cursor:pointer;font-size:12px">
-                <input type="radio" name="bg-p-datereq" value="required" checked onchange="updatePreview()"> 필수
-              </label>
-              <label style="flex:1;display:flex;align-items:center;gap:6px;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);cursor:pointer;font-size:12px">
-                <input type="radio" name="bg-p-datereq" value="optional" onchange="updatePreview()"> 선택
-              </label>
-            </div>
-            <p style="font-size:10px;color:var(--gray-500);margin-top:4px">선택: 미선택 시 가장 빠른 출고일 자동 적용</p>
-          </div>
-
-          <div>
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-bottom:6px">
-              <input type="checkbox" id="bg-p-notice-on" onchange="updatePreview()"> 안내문구 노출
-            </label>
-            <textarea id="bg-p-notice-text" placeholder="결제 완료 후 날짜 변경이 어려울 수 있습니다." rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;resize:vertical;font-family:inherit" oninput="updatePreview()"></textarea>
-          </div>
-        </div>
-
-        <!-- 스티커 연결 -->
-        <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px">
-          <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">스티커 연결</h4>
-          <div id="bg-p-sticker-checks" style="display:flex;flex-wrap:wrap;gap:6px"></div>
-        </div>
+    <div style="padding:20px" id="bg-p-body">
+      <div style="margin-bottom:12px">
+        <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">상품코드</label>
+        <input type="text" id="bg-p-code" readonly style="width:100%;padding:8px 12px;border:1px solid var(--gray-200);border-radius:var(--radius);font-size:13px;background:var(--gray-50)">
       </div>
 
-      <!-- 오른쪽: 프리뷰 -->
-      <div style="position:sticky;top:60px;align-self:start">
-        <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px;background:var(--gray-50)">
-          <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">4. 캘린더 프리뷰</h4>
-          <div id="bg-p-preview" style="background:#fff;border-radius:var(--radius);padding:12px;border:1px solid var(--gray-200)">
-            <div id="bg-p-preview-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-              <button class="btn btn-sm" onclick="previewPrevMonth()">&lt;</button>
-              <span id="bg-p-preview-month" style="font-size:14px;font-weight:600"></span>
-              <button class="btn btn-sm" onclick="previewNextMonth()">&gt;</button>
-            </div>
-            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center;font-size:11px;margin-bottom:4px">
-              <div style="color:var(--red);font-weight:600">일</div><div style="font-weight:600">월</div><div style="font-weight:600">화</div><div style="font-weight:600">수</div><div style="font-weight:600">목</div><div style="font-weight:600">금</div><div style="color:var(--primary);font-weight:600">토</div>
-            </div>
-            <div id="bg-p-preview-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center"></div>
-            <div id="bg-p-preview-selected" style="margin-top:8px;font-size:11px;color:var(--primary);font-weight:500;display:none"></div>
-            <div id="bg-p-preview-notice" style="margin-top:8px;font-size:11px;color:var(--gray-500);white-space:pre-wrap;display:none"></div>
-          </div>
-          <p style="font-size:10px;color:var(--gray-500);margin-top:8px">설정에 따라 실시간 반영됩니다.</p>
-        </div>
+      <!-- 스티커 연결 -->
+      <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px">
+        <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">스티커 연결</h4>
+        <div id="bg-p-sticker-checks" style="display:flex;flex-wrap:wrap;gap:6px"></div>
       </div>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;padding:16px 20px;border-top:1px solid var(--gray-200);position:sticky;bottom:0;background:#fff;border-radius:0 0 12px 12px">
       <button class="btn" onclick="closeBgProductForm()">취소</button>
       <button class="btn btn-primary" onclick="saveBgProduct()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========== 바른기프트: 출고일 설정 ========== -->
+<div id="page-bg-shipping" class="page">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+    <h2 style="margin:0">📅 출고일 설정</h2>
+    <button class="btn btn-primary" onclick="saveBgShipping()">설정 저장</button>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 320px;gap:20px">
+    <!-- 왼쪽: 설정 -->
+    <div>
+      <!-- 1. 기본설정 -->
+      <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px;margin-bottom:16px">
+        <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">1. 기본설정</h4>
+
+        <div style="margin-bottom:12px">
+          <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">출고방식</label>
+          <div style="padding:8px 12px;border:1px solid var(--gray-200);border-radius:var(--radius);background:var(--gray-50);font-size:13px;font-weight:500;margin-bottom:6px">📦 희망출고 <span style="font-size:11px;color:var(--gray-500);font-weight:400">(기본)</span></div>
+          <label style="display:flex;align-items:center;gap:6px;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);cursor:pointer;font-size:12px">
+            <input type="checkbox" id="bg-sh-today-shipping" onchange="onBgShShipTypeChange()"> ⚡ 오늘출발 옵션 활성화
+          </label>
+        </div>
+
+        <!-- 컷오프 (오늘출발 시) -->
+        <div id="bg-sh-cutoff-section" style="display:none;margin-bottom:12px;padding:10px;background:var(--gray-50);border-radius:var(--radius)">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-bottom:8px">
+            <input type="checkbox" id="bg-sh-cutoff-on" onchange="onBgShCutoffChange()"> <b>컷오프 설정</b>
+          </label>
+          <div id="bg-sh-cutoff-fields" style="display:none;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div>
+              <label style="font-size:11px;color:var(--gray-500)">시</label>
+              <input type="number" id="bg-sh-cutoff-h" value="14" min="0" max="23" style="width:100%;padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px" oninput="updateBgShPreview()">
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--gray-500)">분</label>
+              <input type="number" id="bg-sh-cutoff-m" value="0" min="0" max="59" style="width:100%;padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px" oninput="updateBgShPreview()">
+            </div>
+          </div>
+          <p style="font-size:10px;color:var(--gray-500);margin-top:6px">컷오프 이전: 당일 접수 / 이후: 익영업일 접수</p>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:8px">
+          <div>
+            <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">리드타임 (영업일, 접수일 미포함)</label>
+            <input type="number" id="bg-sh-leadtime" value="2" min="0" max="90" style="width:100%;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px" oninput="updateBgShPreview()">
+            <p style="font-size:10px;color:var(--gray-500);margin-top:2px">0 = 당일출고 (컷오프 시간 참조)</p>
+          </div>
+        </div>
+
+        <!-- 선택가능일 (희망출고 시) -->
+        <div id="bg-sh-range-section" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div>
+            <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">선택 가능일 최소 (일)</label>
+            <input type="number" id="bg-sh-mindays" value="3" min="0" max="365" style="width:100%;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px" oninput="updateBgShPreview()">
+          </div>
+          <div>
+            <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">선택 가능일 최대 (일)</label>
+            <input type="number" id="bg-sh-maxdays" value="60" min="1" max="365" style="width:100%;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px" oninput="updateBgShPreview()">
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. 휴무일 설정 -->
+      <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px;margin-bottom:16px">
+        <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">2. 휴무일 설정</h4>
+
+        <div style="margin-bottom:12px">
+          <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:6px">출고 불가 요일 (반복)</label>
+          <div style="display:flex;gap:4px;flex-wrap:wrap" id="bg-sh-weekdays">
+            <label style="display:flex;align-items:center;gap:3px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:4px;font-size:12px;cursor:pointer"><input type="checkbox" value="0" onchange="updateBgShPreview()"> 일</label>
+            <label style="display:flex;align-items:center;gap:3px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:4px;font-size:12px;cursor:pointer"><input type="checkbox" value="1" onchange="updateBgShPreview()"> 월</label>
+            <label style="display:flex;align-items:center;gap:3px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:4px;font-size:12px;cursor:pointer"><input type="checkbox" value="2" onchange="updateBgShPreview()"> 화</label>
+            <label style="display:flex;align-items:center;gap:3px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:4px;font-size:12px;cursor:pointer"><input type="checkbox" value="3" onchange="updateBgShPreview()"> 수</label>
+            <label style="display:flex;align-items:center;gap:3px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:4px;font-size:12px;cursor:pointer"><input type="checkbox" value="4" onchange="updateBgShPreview()"> 목</label>
+            <label style="display:flex;align-items:center;gap:3px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:4px;font-size:12px;cursor:pointer"><input type="checkbox" value="5" onchange="updateBgShPreview()"> 금</label>
+            <label style="display:flex;align-items:center;gap:3px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:4px;font-size:12px;cursor:pointer"><input type="checkbox" value="6" onchange="updateBgShPreview()"> 토</label>
+          </div>
+        </div>
+
+        <div>
+          <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:6px">출고 불가 일 (캘린더에서 날짜 클릭)</label>
+          <!-- 미니 캘린더 -->
+          <div style="background:#fff;border:1px solid var(--gray-200);border-radius:var(--radius);padding:10px;margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+              <button class="btn btn-sm" onclick="bgShClosedCalPrev()">&lt;</button>
+              <span id="bg-sh-closed-cal-month" style="font-size:13px;font-weight:600"></span>
+              <button class="btn btn-sm" onclick="bgShClosedCalNext()">&gt;</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;text-align:center;font-size:10px;margin-bottom:3px;color:var(--gray-500)">
+              <div style="color:var(--red)">일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div style="color:var(--primary)">토</div>
+            </div>
+            <div id="bg-sh-closed-cal-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;text-align:center"></div>
+          </div>
+          <!-- 사유 입력 -->
+          <div id="bg-sh-cd-reason-box" style="display:none;margin-bottom:8px">
+            <div style="display:flex;gap:6px">
+              <input type="text" id="bg-sh-cd-reason" placeholder="사유 입력 (선택, 예: 명절 연휴)" style="flex:1;padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+              <button class="btn btn-sm" onclick="bgShClosedReasonApply()">적용</button>
+            </div>
+          </div>
+          <!-- 등록된 불가일 목록 -->
+          <div id="bg-sh-closed-list" style="max-height:180px;overflow-y:auto"></div>
+        </div>
+      </div>
+
+      <!-- 3. 고객 노출 설정 -->
+      <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px;margin-bottom:16px">
+        <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">3. 고객 노출 설정</h4>
+
+        <div style="margin-bottom:12px">
+          <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">날짜 지정</label>
+          <div style="display:flex;gap:6px">
+            <label style="flex:1;display:flex;align-items:center;gap:6px;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);cursor:pointer;font-size:12px">
+              <input type="radio" name="bg-sh-datereq" value="required" checked onchange="updateBgShPreview()"> 필수
+            </label>
+            <label style="flex:1;display:flex;align-items:center;gap:6px;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);cursor:pointer;font-size:12px">
+              <input type="radio" name="bg-sh-datereq" value="optional" onchange="updateBgShPreview()"> 선택
+            </label>
+          </div>
+          <p style="font-size:10px;color:var(--gray-500);margin-top:4px">선택: 미선택 시 가장 빠른 출고일 자동 적용</p>
+        </div>
+
+        <div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-bottom:6px">
+            <input type="checkbox" id="bg-sh-notice-on" onchange="updateBgShPreview()"> 안내문구 노출
+          </label>
+          <textarea id="bg-sh-notice-text" placeholder="결제 완료 후 날짜 변경이 어려울 수 있습니다." rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;resize:vertical;font-family:inherit" oninput="updateBgShPreview()"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- 오른쪽: 프리뷰 -->
+    <div style="position:sticky;top:72px;align-self:start">
+      <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px;background:var(--gray-50)">
+        <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">캘린더 프리뷰</h4>
+        <div id="bg-sh-preview" style="background:#fff;border-radius:var(--radius);padding:12px;border:1px solid var(--gray-200)">
+          <div id="bg-sh-preview-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <button class="btn btn-sm" onclick="bgShPreviewPrevMonth()">&lt;</button>
+            <span id="bg-sh-preview-month" style="font-size:14px;font-weight:600"></span>
+            <button class="btn btn-sm" onclick="bgShPreviewNextMonth()">&gt;</button>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center;font-size:11px;margin-bottom:4px">
+            <div style="color:var(--red);font-weight:600">일</div><div style="font-weight:600">월</div><div style="font-weight:600">화</div><div style="font-weight:600">수</div><div style="font-weight:600">목</div><div style="font-weight:600">금</div><div style="color:var(--primary);font-weight:600">토</div>
+          </div>
+          <div id="bg-sh-preview-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center"></div>
+          <div id="bg-sh-preview-selected" style="margin-top:8px;font-size:11px;color:var(--primary);font-weight:500;display:none"></div>
+          <div id="bg-sh-preview-notice" style="margin-top:8px;font-size:11px;color:var(--gray-500);white-space:pre-wrap;display:none"></div>
+        </div>
+        <p style="font-size:10px;color:var(--gray-500);margin-top:8px">설정에 따라 실시간 반영됩니다.</p>
+      </div>
     </div>
   </div>
 </div>
@@ -1166,7 +1182,7 @@ function init() {
 
   // URL hash 기반 페이지 전환
   const hash = location.hash.replace('#', '') || 'dashboard';
-  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products'].includes(hash)) showPage(hash);
+  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping'].includes(hash)) showPage(hash);
 }
 
 function fmt(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -1184,6 +1200,7 @@ function showPage(name) {
   if (name === 'worklog') loadWorklog();
   if (name === 'bg-stickers') loadBgStickers();
   if (name === 'bg-products') loadBgProducts();
+  if (name === 'bg-shipping') loadBgShipping();
 }
 
 // --- Category Tabs ---
@@ -1275,10 +1292,13 @@ function renderOrderTable() {
   document.getElementById('order-tbody').innerHTML = filtered.map((r, i) => {
     const key = String(r.order_seq);
     const isCollected = collected.has(key);
-    const isCancel = isCancelled(r);
+    const isCancelStatus = r.status_seq === 3 || r.status_seq === 5;
+    const isPendingStatus = r.status_seq === 1;
     let cls = '';
-    if (isCollected && isCancel) cls = 'row-cancel-alert';
+    if (isCollected && isCancelStatus) cls = 'row-cancel-alert';
     else if (isCollected) cls = 'row-collected';
+    else if (isCancelStatus) cls = 'row-cancelled';
+    else if (isPendingStatus) cls = 'row-pending';
     return `<tr class="${cls}">` +
       `<td><input type="checkbox" class="row-check" data-idx="${i}" onchange="updateSelectedCount()"></td>` +
       cols.map(c => `<td class="${c.num?'num':''}">${r[c.key] ?? ''}</td>`).join('') +
@@ -3797,9 +3817,6 @@ async function deleteBgSticker(id) {
 // 바른기프트: 상품 설정 (v2)
 // ============================================
 let bgProductSettings = [];
-let bgClosedDates = []; // 모달 내 임시 저장
-let previewMonth = new Date(); // 프리뷰 캘린더 월
-let previewSelectedDate = null;
 
 async function loadBgProducts() {
   try {
@@ -3825,7 +3842,10 @@ function renderBgProducts() {
       <td><span class="badge ${s.shipping_type==='today_shipping'?'badge-up':'badge-neutral'}">${type}</span></td>
       <td>${s.lead_time_days}영업일</td>
       <td>${(s.available_sticker_ids||[]).length}개</td>
-      <td><button class="btn btn-sm" onclick="openBgProductForm('${s.product_id}')">편집</button></td>
+      <td>
+        <button class="btn btn-sm" onclick="openBgProductForm('${s.product_id}')" title="편집">✏️</button>
+        <button class="btn btn-sm" onclick="deleteBgProduct('${s.product_id}')" title="삭제" style="color:var(--red)">🗑️</button>
+      </td>
     </tr>`;
   }).join('');
 }
@@ -3835,8 +3855,6 @@ async function openBgProductForm(productId) {
   productId = productId.trim();
   document.getElementById('bg-p-code').value = productId;
   document.getElementById('bg-product-modal-title').textContent = '상품 설정: ' + productId;
-  previewSelectedDate = null;
-  previewMonth = new Date();
 
   try {
     const [settingsRes, stickersRes] = await Promise.all([
@@ -3846,42 +3864,13 @@ async function openBgProductForm(productId) {
     const s = (await settingsRes.json()).settings;
     const stickers = (await stickersRes.json()).stickers || [];
 
-    // 1. 기본설정
-    document.getElementById('bg-p-today-shipping').checked = (s?.shipping_type === 'today_shipping');
-    document.getElementById('bg-p-cutoff-on').checked = s?.cutoff_enabled ?? false;
-    document.getElementById('bg-p-cutoff-h').value = s?.cutoff_hour ?? 14;
-    document.getElementById('bg-p-cutoff-m').value = s?.cutoff_minute ?? 0;
-    document.getElementById('bg-p-leadtime').value = s?.lead_time_days ?? 2;
-    document.getElementById('bg-p-mindays').value = s?.min_select_days ?? 3;
-    document.getElementById('bg-p-maxdays').value = s?.max_select_days ?? 60;
-
-    // 2. 휴무일
-    const closedW = s?.closed_weekdays || [0, 6];
-    document.querySelectorAll('#bg-p-weekdays input').forEach(cb => {
-      cb.checked = closedW.includes(parseInt(cb.value));
-    });
-    bgClosedDates = s?.closed_dates || [];
-    renderClosedDates();
-
-    // 3. 고객 노출
-    const req = s?.date_required !== false ? 'required' : 'optional';
-    document.querySelector(`input[name="bg-p-datereq"][value="${req}"]`).checked = true;
-    document.getElementById('bg-p-notice-on').checked = s?.notice_enabled ?? false;
-    document.getElementById('bg-p-notice-text').value = s?.notice_text || '';
-
-    // 스티커
+    // 스티커 체크박스
     const selectedSt = s?.available_sticker_ids || [];
     document.getElementById('bg-p-sticker-checks').innerHTML = stickers.map(st =>
       `<label style="display:flex;align-items:center;gap:4px;font-size:12px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:4px;cursor:pointer;background:#fff">
         <input type="checkbox" value="${st.id}" ${selectedSt.includes(st.id)?'checked':''}> ${st.name}
       </label>`
     ).join('') || '<span style="color:var(--gray-500);font-size:12px">등록된 스티커 없음</span>';
-
-    closedCalMonth = new Date();
-    renderClosedCal();
-    onShipTypeChange();
-    onCutoffChange();
-    updatePreview();
   } catch(e) { console.error('openBgProductForm:', e); }
 
   document.getElementById('bg-product-modal').style.display = 'flex';
@@ -3889,123 +3878,9 @@ async function openBgProductForm(productId) {
 
 function closeBgProductForm() { document.getElementById('bg-product-modal').style.display = 'none'; }
 
-// 출고방식 변경 시
-function onShipTypeChange() {
-  const isToday = document.getElementById('bg-p-today-shipping').checked;
-  document.getElementById('bg-p-cutoff-section').style.display = isToday ? 'block' : 'none';
-  document.getElementById('bg-p-range-section').style.display = isToday ? 'none' : 'grid';
-  updatePreview();
-}
-
-function onCutoffChange() {
-  const on = document.getElementById('bg-p-cutoff-on').checked;
-  document.getElementById('bg-p-cutoff-fields').style.display = on ? 'grid' : 'none';
-  updatePreview();
-}
-
-// 출고 불가일 관리 (캘린더 클릭 방식)
-let closedCalMonth = new Date();
-let closedReasonTarget = null; // 사유 입력 대상 날짜
-
-function closedCalPrev() { closedCalMonth.setMonth(closedCalMonth.getMonth() - 1); renderClosedCal(); }
-function closedCalNext() { closedCalMonth.setMonth(closedCalMonth.getMonth() + 1); renderClosedCal(); }
-
-function renderClosedCal() {
-  const y = closedCalMonth.getFullYear();
-  const m = closedCalMonth.getMonth();
-  document.getElementById('bg-p-closed-cal-month').textContent = y + '년 ' + (m + 1) + '월';
-  const firstDay = new Date(y, m, 1).getDay();
-  const daysInMonth = new Date(y, m + 1, 0).getDate();
-  const todayStr = fmt(new Date());
-  const selected = bgClosedDates.map(d => d.date);
-  let html = '';
-  for (let i = 0; i < firstDay; i++) html += '<div style="height:26px"></div>';
-  for (let d = 1; d <= daysInMonth; d++) {
-    const ds = fmt(new Date(y, m, d));
-    const isPast = ds < todayStr;
-    const isSelected = selected.includes(ds);
-    let style = 'height:26px;line-height:26px;border-radius:4px;font-size:11px;cursor:pointer;';
-    if (isPast) style += 'color:var(--gray-300);cursor:default;';
-    else if (isSelected) style += 'background:var(--red);color:#fff;font-weight:600;';
-    else style += 'color:var(--gray-700);';
-    const click = isPast ? '' : ' onclick="toggleClosedDate(\'' + ds + '\')"';
-    html += '<div style="' + style + '"' + click + '>' + d + '</div>';
-  }
-  document.getElementById('bg-p-closed-cal-grid').innerHTML = html;
-}
-
-function toggleClosedDate(ds) {
-  const idx = bgClosedDates.findIndex(d => d.date === ds);
-  if (idx >= 0) {
-    // 이미 있으면 제거
-    bgClosedDates.splice(idx, 1);
-    closedReasonTarget = null;
-    document.getElementById('bg-p-cd-reason-box').style.display = 'none';
-  } else {
-    // 추가
-    bgClosedDates.push({ date: ds, reason: '' });
-    bgClosedDates.sort((a, b) => a.date.localeCompare(b.date));
-    closedReasonTarget = ds;
-    document.getElementById('bg-p-cd-reason').value = '';
-    document.getElementById('bg-p-cd-reason-box').style.display = 'block';
-    document.getElementById('bg-p-cd-reason').placeholder = ds + ' 사유 입력 (선택)';
-    document.getElementById('bg-p-cd-reason').focus();
-  }
-  renderClosedCal();
-  renderClosedDates();
-  updatePreview();
-}
-
-function closedReasonApply() {
-  if (!closedReasonTarget) return;
-  const reason = document.getElementById('bg-p-cd-reason').value.trim();
-  const item = bgClosedDates.find(d => d.date === closedReasonTarget);
-  if (item) item.reason = reason;
-  closedReasonTarget = null;
-  document.getElementById('bg-p-cd-reason-box').style.display = 'none';
-  renderClosedDates();
-}
-
-function removeClosedDate(date) {
-  bgClosedDates = bgClosedDates.filter(d => d.date !== date);
-  renderClosedCal();
-  renderClosedDates();
-  updatePreview();
-}
-
-function renderClosedDates() {
-  const el = document.getElementById('bg-p-closed-list');
-  if (!bgClosedDates.length) { el.innerHTML = '<p style="font-size:11px;color:var(--gray-500);padding:4px 0">등록된 불가일 없음</p>'; return; }
-  const today = fmt(new Date());
-  el.innerHTML = bgClosedDates.map(d => {
-    const past = d.date < today;
-    return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--gray-100);${past?'opacity:0.4':''}">
-      <span style="font-size:12px;font-family:monospace;min-width:90px">${d.date}</span>
-      <span style="font-size:11px;color:var(--gray-500);flex:1">${d.reason||'-'}</span>
-      <button class="btn btn-sm" onclick="removeClosedDate('${d.date}')" style="color:var(--red);font-size:10px;padding:2px 6px">삭제</button>
-    </div>`;
-  }).join('');
-}
-
 // ============================================
-// 캘린더 프리뷰
+// 캘린더 유틸리티 (공용)
 // ============================================
-function getPreviewSettings() {
-  const shipType = document.getElementById('bg-p-today-shipping')?.checked ? 'today_shipping' : 'desired_date';
-  const cutoffOn = document.getElementById('bg-p-cutoff-on').checked;
-  const cutoffH = parseInt(document.getElementById('bg-p-cutoff-h').value) || 0;
-  const cutoffM = parseInt(document.getElementById('bg-p-cutoff-m').value) || 0;
-  const leadTime = parseInt(document.getElementById('bg-p-leadtime').value) || 0;
-  const minDays = parseInt(document.getElementById('bg-p-mindays').value) || 0;
-  const maxDays = parseInt(document.getElementById('bg-p-maxdays').value) || 60;
-  const closedWeekdays = [...document.querySelectorAll('#bg-p-weekdays input:checked')].map(c => parseInt(c.value));
-  const closedDateList = bgClosedDates.map(d => d.date);
-  const dateRequired = document.querySelector('input[name="bg-p-datereq"]:checked')?.value === 'required';
-  const noticeOn = document.getElementById('bg-p-notice-on').checked;
-  const noticeText = document.getElementById('bg-p-notice-text').value;
-  return { shipType, cutoffOn, cutoffH, cutoffM, leadTime, minDays, maxDays, closedWeekdays, closedDateList, dateRequired, noticeOn, noticeText };
-}
-
 function isBusinessDayPreview(date, closedWeekdays, closedDateList) {
   if (closedWeekdays.includes(date.getDay())) return false;
   const ds = fmt(date);
@@ -4038,22 +3913,18 @@ function calcMinDate(cfg) {
 
   if (shipType === 'today_shipping') {
     if (leadTime === 0) {
-      // 당일출고
       if (cutoffOn) {
         const cutoffMin = cutoffH * 60 + cutoffM;
         const nowMin = now.getHours() * 60 + now.getMinutes();
         if (nowMin < cutoffMin && isBusinessDayPreview(today, closedWeekdays, closedDateList)) {
-          return today; // 컷오프 전 + 영업일 = 당일
+          return today;
         }
-        // 컷오프 후 또는 비영업일 → 다음 영업일
         const next = new Date(today); next.setDate(next.getDate() + 1);
         return getNextBizDay(next, closedWeekdays, closedDateList);
       }
-      // 컷오프 OFF + 리드타임 0 → 무조건 익일
       const next = new Date(today); next.setDate(next.getDate() + 1);
       return getNextBizDay(next, closedWeekdays, closedDateList);
     }
-    // 리드타임 >= 1
     let receiptDay = today;
     if (cutoffOn) {
       const cutoffMin = cutoffH * 60 + cutoffM;
@@ -4077,130 +3948,17 @@ function calcMinDate(cfg) {
   // 희망출고
   const calendarMin = new Date(today); calendarMin.setDate(calendarMin.getDate() + minDays);
   const bizMin = addBizDays(today, leadTime, closedWeekdays, closedDateList);
-  // 둘 중 늦은 날짜
   const earliest = calendarMin > bizMin ? calendarMin : bizMin;
   return getNextBizDay(earliest, closedWeekdays, closedDateList);
 }
 
-function updatePreview() {
-  const cfg = getPreviewSettings();
-  const minDate = calcMinDate(cfg);
-  const today = new Date(); today.setHours(0,0,0,0);
-  const maxDate = new Date(today); maxDate.setDate(maxDate.getDate() + cfg.maxDays);
-
-  renderPreviewCalendar(cfg, minDate, maxDate);
-
-  // 선택한 날짜 표시
-  const selEl = document.getElementById('bg-p-preview-selected');
-  if (previewSelectedDate) {
-    selEl.style.display = 'block';
-    selEl.innerHTML = '<span style="color:var(--primary)">📅 선택한 희망출고일: <b>' + previewSelectedDate + '</b></span>';
-  } else if (!cfg.dateRequired) {
-    selEl.style.display = 'block';
-    selEl.innerHTML = '<span style="color:var(--gray-500)">미선택 시 가장 빠른 출고일 <b>' + fmt(minDate) + '</b> 자동 적용</span>';
-  } else {
-    selEl.style.display = 'none';
-  }
-
-  // 안내문구
-  const notEl = document.getElementById('bg-p-preview-notice');
-  let noticeHtml = '';
-
-  // 선택 가능 기간 안내
-  noticeHtml += '<div style="font-size:10px;color:var(--gray-400);margin-bottom:4px">선택 가능: ' + fmt(minDate) + ' ~ ' + fmt(maxDate) + '</div>';
-
-  // 컷오프 상태 안내 (오늘출발일 때)
-  if (cfg.shipType === 'today_shipping' && cfg.cutoffOn) {
-    const now = new Date();
-    const nowMin = now.getHours() * 60 + now.getMinutes();
-    const cutMin = cfg.cutoffH * 60 + cfg.cutoffM;
-    const cutLabel = String(cfg.cutoffH).padStart(2,'0') + ':' + String(cfg.cutoffM).padStart(2,'0');
-    if (nowMin < cutMin) {
-      noticeHtml += '<div style="font-size:10px;color:var(--green)">⏰ 컷오프 ' + cutLabel + ' 이전 — 당일 접수 가능</div>';
-    } else {
-      noticeHtml += '<div style="font-size:10px;color:var(--orange)">⏰ 컷오프 ' + cutLabel + ' 초과 — 익영업일 접수</div>';
-    }
-  }
-
-  // 리드타임 안내
-  if (cfg.leadTime === 0) {
-    noticeHtml += '<div style="font-size:10px;color:var(--gray-500)">당일출고 상품' + (cfg.cutoffOn ? ' (컷오프 기준)' : ' (익일출고)') + '</div>';
-  } else {
-    noticeHtml += '<div style="font-size:10px;color:var(--gray-500)">리드타임 ' + cfg.leadTime + '영업일 (접수일 미포함)</div>';
-  }
-
-  // 사용자 안내문구
-  if (cfg.noticeOn && cfg.noticeText) {
-    noticeHtml += '<div style="margin-top:6px;padding:6px 8px;background:#fffbeb;border-radius:4px;color:#92400e;font-size:10px;white-space:pre-wrap">' + cfg.noticeText + '</div>';
-  }
-
-  notEl.style.display = 'block';
-  notEl.innerHTML = noticeHtml;
-}
-
-function renderPreviewCalendar(cfg, minDate, maxDate) {
-  const year = previewMonth.getFullYear();
-  const month = previewMonth.getMonth();
-  document.getElementById('bg-p-preview-month').textContent = year + '년 ' + (month + 1) + '월' + (cfg.dateRequired ? ' *' : '');
-
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const grid = document.getElementById('bg-p-preview-grid');
-  let html = '';
-  // 빈 칸
-  for (let i = 0; i < firstDay; i++) html += '<div style="height:28px"></div>';
-  // 날짜
-  for (let d = 1; d <= daysInMonth; d++) {
-    const date = new Date(year, month, d);
-    const ds = fmt(date);
-    const isClosed = cfg.closedWeekdays.includes(date.getDay()) || cfg.closedDateList.includes(ds);
-    const isBeforeMin = date < minDate;
-    const isAfterMax = date > maxDate;
-    const disabled = isClosed || isBeforeMin || isAfterMax;
-    const isToday = ds === fmt(new Date());
-    const isSelected = ds === previewSelectedDate;
-    let style = 'height:28px;line-height:28px;border-radius:4px;font-size:12px;cursor:pointer;';
-    if (disabled) style += 'color:var(--gray-300);cursor:default;';
-    else if (isSelected) style += 'background:var(--primary);color:#fff;font-weight:600;';
-    else if (isToday) style += 'background:var(--primary-light);color:var(--primary);font-weight:600;';
-    else style += 'color:var(--gray-700);';
-    if (date.getDay() === 0 && !disabled) style += 'color:var(--red);';
-    if (date.getDay() === 6 && !disabled && !isSelected) style += 'color:var(--primary);';
-    const clickAttr = disabled ? '' : ' onclick="previewSelectDate(\'' + ds + '\')"';
-    html += '<div style="' + style + '"' + clickAttr + '>' + d + '</div>';
-  }
-  grid.innerHTML = html;
-}
-
-function previewSelectDate(ds) { previewSelectedDate = ds; updatePreview(); }
-function previewPrevMonth() { previewMonth.setMonth(previewMonth.getMonth() - 1); updatePreview(); }
-function previewNextMonth() { previewMonth.setMonth(previewMonth.getMonth() + 1); updatePreview(); }
-
-// 저장
+// 저장 (스티커 연결만)
 async function saveBgProduct() {
   const productId = document.getElementById('bg-p-code').value;
   const stickerIds = [...document.querySelectorAll('#bg-p-sticker-checks input:checked')].map(c => c.value);
-  const shipType = document.getElementById('bg-p-today-shipping')?.checked ? 'today_shipping' : 'desired_date';
-  const closedWeekdays = [...document.querySelectorAll('#bg-p-weekdays input:checked')].map(c => parseInt(c.value));
 
   const body = {
-    shipping_type: shipType,
-    cutoff_enabled: document.getElementById('bg-p-cutoff-on').checked,
-    cutoff_hour: parseInt(document.getElementById('bg-p-cutoff-h').value) || 0,
-    cutoff_minute: parseInt(document.getElementById('bg-p-cutoff-m').value) || 0,
-    lead_time_days: parseInt(document.getElementById('bg-p-leadtime').value) || 0,
-    min_select_days: parseInt(document.getElementById('bg-p-mindays').value) || 0,
-    max_select_days: parseInt(document.getElementById('bg-p-maxdays').value) || 60,
-    closed_weekdays: closedWeekdays,
-    closed_dates: bgClosedDates,
-    date_required: document.querySelector('input[name="bg-p-datereq"]:checked')?.value === 'required',
-    notice_enabled: document.getElementById('bg-p-notice-on').checked,
-    notice_text: document.getElementById('bg-p-notice-text').value,
     available_sticker_ids: stickerIds,
-    // 레거시 호환
-    express_available: shipType === 'today_shipping',
-    express_cutoff_time: String(parseInt(document.getElementById('bg-p-cutoff-h').value)||14).padStart(2,'0') + ':' + String(parseInt(document.getElementById('bg-p-cutoff-m').value)||0).padStart(2,'0'),
-    blackout_dates: bgClosedDates.map(d => d.date),
   };
 
   try {
@@ -4213,6 +3971,278 @@ async function saveBgProduct() {
     loadBgProducts();
   } catch(e) { alert(e.message); }
 }
+
+async function deleteBgProduct(productId) {
+  if (!confirm('이 상품 설정을 삭제하시겠습니까?\n상품코드: ' + productId)) return;
+  try {
+    const r = await fetch(API + '/api/bg/products/' + encodeURIComponent(productId) + '/settings', { method: 'DELETE' });
+    if (!r.ok) throw new Error((await r.json()).error || '삭제 실패');
+    showToast('상품 설정이 삭제되었습니다.');
+    loadBgProducts();
+  } catch(e) { alert(e.message); }
+}
+
+// ============================================
+// 바른기프트: 출고일 설정 페이지 (bg-sh- prefix)
+// ============================================
+let bgShClosedDates = [];
+let bgShClosedCalMonth = new Date();
+let bgShClosedReasonTarget = null;
+let bgShPreviewMonth = new Date();
+let bgShPreviewSelected = null;
+
+async function loadBgShipping() {
+  try {
+    const r = await fetch(API + '/api/bg/shipping-config');
+    const d = await r.json();
+    const cfg = d.config || {};
+    document.getElementById('bg-sh-today-shipping').checked = cfg.shipping_type === 'today_shipping';
+    document.getElementById('bg-sh-cutoff-on').checked = cfg.cutoff_enabled ?? false;
+    document.getElementById('bg-sh-cutoff-h').value = cfg.cutoff_hour ?? 14;
+    document.getElementById('bg-sh-cutoff-m').value = cfg.cutoff_minute ?? 0;
+    document.getElementById('bg-sh-leadtime').value = cfg.lead_time_days ?? 2;
+    document.getElementById('bg-sh-mindays').value = cfg.min_select_days ?? 3;
+    document.getElementById('bg-sh-maxdays').value = cfg.max_select_days ?? 60;
+    // weekdays
+    const closedW = cfg.closed_weekdays || [0, 6];
+    document.querySelectorAll('#bg-sh-weekdays input').forEach(cb => {
+      cb.checked = closedW.includes(parseInt(cb.value));
+    });
+    // closed dates
+    bgShClosedDates = cfg.closed_dates || [];
+    renderBgShClosedDates();
+    bgShClosedCalMonth = new Date();
+    renderBgShClosedCal();
+    // customer display
+    const req = cfg.date_required !== false ? 'required' : 'optional';
+    document.querySelector('input[name="bg-sh-datereq"][value="' + req + '"]').checked = true;
+    document.getElementById('bg-sh-notice-on').checked = cfg.notice_enabled ?? false;
+    document.getElementById('bg-sh-notice-text').value = cfg.notice_text || '';
+    // UI toggles
+    onBgShShipTypeChange();
+    onBgShCutoffChange();
+    bgShPreviewMonth = new Date();
+    bgShPreviewSelected = null;
+    updateBgShPreview();
+  } catch(e) { console.error('loadBgShipping:', e); }
+}
+
+async function saveBgShipping() {
+  const shipType = document.getElementById('bg-sh-today-shipping').checked ? 'today_shipping' : 'desired_date';
+  const closedWeekdays = [...document.querySelectorAll('#bg-sh-weekdays input:checked')].map(c => parseInt(c.value));
+  const body = {
+    shipping_type: shipType,
+    cutoff_enabled: document.getElementById('bg-sh-cutoff-on').checked,
+    cutoff_hour: parseInt(document.getElementById('bg-sh-cutoff-h').value) || 0,
+    cutoff_minute: parseInt(document.getElementById('bg-sh-cutoff-m').value) || 0,
+    lead_time_days: parseInt(document.getElementById('bg-sh-leadtime').value) || 0,
+    min_select_days: parseInt(document.getElementById('bg-sh-mindays').value) || 0,
+    max_select_days: parseInt(document.getElementById('bg-sh-maxdays').value) || 60,
+    closed_weekdays: closedWeekdays,
+    closed_dates: bgShClosedDates,
+    date_required: document.querySelector('input[name="bg-sh-datereq"]:checked')?.value === 'required',
+    notice_enabled: document.getElementById('bg-sh-notice-on').checked,
+    notice_text: document.getElementById('bg-sh-notice-text').value,
+  };
+  try {
+    const r = await fetch(API + '/api/bg/shipping-config', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error((await r.json()).error || '저장 실패');
+    showToast('출고일 설정이 저장되었습니다.');
+  } catch(e) { alert(e.message); }
+}
+
+function onBgShShipTypeChange() {
+  const isToday = document.getElementById('bg-sh-today-shipping').checked;
+  document.getElementById('bg-sh-cutoff-section').style.display = isToday ? 'block' : 'none';
+  document.getElementById('bg-sh-range-section').style.display = isToday ? 'none' : 'grid';
+  updateBgShPreview();
+}
+
+function onBgShCutoffChange() {
+  const on = document.getElementById('bg-sh-cutoff-on').checked;
+  document.getElementById('bg-sh-cutoff-fields').style.display = on ? 'grid' : 'none';
+  updateBgShPreview();
+}
+
+// 출고 불가일 캘린더
+function bgShClosedCalPrev() { bgShClosedCalMonth.setMonth(bgShClosedCalMonth.getMonth() - 1); renderBgShClosedCal(); }
+function bgShClosedCalNext() { bgShClosedCalMonth.setMonth(bgShClosedCalMonth.getMonth() + 1); renderBgShClosedCal(); }
+
+function renderBgShClosedCal() {
+  const y = bgShClosedCalMonth.getFullYear();
+  const m = bgShClosedCalMonth.getMonth();
+  document.getElementById('bg-sh-closed-cal-month').textContent = y + '년 ' + (m + 1) + '월';
+  const firstDay = new Date(y, m, 1).getDay();
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const todayStr = fmt(new Date());
+  const selected = bgShClosedDates.map(d => d.date);
+  let html = '';
+  for (let i = 0; i < firstDay; i++) html += '<div style="height:26px"></div>';
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = fmt(new Date(y, m, d));
+    const isPast = ds < todayStr;
+    const isSelected = selected.includes(ds);
+    let style = 'height:26px;line-height:26px;border-radius:4px;font-size:11px;cursor:pointer;';
+    if (isPast) style += 'color:var(--gray-300);cursor:default;';
+    else if (isSelected) style += 'background:var(--red);color:#fff;font-weight:600;';
+    else style += 'color:var(--gray-700);';
+    const click = isPast ? '' : ' onclick="bgShToggleClosedDate(\'' + ds + '\')"';
+    html += '<div style="' + style + '"' + click + '>' + d + '</div>';
+  }
+  document.getElementById('bg-sh-closed-cal-grid').innerHTML = html;
+}
+
+function bgShToggleClosedDate(ds) {
+  const idx = bgShClosedDates.findIndex(d => d.date === ds);
+  if (idx >= 0) {
+    bgShClosedDates.splice(idx, 1);
+    bgShClosedReasonTarget = null;
+    document.getElementById('bg-sh-cd-reason-box').style.display = 'none';
+  } else {
+    bgShClosedDates.push({ date: ds, reason: '' });
+    bgShClosedDates.sort((a, b) => a.date.localeCompare(b.date));
+    bgShClosedReasonTarget = ds;
+    document.getElementById('bg-sh-cd-reason').value = '';
+    document.getElementById('bg-sh-cd-reason-box').style.display = 'block';
+    document.getElementById('bg-sh-cd-reason').placeholder = ds + ' 사유 입력 (선택)';
+    document.getElementById('bg-sh-cd-reason').focus();
+  }
+  renderBgShClosedCal();
+  renderBgShClosedDates();
+  updateBgShPreview();
+}
+
+function bgShClosedReasonApply() {
+  if (!bgShClosedReasonTarget) return;
+  const reason = document.getElementById('bg-sh-cd-reason').value.trim();
+  const item = bgShClosedDates.find(d => d.date === bgShClosedReasonTarget);
+  if (item) item.reason = reason;
+  bgShClosedReasonTarget = null;
+  document.getElementById('bg-sh-cd-reason-box').style.display = 'none';
+  renderBgShClosedDates();
+}
+
+function bgShRemoveClosedDate(date) {
+  bgShClosedDates = bgShClosedDates.filter(d => d.date !== date);
+  renderBgShClosedCal();
+  renderBgShClosedDates();
+  updateBgShPreview();
+}
+
+function renderBgShClosedDates() {
+  const el = document.getElementById('bg-sh-closed-list');
+  if (!bgShClosedDates.length) { el.innerHTML = '<p style="font-size:11px;color:var(--gray-500);padding:4px 0">등록된 불가일 없음</p>'; return; }
+  const today = fmt(new Date());
+  el.innerHTML = bgShClosedDates.map(d => {
+    const past = d.date < today;
+    return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--gray-100);' + (past ? 'opacity:0.4' : '') + '">' +
+      '<span style="font-size:12px;font-family:monospace;min-width:90px">' + d.date + '</span>' +
+      '<span style="font-size:11px;color:var(--gray-500);flex:1">' + (d.reason || '-') + '</span>' +
+      '<button class="btn btn-sm" onclick="bgShRemoveClosedDate(\'' + d.date + '\')" style="color:var(--red);font-size:10px;padding:2px 6px">삭제</button>' +
+    '</div>';
+  }).join('');
+}
+
+// 프리뷰 캘린더 (출고일 설정 페이지)
+function getBgShPreviewSettings() {
+  const shipType = document.getElementById('bg-sh-today-shipping')?.checked ? 'today_shipping' : 'desired_date';
+  const cutoffOn = document.getElementById('bg-sh-cutoff-on').checked;
+  const cutoffH = parseInt(document.getElementById('bg-sh-cutoff-h').value) || 0;
+  const cutoffM = parseInt(document.getElementById('bg-sh-cutoff-m').value) || 0;
+  const leadTime = parseInt(document.getElementById('bg-sh-leadtime').value) || 0;
+  const minDays = parseInt(document.getElementById('bg-sh-mindays').value) || 0;
+  const maxDays = parseInt(document.getElementById('bg-sh-maxdays').value) || 60;
+  const closedWeekdays = [...document.querySelectorAll('#bg-sh-weekdays input:checked')].map(c => parseInt(c.value));
+  const closedDateList = bgShClosedDates.map(d => d.date);
+  const dateRequired = document.querySelector('input[name="bg-sh-datereq"]:checked')?.value === 'required';
+  const noticeOn = document.getElementById('bg-sh-notice-on').checked;
+  const noticeText = document.getElementById('bg-sh-notice-text').value;
+  return { shipType, cutoffOn, cutoffH, cutoffM, leadTime, minDays, maxDays, closedWeekdays, closedDateList, dateRequired, noticeOn, noticeText };
+}
+
+function updateBgShPreview() {
+  const cfg = getBgShPreviewSettings();
+  const minDate = calcMinDate(cfg);
+  const today = new Date(); today.setHours(0,0,0,0);
+  const maxDate = new Date(today); maxDate.setDate(maxDate.getDate() + cfg.maxDays);
+
+  renderBgShPreviewCalendar(cfg, minDate, maxDate);
+
+  // 선택한 날짜 표시
+  const selEl = document.getElementById('bg-sh-preview-selected');
+  if (bgShPreviewSelected) {
+    selEl.style.display = 'block';
+    selEl.innerHTML = '<span style="color:var(--primary)">📅 선택한 희망출고일: <b>' + bgShPreviewSelected + '</b></span>';
+  } else if (!cfg.dateRequired) {
+    selEl.style.display = 'block';
+    selEl.innerHTML = '<span style="color:var(--gray-500)">미선택 시 가장 빠른 출고일 <b>' + fmt(minDate) + '</b> 자동 적용</span>';
+  } else {
+    selEl.style.display = 'none';
+  }
+
+  // 안내문구
+  const notEl = document.getElementById('bg-sh-preview-notice');
+  let noticeHtml = '';
+  noticeHtml += '<div style="font-size:10px;color:var(--gray-400);margin-bottom:4px">선택 가능: ' + fmt(minDate) + ' ~ ' + fmt(maxDate) + '</div>';
+  if (cfg.shipType === 'today_shipping' && cfg.cutoffOn) {
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const cutMin = cfg.cutoffH * 60 + cfg.cutoffM;
+    const cutLabel = String(cfg.cutoffH).padStart(2,'0') + ':' + String(cfg.cutoffM).padStart(2,'0');
+    if (nowMin < cutMin) {
+      noticeHtml += '<div style="font-size:10px;color:var(--green)">⏰ 컷오프 ' + cutLabel + ' 이전 — 당일 접수 가능</div>';
+    } else {
+      noticeHtml += '<div style="font-size:10px;color:var(--orange)">⏰ 컷오프 ' + cutLabel + ' 초과 — 익영업일 접수</div>';
+    }
+  }
+  if (cfg.leadTime === 0) {
+    noticeHtml += '<div style="font-size:10px;color:var(--gray-500)">당일출고 상품' + (cfg.cutoffOn ? ' (컷오프 기준)' : ' (익일출고)') + '</div>';
+  } else {
+    noticeHtml += '<div style="font-size:10px;color:var(--gray-500)">리드타임 ' + cfg.leadTime + '영업일 (접수일 미포함)</div>';
+  }
+  if (cfg.noticeOn && cfg.noticeText) {
+    noticeHtml += '<div style="margin-top:6px;padding:6px 8px;background:#fffbeb;border-radius:4px;color:#92400e;font-size:10px;white-space:pre-wrap">' + cfg.noticeText + '</div>';
+  }
+  notEl.style.display = 'block';
+  notEl.innerHTML = noticeHtml;
+}
+
+function renderBgShPreviewCalendar(cfg, minDate, maxDate) {
+  const year = bgShPreviewMonth.getFullYear();
+  const month = bgShPreviewMonth.getMonth();
+  document.getElementById('bg-sh-preview-month').textContent = year + '년 ' + (month + 1) + '월' + (cfg.dateRequired ? ' *' : '');
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const grid = document.getElementById('bg-sh-preview-grid');
+  let html = '';
+  for (let i = 0; i < firstDay; i++) html += '<div style="height:28px"></div>';
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = new Date(year, month, d);
+    const ds = fmt(date);
+    const isClosed = cfg.closedWeekdays.includes(date.getDay()) || cfg.closedDateList.includes(ds);
+    const isBeforeMin = date < minDate;
+    const isAfterMax = date > maxDate;
+    const disabled = isClosed || isBeforeMin || isAfterMax;
+    const isToday = ds === fmt(new Date());
+    const isSelected = ds === bgShPreviewSelected;
+    let style = 'height:28px;line-height:28px;border-radius:4px;font-size:12px;cursor:pointer;';
+    if (disabled) style += 'color:var(--gray-300);cursor:default;';
+    else if (isSelected) style += 'background:var(--primary);color:#fff;font-weight:600;';
+    else if (isToday) style += 'background:var(--primary-light);color:var(--primary);font-weight:600;';
+    else style += 'color:var(--gray-700);';
+    if (date.getDay() === 0 && !disabled) style += 'color:var(--red);';
+    if (date.getDay() === 6 && !disabled && !isSelected) style += 'color:var(--primary);';
+    const clickAttr = disabled ? '' : ' onclick="bgShPreviewSelectDate(\'' + ds + '\')"';
+    html += '<div style="' + style + '"' + clickAttr + '>' + d + '</div>';
+  }
+  grid.innerHTML = html;
+}
+
+function bgShPreviewSelectDate(ds) { bgShPreviewSelected = ds; updateBgShPreview(); }
+function bgShPreviewPrevMonth() { bgShPreviewMonth.setMonth(bgShPreviewMonth.getMonth() - 1); updateBgShPreview(); }
+function bgShPreviewNextMonth() { bgShPreviewMonth.setMonth(bgShPreviewMonth.getMonth() + 1); updateBgShPreview(); }
 
 init();
 </script>

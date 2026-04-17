@@ -83,6 +83,7 @@ const FILES = {
   stickers: path.join(DATA_DIR, 'bg_stickers.json'),
   productSettings: path.join(DATA_DIR, 'bg_product_settings.json'),
   customerInfo: path.join(DATA_DIR, 'bg_order_customer_info.json'),
+  shippingConfig: path.join(DATA_DIR, 'bg_shipping_config.json'),
 };
 
 function ensureDataDir() {
@@ -236,6 +237,17 @@ async function upsertProductSettings(productId, data) {
   return local;
 }
 
+async function deleteProductSettings(productId) {
+  if (USE_SUPABASE) {
+    const url = `${SB_URL}/rest/v1/bg_product_settings?product_id=eq.${encodeURIComponent(productId)}`;
+    await fetch(url, { method: 'DELETE', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY } });
+    return;
+  }
+  let settings = readJson(FILES.productSettings, []);
+  settings = settings.filter(s => s.product_id !== productId);
+  writeJson(FILES.productSettings, settings);
+}
+
 // ============================================
 // 고객 입력 정보
 // ============================================
@@ -293,6 +305,35 @@ async function getAllCustomerInfos() {
   return readJson(FILES.customerInfo, []);
 }
 
+// ============================================
+// 공통 출고일 설정 (shipping config)
+// ============================================
+
+const DEFAULT_SHIPPING_CONFIG = {
+  shipping_type: 'desired_date',
+  cutoff_enabled: false,
+  cutoff_hour: 14,
+  cutoff_minute: 0,
+  lead_time_days: 2,
+  min_select_days: 3,
+  max_select_days: 60,
+  closed_weekdays: [0, 6],
+  closed_dates: [],
+  date_required: true,
+  notice_enabled: false,
+  notice_text: '',
+};
+
+function getShippingConfig() {
+  return readJson(FILES.shippingConfig, DEFAULT_SHIPPING_CONFIG);
+}
+
+function saveShippingConfig(data) {
+  const config = { ...getShippingConfig(), ...data, updated_at: now() };
+  writeJson(FILES.shippingConfig, config);
+  return config;
+}
+
 module.exports = {
   getAllStickers,
   getStickerById,
@@ -302,8 +343,11 @@ module.exports = {
   getAllProductSettings,
   getProductSettings,
   upsertProductSettings,
+  deleteProductSettings,
   getCustomerInfo,
   getCustomerInfoBatch,
   saveCustomerInfo,
   getAllCustomerInfos,
+  getShippingConfig,
+  saveShippingConfig,
 };

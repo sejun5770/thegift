@@ -263,6 +263,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         info_status: existingInfo?.submitted_at ? 'completed' : 'pending',
         products,
         product_settings: productSettings,
+        shipping_config: store.getShippingConfig(),
         available_stickers: availableStickers,
         existing_info: existingInfo,
         bank_info: {
@@ -360,9 +361,28 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     return json(res, settings);
   }
 
+  // DELETE /api/bg/products/:productId/settings
+  if (productSettingsMatch && method === 'DELETE') {
+    const productId = decodeURIComponent(productSettingsMatch[1]);
+    await store.deleteProductSettings(productId);
+    return json(res, { ok: true });
+  }
+
   // GET /api/bg/customer-infos - 전체 고객 입력 목록 (관리자)
   if (pathname === '/api/bg/customer-infos' && method === 'GET') {
     return json(res, { infos: await store.getAllCustomerInfos() });
+  }
+
+  // GET /api/bg/shipping-config - 공통 출고일 설정 조회
+  if (pathname === '/api/bg/shipping-config' && method === 'GET') {
+    return json(res, { config: store.getShippingConfig() });
+  }
+
+  // PUT /api/bg/shipping-config - 공통 출고일 설정 저장
+  if (pathname === '/api/bg/shipping-config' && method === 'PUT') {
+    const body = await parseBody(req);
+    const config = store.saveShippingConfig(body);
+    return json(res, config);
   }
 
   return false; // 미처리 → 다른 핸들러로
