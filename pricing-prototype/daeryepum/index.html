@@ -935,6 +935,11 @@ nav a:hover{color:var(--gray-900)}
             </div>
           </div>
           <p style="font-size:10px;color:var(--gray-500);margin-top:6px">컷오프 이전: 당일 접수 / 이후: 익영업일 접수</p>
+          <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--gray-300)">
+            <label style="font-size:12px;color:var(--gray-700);display:block;margin-bottom:4px;font-weight:600">⚡ 오늘출발 추가 요금 (원)</label>
+            <input type="number" id="bg-sh-express-fee" value="0" min="0" max="1000000" step="100" style="width:100%;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px" oninput="updateBgShPreview()">
+            <p style="font-size:10px;color:var(--gray-500);margin-top:2px">고객이 빠른출고 선택 시 표시되는 추가 요금 (0원 = 무료)</p>
+          </div>
         </div>
 
         <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:8px">
@@ -1041,6 +1046,7 @@ nav a:hover{color:var(--gray-900)}
             <div style="color:var(--red);font-weight:600">일</div><div style="font-weight:600">월</div><div style="font-weight:600">화</div><div style="font-weight:600">수</div><div style="font-weight:600">목</div><div style="font-weight:600">금</div><div style="color:var(--primary);font-weight:600">토</div>
           </div>
           <div id="bg-sh-preview-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center"></div>
+          <div id="bg-sh-preview-legend" style="margin-top:8px;display:none;gap:12px;flex-wrap:wrap"></div>
           <div id="bg-sh-preview-selected" style="margin-top:8px;font-size:11px;color:var(--primary);font-weight:500;display:none"></div>
           <div id="bg-sh-preview-notice" style="margin-top:8px;font-size:11px;color:var(--gray-500);white-space:pre-wrap;display:none"></div>
         </div>
@@ -4129,6 +4135,7 @@ async function loadBgShipping() {
     document.getElementById('bg-sh-leadtime').value = cfg.lead_time_days ?? 2;
     document.getElementById('bg-sh-mindays').value = cfg.min_select_days ?? 3;
     document.getElementById('bg-sh-maxdays').value = cfg.max_select_days ?? 60;
+    document.getElementById('bg-sh-express-fee').value = cfg.express_fee ?? 0;
     // weekdays
     const closedW = cfg.closed_weekdays || [0, 6];
     document.querySelectorAll('#bg-sh-weekdays input').forEach(cb => {
@@ -4164,6 +4171,7 @@ async function saveBgShipping() {
     lead_time_days: parseInt(document.getElementById('bg-sh-leadtime').value) || 0,
     min_select_days: parseInt(document.getElementById('bg-sh-mindays').value) || 0,
     max_select_days: parseInt(document.getElementById('bg-sh-maxdays').value) || 60,
+    express_fee: parseInt(document.getElementById('bg-sh-express-fee').value) || 0,
     closed_weekdays: closedWeekdays,
     closed_dates: bgShClosedDates,
     date_required: document.querySelector('input[name="bg-sh-datereq"]:checked')?.value === 'required',
@@ -4181,19 +4189,20 @@ async function saveBgShipping() {
 
 function onBgShShipTypeChange() {
   const isToday = document.getElementById('bg-sh-today-shipping').checked;
+  // 컷오프 섹션: 오늘출발 활성화 시에만 표시
   document.getElementById('bg-sh-cutoff-section').style.display = isToday ? 'block' : 'none';
-  // 선택 가능일 min/max: 숨기지 않고 비활성 처리만 (값 보존)
+  // 선택 가능일 min/max: 항상 활성 (일반출고 범위 설정용)
   const rangeSection = document.getElementById('bg-sh-range-section');
   rangeSection.style.display = 'grid';
-  rangeSection.style.opacity = isToday ? '0.5' : '1';
+  rangeSection.style.opacity = '1';
   const minInput = document.getElementById('bg-sh-mindays');
   const maxInput = document.getElementById('bg-sh-maxdays');
   [minInput, maxInput].forEach(el => {
     if (!el) return;
-    el.disabled = isToday;
-    el.style.background = isToday ? 'var(--gray-100)' : '';
-    el.style.color = isToday ? 'var(--gray-400)' : '';
-    el.style.cursor = isToday ? 'not-allowed' : '';
+    el.disabled = false;
+    el.style.background = '';
+    el.style.color = '';
+    el.style.cursor = '';
   });
   updateBgShPreview();
 }
@@ -4356,55 +4365,100 @@ function renderBgShPreviewCalendar(cfg, minDate, maxDate) {
   const grid = document.getElementById('bg-sh-preview-grid');
   const today0 = new Date(); today0.setHours(0,0,0,0);
   const todayStr = fmt(today0);
-  // 오늘출발 모드: 오늘의 컷오프 기준 활성 여부
   const isTodayShipping = cfg.shipType === 'today_shipping';
-  let todayActiveInTodayMode = false;
+
+  // ── 오늘출발 모드: 빠른출고 선택가능 범위 계산 (receipt ~ receipt + leadtime)
+  let expressStart = null, expressEnd = null;
   if (isTodayShipping) {
+    // 접수일(receipt) 계산: 컷오프/영업일 고려
+    const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+    const cutMin = cfg.cutoffH * 60 + cfg.cutoffM;
     const todayIsBiz = !(cfg.closedWeekdays.includes(today0.getDay()) || cfg.closedDateList.includes(todayStr));
-    if (todayIsBiz) {
-      if (cfg.cutoffOn) {
-        const now = new Date();
-        const nowMin = now.getHours() * 60 + now.getMinutes();
-        const cutMin = cfg.cutoffH * 60 + cfg.cutoffM;
-        todayActiveInTodayMode = nowMin < cutMin;
-      } else {
-        todayActiveInTodayMode = true;
+    let receipt;
+    if (cfg.cutoffOn) {
+      if (todayIsBiz && nowMin < cutMin) receipt = new Date(today0);
+      else {
+        const nxt = new Date(today0); nxt.setDate(nxt.getDate() + 1);
+        receipt = getNextBizDay(nxt, cfg.closedWeekdays, cfg.closedDateList);
+      }
+    } else {
+      if (todayIsBiz) receipt = new Date(today0);
+      else {
+        const nxt = new Date(today0); nxt.setDate(nxt.getDate() + 1);
+        receipt = getNextBizDay(nxt, cfg.closedWeekdays, cfg.closedDateList);
       }
     }
+    expressStart = receipt;
+    // 도착 범위: receipt ~ receipt + leadtime 영업일
+    if ((cfg.leadTime || 0) > 0) {
+      expressEnd = addBizDays(receipt, cfg.leadTime, cfg.closedWeekdays, cfg.closedDateList);
+    } else {
+      expressEnd = receipt; // 당일출고
+    }
   }
+
+  // ── 일반출고 선택가능 범위: today + minDays ~ today + maxDays
+  const normalStart = new Date(today0); normalStart.setDate(normalStart.getDate() + (cfg.minDays || 0));
+  const normalEnd = new Date(today0); normalEnd.setDate(normalEnd.getDate() + (cfg.maxDays || 60));
 
   let html = '';
   for (let i = 0; i < firstDay; i++) html += '<div style="height:28px"></div>';
   for (let d = 1; d <= daysInMonth; d++) {
-    const date = new Date(year, month, d);
+    const date = new Date(year, month, d); date.setHours(0,0,0,0);
     const ds = fmt(date);
     const isClosed = cfg.closedWeekdays.includes(date.getDay()) || cfg.closedDateList.includes(ds);
     const isToday = ds === todayStr;
     const isSelected = ds === bgShPreviewSelected;
 
-    // 비활성 여부 계산
-    let disabled;
-    if (isTodayShipping) {
-      // 오늘출발 모드: 최소/최대 범위는 모두 비활성, 오늘만 컷오프 기준 활성/비활성
-      disabled = isClosed || !isToday || !todayActiveInTodayMode;
-    } else {
-      // 희망출고 모드: 기존 로직 (min~max 범위 활성)
-      const isBeforeMin = date < minDate;
-      const isAfterMax = date > maxDate;
-      disabled = isClosed || isBeforeMin || isAfterMax;
-    }
+    // 범위 판별
+    const inExpressRange = isTodayShipping && expressStart && expressEnd
+      && date >= expressStart && date <= expressEnd;
+    const inNormalRange = date >= normalStart && date <= normalEnd;
+    const disabled = isClosed || (!inExpressRange && !inNormalRange);
 
-    let style = 'height:28px;line-height:28px;border-radius:4px;font-size:12px;cursor:pointer;';
-    if (disabled) style += 'color:var(--gray-300);cursor:default;';
-    else if (isSelected) style += 'background:var(--primary);color:#fff;font-weight:600;';
-    else if (isToday) style += 'background:var(--primary-light);color:var(--primary);font-weight:600;';
-    else style += 'color:var(--gray-700);';
-    if (date.getDay() === 0 && !disabled) style += 'color:var(--red);';
-    if (date.getDay() === 6 && !disabled && !isSelected) style += 'color:var(--primary);';
+    let style = 'height:28px;line-height:28px;border-radius:4px;font-size:12px;cursor:pointer;border:1px solid transparent;';
+    if (disabled) {
+      style += 'color:var(--gray-300);cursor:default;';
+    } else if (isSelected) {
+      style += 'background:var(--primary);color:#fff;font-weight:600;';
+    } else if (inExpressRange && inNormalRange) {
+      // 두 범위 겹침: 초록 배경 + 파란 테두리 (duo-indicator)
+      style += 'background:#D1FAE5;color:#065F46;font-weight:600;border:1px solid var(--primary);';
+    } else if (inExpressRange) {
+      // 빠른출고 전용
+      style += 'background:#D1FAE5;color:#065F46;font-weight:600;';
+    } else if (isToday) {
+      style += 'background:var(--primary-light);color:var(--primary);font-weight:600;';
+    } else {
+      // 일반출고 범위
+      style += 'color:var(--gray-700);';
+    }
+    if (date.getDay() === 0 && !disabled && !isSelected && !inExpressRange) style += 'color:var(--red);';
+    if (date.getDay() === 6 && !disabled && !isSelected && !inExpressRange) style += 'color:var(--primary);';
     const clickAttr = disabled ? '' : ' onclick="bgShPreviewSelectDate(\'' + ds + '\')"';
     html += '<div style="' + style + '"' + clickAttr + '>' + d + '</div>';
   }
   grid.innerHTML = html;
+
+  // ── 범례 (legend): 오늘출발 모드일 때만 표시
+  const legendEl = document.getElementById('bg-sh-preview-legend');
+  if (legendEl) {
+    if (isTodayShipping) {
+      legendEl.style.display = 'flex';
+      legendEl.innerHTML = ''
+        + '<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--gray-600)">'
+        +   '<span style="display:inline-block;width:12px;height:12px;background:#D1FAE5;border-radius:2px"></span> ⚡ 빠른출고'
+        + '</span>'
+        + '<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--gray-600)">'
+        +   '<span style="display:inline-block;width:12px;height:12px;background:#fff;border:1px solid var(--gray-300);border-radius:2px"></span> 일반출고'
+        + '</span>'
+        + '<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--gray-600)">'
+        +   '<span style="display:inline-block;width:12px;height:12px;background:#D1FAE5;border:1px solid var(--primary);border-radius:2px"></span> 겹침'
+        + '</span>';
+    } else {
+      legendEl.style.display = 'none';
+    }
+  }
 }
 
 function bgShPreviewSelectDate(ds) { bgShPreviewSelected = ds; updateBgShPreview(); }

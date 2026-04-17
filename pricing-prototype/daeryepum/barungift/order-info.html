@@ -336,7 +336,9 @@
   }
 
   function getSettings() {
-    return orderData?.product_settings || {};
+    // 공통 shipping_config (관리자 출고일 설정) + 상품별 product_settings 병합
+    // 상품별 설정이 우선 (per-product override)
+    return { ...(orderData?.shipping_config || {}), ...(orderData?.product_settings || {}) };
   }
 
   /** 해당 날짜가 휴무일(출고불가)인지 확인 */
@@ -453,7 +455,10 @@
   }
 
   function getExpressFee() {
-    return orderData?.product_settings?.express_fee || 0;
+    // 공통 shipping_config 우선, 없으면 상품별 product_settings 폴백
+    return orderData?.shipping_config?.express_fee
+      ?? orderData?.product_settings?.express_fee
+      ?? 0;
   }
 
   function isExpressAvailable() {
@@ -692,6 +697,21 @@
       if (matching.length === 0) {
         stTypeHtml = '<div class="mt-3 text-xs text-gray-400">이 상품에 적용 가능한 스티커가 없습니다.</div>';
       } else {
+        // 선택된 스티커 대형 프리뷰 (선택 시에만)
+        var selectedSticker = selStickerId ? matching.find(function(s){ return s.id === selStickerId; }) : null;
+        var bigPreviewHtml = '';
+        if (selectedSticker) {
+          var bigImg = selectedSticker.preview_image_url
+            ? '<img src="' + selectedSticker.preview_image_url + '" alt="' + (selectedSticker.name||'').replace(/"/g,'&quot;') + '" class="max-h-[180px] max-w-full object-contain" />'
+            : '<div class="w-40 h-40 flex items-center justify-center text-gray-400 text-sm" style="background:' + (selectedSticker.preview_color || '#F3F4F6') + '">이미지 없음</div>';
+          bigPreviewHtml = ''
+            + '<div class="sticker-big-preview mt-3 p-4 bg-white rounded-lg border-2 border-blue-400 flex flex-col items-center gap-2">'
+            +   '<span class="text-xs text-blue-600 font-medium">✓ 선택됨</span>'
+            +   bigImg
+            +   '<span class="text-sm font-semibold text-gray-800">' + (selectedSticker.name || '스티커') + '</span>'
+            + '</div>';
+        }
+
         // "선택안함" 카드
         var noneSelected = !selStickerId;
         var noneCardCls = noneSelected
@@ -699,8 +719,8 @@
           : 'ring-1 ring-gray-200 bg-white hover:ring-blue-300';
         var noneCard = ''
           + '<button type="button" data-action="productStickerType" data-idx="' + idx + '" data-value="" '
-          +   'class="sticker-card ' + noneCardCls + ' rounded-lg overflow-hidden text-left w-full transition">'
-          +   '<div class="w-full aspect-square flex items-center justify-center bg-gray-50 text-gray-400 text-2xl">✕</div>'
+          +   'class="sticker-card ' + noneCardCls + ' rounded-lg overflow-hidden text-left w-full transition touch-manipulation">'
+          +   '<div class="w-full aspect-square flex items-center justify-center bg-gray-50 text-gray-400 text-3xl">✕</div>'
           +   '<div class="px-2 py-1.5 text-xs">'
           +     '<div class="font-medium text-gray-700">선택안함</div>'
           +   '</div>'
@@ -713,11 +733,11 @@
             : 'ring-1 ring-gray-200 bg-white hover:ring-blue-300';
           var safeName = (st.name || '스티커').replace(/"/g, '&quot;');
           var thumb = st.preview_image_url
-            ? '<img src="' + st.preview_image_url + '" alt="' + safeName + '" class="w-full aspect-square object-contain bg-white pointer-events-none" />'
+            ? '<img src="' + st.preview_image_url + '" alt="' + safeName + '" class="w-full aspect-square object-contain bg-white pointer-events-none" loading="lazy" />'
             : '<div class="w-full aspect-square flex items-center justify-center text-gray-400 text-xs pointer-events-none" style="background:' + (st.preview_color || '#F9FAFB') + '">이미지 없음</div>';
           return ''
             + '<button type="button" data-action="productStickerType" data-idx="' + idx + '" data-value="' + st.id + '" '
-            +   'class="sticker-card ' + cardCls + ' rounded-lg overflow-hidden text-left w-full transition">'
+            +   'class="sticker-card ' + cardCls + ' rounded-lg overflow-hidden text-left w-full transition touch-manipulation">'
             +   thumb
             +   '<div class="px-2 py-1.5 text-xs">'
             +     '<div class="font-medium text-gray-800 truncate">' + (st.name || '스티커') + '</div>'
@@ -726,9 +746,10 @@
         }).join('');
 
         stTypeHtml = ''
-          + '<div class="mt-3">'
+          + '<div class="mt-3 sticker-picker" data-product-idx="' + idx + '">'
           +   '<label class="block text-xs font-medium text-gray-600 mb-2">스티커타입</label>'
-          +   '<div class="grid grid-cols-3 sm:grid-cols-4 gap-2">'
+          +   bigPreviewHtml
+          +   '<div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-2">'
           +     noneCard + cards
           +   '</div>'
           + '</div>';
@@ -1053,10 +1074,16 @@
   const STEP_RENDERERS = [renderStep0, renderStep1, renderStep2, renderStep3, renderStep4];
 
   function renderCurrentStep() {
+    // 스크롤 위치 보존하여 터치 시 화면 점프/깜빡임 방지
+    const scrollY = window.pageYOffset || document.documentElement.scrollTop;
     $stepContent.innerHTML = STEP_RENDERERS[currentStep]();
     renderStepIndicator();
     updateNavButtons();
     saveFormState();
+    // 동일 스텝 재렌더링 시 이전 스크롤 복원
+    if (scrollY > 0) {
+      window.scrollTo({ top: scrollY, behavior: 'instant' });
+    }
   }
 
   // ============================================

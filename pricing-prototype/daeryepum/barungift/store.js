@@ -318,6 +318,7 @@ const DEFAULT_SHIPPING_CONFIG = {
   lead_time_days: 2,
   min_select_days: 3,
   max_select_days: 60,
+  express_fee: 0,
   closed_weekdays: [0, 6],
   closed_dates: [],
   date_required: true,
@@ -325,14 +326,40 @@ const DEFAULT_SHIPPING_CONFIG = {
   notice_text: '',
 };
 
-function getShippingConfig() {
+// 단일 row 식별 ID (bg_shipping_config 테이블)
+const SHIPPING_CONFIG_ID = '00000000-0000-0000-0000-000000000001';
+
+async function getShippingConfig() {
+  if (USE_SUPABASE) {
+    try {
+      const rows = await sbGet('bg_shipping_config', `id=eq.${SHIPPING_CONFIG_ID}`);
+      if (rows && rows[0]) return { ...DEFAULT_SHIPPING_CONFIG, ...rows[0] };
+      return DEFAULT_SHIPPING_CONFIG;
+    } catch (e) {
+      console.warn('[store] bg_shipping_config Supabase fetch 실패, JSON 폴백:', e.message);
+    }
+  }
   return readJson(FILES.shippingConfig, DEFAULT_SHIPPING_CONFIG);
 }
 
-function saveShippingConfig(data) {
-  const config = { ...getShippingConfig(), ...data, updated_at: now() };
-  writeJson(FILES.shippingConfig, config);
-  return config;
+async function saveShippingConfig(data) {
+  const current = await getShippingConfig();
+  const merged = { ...current, ...data, updated_at: now() };
+  if (USE_SUPABASE) {
+    try {
+      // 존재 여부 확인
+      const existing = await sbGet('bg_shipping_config', `id=eq.${SHIPPING_CONFIG_ID}`);
+      if (existing && existing.length) {
+        const { id: _id, created_at, ...updateData } = merged;
+        return await sbUpdate('bg_shipping_config', `id=eq.${SHIPPING_CONFIG_ID}`, updateData);
+      }
+      return await sbInsert('bg_shipping_config', { id: SHIPPING_CONFIG_ID, ...merged });
+    } catch (e) {
+      console.warn('[store] bg_shipping_config Supabase save 실패, JSON 폴백:', e.message);
+    }
+  }
+  writeJson(FILES.shippingConfig, merged);
+  return merged;
 }
 
 // ============================================

@@ -214,7 +214,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         info_status: existingInfo?.submitted_at ? 'completed' : 'pending',
         products,
         product_settings: productSettings,
-        shipping_config: store.getShippingConfig(),
+        shipping_config: await store.getShippingConfig(),
         available_stickers: availableStickers,
         existing_info: existingInfo,
         bank_info: {
@@ -326,13 +326,13 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
   // GET /api/bg/shipping-config - 공통 출고일 설정 조회
   if (pathname === '/api/bg/shipping-config' && method === 'GET') {
-    return json(res, { config: store.getShippingConfig() });
+    return json(res, { config: await store.getShippingConfig() });
   }
 
   // PUT /api/bg/shipping-config - 공통 출고일 설정 저장
   if (pathname === '/api/bg/shipping-config' && method === 'PUT') {
     const body = await parseBody(req);
-    const config = store.saveShippingConfig(body);
+    const config = await store.saveShippingConfig(body);
     return json(res, config);
   }
 
