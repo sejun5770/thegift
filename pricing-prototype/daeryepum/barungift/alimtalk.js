@@ -1,113 +1,180 @@
 /**
- * 비즈톡(InfoBank) 알림톡 클라이언트 + 템플릿
- * Node.js HTTP 서버용 포팅 (Next.js: src/lib/alimtalk/biztalk.ts + template.ts)
+ * Barunson Partner API 기반 알림톡 발송 클라이언트 + 템플릿
  *
- * API 문서: https://omni.ibapi.kr (InfoBank OMNI)
- *  - POST /v1/auth/token : 액세스 토큰 발급
- *  - POST /v1/send/alimtalk : 알림톡 발송
+ * InfoBank OMNI를 직접 호출하지 않고, 바른손 자체 Partner API를 경유한다.
+ *   1) POST /api/Partner/authenticate   → Bearer 토큰 발급
+ *   2) POST /api/Biztalk/send           → 알림톡 발송 (Authorization: Bearer)
+ *
+ * 환경변수:
+ *   BIZTALK_API_URL         (기본: https://api.barunsoncard.com)
+ *   PARTNER_CLIENT_ID       (필수, 바른손 API 담당자 문의)
+ *   PARTNER_CLIENT_SECRET   (필수)
+ *   KAKAO_SENDER_KEY        (필수, 비즈 채널 발신 프로필 키)
+ *   KAKAO_CALLBACK          (기본: 1644-0708)
+ *   BIZTALK_TEMPLATE_CODE_ORDER_INFO (기본: BH0175_3)
+ *   BIZTALK_TEMPLATE_BODY   (선택, 카카오 승인본 그대로)
+ *   BIZTALK_TEMPLATE_SUBJECT (선택)
  */
 
 // ============================================
-// 비즈톡 설정 + 토큰 캐시
+// 설정 + 토큰 캐시
 // ============================================
-let cachedToken = null;
+let cachedToken = null; // { token, expires(ms), refreshToken, refreshExpires(ms) }
 
 function getConfig() {
-  const clientId = process.env.BIZTALK_CLIENT_ID;
-  const clientPasswd = process.env.BIZTALK_CLIENT_PASSWD;
-  const senderKey = process.env.BIZTALK_SENDER_KEY;
-  const baseUrl = process.env.BIZTALK_BASE_URL || 'https://omni.ibapi.kr';
-  if (!clientId || !clientPasswd || !senderKey) return null;
-  return { baseUrl, clientId, clientPasswd, senderKey };
+  const clientId = process.env.PARTNER_CLIENT_ID;
+  const clientSecret = process.env.PARTNER_CLIENT_SECRET;
+  const senderKey = process.env.KAKAO_SENDER_KEY;
+  const baseUrl = (process.env.BIZTALK_API_URL || 'https://api.barunsoncard.com').replace(/\/$/, '');
+  const callback = process.env.KAKAO_CALLBACK || '1644-0708';
+
+  if (!clientId || !clientSecret || !senderKey) return null;
+  return { baseUrl, clientId, clientSecret, senderKey, callback };
 }
 
 function isBiztalkConfigured() {
   return getConfig() !== null;
 }
 
-async function fetchAccessToken(config) {
-  const now = Date.now();
-  if (cachedToken && cachedToken.expiresAt > now + 60_000) {
-    return cachedToken.token;
-  }
+function parseExpires(isoStr, fallbackMs) {
+  if (!isoStr) return fallbackMs;
+  const t = new Date(isoStr).getTime();
+  return Number.isFinite(t) ? t : fallbackMs;
+}
 
-  const res = await fetch(`${config.baseUrl}/v1/auth/token`, {
+async function authenticate(config) {
+  const res = await fetch(`${config.baseUrl}/api/Partner/authenticate`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-IB-Client-Id': config.clientId,
-      'X-IB-Client-Passwd': config.clientPasswd,
-    },
-    body: JSON.stringify({}),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+    }),
   });
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`비즈톡 토큰 발급 실패 (${res.status}): ${text}`);
+    throw new Error(`Partner 인증 실패 (${res.status}): ${text}`);
   }
 
   const data = await res.json();
-  const token = data?.data?.token;
-  if (!token) throw new Error(`비즈톡 토큰 응답에 token 없음: ${JSON.stringify(data)}`);
-
-  const expiredAt = data?.data?.expired
-    ? new Date(data.data.expired).getTime()
-    : now + 60 * 60 * 1000;
-
-  cachedToken = { token, expiresAt: expiredAt };
-  return token;
-}
-
-function normalizePhone(phone) {
-  return String(phone || '').replace(/[^0-9]/g, '');
-}
-
-async function sendViaBiztalk(config, req) {
-  const token = await fetchAccessToken(config);
-  const body = {
-    senderKey: config.senderKey,
-    msgType: 'AT',
-    to: normalizePhone(req.to),
-    text: req.text,
-    templateCode: req.templateCode,
-  };
-  if (Array.isArray(req.buttons) && req.buttons.length > 0) body.button = req.buttons;
-  if (req.fallback) {
-    body.fallback = {
-      type: req.fallback.type,
-      text: req.fallback.text,
-      ...(req.fallback.from ? { from: req.fallback.from } : {}),
-    };
+  if (!data?.token) {
+    throw new Error(`Partner 응답에 token 없음: ${JSON.stringify(data)}`);
   }
 
-  const res = await fetch(`${config.baseUrl}/v1/send/alimtalk`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
-  });
+  const now = Date.now();
+  cachedToken = {
+    token: data.token,
+    expires: parseExpires(data.expires, now + 60 * 60 * 1000),
+    refreshToken: data.refreshToken || null,
+    refreshExpires: parseExpires(data.refreshTokenExpires, now + 24 * 60 * 60 * 1000),
+  };
+  return cachedToken.token;
+}
+
+async function refreshOrReauth(config) {
+  const now = Date.now();
+  if (cachedToken?.refreshToken && cachedToken.refreshExpires > now + 60_000) {
+    try {
+      const res = await fetch(`${config.baseUrl}/api/Partner/refresh-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientId: config.clientId,
+          refreshToken: cachedToken.refreshToken,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.token) {
+          cachedToken = {
+            token: data.token,
+            expires: parseExpires(data.expires, now + 60 * 60 * 1000),
+            refreshToken: data.refreshToken || cachedToken.refreshToken,
+            refreshExpires: parseExpires(data.refreshTokenExpires, cachedToken.refreshExpires),
+          };
+          return cachedToken.token;
+        }
+      }
+    } catch (e) {
+      console.warn('[Alimtalk] refresh 실패, 재인증 시도:', e.message);
+    }
+  }
+  return authenticate(config);
+}
+
+async function getToken(config) {
+  const now = Date.now();
+  if (cachedToken && cachedToken.expires > now + 5 * 60_000) {
+    return cachedToken.token;
+  }
+  if (cachedToken) return refreshOrReauth(config);
+  return authenticate(config);
+}
+
+// 전화번호 정규화: 하이픈 포함 형식 필수
+function normalizePhone(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('02')) {
+    if (digits.length === 9) return `${digits.slice(0, 2)}-${digits.slice(2, 5)}-${digits.slice(5)}`;
+    if (digits.length === 10) return `${digits.slice(0, 2)}-${digits.slice(2, 6)}-${digits.slice(6)}`;
+    return digits;
+  }
+  if (digits.length === 10) return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  if (digits.length === 11) return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
+  return digits;
+}
+
+async function sendViaPartner(config, req) {
+  const token = await getToken(config);
+
+  const body = {
+    recipientNum: normalizePhone(req.to),
+    content: req.text,
+    templateCode: req.templateCode,
+    senderKey: config.senderKey,
+    callback: req.callback || config.callback,
+    subject: req.subject || '알림톡',
+    msgType: 1008,
+  };
+
+  const doSend = async (authToken) => {
+    return fetch(`${config.baseUrl}/api/Biztalk/send`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+  };
+
+  let res = await doSend(token);
+
+  // 401 시 토큰 갱신 후 1회 재시도
+  if (res.status === 401) {
+    const newToken = await refreshOrReauth(config);
+    res = await doSend(newToken);
+  }
 
   let raw = null;
   try { raw = await res.json(); } catch {}
 
-  const success = res.ok && (raw?.code === '0000' || raw?.result === 'success');
+  const success = res.ok && (raw?.success === true || raw?.code === '0000' || raw?.result === 'success');
 
   return {
     success,
     mock: false,
-    messageId: raw?.messageId,
+    messageId: raw?.tranId ? String(raw.tranId) : (raw?.messageId || undefined),
     code: raw?.code,
-    message: raw?.message,
+    message: raw?.message || raw?.errors,
     raw,
   };
 }
 
 /**
  * 알림톡 발송. 설정 없으면 mock 응답 반환.
- * @param {{ to, templateCode, text, buttons?, fallback? }} req
- * @returns {Promise<{success,mock,messageId?,code?,message?,raw?}>}
  */
 async function sendAlimtalk(req) {
   const config = getConfig();
@@ -117,7 +184,6 @@ async function sendAlimtalk(req) {
       to: req.to,
       templateCode: req.templateCode,
       textPreview: String(req.text || '').slice(0, 60),
-      buttons: req.buttons?.length ?? 0,
     });
     return {
       success: true,
@@ -127,11 +193,19 @@ async function sendAlimtalk(req) {
     };
   }
 
-  return sendViaBiztalk(config, req);
+  try {
+    return await sendViaPartner(config, req);
+  } catch (e) {
+    return {
+      success: false,
+      mock: false,
+      message: e.message,
+    };
+  }
 }
 
 // ============================================
-// 템플릿 관리
+// 템플릿 관리 (BH0175_3 기본)
 // ============================================
 
 const TEMPLATE_VARIABLES = {
@@ -142,9 +216,9 @@ const TEMPLATE_VARIABLES = {
   주문정보URL: { description: '고객 주문정보 입력 페이지 URL', example: 'https://example.com/...' },
 };
 
-// 비즈톡 승인 템플릿 BH0175_3 (회원가입 안내, #{name} 변수 1개)
-// 카카오 승인본과 1바이트도 다르면 발송 거부되므로 정확히 일치해야 함
+// wedd_biztalk.BH0175_3 승인본
 const DEFAULT_TEMPLATE_CODE = 'BH0175_3';
+const DEFAULT_TEMPLATE_SUBJECT = '[바른손카드] 회원가입 안내';
 const DEFAULT_TEMPLATE =
   `[바른손카드] 회원가입 안내\n\n` +
   `안녕하세요 #{name}고객님, 바른손카드 회원가입을 축하드립니다.\n\n` +
@@ -162,25 +236,14 @@ const DEFAULT_TEMPLATE =
   `남은 결혼 준비도 바른손카드가 든든하게 지원하겠습니다.\n\n` +
   `바른손카드 고객센터 (1644-0708)`;
 
-const DEFAULT_BUTTON_NAME = '';
-
-function getButtonConfig() {
-  // BH0175_3 템플릿은 버튼이 없으므로 기본 비활성화
-  // 환경변수로 강제 활성화하려면 BIZTALK_TEMPLATE_BUTTON_NAME에 값 입력
-  if (process.env.BIZTALK_TEMPLATE_BUTTON_DISABLED === 'true') return null;
-  const envName = process.env.BIZTALK_TEMPLATE_BUTTON_NAME;
-  if (!envName) return null; // 값이 없거나 빈 문자열이면 버튼 없음
-  return {
-    name: envName,
-    type: 'WL',
-  };
-}
-
 function getTemplateConfig() {
   return {
     templateCode: process.env.BIZTALK_TEMPLATE_CODE_ORDER_INFO || DEFAULT_TEMPLATE_CODE,
+    subject: process.env.BIZTALK_TEMPLATE_SUBJECT || DEFAULT_TEMPLATE_SUBJECT,
     body: process.env.BIZTALK_TEMPLATE_BODY || DEFAULT_TEMPLATE,
-    button: getButtonConfig(),
+    // Partner API 방식은 카카오 템플릿 자체에 버튼이 정의됨.
+    // UI 미리보기를 위한 플레이스홀더만 유지.
+    button: null,
   };
 }
 
@@ -188,15 +251,12 @@ function renderTemplate(template, vars) {
   let result = String(template || '');
   for (const [key, value] of Object.entries(vars || {})) {
     if (value == null) continue;
-    // replaceAll로 #{key} 모두 치환
     result = result.split(`#{${key}}`).join(String(value));
   }
   return result;
 }
 
 function buildCustomerUrl(orderId) {
-  // PUBLIC_BASE_URL: 전체 URL (예: https://docker-manager.barunsoncard.com/c/barungift)
-  // BASE_PATH:      /c/barungift 와 같은 경로만 있는 경우 상대경로
   const publicBase = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
   if (publicBase) {
     return `${publicBase}/order-info?oid=${encodeURIComponent(orderId)}`;
@@ -205,9 +265,6 @@ function buildCustomerUrl(orderId) {
   return `${basePath}/order-info?oid=${encodeURIComponent(orderId)}`;
 }
 
-/**
- * 주문 정보로 발송용 메시지 페이로드를 조립.
- */
 function buildMessagePayload(params) {
   const config = getTemplateConfig();
   const customerUrl = buildCustomerUrl(params.orderId);
@@ -229,15 +286,9 @@ function buildMessagePayload(params) {
   return {
     text,
     templateCode: config.templateCode,
+    subject: config.subject,
     customerUrl,
-    button: config.button
-      ? {
-          name: config.button.name,
-          type: config.button.type,
-          url_mobile: customerUrl,
-          url_pc: customerUrl,
-        }
-      : null,
+    button: config.button,
     variables,
   };
 }
