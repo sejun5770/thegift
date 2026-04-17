@@ -1598,6 +1598,7 @@ async function apiMarketing(query = {}) {
 
 // --- HTTP Server ---
 const server = http.createServer(async (req, res) => {
+  try {
   const parsed = url.parse(req.url, true);
   // BASE_PATH 접두어 제거 (docker-manager 프록시가 /c/barungift/... 형태로 전달)
   let pathname = parsed.pathname;
@@ -1874,8 +1875,23 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(404);
     res.end('Not found');
   }
+  } catch (globalErr) {
+    console.error('[HTTP handler error]', req.method, req.url, globalErr.message);
+    if (!res.headersSent) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: '서버 내부 오류' }));
+    }
+  }
 });
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`답례품 관리 서버: http://localhost:${PORT}${BASE_PATH || ''}`);
+});
+
+// 서버 크래시 방지
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err.message, err.stack);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
 });
