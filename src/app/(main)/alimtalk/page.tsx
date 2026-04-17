@@ -106,6 +106,13 @@ export default function AlimtalkBulkPage() {
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
+  const [resultsOpen, setResultsOpen] = useState(false);
+  const [sendResultsData, setSendResultsData] = useState<{
+    results: SendResult[];
+    summary: SendSummary;
+    mock: boolean;
+  } | null>(null);
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_LIMIT));
 
   const fetchRecipients = useCallback(async () => {
@@ -143,6 +150,11 @@ export default function AlimtalkBulkPage() {
 
   const sendableIds = useMemo(
     () => recipients.filter((r) => r.recipient_phone).map((r) => r.order_id),
+    [recipients]
+  );
+
+  const recipientMap = useMemo(
+    () => new Map(recipients.map((r) => [r.order_id, r])),
     [recipients]
   );
 
@@ -220,16 +232,13 @@ export default function AlimtalkBulkPage() {
       };
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       const summary = data.summary ?? { total: 0, sent: 0, failed: 0, skipped: 0 };
-      const prefix = data.mock ? '(Mock) ' : '';
-      if (summary.failed === 0 && summary.skipped === 0) {
-        toast.success(`${prefix}알림톡 ${summary.sent}건 발송 완료`);
-      } else {
-        toast.message(
-          `${prefix}발송 ${summary.sent} / 실패 ${summary.failed} / 스킵 ${summary.skipped}`,
-          { description: formatSkipDetails(data.results ?? []) }
-        );
-      }
+      setSendResultsData({
+        results: data.results ?? [],
+        summary,
+        mock: !!data.mock,
+      });
       setConfirmOpen(false);
+      setResultsOpen(true);
       await fetchRecipients();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '발송 실패');
@@ -564,9 +573,26 @@ export default function AlimtalkBulkPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* 발송 결과 다이얼로그 */}
+      <Dialog open={resultsOpen} onOpenChange={setResultsOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>발송 결과</DialogTitle>
+          </DialogHeader>
+          {sendResultsData && (
+            <SendResultsView
+              data={sendResultsData}
+              recipientMap={recipientMap}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+
+// ── Sub-components ────────────────────────────
 
 function MessagePreviewCard({ preview }: { preview: PreviewData }) {
   return (
@@ -583,22 +609,114 @@ function MessagePreviewCard({ preview }: { preview: PreviewData }) {
   );
 }
 
-function formatSkipDetails(results: SendResult[]): string {
-  const reasons = new Map<string, number>();
-  for (const r of results) {
-    if (r.success) continue;
-    const key = r.skipped_reason ?? (r.error ? 'error' : 'unknown');
-    reasons.set(key, (reasons.get(key) ?? 0) + 1);
-  }
-  if (reasons.size === 0) return '';
-  const label: Record<string, string> = {
-    not_daeryepum: '답례품 아님',
-    missing_phone: '전화번호 없음',
-    order_not_found: '주문 없음',
-    error: '발송 오류',
-    unknown: '알 수 없음',
-  };
-  return Array.from(reasons.entries())
-    .map(([k, v]) => `${label[k] ?? k}: ${v}건`)
-    .join(' · ');
+const SKIP_REASON_LABEL: Record<string, string> = {
+  not_daeryepum: '답례품 아님',
+  missing_phone: '전화번호 없음',
+  order_not_found: '주문 없음',
+};
+
+function SendResultsView({
+  data,
+  recipientMap,
+}: {
+  data: { results: SendResult[]; summary: SendSummary; mock: boolean };
+  recipientMap: Map<string, Recipient>;
+}) {
+  const { results, summary, mock } = data;
+
+  return (
+    <div className="flex flex-col gap-3 overflow-hidden">
+      {/* 요약 카드 */}
+      <div className="flex gap-3">
+        <SummaryBadge label="전체" count={summary.total} variant="outline" />
+        <SummaryBadge label="성공" count={summary.sent} variant="success" />
+        {summary.failed > 0 && (
+          <SummaryBadge label="실패" count={summary.failed} variant="destructive" />
+        )}
+        {summary.skipped > 0 && (
+          <SummaryBadge label="스킵" count={summary.skipped} variant="warning" />
+        )}
+        {mock && (
+          <Badge variant="outline" className="text-xs">Mock</Badge>
+        )}
+      </div>
+
+      {/* 결과 테이블 */}
+      <div className="overflow-auto rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>주문번호</TableHead>
+              <TableHead>수신자</TableHead>
+              <TableHead>결과</TableHead>
+              <TableHead>상세</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {results.map((r) => {
+              const recipient = recipientMap.get(r.order_id);
+              return (
+                <TableRow key={r.order_id}>
+                  <TableCell className="font-mono text-xs">
+                    {recipient?.order_number ?? r.order_id.slice(0, 8)}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {recipient?.recipient_name ?? '-'}
+                  </TableCell>
+                  <TableCell>
+                    {r.success ? (
+                      <Badge className="bg-green-100 text-green-800 hover:bg-green-100">
+                        성공
+                      </Badge>
+                    ) : r.skipped_reason ? (
+                      <Badge variant="outline" className="text-yellow-700 border-yellow-300">
+                        스킵
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive">실패</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-xs text-gray-500">
+                    {r.success
+                      ? r.message_id
+                        ? `msgId: ${r.message_id}`
+                        : ''
+                      : r.skipped_reason
+                        ? SKIP_REASON_LABEL[r.skipped_reason] ?? r.skipped_reason
+                        : r.error ?? '알 수 없는 오류'}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  );
+}
+
+function SummaryBadge({
+  label,
+  count,
+  variant,
+}: {
+  label: string;
+  count: number;
+  variant: 'outline' | 'success' | 'destructive' | 'warning';
+}) {
+  const colorClass =
+    variant === 'success'
+      ? 'bg-green-100 text-green-800 border-green-200'
+      : variant === 'destructive'
+        ? 'bg-red-100 text-red-800 border-red-200'
+        : variant === 'warning'
+          ? 'bg-yellow-100 text-yellow-800 border-yellow-200'
+          : 'bg-gray-100 text-gray-800 border-gray-200';
+
+  return (
+    <div className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 ${colorClass}`}>
+      <span className="text-xs">{label}</span>
+      <span className="text-sm font-semibold">{count}</span>
+    </div>
+  );
 }
