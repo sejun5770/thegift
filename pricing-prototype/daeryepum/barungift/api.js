@@ -230,6 +230,24 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
   }
 
+  // GET /api/bg/debug/schema?table=custom_order - 테이블 컬럼 목록 조회 (개발용)
+  if (pathname === '/api/bg/debug/schema' && method === 'GET') {
+    const tableName = query.table || 'custom_order';
+    try {
+      const pool = await getPool();
+      const result = await pool.request()
+        .query(`
+          SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+          FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_NAME = '${tableName.replace(/'/g, '')}'
+          ORDER BY ORDINAL_POSITION
+        `);
+      return json(res, { table: tableName, columns: result.recordset });
+    } catch (err) {
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
   // POST /api/bg/orders/:orderId/customer-info - 고객 입력 저장
   const customerInfoMatch = pathname.match(/^\/api\/bg\/orders\/([^/]+)\/customer-info$/);
   if (customerInfoMatch && method === 'POST') {

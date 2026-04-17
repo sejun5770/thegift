@@ -1197,7 +1197,7 @@
     var isNone = stInput === 'none';
 
     var headerHtml = '<div class="mt-3">'
-      + '<p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">문구는 샘플이미지로 출력되며 이름은 출력되지 않습니다.</p>'
+      + (isNone ? '<p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">문구는 샘플이미지로 출력되며 이름은 출력되지 않습니다.</p>' : '')
       + '<div class="flex items-center justify-between mb-2">'
       + '<label class="text-xs font-medium text-gray-600">스티커 문구 입력</label>'
       + '<label class="flex items-center gap-1.5 cursor-pointer">'
