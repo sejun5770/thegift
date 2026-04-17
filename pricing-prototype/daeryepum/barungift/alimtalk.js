@@ -1,20 +1,16 @@
 /**
- * 비즈톡(InfoBank OMNI API) 알림톡 클라이언트
+ * 비즈톡(InfoBank) 알림톡 클라이언트 + 템플릿
+ * Node.js HTTP 서버용 포팅 (Next.js: src/lib/alimtalk/biztalk.ts + template.ts)
  *
- * Node.js stdlib만 사용. 외부 패키지 없이 HTTPS로 직접 호출.
- *
- * 환경변수:
- *  - BIZTALK_CLIENT_ID
- *  - BIZTALK_CLIENT_PASSWD
- *  - BIZTALK_SENDER_KEY
- *  - BIZTALK_BASE_URL (기본: https://omni.ibapi.kr)
- *  - BIZTALK_TEMPLATE_CODE_ORDER_INFO
- *  - BIZTALK_TEMPLATE_BODY (선택, 승인본 오버라이드)
- *  - BIZTALK_TEMPLATE_BUTTON_NAME (선택, 빈 값이면 버튼 없음)
- *  - BIZTALK_TEMPLATE_BUTTON_DISABLED=true (선택)
+ * API 문서: https://omni.ibapi.kr (InfoBank OMNI)
+ *  - POST /v1/auth/token : 액세스 토큰 발급
+ *  - POST /v1/send/alimtalk : 알림톡 발송
  */
-const https = require('https');
-const { URL } = require('url');
+
+// ============================================
+// 비즈톡 설정 + 토큰 캐시
+// ============================================
+let cachedToken = null;
 
 function getConfig() {
   const clientId = process.env.BIZTALK_CLIENT_ID;
@@ -29,67 +25,30 @@ function isBiztalkConfigured() {
   return getConfig() !== null;
 }
 
-function httpsRequest(urlStr, options, body) {
-  return new Promise((resolve, reject) => {
-    const u = new URL(urlStr);
-    const reqOpts = {
-      method: options.method || 'GET',
-      hostname: u.hostname,
-      port: u.port || 443,
-      path: u.pathname + u.search,
-      headers: options.headers || {},
-    };
-    const req = https.request(reqOpts, (res) => {
-      let chunks = '';
-      res.on('data', (c) => (chunks += c));
-      res.on('end', () => {
-        resolve({
-          statusCode: res.statusCode,
-          headers: res.headers,
-          body: chunks,
-        });
-      });
-    });
-    req.on('error', reject);
-    if (body) req.write(body);
-    req.end();
-  });
-}
-
-let cachedToken = null; // { token, expiresAt }
-
 async function fetchAccessToken(config) {
   const now = Date.now();
   if (cachedToken && cachedToken.expiresAt > now + 60_000) {
     return cachedToken.token;
   }
 
-  const res = await httpsRequest(
-    `${config.baseUrl}/v1/auth/token`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-IB-Client-Id': config.clientId,
-        'X-IB-Client-Passwd': config.clientPasswd,
-      },
+  const res = await fetch(`${config.baseUrl}/v1/auth/token`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-IB-Client-Id': config.clientId,
+      'X-IB-Client-Passwd': config.clientPasswd,
     },
-    JSON.stringify({})
-  );
+    body: JSON.stringify({}),
+  });
 
-  if (res.statusCode < 200 || res.statusCode >= 300) {
-    throw new Error(`비즈톡 토큰 발급 실패 (${res.statusCode}): ${res.body}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`비즈톡 토큰 발급 실패 (${res.status}): ${text}`);
   }
 
-  let data;
-  try {
-    data = JSON.parse(res.body);
-  } catch {
-    throw new Error(`비즈톡 토큰 응답 파싱 실패: ${res.body}`);
-  }
-
+  const data = await res.json();
   const token = data?.data?.token;
-  if (!token) throw new Error(`토큰이 응답에 없음: ${res.body}`);
+  if (!token) throw new Error(`비즈톡 토큰 응답에 token 없음: ${JSON.stringify(data)}`);
 
   const expiredAt = data?.data?.expired
     ? new Date(data.data.expired).getTime()
@@ -103,30 +62,8 @@ function normalizePhone(phone) {
   return String(phone || '').replace(/[^0-9]/g, '');
 }
 
-/**
- * 알림톡 1건 발송.
- * @returns {{ success, mock, messageId?, code?, message?, raw? }}
- */
-async function sendAlimtalk(req) {
-  const config = getConfig();
-
-  if (!config) {
-    console.log('[Alimtalk][mock]', {
-      to: req.to,
-      templateCode: req.templateCode,
-      textPreview: String(req.text || '').slice(0, 60),
-      buttons: (req.buttons || []).length,
-    });
-    return {
-      success: true,
-      mock: true,
-      messageId: `mock_${Date.now()}`,
-      message: 'mock mode',
-    };
-  }
-
+async function sendViaBiztalk(config, req) {
   const token = await fetchAccessToken(config);
-
   const body = {
     senderKey: config.senderKey,
     msgType: 'AT',
@@ -134,9 +71,7 @@ async function sendAlimtalk(req) {
     text: req.text,
     templateCode: req.templateCode,
   };
-  if (Array.isArray(req.buttons) && req.buttons.length > 0) {
-    body.button = req.buttons;
-  }
+  if (Array.isArray(req.buttons) && req.buttons.length > 0) body.button = req.buttons;
   if (req.fallback) {
     body.fallback = {
       type: req.fallback.type,
@@ -145,27 +80,19 @@ async function sendAlimtalk(req) {
     };
   }
 
-  const res = await httpsRequest(
-    `${config.baseUrl}/v1/send/alimtalk`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
+  const res = await fetch(`${config.baseUrl}/v1/send/alimtalk`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
     },
-    JSON.stringify(body)
-  );
+    body: JSON.stringify(body),
+  });
 
   let raw = null;
-  try {
-    raw = res.body ? JSON.parse(res.body) : null;
-  } catch {
-    raw = { parseError: res.body };
-  }
+  try { raw = await res.json(); } catch {}
 
-  const okStatus = res.statusCode >= 200 && res.statusCode < 300;
-  const success = okStatus && (raw?.code === '0000' || raw?.result === 'success');
+  const success = res.ok && (raw?.code === '0000' || raw?.result === 'success');
 
   return {
     success,
@@ -177,4 +104,144 @@ async function sendAlimtalk(req) {
   };
 }
 
-module.exports = { sendAlimtalk, isBiztalkConfigured };
+/**
+ * 알림톡 발송. 설정 없으면 mock 응답 반환.
+ * @param {{ to, templateCode, text, buttons?, fallback? }} req
+ * @returns {Promise<{success,mock,messageId?,code?,message?,raw?}>}
+ */
+async function sendAlimtalk(req) {
+  const config = getConfig();
+
+  if (!config) {
+    console.log('[Alimtalk][mock]', {
+      to: req.to,
+      templateCode: req.templateCode,
+      textPreview: String(req.text || '').slice(0, 60),
+      buttons: req.buttons?.length ?? 0,
+    });
+    return {
+      success: true,
+      mock: true,
+      messageId: `mock_${Date.now()}`,
+      message: 'mock mode',
+    };
+  }
+
+  return sendViaBiztalk(config, req);
+}
+
+// ============================================
+// 템플릿 관리
+// ============================================
+
+const TEMPLATE_VARIABLES = {
+  고객명: { description: '수신자 이름', example: '홍길동' },
+  name: { description: '수신자 이름(영문 변수)', example: '홍길동' },
+  상품명: { description: '답례품 상품명', example: '한지형 답례장' },
+  주문번호: { description: '주문번호', example: 'BO-240417-0001' },
+  주문정보URL: { description: '고객 주문정보 입력 페이지 URL', example: 'https://example.com/...' },
+};
+
+const DEFAULT_TEMPLATE =
+  `[바른손 답례품]\n` +
+  `#{고객명}님, 답례품 주문이 접수되었습니다.\n\n` +
+  `· 주문번호: #{주문번호}\n` +
+  `· 상품: #{상품명}\n\n` +
+  `아래 버튼을 눌러 출고 희망일과 스티커 정보를 입력해 주세요.`;
+
+const DEFAULT_BUTTON_NAME = '주문정보 입력하기';
+
+function getButtonConfig() {
+  if (process.env.BIZTALK_TEMPLATE_BUTTON_DISABLED === 'true') return null;
+  const envName = process.env.BIZTALK_TEMPLATE_BUTTON_NAME;
+  if (envName === '') return null;
+  return {
+    name: envName || DEFAULT_BUTTON_NAME,
+    type: 'WL',
+  };
+}
+
+function getTemplateConfig() {
+  return {
+    templateCode: process.env.BIZTALK_TEMPLATE_CODE_ORDER_INFO || 'MOCK_TEMPLATE',
+    body: process.env.BIZTALK_TEMPLATE_BODY || DEFAULT_TEMPLATE,
+    button: getButtonConfig(),
+  };
+}
+
+function renderTemplate(template, vars) {
+  let result = String(template || '');
+  for (const [key, value] of Object.entries(vars || {})) {
+    if (value == null) continue;
+    // replaceAll로 #{key} 모두 치환
+    result = result.split(`#{${key}}`).join(String(value));
+  }
+  return result;
+}
+
+function buildCustomerUrl(orderId) {
+  // PUBLIC_BASE_URL: 전체 URL (예: https://docker-manager.barunsoncard.com/c/barungift)
+  // BASE_PATH:      /c/barungift 와 같은 경로만 있는 경우 상대경로
+  const publicBase = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+  if (publicBase) {
+    return `${publicBase}/order-info?oid=${encodeURIComponent(orderId)}`;
+  }
+  const basePath = (process.env.BASE_PATH || '').replace(/\/$/, '');
+  return `${basePath}/order-info?oid=${encodeURIComponent(orderId)}`;
+}
+
+/**
+ * 주문 정보로 발송용 메시지 페이로드를 조립.
+ */
+function buildMessagePayload(params) {
+  const config = getTemplateConfig();
+  const customerUrl = buildCustomerUrl(params.orderId);
+
+  const customerName = params.customerName || '고객';
+  const productName = params.productName || '답례품';
+  const orderNumber = params.orderNumber || '-';
+
+  const variables = {
+    고객명: customerName,
+    name: customerName,
+    상품명: productName,
+    주문번호: orderNumber,
+    주문정보URL: customerUrl,
+  };
+
+  const text = renderTemplate(config.body, variables);
+
+  return {
+    text,
+    templateCode: config.templateCode,
+    customerUrl,
+    button: config.button
+      ? {
+          name: config.button.name,
+          type: config.button.type,
+          url_mobile: customerUrl,
+          url_pc: customerUrl,
+        }
+      : null,
+    variables,
+  };
+}
+
+function buildSamplePayload() {
+  return buildMessagePayload({
+    orderId: 'sample-order-id',
+    orderNumber: 'BO-240417-0001',
+    customerName: '홍길동',
+    productName: '한지형 답례장',
+  });
+}
+
+module.exports = {
+  sendAlimtalk,
+  isBiztalkConfigured,
+  getTemplateConfig,
+  buildMessagePayload,
+  buildSamplePayload,
+  renderTemplate,
+  TEMPLATE_VARIABLES,
+};

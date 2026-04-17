@@ -84,6 +84,7 @@ const FILES = {
   productSettings: path.join(DATA_DIR, 'bg_product_settings.json'),
   customerInfo: path.join(DATA_DIR, 'bg_order_customer_info.json'),
   shippingConfig: path.join(DATA_DIR, 'bg_shipping_config.json'),
+  alimtalkLog: path.join(DATA_DIR, 'bg_alimtalk_log.json'),
 };
 
 function ensureDataDir() {
@@ -334,6 +335,72 @@ function saveShippingConfig(data) {
   return config;
 }
 
+// ============================================
+// 알림톡 발송 로그 (bg_alimtalk_log)
+// ============================================
+
+/** 발송 기록 저장 */
+async function logAlimtalkSend(record) {
+  const row = {
+    order_id: String(record.order_id),
+    to_phone: record.to_phone || null,
+    template_code: record.template_code || null,
+    message_id: record.message_id || null,
+    success: !!record.success,
+    is_mock: !!record.is_mock,
+    error_code: record.error_code || null,
+    error_message: record.error_message || null,
+    sent_at: now(),
+  };
+  if (USE_SUPABASE) {
+    try {
+      return await sbInsert('bg_alimtalk_log', row);
+    } catch (e) {
+      // 테이블이 아직 없는 경우 JSON 폴백
+      console.warn('[store] bg_alimtalk_log Supabase insert 실패, JSON 폴백:', e.message);
+    }
+  }
+  const logs = readJson(FILES.alimtalkLog, []);
+  const local = { id: uuid(), ...row };
+  logs.push(local);
+  writeJson(FILES.alimtalkLog, logs);
+  return local;
+}
+
+/**
+ * 주문 ID 배열로 발송 이력 조회.
+ * @returns {Map<string, { lastSentAt: string, count: number, successCount: number }>}
+ */
+async function getAlimtalkHistory(orderIds) {
+  const result = new Map();
+  if (!Array.isArray(orderIds) || orderIds.length === 0) return result;
+
+  let rows = [];
+  if (USE_SUPABASE) {
+    try {
+      const inList = orderIds.map(encodeURIComponent).join(',');
+      rows = await sbGet('bg_alimtalk_log', `order_id=in.(${inList})&order=sent_at.desc`);
+    } catch (e) {
+      console.warn('[store] bg_alimtalk_log Supabase fetch 실패, JSON 폴백:', e.message);
+      rows = readJson(FILES.alimtalkLog, []).filter(r => orderIds.includes(r.order_id));
+    }
+  } else {
+    rows = readJson(FILES.alimtalkLog, []).filter(r => orderIds.includes(r.order_id));
+  }
+
+  for (const r of rows) {
+    const key = r.order_id;
+    const prev = result.get(key) || { lastSentAt: null, count: 0, successCount: 0 };
+    prev.count += 1;
+    if (r.success) prev.successCount += 1;
+    if (!prev.lastSentAt || new Date(r.sent_at) > new Date(prev.lastSentAt)) {
+      prev.lastSentAt = r.sent_at;
+    }
+    result.set(key, prev);
+  }
+  return result;
+}
+
 module.exports = {
   getAllStickers,
   getStickerById,
@@ -350,4 +417,6 @@ module.exports = {
   getAllCustomerInfos,
   getShippingConfig,
   saveShippingConfig,
+  logAlimtalkSend,
+  getAlimtalkHistory,
 };
