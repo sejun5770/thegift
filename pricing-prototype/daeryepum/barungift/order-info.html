@@ -692,12 +692,46 @@
       if (matching.length === 0) {
         stTypeHtml = '<div class="mt-3 text-xs text-gray-400">이 상품에 적용 가능한 스티커가 없습니다.</div>';
       } else {
-        var opts = '<option value="">선택안함</option>';
-        matching.forEach(function(st) {
-          opts += '<option value="' + st.id + '"' + (selStickerId === st.id ? ' selected' : '') + '>' + (st.name || '스티커') + '</option>';
-        });
-        stTypeHtml = '<div class="mt-3"><label class="block text-xs font-medium text-gray-600 mb-1">스티커타입</label>' +
-          '<select class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white" data-action="productStickerType" data-idx="' + idx + '">' + opts + '</select></div>';
+        // "선택안함" 카드
+        var noneSelected = !selStickerId;
+        var noneCardCls = noneSelected
+          ? 'ring-2 ring-blue-500 bg-blue-50'
+          : 'ring-1 ring-gray-200 bg-white hover:ring-blue-300';
+        var noneCard = ''
+          + '<button type="button" data-action="productStickerType" data-idx="' + idx + '" data-value="" '
+          +   'class="sticker-card ' + noneCardCls + ' rounded-lg overflow-hidden text-left w-full transition">'
+          +   '<div class="w-full aspect-square flex items-center justify-center bg-gray-50 text-gray-400 text-2xl">✕</div>'
+          +   '<div class="px-2 py-1.5 text-xs">'
+          +     '<div class="font-medium text-gray-700">선택안함</div>'
+          +   '</div>'
+          + '</button>';
+
+        var cards = matching.map(function(st) {
+          var isSelected = selStickerId === st.id;
+          var cardCls = isSelected
+            ? 'ring-2 ring-blue-500 bg-blue-50'
+            : 'ring-1 ring-gray-200 bg-white hover:ring-blue-300';
+          var safeName = (st.name || '스티커').replace(/"/g, '&quot;');
+          var thumb = st.preview_image_url
+            ? '<img src="' + st.preview_image_url + '" alt="' + safeName + '" class="w-full aspect-square object-contain bg-white pointer-events-none" />'
+            : '<div class="w-full aspect-square flex items-center justify-center text-gray-400 text-xs pointer-events-none" style="background:' + (st.preview_color || '#F9FAFB') + '">이미지 없음</div>';
+          return ''
+            + '<button type="button" data-action="productStickerType" data-idx="' + idx + '" data-value="' + st.id + '" '
+            +   'class="sticker-card ' + cardCls + ' rounded-lg overflow-hidden text-left w-full transition">'
+            +   thumb
+            +   '<div class="px-2 py-1.5 text-xs">'
+            +     '<div class="font-medium text-gray-800 truncate">' + (st.name || '스티커') + '</div>'
+            +   '</div>'
+            + '</button>';
+        }).join('');
+
+        stTypeHtml = ''
+          + '<div class="mt-3">'
+          +   '<label class="block text-xs font-medium text-gray-600 mb-2">스티커타입</label>'
+          +   '<div class="grid grid-cols-3 sm:grid-cols-4 gap-2">'
+          +     noneCard + cards
+          +   '</div>'
+          + '</div>';
       }
 
       var stInputHtml = '';
@@ -911,6 +945,13 @@
       }
       var stickerLabel = sticker ? sticker.name : (matching.length === 0 ? '스티커 없음' : '선택안함');
       var inputLabel = ps.sticker_input === 'custom' ? '직접입력' : '선택안함';
+      var stickerThumb = '';
+      if (sticker && sticker.preview_image_url) {
+        var safeName = (sticker.name || '').replace(/"/g, '&quot;');
+        stickerThumb = '<img src="' + sticker.preview_image_url + '" alt="' + safeName + '" class="inline-block w-10 h-10 object-contain rounded border border-gray-200 mr-2 align-middle" />';
+      } else if (sticker) {
+        stickerThumb = '<span class="inline-block w-10 h-10 rounded border border-gray-200 mr-2 align-middle" style="background:' + (sticker.preview_color || '#F3F4F6') + '"></span>';
+      }
       return (
         '<div class="bg-white rounded-xl border border-gray-200 p-4 mb-2">' +
           '<div class="flex items-center justify-between mb-2">' +
@@ -918,7 +959,7 @@
           '</div>' +
           '<div class="space-y-1 text-sm">' +
             '<div class="flex justify-between"><span class="text-gray-500">출고일</span><span class="text-gray-900">' + (ps.desired_ship_date ? formatDate(ps.desired_ship_date) : '-') + '</span></div>' +
-            '<div class="flex justify-between"><span class="text-gray-500">스티커</span><span class="text-gray-900">' + stickerLabel + '</span></div>' +
+            '<div class="flex justify-between items-center"><span class="text-gray-500">스티커</span><span class="text-gray-900 flex items-center">' + stickerThumb + stickerLabel + '</span></div>' +
             (sticker ? '<div class="flex justify-between"><span class="text-gray-500">스티커정보</span><span class="text-gray-900">' + inputLabel + '</span></div>' : '') +
           '</div>' +
           fieldHtml +
@@ -1038,7 +1079,8 @@
       }
       case 'productStickerType': {
         const idx = target.dataset.idx;
-        const val = target.value;
+        // 썸네일 버튼(data-value 속성) 우선, 레거시 <select>는 value 사용
+        const val = ('value' in target.dataset) ? target.dataset.value : target.value;
         const ps = ensureProductEntry(idx);
         if (ps.sticker_type !== val) {
           ps.sticker_type = val || null;

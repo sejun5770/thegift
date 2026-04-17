@@ -4182,7 +4182,19 @@ async function saveBgShipping() {
 function onBgShShipTypeChange() {
   const isToday = document.getElementById('bg-sh-today-shipping').checked;
   document.getElementById('bg-sh-cutoff-section').style.display = isToday ? 'block' : 'none';
-  document.getElementById('bg-sh-range-section').style.display = isToday ? 'none' : 'grid';
+  // 선택 가능일 min/max: 숨기지 않고 비활성 처리만 (값 보존)
+  const rangeSection = document.getElementById('bg-sh-range-section');
+  rangeSection.style.display = 'grid';
+  rangeSection.style.opacity = isToday ? '0.5' : '1';
+  const minInput = document.getElementById('bg-sh-mindays');
+  const maxInput = document.getElementById('bg-sh-maxdays');
+  [minInput, maxInput].forEach(el => {
+    if (!el) return;
+    el.disabled = isToday;
+    el.style.background = isToday ? 'var(--gray-100)' : '';
+    el.style.color = isToday ? 'var(--gray-400)' : '';
+    el.style.cursor = isToday ? 'not-allowed' : '';
+  });
   updateBgShPreview();
 }
 
@@ -4342,17 +4354,46 @@ function renderBgShPreviewCalendar(cfg, minDate, maxDate) {
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const grid = document.getElementById('bg-sh-preview-grid');
+  const today0 = new Date(); today0.setHours(0,0,0,0);
+  const todayStr = fmt(today0);
+  // 오늘출발 모드: 오늘의 컷오프 기준 활성 여부
+  const isTodayShipping = cfg.shipType === 'today_shipping';
+  let todayActiveInTodayMode = false;
+  if (isTodayShipping) {
+    const todayIsBiz = !(cfg.closedWeekdays.includes(today0.getDay()) || cfg.closedDateList.includes(todayStr));
+    if (todayIsBiz) {
+      if (cfg.cutoffOn) {
+        const now = new Date();
+        const nowMin = now.getHours() * 60 + now.getMinutes();
+        const cutMin = cfg.cutoffH * 60 + cfg.cutoffM;
+        todayActiveInTodayMode = nowMin < cutMin;
+      } else {
+        todayActiveInTodayMode = true;
+      }
+    }
+  }
+
   let html = '';
   for (let i = 0; i < firstDay; i++) html += '<div style="height:28px"></div>';
   for (let d = 1; d <= daysInMonth; d++) {
     const date = new Date(year, month, d);
     const ds = fmt(date);
     const isClosed = cfg.closedWeekdays.includes(date.getDay()) || cfg.closedDateList.includes(ds);
-    const isBeforeMin = date < minDate;
-    const isAfterMax = date > maxDate;
-    const disabled = isClosed || isBeforeMin || isAfterMax;
-    const isToday = ds === fmt(new Date());
+    const isToday = ds === todayStr;
     const isSelected = ds === bgShPreviewSelected;
+
+    // 비활성 여부 계산
+    let disabled;
+    if (isTodayShipping) {
+      // 오늘출발 모드: 최소/최대 범위는 모두 비활성, 오늘만 컷오프 기준 활성/비활성
+      disabled = isClosed || !isToday || !todayActiveInTodayMode;
+    } else {
+      // 희망출고 모드: 기존 로직 (min~max 범위 활성)
+      const isBeforeMin = date < minDate;
+      const isAfterMax = date > maxDate;
+      disabled = isClosed || isBeforeMin || isAfterMax;
+    }
+
     let style = 'height:28px;line-height:28px;border-radius:4px;font-size:12px;cursor:pointer;';
     if (disabled) style += 'color:var(--gray-300);cursor:default;';
     else if (isSelected) style += 'background:var(--primary);color:#fff;font-weight:600;';
