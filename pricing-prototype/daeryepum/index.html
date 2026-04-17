@@ -186,6 +186,7 @@ nav a:hover{color:var(--gray-900)}
   <a href="#bg-stickers" onclick="showPage('bg-stickers')">🏷️ 스티커</a>
   <a href="#bg-products" onclick="showPage('bg-products')">⚙️ 상품설정</a>
   <a href="#bg-shipping" onclick="showPage('bg-shipping')">📅 출고일설정</a>
+  <a href="#bg-alimtalk" onclick="showPage('bg-alimtalk')">📨 알림톡 발송</a>
   <div class="user-area" id="user-area"></div>
 </nav>
 
@@ -1049,6 +1050,130 @@ nav a:hover{color:var(--gray-900)}
   </div>
 </div>
 
+<!-- ========== 바른기프트: 알림톡 발송 ========== -->
+<div id="page-bg-alimtalk" class="page">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+    <h2 style="margin:0">📨 답례품 알림톡 발송</h2>
+    <button class="btn" onclick="loadBgAlimtalk()">🔄 새로고침</button>
+  </div>
+
+  <!-- 필터 -->
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+      <div>
+        <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">주문일 시작</label>
+        <input type="date" id="bg-at-start" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">주문일 종료</label>
+        <input type="date" id="bg-at-end" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">발송 이력</label>
+        <select id="bg-at-sent" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px">
+          <option value="all">전체</option>
+          <option value="unsent" selected>미발송</option>
+          <option value="sent">발송됨</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">검색 (주문번호/이름)</label>
+        <input type="text" id="bg-at-search" placeholder="검색어 입력" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px;min-width:180px">
+      </div>
+      <button class="btn btn-primary" onclick="loadBgAlimtalk()">조회</button>
+    </div>
+  </div>
+
+  <!-- 액션 -->
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <div style="font-size:13px;color:var(--gray-500)">
+      총 <b id="bg-at-total">0</b>건 · 선택 <b id="bg-at-selected">0</b>건
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-sm" onclick="bgAlimtalkPreview()">👁️ 템플릿 미리보기</button>
+      <button class="btn btn-sm btn-primary" onclick="bgAlimtalkSend()">📤 선택 발송</button>
+    </div>
+  </div>
+
+  <!-- 목록 -->
+  <div class="card" style="padding:0">
+    <table class="data-table" id="bg-at-table">
+      <thead><tr>
+        <th style="width:30px"><input type="checkbox" id="bg-at-check-all" onchange="bgAlimtalkCheckAll(this.checked)"></th>
+        <th>주문번호</th>
+        <th>수신자</th>
+        <th>전화번호</th>
+        <th>주문일</th>
+        <th>상품</th>
+        <th>상태</th>
+        <th>발송이력</th>
+      </tr></thead>
+      <tbody id="bg-at-tbody"></tbody>
+    </table>
+    <div id="bg-at-empty" class="hidden" style="text-align:center;padding:40px;color:var(--gray-500)">
+      조회된 주문이 없습니다.
+    </div>
+  </div>
+</div>
+
+<!-- 템플릿 미리보기 모달 -->
+<div id="bg-at-preview-modal" onclick="if(event.target===this)closeBgAtPreview()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;max-width:480px;width:90%;max-height:85vh;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
+      <h3 style="margin:0;font-size:16px">📨 알림톡 템플릿 미리보기</h3>
+      <button onclick="closeBgAtPreview()" style="border:none;background:none;font-size:20px;cursor:pointer;color:var(--gray-500)">&times;</button>
+    </div>
+    <div style="padding:20px">
+      <div style="background:#fbe24a;border-radius:12px;padding:16px;margin-bottom:12px;color:#3a1d1d">
+        <div style="font-size:11px;font-weight:600;margin-bottom:8px;opacity:0.7">💬 알림톡 미리보기</div>
+        <pre id="bg-at-preview-text" style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:13px;line-height:1.6;margin:0"></pre>
+        <div id="bg-at-preview-button" style="margin-top:12px;padding:10px;background:#fff;border-radius:8px;text-align:center;font-size:13px;font-weight:500;color:var(--gray-700);display:none"></div>
+      </div>
+      <div style="font-size:11px;color:var(--gray-500)">
+        <div>템플릿 코드: <code id="bg-at-preview-code" style="font-family:monospace"></code></div>
+        <div style="margin-top:4px">버튼 URL: <code id="bg-at-preview-url" style="font-family:monospace;font-size:10px;word-break:break-all"></code></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:12px 20px;border-top:1px solid var(--gray-200)">
+      <button class="btn" onclick="closeBgAtPreview()">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 발송 결과 모달 -->
+<div id="bg-at-result-modal" onclick="if(event.target===this)closeBgAtResult()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;max-width:560px;width:90%;max-height:85vh;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
+      <h3 style="margin:0;font-size:16px">📤 발송 결과</h3>
+      <button onclick="closeBgAtResult()" style="border:none;background:none;font-size:20px;cursor:pointer;color:var(--gray-500)">&times;</button>
+    </div>
+    <div style="padding:20px">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">
+        <div style="text-align:center;padding:12px;background:var(--gray-50);border-radius:var(--radius)">
+          <div style="font-size:11px;color:var(--gray-500)">전체</div>
+          <div style="font-size:20px;font-weight:700" id="bg-at-rs-total">0</div>
+        </div>
+        <div style="text-align:center;padding:12px;background:var(--green-bg);border-radius:var(--radius);color:var(--green)">
+          <div style="font-size:11px">성공</div>
+          <div style="font-size:20px;font-weight:700" id="bg-at-rs-sent">0</div>
+        </div>
+        <div style="text-align:center;padding:12px;background:var(--red-bg);border-radius:var(--radius);color:var(--red)">
+          <div style="font-size:11px">실패</div>
+          <div style="font-size:20px;font-weight:700" id="bg-at-rs-failed">0</div>
+        </div>
+        <div style="text-align:center;padding:12px;background:var(--gray-100);border-radius:var(--radius);color:var(--gray-500)">
+          <div style="font-size:11px">스킵</div>
+          <div style="font-size:20px;font-weight:700" id="bg-at-rs-skipped">0</div>
+        </div>
+      </div>
+      <div id="bg-at-rs-list" style="max-height:300px;overflow-y:auto;font-size:12px"></div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:12px 20px;border-top:1px solid var(--gray-200)">
+      <button class="btn btn-primary" onclick="closeBgAtResult();loadBgAlimtalk()">확인</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <!-- 첨부파일 모달 -->
@@ -1182,7 +1307,7 @@ function init() {
 
   // URL hash 기반 페이지 전환
   const hash = location.hash.replace('#', '') || 'dashboard';
-  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping'].includes(hash)) showPage(hash);
+  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-alimtalk'].includes(hash)) showPage(hash);
 }
 
 function fmt(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -1201,6 +1326,7 @@ function showPage(name) {
   if (name === 'bg-stickers') loadBgStickers();
   if (name === 'bg-products') loadBgProducts();
   if (name === 'bg-shipping') loadBgShipping();
+  if (name === 'bg-alimtalk') loadBgAlimtalk();
 }
 
 // --- Category Tabs ---
@@ -4243,6 +4369,167 @@ function renderBgShPreviewCalendar(cfg, minDate, maxDate) {
 function bgShPreviewSelectDate(ds) { bgShPreviewSelected = ds; updateBgShPreview(); }
 function bgShPreviewPrevMonth() { bgShPreviewMonth.setMonth(bgShPreviewMonth.getMonth() - 1); updateBgShPreview(); }
 function bgShPreviewNextMonth() { bgShPreviewMonth.setMonth(bgShPreviewMonth.getMonth() + 1); updateBgShPreview(); }
+
+// ============================================
+// 바른기프트: 답례품 알림톡 발송
+// ============================================
+let bgAtRows = [];
+let bgAtSelected = new Set();
+
+async function loadBgAlimtalk() {
+  const params = new URLSearchParams();
+  const start = document.getElementById('bg-at-start').value;
+  const end = document.getElementById('bg-at-end').value;
+  const sent = document.getElementById('bg-at-sent').value;
+  const search = document.getElementById('bg-at-search').value.trim();
+  if (start) params.set('startDate', start);
+  if (end) params.set('endDate', end);
+  if (sent) params.set('sentStatus', sent);
+  if (search) params.set('search', search);
+  params.set('limit', '100');
+
+  try {
+    const r = await fetch(API + '/api/bg/alimtalk/recipients?' + params.toString());
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || '조회 실패');
+    bgAtRows = d.rows || [];
+    bgAtSelected = new Set();
+    renderBgAlimtalk(d.total || 0);
+  } catch(e) {
+    showToast('조회 실패: ' + e.message);
+    document.getElementById('bg-at-empty').classList.remove('hidden');
+  }
+}
+
+function renderBgAlimtalk(total) {
+  const tbody = document.getElementById('bg-at-tbody');
+  const empty = document.getElementById('bg-at-empty');
+  document.getElementById('bg-at-total').textContent = total.toLocaleString();
+  updateBgAtSelectedCount();
+
+  if (!bgAtRows.length) {
+    tbody.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+
+  tbody.innerHTML = bgAtRows.map(r => {
+    const dateStr = r.collected_at ? new Date(r.collected_at).toLocaleDateString('ko-KR') : '-';
+    const phone = r.recipient_phone || '';
+    const phoneFmt = phone ? phone.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3').replace(/-+/g, '-') : '-';
+    const historyBadge = r.alimtalk_send_count > 0
+      ? '<span class="badge badge-up">' + r.alimtalk_send_count + '회 · ' + (r.last_alimtalk_sent_at ? new Date(r.last_alimtalk_sent_at).toLocaleDateString('ko-KR') : '-') + '</span>'
+      : '<span class="badge badge-neutral">미발송</span>';
+    const statusBadge = r.status === 'cancelled' ? '<span class="badge badge-down">취소</span>' : '<span class="badge badge-up">정상</span>';
+    const disabled = !phone || r.status === 'cancelled';
+    const checked = bgAtSelected.has(r.order_id) ? 'checked' : '';
+    return '<tr>' +
+      '<td><input type="checkbox" ' + (disabled?'disabled':'') + ' ' + checked + ' onchange="bgAlimtalkToggle(\'' + r.order_id + '\',this.checked)"></td>' +
+      '<td style="font-family:monospace;font-size:11px">' + r.order_number + '</td>' +
+      '<td style="font-size:12px">' + (r.recipient_name || '-') + '</td>' +
+      '<td style="font-family:monospace;font-size:11px">' + phoneFmt + '</td>' +
+      '<td style="font-size:11px">' + dateStr + '</td>' +
+      '<td style="font-size:12px">' + (r.product_name || '-') + '</td>' +
+      '<td>' + statusBadge + '</td>' +
+      '<td>' + historyBadge + '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function bgAlimtalkToggle(orderId, checked) {
+  if (checked) bgAtSelected.add(orderId);
+  else bgAtSelected.delete(orderId);
+  updateBgAtSelectedCount();
+}
+
+function bgAlimtalkCheckAll(checked) {
+  bgAtRows.forEach(r => {
+    if (r.recipient_phone && r.status !== 'cancelled') {
+      if (checked) bgAtSelected.add(r.order_id);
+      else bgAtSelected.delete(r.order_id);
+    }
+  });
+  renderBgAlimtalk(parseInt(document.getElementById('bg-at-total').textContent.replace(/,/g,'')) || 0);
+}
+
+function updateBgAtSelectedCount() {
+  document.getElementById('bg-at-selected').textContent = bgAtSelected.size.toLocaleString();
+}
+
+async function bgAlimtalkPreview() {
+  try {
+    const orderId = bgAtSelected.size > 0 ? [...bgAtSelected][0] : '';
+    const qs = orderId ? '?orderId=' + encodeURIComponent(orderId) : '';
+    const r = await fetch(API + '/api/bg/alimtalk/preview' + qs);
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || '미리보기 실패');
+
+    document.getElementById('bg-at-preview-text').textContent = d.payload?.text || '';
+    document.getElementById('bg-at-preview-code').textContent = d.payload?.templateCode || '-';
+    document.getElementById('bg-at-preview-url').textContent = d.payload?.customerUrl || '-';
+
+    const btnEl = document.getElementById('bg-at-preview-button');
+    if (d.payload?.button) {
+      btnEl.textContent = '🔗 ' + d.payload.button.name;
+      btnEl.style.display = 'block';
+    } else {
+      btnEl.style.display = 'none';
+    }
+
+    document.getElementById('bg-at-preview-modal').style.display = 'flex';
+  } catch(e) {
+    showToast('미리보기 실패: ' + e.message);
+  }
+}
+
+function closeBgAtPreview() {
+  document.getElementById('bg-at-preview-modal').style.display = 'none';
+}
+
+async function bgAlimtalkSend() {
+  if (bgAtSelected.size === 0) { showToast('발송할 주문을 선택해주세요.'); return; }
+  if (!confirm(bgAtSelected.size + '건의 알림톡을 발송하시겠습니까?')) return;
+
+  try {
+    const r = await fetch(API + '/api/bg/alimtalk/send', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ order_ids: [...bgAtSelected] }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || '발송 실패');
+
+    const s = d.summary || {};
+    document.getElementById('bg-at-rs-total').textContent = s.total || 0;
+    document.getElementById('bg-at-rs-sent').textContent = s.sent || 0;
+    document.getElementById('bg-at-rs-failed').textContent = s.failed || 0;
+    document.getElementById('bg-at-rs-skipped').textContent = s.skipped || 0;
+
+    const REASON_LABEL = {
+      not_daeryepum: '답례품 아님',
+      missing_phone: '전화번호 없음',
+      order_not_found: '주문 없음',
+    };
+    document.getElementById('bg-at-rs-list').innerHTML = (d.results || []).map(r => {
+      let status;
+      if (r.success) status = '<span style="color:var(--green)">✓ ' + (r.mock?'Mock 발송':'발송 성공') + '</span>';
+      else if (r.skipped_reason) status = '<span style="color:var(--gray-500)">⊘ ' + (REASON_LABEL[r.skipped_reason]||r.skipped_reason) + '</span>';
+      else status = '<span style="color:var(--red)">✗ ' + (r.error || '실패') + '</span>';
+      return '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--gray-100)">' +
+        '<span style="font-family:monospace">' + r.order_id + '</span>' + status +
+      '</div>';
+    }).join('') || '<p style="color:var(--gray-500);text-align:center;padding:20px">결과 없음</p>';
+
+    document.getElementById('bg-at-result-modal').style.display = 'flex';
+  } catch(e) {
+    showToast('발송 실패: ' + e.message);
+  }
+}
+
+function closeBgAtResult() {
+  document.getElementById('bg-at-result-modal').style.display = 'none';
+}
 
 init();
 </script>

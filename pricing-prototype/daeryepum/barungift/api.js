@@ -336,6 +336,118 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     return json(res, config);
   }
 
+  // ============================================
+  // 알림톡 관리 API (인증 필요)
+  // ============================================
+  const { fetchDaeryepumRecipients, sendAlimtalkForOrder } = require('./alimtalk-orders');
+  const { buildMessagePayload, buildSamplePayload, getTemplateConfig, TEMPLATE_VARIABLES } = require('./alimtalk');
+
+  // GET /api/bg/alimtalk/recipients - 답례품 수신자 목록
+  if (pathname === '/api/bg/alimtalk/recipients' && method === 'GET') {
+    try {
+      const pool = await getPool();
+      const filters = {
+        startDate: query.startDate,
+        endDate: query.endDate,
+        sentStatus: query.sentStatus,
+        search: query.search,
+        page: query.page,
+        limit: query.limit,
+      };
+      const result = await fetchDaeryepumRecipients(pool, sql, filters);
+      return json(res, result);
+    } catch (err) {
+      console.error('alimtalk recipients error:', err.message);
+      return json(res, { error: '수신자 조회 실패: ' + err.message }, 500);
+    }
+  }
+
+  // POST /api/bg/alimtalk/send - 알림톡 일괄 발송
+  if (pathname === '/api/bg/alimtalk/send' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const orderIds = Array.isArray(body.order_ids) ? body.order_ids : [];
+      if (orderIds.length === 0) return json(res, { error: '발송할 주문을 선택해주세요.' }, 400);
+
+      const pool = await getPool();
+      const results = [];
+      for (const orderId of orderIds) {
+        const r = await sendAlimtalkForOrder(pool, sql, orderId);
+        results.push(r);
+      }
+
+      const summary = {
+        total: results.length,
+        sent: results.filter(r => r.success).length,
+        failed: results.filter(r => !r.success && !r.skipped_reason).length,
+        skipped: results.filter(r => r.skipped_reason).length,
+      };
+
+      return json(res, { summary, results });
+    } catch (err) {
+      console.error('alimtalk send error:', err.message);
+      return json(res, { error: '발송 실패: ' + err.message }, 500);
+    }
+  }
+
+  // GET /api/bg/alimtalk/preview?orderId=... - 메시지 미리보기
+  if (pathname === '/api/bg/alimtalk/preview' && method === 'GET') {
+    try {
+      const config = getTemplateConfig();
+      let payload;
+
+      if (query.orderId) {
+        const pool = await getPool();
+        const orderId = String(query.orderId);
+        const isEtc = orderId.startsWith('ETC-');
+        const seq = parseInt(isEtc ? orderId.slice(4) : orderId) || 0;
+
+        if (seq) {
+          const q = isEtc
+            ? `SELECT TOP 1 co.order_seq, co.order_name,
+                 (SELECT TOP 1 c2.Card_Name FROM CUSTOM_ETC_ORDER_ITEM ei2 WITH (NOLOCK)
+                  INNER JOIN S2_Card c2 WITH (NOLOCK) ON ei2.card_seq = c2.Card_Seq
+                  LEFT JOIN S2_CardKind ck2 WITH (NOLOCK) ON c2.Card_Seq = ck2.Card_Seq AND ck2.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
+                  WHERE ei2.order_seq = co.order_seq
+                    AND ${DAERYEPUM_WHERE.replace(/ck\./g, 'ck2.').replace(/c\./g, 'c2.')}) AS card_name
+                FROM CUSTOM_ETC_ORDER co WITH (NOLOCK) WHERE co.order_seq = @seq`
+            : `SELECT TOP 1 co.order_seq, co.order_name,
+                 (SELECT TOP 1 c2.Card_Name FROM custom_order_item coi2 WITH (NOLOCK)
+                  INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+                  LEFT JOIN S2_CardKind ck2 WITH (NOLOCK) ON c2.Card_Seq = ck2.Card_Seq AND ck2.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
+                  WHERE coi2.order_seq = co.order_seq
+                    AND ${DAERYEPUM_WHERE.replace(/ck\./g, 'ck2.').replace(/c\./g, 'c2.')}) AS card_name
+                FROM custom_order co WITH (NOLOCK) WHERE co.order_seq = @seq`;
+          const result = await pool.request().input('seq', sql.Int, seq).query(q);
+          const row = result.recordset[0];
+          if (row) {
+            payload = buildMessagePayload({
+              orderId,
+              orderNumber: (isEtc ? 'BHS-' : 'BRS-') + row.order_seq,
+              customerName: row.order_name,
+              productName: row.card_name || '답례품',
+            });
+          }
+        }
+      }
+
+      if (!payload) payload = buildSamplePayload();
+
+      return json(res, {
+        payload,
+        template: {
+          templateCode: config.templateCode,
+          body: config.body,
+          button: config.button,
+        },
+        variables: TEMPLATE_VARIABLES,
+      });
+    } catch (err) {
+      console.error('alimtalk preview error:', err.message);
+      return json(res, { error: '미리보기 실패: ' + err.message }, 500);
+    }
+  }
+
   return false; // 미처리 → 다른 핸들러로
 }
 
