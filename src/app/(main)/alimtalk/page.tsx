@@ -76,7 +76,7 @@ interface PreviewData {
   text: string;
   templateCode: string;
   customerUrl: string;
-  button: { name: string; type: string; url_mobile: string; url_pc: string };
+  button: { name: string; type: string; url_mobile: string; url_pc: string } | null;
   variables: Record<string, string>;
   recipient_phone?: string;
   sample: boolean;
@@ -600,11 +600,13 @@ function MessagePreviewCard({ preview }: { preview: PreviewData }) {
       <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed text-gray-900">
         {preview.text}
       </pre>
-      <div className="mt-3 flex justify-center">
-        <div className="rounded-md border border-yellow-300 bg-white px-4 py-1.5 text-xs font-medium text-yellow-800">
-          {preview.button.name}
+      {preview.button && (
+        <div className="mt-3 flex justify-center">
+          <div className="rounded-md border border-yellow-300 bg-white px-4 py-1.5 text-xs font-medium text-yellow-800">
+            {preview.button.name}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

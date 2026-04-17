@@ -4,11 +4,16 @@
 // 카카오 알림톡은 사전 승인된 템플릿만 발송 가능하다.
 // 템플릿 본문에 #{변수명} 형태의 치환 변수를 넣고,
 // 발송 시 실제 값으로 교체한다.
+//
+// 템플릿 본문과 변수는 카카오 승인 당시의 내용과
+// 1바이트라도 다르면 발송이 거부되므로, 환경변수
+// BIZTALK_TEMPLATE_BODY로 승인본을 그대로 주입하는 것을 권장한다.
 // ============================================
 
-/** 템플릿에서 사용할 수 있는 변수 정의 */
+/** 템플릿에서 사용할 수 있는 변수 정의 (미리보기 UI 표시용 메타데이터) */
 export const TEMPLATE_VARIABLES = {
   고객명: { description: '수신자 이름', example: '홍길동' },
+  name: { description: '수신자 이름(영문 변수)', example: '홍길동' },
   상품명: { description: '답례품 상품명', example: '한지형 답례장' },
   주문번호: { description: '주문번호', example: 'BO-240417-0001' },
   주문정보URL: { description: '고객 주문정보 입력 페이지 URL', example: 'https://example.com/c/barungift/order-info?oid=...' },
@@ -16,7 +21,7 @@ export const TEMPLATE_VARIABLES = {
 
 export type TemplateVariableKey = keyof typeof TEMPLATE_VARIABLES;
 
-/** 기본 템플릿 (카카오 승인용 원본과 일치해야 함) */
+/** 기본 템플릿 (답례품 주문 안내용 예시 — 실제 승인본과 일치시키려면 BIZTALK_TEMPLATE_BODY로 오버라이드) */
 const DEFAULT_TEMPLATE =
   `[바른손 답례품]\n` +
   `#{고객명}님, 답례품 주문이 접수되었습니다.\n\n` +
@@ -25,32 +30,46 @@ const DEFAULT_TEMPLATE =
   `아래 버튼을 눌러 출고 희망일과 스티커 정보를 입력해 주세요.`;
 
 /** 기본 버튼 설정 */
-const DEFAULT_BUTTON = {
-  name: '주문정보 입력하기',
-  type: 'WL' as const,
-};
+const DEFAULT_BUTTON_NAME = '주문정보 입력하기';
 
 export interface TemplateConfig {
   templateCode: string;
   body: string;
-  button: { name: string; type: 'WL' };
+  /** 버튼이 비활성화된 경우 null */
+  button: { name: string; type: 'WL' } | null;
+}
+
+/**
+ * 환경변수 BIZTALK_TEMPLATE_BUTTON_NAME이 빈 문자열이거나
+ * BIZTALK_TEMPLATE_BUTTON_DISABLED=true 이면 버튼을 보내지 않는다.
+ */
+function getButtonConfig(): TemplateConfig['button'] {
+  if (process.env.BIZTALK_TEMPLATE_BUTTON_DISABLED === 'true') {
+    return null;
+  }
+  const envName = process.env.BIZTALK_TEMPLATE_BUTTON_NAME;
+  if (envName === '') {
+    return null;
+  }
+  return {
+    name: envName || DEFAULT_BUTTON_NAME,
+    type: 'WL',
+  };
 }
 
 export function getTemplateConfig(): TemplateConfig {
   return {
     templateCode: process.env.BIZTALK_TEMPLATE_CODE_ORDER_INFO || 'MOCK_TEMPLATE',
     body: process.env.BIZTALK_TEMPLATE_BODY || DEFAULT_TEMPLATE,
-    button: {
-      name: process.env.BIZTALK_TEMPLATE_BUTTON_NAME || DEFAULT_BUTTON.name,
-      type: DEFAULT_BUTTON.type,
-    },
+    button: getButtonConfig(),
   };
 }
 
-export type TemplateVariables = Record<TemplateVariableKey, string>;
+export type TemplateVariables = Partial<Record<TemplateVariableKey, string>>;
 
 /**
  * 템플릿 본문의 #{변수명}을 실제 값으로 치환한다.
+ * 정의되지 않은 변수는 그대로 유지된다.
  */
 export function renderTemplate(
   template: string,
@@ -58,6 +77,7 @@ export function renderTemplate(
 ): string {
   let result = template;
   for (const [key, value] of Object.entries(vars)) {
+    if (value == null) continue;
     result = result.replaceAll(`#{${key}}`, value);
   }
   return result;
@@ -72,7 +92,8 @@ export interface AlimtalkMessagePayload {
   text: string;
   templateCode: string;
   customerUrl: string;
-  button: { name: string; type: 'WL'; url_mobile: string; url_pc: string };
+  /** 버튼이 비활성화된 경우 null */
+  button: { name: string; type: 'WL'; url_mobile: string; url_pc: string } | null;
   variables: TemplateVariables;
 }
 
@@ -88,10 +109,15 @@ export function buildMessagePayload(params: {
   const config = getTemplateConfig();
   const customerUrl = buildCustomerUrl(params.orderId);
 
+  const customerName = params.customerName || '고객';
+  const productName = params.productName || '답례품';
+  const orderNumber = params.orderNumber || '-';
+
   const variables: TemplateVariables = {
-    고객명: params.customerName || '고객',
-    상품명: params.productName || '답례품',
-    주문번호: params.orderNumber || '-',
+    고객명: customerName,
+    name: customerName,
+    상품명: productName,
+    주문번호: orderNumber,
     주문정보URL: customerUrl,
   };
 
@@ -101,12 +127,14 @@ export function buildMessagePayload(params: {
     text,
     templateCode: config.templateCode,
     customerUrl,
-    button: {
-      name: config.button.name,
-      type: config.button.type,
-      url_mobile: customerUrl,
-      url_pc: customerUrl,
-    },
+    button: config.button
+      ? {
+          name: config.button.name,
+          type: config.button.type,
+          url_mobile: customerUrl,
+          url_pc: customerUrl,
+        }
+      : null,
     variables,
   };
 }

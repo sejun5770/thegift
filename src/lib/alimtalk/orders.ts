@@ -256,7 +256,7 @@ export async function sendAlimtalkForOrder(
       to: order.recipient_phone,
       templateCode: msg.templateCode,
       text: msg.text,
-      buttons: [msg.button],
+      buttons: msg.button ? [msg.button] : undefined,
     });
   } catch (e) {
     return {
