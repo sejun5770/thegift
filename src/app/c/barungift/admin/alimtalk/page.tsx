@@ -127,7 +127,7 @@ export default function AlimtalkBulkPage() {
       if (endDate) params.set('end_date', endDate);
       if (search) params.set('search', search);
 
-      const res = await fetch(`/api/alimtalk/recipients?${params}`);
+      const res = await fetch(`/c/barungift/api/alimtalk/recipients?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRecipients(data.recipients ?? []);
@@ -180,8 +180,8 @@ export default function AlimtalkBulkPage() {
     setPreviewLoading(true);
     try {
       const url = orderId
-        ? `/api/alimtalk/preview?order_id=${orderId}`
-        : '/api/alimtalk/preview';
+        ? `/c/barungift/api/alimtalk/preview?order_id=${orderId}`
+        : '/c/barungift/api/alimtalk/preview';
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return (await res.json()) as PreviewData;
@@ -219,7 +219,7 @@ export default function AlimtalkBulkPage() {
     if (selectedIds.length === 0) return;
     setSending(true);
     try {
-      const res = await fetch('/api/alimtalk/send', {
+      const res = await fetch('/c/barungift/api/alimtalk/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ order_ids: selectedIds }),

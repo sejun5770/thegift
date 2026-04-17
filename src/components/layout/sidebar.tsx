@@ -20,12 +20,12 @@ const navItems = [
   { href: '/products', label: '상품관리', icon: Package },
   { href: '/stickers', label: '스티커관리', icon: Sticker },
   { href: '/box-types', label: '박스타입', icon: Box },
-  { href: '/alimtalk', label: '답례품 알림톡', icon: MessageSquare },
 ];
 
 const barungiftNavItems = [
   { href: '/c/barungift/admin/stickers', label: '스티커관리', icon: Sticker },
   { href: '/c/barungift/admin/products', label: '상품설정', icon: Settings },
+  { href: '/c/barungift/admin/alimtalk', label: '답례품 알림톡', icon: MessageSquare },
 ];
 
 export function Sidebar() {
