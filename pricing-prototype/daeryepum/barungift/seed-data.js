@@ -227,7 +227,7 @@ function buildProductSettings(products, stickers) {
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
-function main() {
+async function main() {
   console.log('=== Barungift Seed Data Generator ===\n');
 
   // Ensure data directory exists
@@ -312,6 +312,106 @@ function main() {
       );
     }
   }
+
+  // --------------------------------------------------------------------
+  // Supabase 업로드 (환경변수 SUPABASE_URL + SUPABASE_ANON_KEY 필요)
+  // --------------------------------------------------------------------
+  const SUPABASE_URL = process.env.SUPABASE_URL || '';
+  const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  const uploadToSupabase = process.argv.includes('--supabase');
+
+  if (uploadToSupabase) {
+    if (!SUPABASE_URL || !SUPABASE_KEY) {
+      console.error('\n❌ SUPABASE_URL 또는 SUPABASE_ANON_KEY 환경변수가 설정되지 않았습니다.');
+      process.exit(1);
+    }
+    console.log('\n=== Supabase 업로드 시작 ===');
+    console.log('URL:', SUPABASE_URL);
+
+    return uploadAll(stickers, productSettings, SUPABASE_URL, SUPABASE_KEY);
+  } else {
+    console.log('\n💡 Supabase에 업로드하려면: node barungift/seed-data.js --supabase');
+    console.log('   (SUPABASE_URL, SUPABASE_ANON_KEY 환경변수 필요)');
+  }
+}
+
+async function uploadAll(stickers, productSettings, supaUrl, supaKey) {
+  const headers = {
+    apikey: supaKey,
+    Authorization: `Bearer ${supaKey}`,
+    'Content-Type': 'application/json',
+    Prefer: 'return=representation,resolution=merge-duplicates',
+  };
+
+  // 1. 스티커 upsert (sticker_code 기준)
+  console.log(`\n📤 Uploading ${stickers.length} stickers...`);
+  const stickerRows = stickers.map((s) => ({
+    id: s.id,
+    name: s.name,
+    preview_image_url: s.preview_image_url,
+    preview_color: s.preview_color,
+    custom_fields: s.custom_fields,
+    is_active: s.is_active,
+    sticker_code: s.sticker_code,
+    brand: s.brand,
+    sticker_type: s.type,
+    usage: s.usage,
+    spec: s.spec,
+    product_codes: s.product_codes,
+    note: s.note,
+  }));
+
+  let resp = await fetch(`${supaUrl}/rest/v1/bg_stickers?on_conflict=sticker_code`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(stickerRows),
+  });
+  if (!resp.ok) {
+    const err = await resp.text();
+    console.error('❌ Sticker upload failed:', resp.status, err);
+    process.exit(1);
+  }
+  console.log(`✅ ${stickers.length} stickers uploaded`);
+
+  // 2. 상품 설정 upsert (product_id 기준)
+  console.log(`\n📤 Uploading ${productSettings.length} product settings...`);
+  const productRows = productSettings.map((p) => ({
+    id: p.id,
+    product_id: p.product_id,
+    product_name: p.product_name,
+    brand: p.brand,
+    shipping_type: p.shipping_type,
+    cutoff_enabled: p.cutoff_enabled,
+    cutoff_hour: p.cutoff_hour,
+    cutoff_minute: p.cutoff_minute,
+    lead_time_days: p.lead_time_days,
+    min_select_days: p.min_select_days,
+    max_select_days: p.max_select_days,
+    closed_weekdays: p.closed_weekdays,
+    closed_dates: p.closed_dates,
+    date_required: p.date_required,
+    notice_enabled: p.notice_enabled,
+    notice_text: p.notice_text,
+    available_sticker_ids: p.available_sticker_ids,
+    express_available: p.express_available,
+    express_fee: p.express_fee,
+    express_cutoff_time: p.express_cutoff_time,
+    blackout_dates: p.blackout_dates,
+  }));
+
+  resp = await fetch(`${supaUrl}/rest/v1/bg_product_settings?on_conflict=product_id`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(productRows),
+  });
+  if (!resp.ok) {
+    const err = await resp.text();
+    console.error('❌ Product settings upload failed:', resp.status, err);
+    process.exit(1);
+  }
+  console.log(`✅ ${productSettings.length} product settings uploaded`);
+
+  console.log('\n🎉 Supabase 업로드 완료!');
 }
 
 main();
