@@ -284,6 +284,7 @@
   // ============================================
   let orderData = null;
   let currentStep = 0;
+  let calendarViewMonth = null;  // 'YYYY-MM' — 캘린더에 표시 중인 달
   let formState = {
     shipping_type: null,        // 'normal' | 'express'
     desired_ship_date: '',      // 주문 단위 단일 출고일
@@ -734,6 +735,11 @@
     const isToday = formState.shipping_type === 'express' && getSettings().shipping_type === 'today_shipping';
     const orderDate = formState.desired_ship_date || '';
 
+    // calendarViewMonth 초기화 (날짜 선택된 달 or minDate 달)
+    if (!calendarViewMonth) {
+      calendarViewMonth = (formState.desired_ship_date || minDate).substring(0, 7);
+    }
+
     var cardsHtml = products.map(function(p, i) {
       var idx = String(i);
       var ps = formState.products[idx] || {};
@@ -790,44 +796,7 @@
           + '</div>';
       }
 
-      var stInputHtml = '';
-      if (selStickerId && matching.length > 0) {
-        stInputHtml = '<div class="mt-3"><label class="block text-xs font-medium text-gray-600 mb-1">스티커정보</label>' +
-          '<select class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white" data-action="productStickerInput" data-idx="' + idx + '">' +
-          '<option value="none"' + (stInput === 'none' ? ' selected' : '') + '>선택안함</option>' +
-          '<option value="custom"' + (stInput === 'custom' ? ' selected' : '') + '>직접입력</option>' +
-          '</select></div>';
-
-        if (stInput === 'custom') {
-          var selSt = matching.find(function(st) { return st.id === selStickerId; });
-          // admin이 custom_fields를 정의하지 않은 경우 기본 텍스트 필드 제공
-          var customFields = (selSt && Array.isArray(selSt.custom_fields) && selSt.custom_fields.length > 0)
-            ? selSt.custom_fields
-            : [{ field_id: 'text', field_label: '스티커 문구', field_type: 'text', max_length: 100, placeholder: '예) 김철수 ♥ 이영희', required: false }];
-
-          var fieldInputs = customFields.map(function(f) {
-            var fieldKey = f.field_id || f.name || f.field_label;
-            var val = (ps.sticker_fields || {})[fieldKey] || '';
-            var reqMark = f.required ? '<span class="text-red-500">*</span>' : '';
-            var safeVal = String(val).replace(/"/g, '&quot;');
-            var inputHtml = '';
-            if (f.field_type === 'select' && Array.isArray(f.options)) {
-              var optHtml = '<option value="">선택</option>' + f.options.map(function(o) {
-                return '<option value="' + o + '"' + (val === o ? ' selected' : '') + '>' + o + '</option>';
-              }).join('');
-              inputHtml = '<select class="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '">' + optHtml + '</select>';
-            } else if (f.field_type === 'date') {
-              inputHtml = '<input type="date" value="' + safeVal + '" class="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '" />';
-            } else if (f.field_type === 'textarea') {
-              inputHtml = '<textarea rows="2" placeholder="' + (f.placeholder || '') + '" maxlength="' + (f.max_length || 200) + '" class="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '">' + safeVal + '</textarea>';
-            } else {
-              inputHtml = '<input type="text" value="' + safeVal + '" placeholder="' + (f.placeholder || '') + '" maxlength="' + (f.max_length || 100) + '" class="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '" />';
-            }
-            return '<div><label class="block text-xs text-gray-600 mb-1">' + (f.field_label || f.label || fieldKey) + ' ' + reqMark + '</label>' + inputHtml + '</div>';
-          }).join('');
-          stInputHtml += '<div class="mt-3 p-3 bg-gray-50 rounded-lg space-y-2">' + fieldInputs + '</div>';
-        }
-      }
+      var stInputHtml = buildStickerInputSection(idx);
 
       return (
         '<div class="bg-white rounded-xl border border-gray-200 p-4 mb-3" data-product-idx="' + idx + '">' +
@@ -839,13 +808,6 @@
       );
     }).join('');
 
-    const orderDateClosedWarning = (orderDate && isDateClosed(orderDate))
-      ? '<p class="text-xs text-red-500 mt-1">* 해당 날짜는 출고 불가일입니다.</p>'
-      : '';
-    const orderDateInfo = (orderDate && !isDateClosed(orderDate))
-      ? '<p class="text-xs text-blue-600 mt-1">' + formatDate(orderDate) + '</p>'
-      : '';
-
     return `
       <div class="fade-in">
         <h2 class="text-lg font-semibold text-gray-900 mb-1">희망 출고일 ${required ? '<span class="text-red-500">*</span>' : ''}</h2>
@@ -853,21 +815,8 @@
           ${isToday ? '컷오프 시간 기준으로 출고일이 결정됩니다.' : '주문 전체에 적용될 출고일을 선택해주세요.'}
         </p>
 
-        <!-- 주문 단위 출고일 (단일 선택) -->
-        <div class="bg-white rounded-xl border border-gray-200 p-4 mb-4">
-          <label class="block text-xs font-medium text-gray-600 mb-1">희망출고일 ${required ? '<span class="text-red-500">*</span>' : ''}</label>
-          <input type="date" value="${orderDate}" min="${minDate}" max="${maxDate}"
-            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-            data-action="orderShipDate" />
-          ${orderDateInfo}
-          ${orderDateClosedWarning}
-          <div class="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-400 space-y-1">
-            <p>* 휴무일(출고 불가 요일/날짜)은 선택할 수 없습니다.</p>
-            <p>* 선택 가능 기간: ${formatDate(minDate)} ~ ${formatDate(maxDate)}</p>
-            ${!required ? '<p class="text-blue-500">* 미선택 시 가장 빠른 출고일(' + formatDate(minDate) + ')이 자동 적용됩니다.</p>' : ''}
-          </div>
-          ${notice ? '<div class="mt-3 p-3 bg-amber-50 rounded-lg text-xs text-amber-700 whitespace-pre-wrap">' + notice + '</div>' : ''}
-        </div>
+        <!-- 인라인 캘린더 -->
+        ${renderCalendar()}
 
         <!-- 상품별 스티커 -->
         ${products.length > 0 ? `
@@ -1137,6 +1086,150 @@
     `;
   }
 
+  function renderCalendar() {
+    var min = getMinDate();
+    var max = getMaxDate();
+    var notice = getNoticeText();
+    var required = isDateRequired();
+
+    if (!calendarViewMonth) {
+      calendarViewMonth = (formState.desired_ship_date || min).substring(0, 7);
+    }
+
+    var parts = calendarViewMonth.split('-');
+    var yr = parseInt(parts[0]);
+    var mo = parseInt(parts[1]);
+
+    var firstDow = new Date(yr, mo - 1, 1).getDay(); // 0=일
+    var daysInMonth = new Date(yr, mo, 0).getDate();
+    var minMonth = min.substring(0, 7);
+    var maxMonth = max.substring(0, 7);
+    var canPrev = calendarViewMonth > minMonth;
+    var canNext = calendarViewMonth < maxMonth;
+
+    var totalCells = Math.ceil((firstDow + daysInMonth) / 7) * 7;
+    var rows = '';
+    var row = '';
+    for (var i = 0; i < totalCells; i++) {
+      var col = i % 7;
+      if (col === 0 && i > 0) { rows += '<tr>' + row + '</tr>'; row = ''; }
+      var dayNum = i - firstDow + 1;
+      if (dayNum < 1 || dayNum > daysInMonth) {
+        row += '<td class="py-0.5"></td>';
+      } else {
+        var ds = yr + '-' + String(mo).padStart(2, '0') + '-' + String(dayNum).padStart(2, '0');
+        var isSel = formState.desired_ship_date === ds;
+        var isClosed = isDateClosed(ds) || ds < min || ds > max;
+        var isToday = ds === todayStr();
+        var isSun = col === 0, isSat = col === 6;
+        var cls = 'w-8 h-8 rounded-full mx-auto flex items-center justify-center text-[13px] leading-none select-none ';
+        if (isSel) cls += 'bg-blue-500 text-white font-bold';
+        else if (isClosed) cls += 'text-gray-300';
+        else if (isSun) cls += 'text-red-500 hover:bg-red-50 cursor-pointer' + (isToday ? ' ring-1 ring-red-300' : '');
+        else if (isSat) cls += 'text-blue-500 hover:bg-blue-50 cursor-pointer' + (isToday ? ' ring-1 ring-blue-300' : '');
+        else cls += 'text-gray-700 hover:bg-gray-100 cursor-pointer' + (isToday ? ' ring-1 ring-gray-300' : '');
+        if (isClosed) {
+          row += '<td class="py-0.5 text-center"><span class="' + cls + '">' + dayNum + '</span></td>';
+        } else {
+          row += '<td class="py-0.5 text-center"><button type="button" data-action="calDay" data-date="' + ds + '" class="w-full flex justify-center"><span class="' + cls + '">' + dayNum + '</span></button></td>';
+        }
+      }
+    }
+    if (row) rows += '<tr>' + row + '</tr>';
+
+    var selectedInfo = '';
+    if (formState.desired_ship_date && !isDateClosed(formState.desired_ship_date)) {
+      selectedInfo = '<p class="text-center text-sm font-semibold text-blue-600 mt-3 pt-3 border-t border-gray-100">' + formatDate(formState.desired_ship_date) + '</p>';
+    } else if (!required) {
+      selectedInfo = '<p class="text-center text-xs text-gray-400 mt-3 pt-3 border-t border-gray-100">미선택 시 가장 빠른 출고일(' + formatDate(min) + ') 자동 적용</p>';
+    } else {
+      selectedInfo = '<p class="text-center text-xs text-gray-400 mt-3 pt-3 border-t border-gray-100">출고일을 선택해주세요</p>';
+    }
+
+    return '<div class="bg-white rounded-xl border border-gray-200 overflow-hidden mb-4" id="calendarWidget">'
+      + '<div class="flex items-center justify-between px-4 py-3 border-b border-gray-100">'
+      + '<button type="button" data-action="calNav" data-dir="-1" class="p-1.5 rounded-lg ' + (canPrev ? 'hover:bg-gray-100 text-gray-600' : 'text-gray-200 pointer-events-none') + '">'
+      + '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>'
+      + '</button>'
+      + '<span class="text-sm font-semibold text-gray-800">' + yr + '년 ' + mo + '월</span>'
+      + '<button type="button" data-action="calNav" data-dir="1" class="p-1.5 rounded-lg ' + (canNext ? 'hover:bg-gray-100 text-gray-600' : 'text-gray-200 pointer-events-none') + '">'
+      + '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>'
+      + '</button>'
+      + '</div>'
+      + '<div class="px-2 py-2">'
+      + '<table class="w-full border-collapse"><thead><tr>'
+      + '<th class="text-[11px] font-medium text-red-400 pb-1.5">일</th>'
+      + '<th class="text-[11px] font-medium text-gray-400 pb-1.5">월</th>'
+      + '<th class="text-[11px] font-medium text-gray-400 pb-1.5">화</th>'
+      + '<th class="text-[11px] font-medium text-gray-400 pb-1.5">수</th>'
+      + '<th class="text-[11px] font-medium text-gray-400 pb-1.5">목</th>'
+      + '<th class="text-[11px] font-medium text-gray-400 pb-1.5">금</th>'
+      + '<th class="text-[11px] font-medium text-blue-400 pb-1.5">토</th>'
+      + '</tr></thead><tbody>' + rows + '</tbody></table>'
+      + '</div>'
+      + '<div class="px-4 pb-3">' + selectedInfo + '</div>'
+      + (notice ? '<div class="mx-3 mb-3 p-3 bg-amber-50 rounded-lg text-xs text-amber-700 whitespace-pre-wrap">' + notice + '</div>' : '')
+      + '</div>';
+  }
+
+  function patchCalendar() {
+    var calEl = document.getElementById('calendarWidget');
+    if (!calEl) return;
+    var t = document.createElement('div');
+    t.innerHTML = renderCalendar();
+    calEl.replaceWith(t.firstElementChild);
+  }
+
+  function buildStickerInputSection(idx) {
+    var ps = formState.products[String(idx)] || {};
+    var products = orderData?.products || [];
+    var p = products[Number(idx)];
+    var productCode = p ? (p.product_code || '') : '';
+    var matching = getStickersForProduct(productCode);
+    var selStickerId = ps.sticker_type || '';
+    var stInput = ps.sticker_input || 'none';
+
+    if (!selStickerId || matching.length === 0) return '<div id="sticker-input-wrap-' + idx + '"></div>';
+
+    var selSt = matching.find(function(st) { return st.id === selStickerId; });
+    var customFields = (selSt && Array.isArray(selSt.custom_fields) && selSt.custom_fields.length > 0)
+      ? selSt.custom_fields
+      : [{ field_id: 'text', field_label: '스티커 문구', field_type: 'text', max_length: 100, placeholder: '예) 김철수 ♥ 이영희', required: false }];
+
+    var selectHtml = '<div class="mt-3"><label class="block text-xs font-medium text-gray-600 mb-1">스티커정보</label>'
+      + '<select class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white" data-action="productStickerInput" data-idx="' + idx + '">'
+      + '<option value="none"' + (stInput === 'none' ? ' selected' : '') + '>선택안함</option>'
+      + '<option value="custom"' + (stInput === 'custom' ? ' selected' : '') + '>직접입력</option>'
+      + '</select></div>';
+
+    var fieldsHtml = '';
+    if (stInput === 'custom') {
+      var fieldInputs = customFields.map(function(f) {
+        var fieldKey = f.field_id || f.name || f.field_label;
+        var val = (ps.sticker_fields || {})[fieldKey] || '';
+        var reqMark = f.required ? '<span class="text-red-500">*</span>' : '';
+        var safeVal = String(val).replace(/"/g, '&quot;');
+        var inputHtml = '';
+        if (f.field_type === 'select' && Array.isArray(f.options)) {
+          var optHtml = '<option value="">선택</option>' + f.options.map(function(o) {
+            return '<option value="' + o + '"' + (val === o ? ' selected' : '') + '>' + o + '</option>';
+          }).join('');
+          inputHtml = '<select class="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '">' + optHtml + '</select>';
+        } else if (f.field_type === 'date') {
+          inputHtml = '<input type="date" value="' + safeVal + '" class="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '" />';
+        } else if (f.field_type === 'textarea') {
+          inputHtml = '<textarea rows="2" placeholder="' + (f.placeholder || '') + '" maxlength="' + (f.max_length || 200) + '" class="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '">' + safeVal + '</textarea>';
+        } else {
+          inputHtml = '<input type="text" value="' + safeVal + '" placeholder="' + (f.placeholder || '') + '" maxlength="' + (f.max_length || 100) + '" class="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '" />';
+        }
+        return '<div><label class="block text-xs text-gray-600 mb-1">' + (f.field_label || fieldKey) + ' ' + reqMark + '</label>' + inputHtml + '</div>';
+      }).join('');
+      fieldsHtml = '<div class="mt-3 p-3 bg-gray-50 rounded-lg space-y-2">' + fieldInputs + '</div>';
+    }
+
+    return '<div id="sticker-input-wrap-' + idx + '">' + selectHtml + fieldsHtml + '</div>';
+  }
+
   const STEP_RENDERERS = [renderStep0, renderStep1, renderStep2, renderStep3, renderStep4];
 
   // ============================================
@@ -1280,15 +1373,6 @@
         renderCurrentStep();
         break;
       }
-      case 'orderShipDate': {
-        // 주문 단위 단일 출고일
-        formState.desired_ship_date = target.value || '';
-        saveFormState();
-        updateNavButtons();
-        // 날짜 안내문만 업데이트하기 위해 전체 재렌더 (스크롤 보존)
-        renderCurrentStep();
-        break;
-      }
       case 'productStickerType': {
         const idx = target.dataset.idx;
         // 썸네일 버튼(data-value 속성) 우선, 레거시 <select>는 value 사용
@@ -1309,12 +1393,21 @@
         break;
       }
       case 'productStickerInput': {
-        const idx = target.dataset.idx;
-        const val = target.value;
-        const ps = ensureProductEntry(idx);
+        var idx = target.dataset.idx;
+        var val = target.value;
+        var ps = ensureProductEntry(idx);
         ps.sticker_input = val || 'none';
         if (val !== 'custom') ps.sticker_fields = {};
-        renderCurrentStep();
+        saveFormState();
+        updateNavButtons();
+        var wrapEl = document.getElementById('sticker-input-wrap-' + idx);
+        if (wrapEl) {
+          var t = document.createElement('div');
+          t.innerHTML = buildStickerInputSection(idx);
+          wrapEl.replaceWith(t.firstElementChild || t);
+        } else {
+          renderCurrentStep();
+        }
         break;
       }
       case 'productStickerField': {
@@ -1365,6 +1458,27 @@
         formState.receipt_number = target.value.replace(/[^0-9]/g, '');
         saveFormState();
         updateNavButtons();
+        break;
+      }
+      case 'calNav': {
+        var dir = parseInt(target.dataset.dir || '0');
+        if (!dir) break;
+        var cp = calendarViewMonth.split('-');
+        var ny = parseInt(cp[0]), nm = parseInt(cp[1]) + dir;
+        if (nm > 12) { ny++; nm = 1; }
+        if (nm < 1) { ny--; nm = 12; }
+        calendarViewMonth = ny + '-' + String(nm).padStart(2, '0');
+        patchCalendar();
+        break;
+      }
+      case 'calDay': {
+        var ds = target.closest('[data-date]') ? target.closest('[data-date]').dataset.date : target.dataset.date;
+        if (!ds) break;
+        if (isDateClosed(ds) || ds < getMinDate() || ds > getMaxDate()) break;
+        formState.desired_ship_date = ds;
+        saveFormState();
+        updateNavButtons();
+        patchCalendar();
         break;
       }
       case 'goToStep': {
