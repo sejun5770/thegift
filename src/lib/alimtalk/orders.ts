@@ -1,5 +1,6 @@
 import { DAERYEPUM_CARD_CODES } from '@/types/barunson';
 import { sendAlimtalk } from './biztalk';
+import { buildMessagePayload } from './template';
 import type { SendAlimtalkResult } from './types';
 
 // ============================================
@@ -175,25 +176,6 @@ export async function fetchDaeryepumRecipients(
   return { rows, total: count ?? rows.length };
 }
 
-function buildCustomerUrl(orderId: string): string {
-  const base = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') || '';
-  return `${base}/c/barungift/order-info?oid=${orderId}`;
-}
-
-function buildMessageText(params: {
-  customerName: string;
-  productName: string;
-  customerUrl: string;
-}): string {
-  return (
-    `[바른손 답례품]\n` +
-    `${params.customerName}님, 답례품 주문이 접수되었습니다.\n\n` +
-    `· 상품: ${params.productName}\n\n` +
-    `아래 버튼을 눌러 출고 희망일과 스티커 정보를 입력해 주세요.\n` +
-    `${params.customerUrl}`
-  );
-}
-
 export interface SendForOrderResult {
   order_id: string;
   success: boolean;
@@ -215,6 +197,7 @@ export async function sendAlimtalkForOrder(
     .select(
       `
         id,
+        order_number,
         recipient_name,
         recipient_phone,
         order_items ( product_code, product_name, sort_order )
@@ -237,6 +220,7 @@ export async function sendAlimtalkForOrder(
 
   const order = data as {
     id: string;
+    order_number: string | null;
     recipient_name: string | null;
     recipient_phone: string | null;
     order_items: OrderItemRow[] | null;
@@ -259,30 +243,20 @@ export async function sendAlimtalkForOrder(
     };
   }
 
-  const customerUrl = buildCustomerUrl(order.id);
-  const text = buildMessageText({
-    customerName: order.recipient_name ?? '고객',
-    productName: item.product_name ?? '답례품',
-    customerUrl,
+  const msg = buildMessagePayload({
+    orderId: order.id,
+    orderNumber: order.order_number,
+    customerName: order.recipient_name,
+    productName: item.product_name,
   });
-
-  const templateCode =
-    process.env.BIZTALK_TEMPLATE_CODE_ORDER_INFO || 'MOCK_TEMPLATE';
 
   let result: SendAlimtalkResult;
   try {
     result = await sendAlimtalk({
       to: order.recipient_phone,
-      templateCode,
-      text,
-      buttons: [
-        {
-          name: '주문정보 입력하기',
-          type: 'WL',
-          url_mobile: customerUrl,
-          url_pc: customerUrl,
-        },
-      ],
+      templateCode: msg.templateCode,
+      text: msg.text,
+      buttons: [msg.button],
     });
   } catch (e) {
     return {
@@ -300,7 +274,7 @@ export async function sendAlimtalkForOrder(
         `알림톡 발송: ${order.recipient_phone}` +
         (result.mock ? ' (mock)' : '') +
         (result.messageId ? ` / msgId=${result.messageId}` : ''),
-      new_value: customerUrl,
+      new_value: msg.customerUrl,
     });
   } catch (e) {
     console.error('[Alimtalk] history 기록 실패:', e);

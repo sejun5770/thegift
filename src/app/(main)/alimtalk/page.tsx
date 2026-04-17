@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Loader2, MessageSquare, RefreshCw, Send } from 'lucide-react';
+import { Eye, Loader2, MessageSquare, RefreshCw, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -34,6 +34,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { formatDateKo, formatDateTimeKo } from '@/lib/date-utils';
 
 interface Recipient {
@@ -66,6 +72,16 @@ interface SendSummary {
   skipped: number;
 }
 
+interface PreviewData {
+  text: string;
+  templateCode: string;
+  customerUrl: string;
+  button: { name: string; type: string; url_mobile: string; url_pc: string };
+  variables: Record<string, string>;
+  recipient_phone?: string;
+  sample: boolean;
+}
+
 type SentStatus = 'all' | 'sent' | 'unsent';
 
 const PAGE_LIMIT = 50;
@@ -84,6 +100,11 @@ export default function AlimtalkBulkPage() {
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmPreview, setConfirmPreview] = useState<PreviewData | null>(null);
+
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewData, setPreviewData] = useState<PreviewData | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_LIMIT));
 
@@ -100,9 +121,7 @@ export default function AlimtalkBulkPage() {
       if (search) params.set('search', search);
 
       const res = await fetch(`/api/alimtalk/recipients?${params}`);
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRecipients(data.recipients ?? []);
       setTotal(data.total ?? 0);
@@ -145,6 +164,45 @@ export default function AlimtalkBulkPage() {
     );
   };
 
+  const fetchPreview = async (orderId?: string) => {
+    setPreviewLoading(true);
+    try {
+      const url = orderId
+        ? `/api/alimtalk/preview?order_id=${orderId}`
+        : '/api/alimtalk/preview';
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return (await res.json()) as PreviewData;
+    } catch (e) {
+      toast.error('미리보기 로드 실패');
+      throw e;
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const openPreview = async (orderId?: string) => {
+    try {
+      const data = await fetchPreview(orderId);
+      setPreviewData(data);
+      setPreviewOpen(true);
+    } catch {
+      // toast already shown
+    }
+  };
+
+  const openConfirm = async () => {
+    if (selectedIds.length === 0) return;
+    try {
+      const firstId = selectedIds[0];
+      const data = await fetchPreview(firstId);
+      setConfirmPreview(data);
+    } catch {
+      setConfirmPreview(null);
+    }
+    setConfirmOpen(true);
+  };
+
   const handleSend = async () => {
     if (selectedIds.length === 0) return;
     setSending(true);
@@ -160,24 +218,15 @@ export default function AlimtalkBulkPage() {
         mock?: boolean;
         error?: string;
       };
-      if (!res.ok) {
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
-      const summary = data.summary ?? {
-        total: 0,
-        sent: 0,
-        failed: 0,
-        skipped: 0,
-      };
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const summary = data.summary ?? { total: 0, sent: 0, failed: 0, skipped: 0 };
       const prefix = data.mock ? '(Mock) ' : '';
       if (summary.failed === 0 && summary.skipped === 0) {
         toast.success(`${prefix}알림톡 ${summary.sent}건 발송 완료`);
       } else {
         toast.message(
           `${prefix}발송 ${summary.sent} / 실패 ${summary.failed} / 스킵 ${summary.skipped}`,
-          {
-            description: formatSkipDetails(data.results ?? []),
-          }
+          { description: formatSkipDetails(data.results ?? []) }
         );
       }
       setConfirmOpen(false);
@@ -196,11 +245,24 @@ export default function AlimtalkBulkPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <MessageSquare className="h-5 w-5 text-blue-600" />
-        <h1 className="text-xl font-semibold">답례품 알림톡 발송</h1>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <MessageSquare className="h-5 w-5 text-blue-600" />
+          <h1 className="text-xl font-semibold">답례품 알림톡 발송</h1>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          onClick={() => openPreview()}
+          disabled={previewLoading}
+        >
+          <Eye className="h-4 w-4" />
+          샘플 미리보기
+        </Button>
       </div>
 
+      {/* 필터 */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">필터</CardTitle>
@@ -277,6 +339,7 @@ export default function AlimtalkBulkPage() {
         </CardContent>
       </Card>
 
+      {/* 요약 + 발송 버튼 */}
       <div className="flex items-center justify-between">
         <div className="text-sm text-gray-600">
           총 <span className="font-semibold">{total.toLocaleString()}</span>건
@@ -287,15 +350,20 @@ export default function AlimtalkBulkPage() {
           )}
         </div>
         <Button
-          onClick={() => setConfirmOpen(true)}
-          disabled={selectedIds.length === 0 || sending}
+          onClick={openConfirm}
+          disabled={selectedIds.length === 0 || sending || previewLoading}
           className="gap-1.5"
         >
-          <Send className="h-4 w-4" />
+          {previewLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Send className="h-4 w-4" />
+          )}
           선택 발송 ({selectedIds.length})
         </Button>
       </div>
 
+      {/* 테이블 */}
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -315,19 +383,20 @@ export default function AlimtalkBulkPage() {
                 <TableHead>희망출고일</TableHead>
                 <TableHead>수집일</TableHead>
                 <TableHead>발송 이력</TableHead>
+                <TableHead className="w-16" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="py-10 text-center">
+                  <TableCell colSpan={9} className="py-10 text-center">
                     <Loader2 className="mx-auto h-5 w-5 animate-spin text-blue-500" />
                   </TableCell>
                 </TableRow>
               ) : recipients.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={8}
+                    colSpan={9}
                     className="py-10 text-center text-sm text-gray-500"
                   >
                     조건에 맞는 답례품 주문이 없습니다.
@@ -389,6 +458,17 @@ export default function AlimtalkBulkPage() {
                           <Badge variant="outline">미발송</Badge>
                         )}
                       </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => openPreview(r.order_id)}
+                          title="미리보기"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   );
                 })
@@ -398,6 +478,7 @@ export default function AlimtalkBulkPage() {
         </CardContent>
       </Card>
 
+      {/* 페이지네이션 */}
       {totalPages > 1 && (
         <div className="flex items-center justify-end gap-2">
           <Button
@@ -422,24 +503,82 @@ export default function AlimtalkBulkPage() {
         </div>
       )}
 
+      {/* 미리보기 다이얼로그 */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>알림톡 메시지 미리보기</DialogTitle>
+          </DialogHeader>
+          {previewData && (
+            <div className="space-y-4">
+              {previewData.sample && (
+                <Badge variant="outline" className="text-xs">
+                  샘플 데이터
+                </Badge>
+              )}
+              <MessagePreviewCard preview={previewData} />
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-gray-500">템플릿 변수</p>
+                <div className="rounded-md bg-gray-50 p-2 text-xs">
+                  {Object.entries(previewData.variables).map(([k, v]) => (
+                    <div key={k} className="flex gap-2">
+                      <span className="text-gray-500">#{`{${k}}`}</span>
+                      <span className="font-medium">{v}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 발송 확인 다이얼로그 */}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="max-w-lg">
           <AlertDialogHeader>
             <AlertDialogTitle>알림톡 일괄 발송</AlertDialogTitle>
-            <AlertDialogDescription>
-              선택된 <b>{selectedIds.length}건</b>의 답례품 주문 고객에게 알림톡을
-              발송합니다. 발송 후 취소할 수 없습니다. 계속하시겠습니까?
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  선택된 <b>{selectedIds.length}건</b>의 답례품 주문 고객에게 알림톡을
+                  발송합니다. 발송 후 취소할 수 없습니다.
+                </p>
+                {confirmPreview && (
+                  <div>
+                    <p className="mb-1.5 text-xs font-medium text-gray-500">
+                      발송될 메시지 (첫 번째 건 예시)
+                    </p>
+                    <MessagePreviewCard preview={confirmPreview} />
+                  </div>
+                )}
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={sending}>취소</AlertDialogCancel>
             <AlertDialogAction onClick={handleSend} disabled={sending}>
               {sending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-              발송
+              {selectedIds.length}건 발송
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+function MessagePreviewCard({ preview }: { preview: PreviewData }) {
+  return (
+    <div className="rounded-lg border bg-yellow-50 p-3">
+      <pre className="whitespace-pre-wrap break-words text-sm leading-relaxed text-gray-900">
+        {preview.text}
+      </pre>
+      <div className="mt-3 flex justify-center">
+        <div className="rounded-md border border-yellow-300 bg-white px-4 py-1.5 text-xs font-medium text-yellow-800">
+          {preview.button.name}
+        </div>
+      </div>
     </div>
   );
 }
