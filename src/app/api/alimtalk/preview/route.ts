@@ -5,6 +5,7 @@ import {
   getTemplateConfig,
   TEMPLATE_VARIABLES,
 } from '@/lib/alimtalk';
+import { requireAdmin } from '@/lib/auth/admin';
 
 function isMockMode() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -13,17 +14,7 @@ function isMockMode() {
 
 /**
  * GET /api/alimtalk/preview
- * 알림톡 메시지 미리보기
- *
- * Query:
- *  - order_id: 실제 주문 데이터로 렌더링 (선택)
- *  - 없으면 샘플 데이터로 렌더링
- *
- * Response:
- *  - text: 치환된 메시지 본문
- *  - button: 버튼 정보
- *  - variables: 사용된 변수 값
- *  - template: 원본 템플릿 + 변수 정의
+ * 알림톡 메시지 미리보기 (관리자 전용)
  */
 export async function GET(request: NextRequest) {
   const orderId = request.nextUrl.searchParams.get('order_id');
@@ -46,6 +37,11 @@ export async function GET(request: NextRequest) {
   try {
     const { createClient } = await import('@/lib/supabase/server');
     const supabase = await createClient();
+
+    const auth = await requireAdmin(supabase);
+    if (auth.error) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
 
     const { data, error } = await supabase
       .from('orders')

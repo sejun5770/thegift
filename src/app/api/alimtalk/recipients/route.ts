@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchDaeryepumRecipients, type RecipientFilters } from '@/lib/alimtalk';
+import { requireAdmin } from '@/lib/auth/admin';
 
 function isMockMode() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -8,13 +9,7 @@ function isMockMode() {
 
 /**
  * GET /api/alimtalk/recipients
- * 답례품 주문 알림톡 수신 대상자 목록 조회
- *
- * Query:
- *  - start_date, end_date: 희망출고일 기간 (YYYY-MM-DD)
- *  - sent_status: 'sent' | 'unsent' | 'all' (기본 'all')
- *  - search: 주문번호 또는 수신자명
- *  - page, limit
+ * 답례품 주문 알림톡 수신 대상자 목록 조회 (관리자 전용)
  */
 export async function GET(request: NextRequest) {
   const sp = request.nextUrl.searchParams;
@@ -41,6 +36,11 @@ export async function GET(request: NextRequest) {
   try {
     const { createClient } = await import('@/lib/supabase/server');
     const supabase = await createClient();
+
+    const auth = await requireAdmin(supabase);
+    if (auth.error) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
 
     const { rows, total } = await fetchDaeryepumRecipients(supabase, filters);
 

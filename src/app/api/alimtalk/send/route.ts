@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { sendAlimtalkForOrder } from '@/lib/alimtalk';
+import { requireAdmin } from '@/lib/auth/admin';
 
 function isMockMode() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -13,10 +14,7 @@ const bodySchema = z.object({
 
 /**
  * POST /api/alimtalk/send
- * 답례품 주문 알림톡 일괄 발송 (관리자용)
- *
- * Body: { order_ids: string[] }
- * Response: { results: SendForOrderResult[], summary: {...} }
+ * 답례품 주문 알림톡 일괄 발송 (관리자 전용)
  */
 export async function POST(request: NextRequest) {
   let parsedBody: z.infer<typeof bodySchema>;
@@ -58,6 +56,11 @@ export async function POST(request: NextRequest) {
   try {
     const { createClient } = await import('@/lib/supabase/server');
     const supabase = await createClient();
+
+    const auth = await requireAdmin(supabase);
+    if (auth.error) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
+    }
 
     const results = [];
     for (const orderId of parsedBody.order_ids) {
