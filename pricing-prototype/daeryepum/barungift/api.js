@@ -223,21 +223,35 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
       // 상품코드로 product_settings 조회
       const productSettings = row.Card_Code ? await store.getProductSettings(row.Card_Code) : null;
-      const stickerIds = productSettings?.available_sticker_ids || [];
       const allActiveStickers = await store.getAllStickers(true);
-      const availableStickers = stickerIds.length > 0
-        ? allActiveStickers.filter(s => stickerIds.includes(s.id))
-        : allActiveStickers;
 
-      // 모든 아이템 수집
-      const products = result.recordset.map(r => ({
-        id: String(r.item_id || r.order_seq),
-        product_id: null,
-        product_name: r.Card_Name || '답례품',
-        product_code: r.Card_Code || null,
-        quantity: r.item_count || 1,
-        item_price: r.item_sale_price || r.Card_Price || 0,
-      }));
+      // 아이템 수집 (DELIVERY_INFO JOIN으로 인한 중복 제거: item_id 기준)
+      const seenItems = new Set();
+      const products = [];
+      for (const r of result.recordset) {
+        const itemId = String(r.item_id || r.order_seq);
+        if (seenItems.has(itemId)) continue;
+        seenItems.add(itemId);
+        products.push({
+          id: itemId,
+          product_id: null,
+          product_name: r.Card_Name || '답례품',
+          product_code: r.Card_Code || null,
+          quantity: r.item_count || 1,
+          item_price: r.item_sale_price || r.Card_Price || 0,
+        });
+      }
+
+      // 모든 상품의 매핑된 스티커 합집합 계산
+      const allMappedStickerIds = new Set();
+      for (const p of products) {
+        if (!p.product_code) continue;
+        const ps = await store.getProductSettings(p.product_code);
+        (ps?.available_sticker_ids || []).forEach(id => allMappedStickerIds.add(id));
+      }
+      const availableStickers = allMappedStickerIds.size > 0
+        ? allActiveStickers.filter(s => allMappedStickerIds.has(s.id))
+        : allActiveStickers;
 
       return json(res, {
         order_id: String(row.order_seq),
