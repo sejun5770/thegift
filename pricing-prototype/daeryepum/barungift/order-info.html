@@ -225,7 +225,7 @@
   // ============================================
   // Constants
   // ============================================
-  const STEP_LABELS = ['출고 방식', '희망출고일', '스티커 선택', '결제정보', '최종 확인'];
+  const STEP_LABELS = ['출고 방식', '상품별 정보', '결제정보', '요청사항', '최종 확인'];
   const RECEIPT_TYPES = { personal: '소득공제용 (휴대폰번호)', business: '지출증빙용 (사업자번호)' };
   const HOLIDAYS_2026 = ['2026-01-01','2026-02-16','2026-02-17','2026-02-18','2026-03-01','2026-05-05','2026-05-24','2026-06-06','2026-08-15','2026-09-24','2026-09-25','2026-09-26','2026-10-03','2026-10-09','2026-12-25'];
   // BASE_PATH 자동 감지: /c/barungift/order-info → '/c/barungift'
@@ -243,12 +243,11 @@
   let currentStep = 0;
   let formState = {
     shipping_type: null,        // 'normal' | 'express'
-    desired_ship_date: null,    // 'YYYY-MM-DD'
-    sticker_id: null,           // selected sticker id
-    sticker_fields: {},         // { fieldName: value }
+    products: {},               // keyed by product index: { "0": { desired_ship_date, sticker_type, sticker_input, sticker_fields }, ... }
     cash_receipt_yn: false,
     receipt_type: null,         // 'personal' | 'business'
     receipt_number: '',
+    customer_request: '',
   };
 
   // ============================================
@@ -337,7 +336,7 @@
   }
 
   function getSettings() {
-    return orderData?.product_settings || {};
+    return orderData?.shipping_config || orderData?.product_settings || {};
   }
 
   /** 해당 날짜가 휴무일(출고불가)인지 확인 */
@@ -475,11 +474,6 @@
     return '';
   }
 
-  function getSelectedSticker() {
-    if (!formState.sticker_id || !orderData) return null;
-    return (orderData.available_stickers || []).find(s => s.id === formState.sticker_id) || null;
-  }
-
   function getTotalAmount() {
     const base = orderData?.total_amount || 0;
     const express = formState.shipping_type === 'express' ? getExpressFee() : 0;
@@ -546,32 +540,26 @@
     switch (step) {
       case 0: return !!formState.shipping_type;
       case 1: {
-        if (!isDateRequired()) return true; // 선택 사항이면 항상 진행 가능
-        return !!formState.desired_ship_date && !isDateClosed(formState.desired_ship_date);
-      }
-      case 2: {
-        const stickers = orderData?.available_stickers || [];
-        if (stickers.length === 0) return true; // No stickers to select
-        if (!formState.sticker_id) return false;
-        const sticker = getSelectedSticker();
-        if (!sticker) return false;
-        // Check required custom fields
-        const fields = sticker.custom_fields || [];
-        for (const f of fields) {
-          if (f.required !== false) {
-            const val = formState.sticker_fields[f.name];
-            if (!val || String(val).trim() === '') return false;
+        // For each product, check desired_ship_date is set (unless date_required is false). Sticker is optional.
+        var products = orderData?.products || [];
+        var required = isDateRequired();
+        for (var i = 0; i < products.length; i++) {
+          var ps = formState.products[String(i)] || {};
+          if (required) {
+            if (!ps.desired_ship_date || isDateClosed(ps.desired_ship_date)) return false;
           }
         }
         return true;
       }
-      case 3: {
+      case 2: {
+        // Payment validation (same as old step 3)
         if (formState.cash_receipt_yn) {
           if (!formState.receipt_type) return false;
           if (!formState.receipt_number || formState.receipt_number.trim() === '') return false;
         }
         return true;
       }
+      case 3: return true; // 요청사항 - always valid (optional)
       case 4: return true;
       default: return false;
     }
@@ -653,144 +641,110 @@
     `;
   }
 
+  /** 상품에 매핑된 스티커 목록 가져오기 */
+  function getStickersForProduct(productCode) {
+    const stickers = orderData?.available_stickers || [];
+    if (!productCode) return stickers;
+    return stickers.filter(function(s) {
+      if (!s.product_codes || s.product_codes.length === 0) return true;
+      return s.product_codes.includes(productCode);
+    });
+  }
+
   function renderStep1() {
+    const products = orderData?.products || [];
     const minDate = getMinDate();
     const maxDate = getMaxDate();
-    const selectedDate = formState.desired_ship_date || '';
-    const s = getSettings();
     const required = isDateRequired();
     const notice = getNoticeText();
-    const isToday = s.shipping_type === 'today_shipping';
 
-    return `
-      <div class="fade-in">
-        <h2 class="text-lg font-semibold text-gray-900 mb-1">
-          희망출고일을 선택해주세요 ${required ? '<span class="text-red-500">*</span>' : '<span class="text-xs text-gray-400 font-normal">(선택)</span>'}
-        </h2>
-        <p class="text-sm text-gray-500 mb-5">
-          ${isToday
-            ? '컷오프 시간 기준으로 출고일이 결정됩니다.'
-            : '아래 캘린더에서 원하시는 출고일을 선택해주세요.'}
-        </p>
+    var cardsHtml = products.map(function(p, i) {
+      var idx = String(i);
+      var ps = formState.products[idx] || {};
+      var selectedDate = ps.desired_ship_date || '';
+      var productCode = p.product_code || '';
+      var matchingStickers = getStickersForProduct(productCode);
+      var selectedStickerType = ps.sticker_type || '';
+      var stickerInput = ps.sticker_input || 'none';
 
-        <div class="bg-white rounded-xl border border-gray-200 p-4">
-          <label class="block text-sm font-medium text-gray-700 mb-2">출고 희망일</label>
-          <input type="date"
-            id="dateInput"
-            class="w-full px-4 py-3 border border-gray-300 rounded-lg text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-            min="${minDate}"
-            max="${maxDate}"
-            value="${selectedDate}"
-            data-action="selectDate"
-          />
+      // Sticker type dropdown
+      var stickerTypeHtml = '';
+      if (matchingStickers.length === 0) {
+        stickerTypeHtml = '<p class="text-xs text-gray-400 mt-1">스티커 없음</p>';
+      } else {
+        var stickerOpts = '<option value="">선택안함</option>';
+        matchingStickers.forEach(function(st) {
+          stickerOpts += '<option value="' + st.id + '"' + (selectedStickerType === st.id ? ' selected' : '') + '>' + (st.name || '스티커') + '</option>';
+        });
+        stickerTypeHtml = '<div class="mt-3"><label class="block text-xs font-medium text-gray-600 mb-1">스티커타입</label>' +
+          '<select class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white" data-action="productStickerType" data-idx="' + idx + '">' + stickerOpts + '</select></div>';
+      }
 
-          ${selectedDate ? `
-            <div class="mt-3 p-3 bg-blue-50 rounded-lg">
-              <p class="text-sm text-blue-700">
-                <span class="font-medium">선택한 날짜:</span> ${formatDate(selectedDate)}
-              </p>
-              ${isDateClosed(selectedDate) ? `
-                <p class="text-sm text-red-600 mt-1 font-medium">
-                  * 해당 날짜는 출고 불가일로 선택할 수 없습니다.
-                </p>
-              ` : ''}
-            </div>
-          ` : ''}
+      // Sticker info dropdown (only when sticker type selected)
+      var stickerInfoHtml = '';
+      if (selectedStickerType && matchingStickers.length > 0) {
+        stickerInfoHtml = '<div class="mt-3"><label class="block text-xs font-medium text-gray-600 mb-1">스티커정보</label>' +
+          '<select class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white" data-action="productStickerInput" data-idx="' + idx + '">' +
+          '<option value="none"' + (stickerInput === 'none' ? ' selected' : '') + '>선택안함</option>' +
+          '<option value="custom"' + (stickerInput === 'custom' ? ' selected' : '') + '>직접입력</option>' +
+          '</select></div>';
 
-          <div class="mt-3 text-xs text-gray-400 space-y-1">
-            <p>* 휴무일(출고 불가 요일/날짜)은 선택할 수 없습니다.</p>
-            <p>* 선택 가능 기간: ${formatDate(minDate)} ~ ${formatDate(maxDate)}</p>
-            ${!required ? '<p class="text-blue-500">* 미선택 시 가장 빠른 출고일(' + formatDate(minDate) + ')이 자동 적용됩니다.</p>' : ''}
-          </div>
-          ${notice ? '<div class="mt-3 p-3 bg-amber-50 rounded-lg text-xs text-amber-700 whitespace-pre-wrap">' + notice + '</div>' : ''}
-        </div>
-      </div>
-    `;
+        // Custom fields when 직접입력 selected
+        if (stickerInput === 'custom') {
+          var selectedSticker = matchingStickers.find(function(st) { return st.id === selectedStickerType; });
+          if (selectedSticker && selectedSticker.custom_fields && selectedSticker.custom_fields.length > 0) {
+            var fieldsHtml = selectedSticker.custom_fields.map(function(f) {
+              var val = (ps.sticker_fields || {})[f.name] || '';
+              var requiredMark = f.required !== false ? '<span class="text-red-500">*</span>' : '';
+              var input = '';
+              if (f.field_type === 'select' && f.options) {
+                var opts = f.options.map(function(o) { return '<option value="' + o + '"' + (val === o ? ' selected' : '') + '>' + o + '</option>'; }).join('');
+                input = '<select class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white" data-action="productStickerField" data-idx="' + idx + '" data-field="' + f.name + '"><option value="">선택해주세요</option>' + opts + '</select>';
+              } else if (f.field_type === 'date') {
+                input = '<input type="date" value="' + val + '" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" data-action="productStickerField" data-idx="' + idx + '" data-field="' + f.name + '" />';
+              } else {
+                input = '<input type="text" value="' + val + '" placeholder="' + (f.placeholder || '') + '" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" data-action="productStickerField" data-idx="' + idx + '" data-field="' + f.name + '" />';
+              }
+              return '<div class="mt-2"><label class="block text-xs font-medium text-gray-600 mb-1">' + (f.label || f.name) + ' ' + requiredMark + '</label>' +
+                (f.description ? '<p class="text-xs text-gray-400 mb-1">' + f.description + '</p>' : '') + input + '</div>';
+            }).join('');
+            stickerInfoHtml += '<div class="mt-2 pl-2 border-l-2 border-blue-200">' + fieldsHtml + '</div>';
+          }
+        }
+      }
+
+      // Date validation message
+      var dateMsg = '';
+      if (selectedDate) {
+        if (isDateClosed(selectedDate)) {
+          dateMsg = '<p class="text-xs text-red-500 mt-1">* 해당 날짜는 출고 불가일입니다.</p>';
+        } else {
+          dateMsg = '<p class="text-xs text-blue-500 mt-1">' + formatDate(selectedDate) + '</p>';
+        }
+      }
+
+      return '<div class="bg-white rounded-xl border border-gray-200 p-4" data-product-idx="' + idx + '">' +
+        '<h3 class="text-sm font-semibold text-gray-900 mb-3">' + (p.product_name || '상품 ' + (i + 1)) + ' <span class="text-xs font-normal text-gray-400">(' + (p.quantity || 0) + '개)</span></h3>' +
+        '<div><label class="block text-xs font-medium text-gray-600 mb-1">희망출고일' + (required ? ' <span class="text-red-500">*</span>' : '') + '</label>' +
+        '<input type="date" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" min="' + minDate + '" max="' + maxDate + '" value="' + selectedDate + '" data-action="productDate" data-idx="' + idx + '" />' +
+        dateMsg + '</div>' +
+        stickerTypeHtml +
+        stickerInfoHtml +
+        '</div>';
+    }).join('');
+
+    return '<div class="fade-in">' +
+      '<h2 class="text-lg font-semibold text-gray-900 mb-1">상품별 정보를 입력해주세요</h2>' +
+      '<p class="text-sm text-gray-500 mb-5">각 상품의 출고일과 스티커를 설정합니다.</p>' +
+      '<div class="space-y-4">' + cardsHtml + '</div>' +
+      (notice ? '<div class="mt-4 p-3 bg-amber-50 rounded-lg text-xs text-amber-700 whitespace-pre-wrap">' + notice + '</div>' : '') +
+      '<div class="mt-3 text-xs text-gray-400 space-y-1">' +
+      '<p>* 선택 가능 기간: ' + formatDate(minDate) + ' ~ ' + formatDate(maxDate) + '</p>' +
+      (!required ? '<p class="text-blue-500">* 출고일 미선택 시 가장 빠른 출고일(' + formatDate(minDate) + ')이 자동 적용됩니다.</p>' : '') +
+      '</div></div>';
   }
 
   function renderStep2() {
-    const stickers = orderData?.available_stickers || [];
-    const selectedId = formState.sticker_id;
-    const selectedSticker = getSelectedSticker();
-
-    if (stickers.length === 0) {
-      return `
-        <div class="fade-in">
-          <h2 class="text-lg font-semibold text-gray-900 mb-1">스티커 선택</h2>
-          <p class="text-sm text-gray-500 mb-5">이 상품은 스티커 옵션이 없습니다.</p>
-          <div class="bg-white rounded-xl border border-gray-200 p-6 text-center">
-            <div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
-              <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-            </div>
-            <p class="text-sm text-gray-500">스티커 없이 진행됩니다.</p>
-          </div>
-        </div>
-      `;
-    }
-
-    let stickerGrid = stickers.map(s => {
-      const isSelected = s.id === selectedId;
-      const color = s.preview_color || '#E5E7EB';
-      return `
-        <div class="card-select cursor-pointer rounded-xl border-2 p-3 bg-white ${isSelected ? 'selected' : 'border-gray-200'}" data-action="selectSticker" data-id="${s.id}">
-          <div class="w-full aspect-square rounded-lg mb-2 flex items-center justify-center" style="background-color: ${color}">
-            ${s.preview_image_url
-              ? '<img src="' + s.preview_image_url + '" class="w-full h-full object-contain rounded-lg" alt="' + (s.name || '') + '" />'
-              : '<span class="text-2xl font-bold text-white/70">' + (s.name || '?').charAt(0) + '</span>'}
-          </div>
-          <p class="text-xs font-medium text-gray-700 text-center truncate">${s.name || '스티커'}</p>
-        </div>
-      `;
-    }).join('');
-
-    let customFieldsHtml = '';
-    if (selectedSticker && selectedSticker.custom_fields && selectedSticker.custom_fields.length > 0) {
-      const fields = selectedSticker.custom_fields.map(f => {
-        const val = formState.sticker_fields[f.name] || '';
-        const requiredMark = f.required !== false ? '<span class="text-red-500">*</span>' : '';
-        let input = '';
-
-        if (f.field_type === 'select' && f.options) {
-          const opts = f.options.map(o => `<option value="${o}" ${val === o ? 'selected' : ''}>${o}</option>`).join('');
-          input = `<select class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white" data-action="stickerField" data-field="${f.name}">
-            <option value="">선택해주세요</option>${opts}
-          </select>`;
-        } else if (f.field_type === 'date') {
-          input = `<input type="date" value="${val}" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" data-action="stickerField" data-field="${f.name}" />`;
-        } else {
-          input = `<input type="text" value="${val}" placeholder="${f.placeholder || ''}" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" data-action="stickerField" data-field="${f.name}" />`;
-        }
-
-        return `
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">${f.label || f.name} ${requiredMark}</label>
-            ${f.description ? '<p class="text-xs text-gray-400 mb-1.5">' + f.description + '</p>' : ''}
-            ${input}
-          </div>
-        `;
-      }).join('');
-
-      customFieldsHtml = `
-        <div class="mt-4 bg-white rounded-xl border border-gray-200 p-4">
-          <h3 class="text-sm font-semibold text-gray-900 mb-3">스티커 정보 입력</h3>
-          <div class="space-y-3">${fields}</div>
-        </div>
-      `;
-    }
-
-    return `
-      <div class="fade-in">
-        <h2 class="text-lg font-semibold text-gray-900 mb-1">스티커를 선택해주세요</h2>
-        <p class="text-sm text-gray-500 mb-5">답례품에 부착될 스티커를 선택합니다.</p>
-
-        <div class="grid grid-cols-3 gap-3">${stickerGrid}</div>
-
-        ${customFieldsHtml}
-      </div>
-    `;
-  }
-
-  function renderStep3() {
     const bankInfo = orderData?.bank_info || { bank_name: '신한은행', account_number: '100-013-801261', account_holder: '바른컴퍼니' };
     const total = getTotalAmount();
     const baseAmount = orderData?.total_amount || 0;
@@ -893,106 +847,109 @@
     `;
   }
 
-  function renderStep4() {
-    const sticker = getSelectedSticker();
-    const total = getTotalAmount();
-    const bankInfo = orderData?.bank_info || {};
-    const expressFee = formState.shipping_type === 'express' ? getExpressFee() : 0;
-    const stickers = orderData?.available_stickers || [];
+  function renderStep3() {
+    return '<div class="fade-in">' +
+      '<h2 class="text-lg font-semibold text-gray-900 mb-1">요청사항</h2>' +
+      '<p class="text-sm text-gray-500 mb-5">추가 요청사항이 있으시면 입력해주세요. (선택)</p>' +
+      '<div class="bg-white rounded-xl border border-gray-200 p-4">' +
+      '<textarea rows="4" placeholder="예: 포장을 꼼꼼하게 해주세요, 리본 추가 부탁드립니다." ' +
+      'class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none" ' +
+      'data-action="customerRequest">' + (formState.customer_request || '') + '</textarea>' +
+      '</div></div>';
+  }
 
-    let stickerSummary = '';
-    if (sticker) {
-      let fieldSummary = '';
-      if (sticker.custom_fields && sticker.custom_fields.length > 0) {
-        fieldSummary = sticker.custom_fields.map(f => {
-          const val = formState.sticker_fields[f.name] || '-';
-          return `<div class="flex justify-between text-sm"><span class="text-gray-500">${f.label || f.name}</span><span class="text-gray-900">${val}</span></div>`;
-        }).join('');
+  function renderStep4() {
+    var products = orderData?.products || [];
+    var allStickers = orderData?.available_stickers || [];
+    var total = getTotalAmount();
+    var bankInfo = orderData?.bank_info || {};
+    var expressFee = formState.shipping_type === 'express' ? getExpressFee() : 0;
+
+    // Per-product summary
+    var productSummaryHtml = products.map(function(p, i) {
+      var idx = String(i);
+      var ps = formState.products[idx] || {};
+      var stickerName = '선택안함';
+      var stickerFieldsHtml = '';
+      if (ps.sticker_type) {
+        var sticker = allStickers.find(function(s) { return s.id === ps.sticker_type; });
+        if (sticker) {
+          stickerName = sticker.name || '스티커';
+          if (ps.sticker_input === 'custom' && sticker.custom_fields && sticker.custom_fields.length > 0) {
+            stickerFieldsHtml = sticker.custom_fields.map(function(f) {
+              var val = (ps.sticker_fields || {})[f.name] || '-';
+              return '<div class="flex justify-between text-xs"><span class="text-gray-400">' + (f.label || f.name) + '</span><span class="text-gray-700">' + val + '</span></div>';
+            }).join('');
+          }
+        }
       }
-      stickerSummary = `
-        <div class="flex items-center gap-3 mb-2">
-          <div class="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style="background-color: ${sticker.preview_color || '#E5E7EB'}">
-            <span class="text-sm font-bold text-white/80">${(sticker.name || '?').charAt(0)}</span>
-          </div>
-          <span class="text-sm font-medium text-gray-900">${sticker.name}</span>
-        </div>
-        ${fieldSummary ? '<div class="ml-13 space-y-1">' + fieldSummary + '</div>' : ''}
-      `;
-    } else if (stickers.length === 0) {
-      stickerSummary = '<p class="text-sm text-gray-400">스티커 없음</p>';
+      var dateStr = ps.desired_ship_date ? formatDate(ps.desired_ship_date) : '자동 (가장 빠른 출고일)';
+      return '<div class="bg-gray-50 rounded-lg p-3">' +
+        '<p class="text-sm font-medium text-gray-900 mb-2">' + (p.product_name || '상품 ' + (i + 1)) + ' <span class="text-xs text-gray-400">(' + (p.quantity || 0) + '개)</span></p>' +
+        '<div class="space-y-1">' +
+        '<div class="flex justify-between text-sm"><span class="text-gray-500">출고일</span><span class="text-gray-900">' + dateStr + '</span></div>' +
+        '<div class="flex justify-between text-sm"><span class="text-gray-500">스티커</span><span class="text-gray-900">' + stickerName + '</span></div>' +
+        (ps.sticker_input === 'custom' ? '<div class="flex justify-between text-sm"><span class="text-gray-500">스티커정보</span><span class="text-gray-900">직접입력</span></div>' : '') +
+        stickerFieldsHtml +
+        '</div></div>';
+    }).join('');
+
+    // Customer request
+    var requestHtml = '';
+    if (formState.customer_request && formState.customer_request.trim()) {
+      requestHtml = '<div class="bg-white rounded-xl border border-gray-200 p-4">' +
+        '<div class="flex items-center justify-between mb-2">' +
+        '<h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">요청사항</h3>' +
+        '<button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="3">수정</button>' +
+        '</div>' +
+        '<p class="text-sm text-gray-900 whitespace-pre-wrap">' + formState.customer_request + '</p>' +
+        '</div>';
     }
 
-    return `
-      <div class="fade-in">
-        <h2 class="text-lg font-semibold text-gray-900 mb-1">입력 내용을 확인해주세요</h2>
-        <p class="text-sm text-gray-500 mb-5">아래 내용이 맞는지 확인 후 제출해주세요.</p>
+    return '<div class="fade-in">' +
+      '<h2 class="text-lg font-semibold text-gray-900 mb-1">입력 내용을 확인해주세요</h2>' +
+      '<p class="text-sm text-gray-500 mb-5">아래 내용이 맞는지 확인 후 제출해주세요.</p>' +
+      '<div class="space-y-3">' +
 
-        <div class="space-y-3">
-          <!-- Shipping type -->
-          <div class="bg-white rounded-xl border border-gray-200 p-4">
-            <div class="flex items-center justify-between mb-2">
-              <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">출고 방식</h3>
-              <button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="0">수정</button>
-            </div>
-            <p class="text-sm font-medium text-gray-900">
-              ${formState.shipping_type === 'express' ? '빠른출고' : '일반출고'}
-              ${expressFee > 0 ? ' <span class="text-orange-600">(+' + formatMoney(expressFee) + ')</span>' : ''}
-            </p>
-          </div>
+      // Shipping type
+      '<div class="bg-white rounded-xl border border-gray-200 p-4">' +
+      '<div class="flex items-center justify-between mb-2">' +
+      '<h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">출고 방식</h3>' +
+      '<button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="0">수정</button>' +
+      '</div>' +
+      '<p class="text-sm font-medium text-gray-900">' +
+      (formState.shipping_type === 'express' ? '빠른출고' : '일반출고') +
+      (expressFee > 0 ? ' <span class="text-orange-600">(+' + formatMoney(expressFee) + ')</span>' : '') +
+      '</p></div>' +
 
-          <!-- Ship date -->
-          <div class="bg-white rounded-xl border border-gray-200 p-4">
-            <div class="flex items-center justify-between mb-2">
-              <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">희망출고일</h3>
-              <button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="1">수정</button>
-            </div>
-            <p class="text-sm font-medium text-gray-900">${formatDate(formState.desired_ship_date)}</p>
-          </div>
+      // Products
+      '<div class="bg-white rounded-xl border border-gray-200 p-4">' +
+      '<div class="flex items-center justify-between mb-2">' +
+      '<h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">상품별 정보</h3>' +
+      '<button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="1">수정</button>' +
+      '</div>' +
+      '<div class="space-y-2">' + productSummaryHtml + '</div></div>' +
 
-          <!-- Sticker -->
-          <div class="bg-white rounded-xl border border-gray-200 p-4">
-            <div class="flex items-center justify-between mb-2">
-              <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">스티커</h3>
-              ${stickers.length > 0 ? '<button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="2">수정</button>' : ''}
-            </div>
-            ${stickerSummary}
-          </div>
+      // Payment info
+      '<div class="bg-white rounded-xl border border-gray-200 p-4">' +
+      '<div class="flex items-center justify-between mb-2">' +
+      '<h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">결제정보</h3>' +
+      '<button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="2">수정</button>' +
+      '</div>' +
+      '<div class="space-y-1.5">' +
+      '<div class="flex justify-between text-sm"><span class="text-gray-500">총 결제금액</span><span class="font-bold text-blue-600">' + formatMoney(total) + '</span></div>' +
+      '<div class="flex justify-between text-sm"><span class="text-gray-500">입금 계좌</span><span class="text-gray-900">' + (bankInfo.bank_name || '') + ' ' + (bankInfo.account_number || '') + '</span></div>' +
+      (formState.cash_receipt_yn
+        ? '<div class="flex justify-between text-sm"><span class="text-gray-500">현금영수증</span><span class="text-gray-900">' + (RECEIPT_TYPES[formState.receipt_type] || '-') + '</span></div>' +
+          '<div class="flex justify-between text-sm"><span class="text-gray-500">발급번호</span><span class="text-gray-900">' + (formState.receipt_number || '-') + '</span></div>'
+        : '<div class="flex justify-between text-sm"><span class="text-gray-500">현금영수증</span><span class="text-gray-400">미신청</span></div>'
+      ) +
+      '</div></div>' +
 
-          <!-- Payment info -->
-          <div class="bg-white rounded-xl border border-gray-200 p-4">
-            <div class="flex items-center justify-between mb-2">
-              <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">결제정보</h3>
-              <button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="3">수정</button>
-            </div>
-            <div class="space-y-1.5">
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-500">총 결제금액</span>
-                <span class="font-bold text-blue-600">${formatMoney(total)}</span>
-              </div>
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-500">입금 계좌</span>
-                <span class="text-gray-900">${bankInfo.bank_name || ''} ${bankInfo.account_number || ''}</span>
-              </div>
-              ${formState.cash_receipt_yn ? `
-                <div class="flex justify-between text-sm">
-                  <span class="text-gray-500">현금영수증</span>
-                  <span class="text-gray-900">${RECEIPT_TYPES[formState.receipt_type] || '-'}</span>
-                </div>
-                <div class="flex justify-between text-sm">
-                  <span class="text-gray-500">발급번호</span>
-                  <span class="text-gray-900">${formState.receipt_number || '-'}</span>
-                </div>
-              ` : `
-                <div class="flex justify-between text-sm">
-                  <span class="text-gray-500">현금영수증</span>
-                  <span class="text-gray-400">미신청</span>
-                </div>
-              `}
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
+      // Customer request (if any)
+      requestHtml +
+
+      '</div></div>';
   }
 
   const STEP_RENDERERS = [renderStep0, renderStep1, renderStep2, renderStep3, renderStep4];
@@ -1014,36 +971,54 @@
         if (val) { formState.shipping_type = val; renderCurrentStep(); }
         break;
       }
-      case 'selectDate': {
+      case 'productDate': {
+        const idx = target.dataset.idx;
         const val = target.value;
-        if (val) {
-          if (isDateDisabled(val)) {
-            formState.desired_ship_date = val; // Show the error message
-          } else {
-            formState.desired_ship_date = val;
-          }
+        if (idx != null && val) {
+          if (!formState.products[idx]) formState.products[idx] = { desired_ship_date: null, sticker_type: null, sticker_input: 'none', sticker_fields: {} };
+          formState.products[idx].desired_ship_date = val;
           renderCurrentStep();
         }
         break;
       }
-      case 'selectSticker': {
-        const id = target.closest('[data-id]')?.dataset?.id;
-        if (id) {
-          if (formState.sticker_id !== id) {
-            formState.sticker_id = id;
-            formState.sticker_fields = {};
-          }
+      case 'productStickerType': {
+        const idx = target.dataset.idx;
+        const val = target.value;
+        if (idx != null) {
+          if (!formState.products[idx]) formState.products[idx] = { desired_ship_date: null, sticker_type: null, sticker_input: 'none', sticker_fields: {} };
+          formState.products[idx].sticker_type = val || null;
+          formState.products[idx].sticker_input = 'none';
+          formState.products[idx].sticker_fields = {};
           renderCurrentStep();
         }
         break;
       }
-      case 'stickerField': {
+      case 'productStickerInput': {
+        const idx = target.dataset.idx;
+        const val = target.value;
+        if (idx != null) {
+          if (!formState.products[idx]) formState.products[idx] = { desired_ship_date: null, sticker_type: null, sticker_input: 'none', sticker_fields: {} };
+          formState.products[idx].sticker_input = val || 'none';
+          if (val !== 'custom') formState.products[idx].sticker_fields = {};
+          renderCurrentStep();
+        }
+        break;
+      }
+      case 'productStickerField': {
+        const idx = target.dataset.idx;
         const field = target.dataset.field;
-        if (field) {
-          formState.sticker_fields[field] = target.value;
+        if (idx != null && field) {
+          if (!formState.products[idx]) formState.products[idx] = { desired_ship_date: null, sticker_type: null, sticker_input: 'none', sticker_fields: {} };
+          if (!formState.products[idx].sticker_fields) formState.products[idx].sticker_fields = {};
+          formState.products[idx].sticker_fields[field] = target.value;
           saveFormState();
           updateNavButtons();
         }
+        break;
+      }
+      case 'customerRequest': {
+        formState.customer_request = target.value;
+        saveFormState();
         break;
       }
       case 'copyAccount': {
@@ -1103,7 +1078,7 @@
 
   $stepContent.addEventListener('input', (e) => {
     const el = e.target.closest('[data-action]');
-    if (el && (el.dataset.action === 'stickerField' || el.dataset.action === 'receiptNumber')) {
+    if (el && (el.dataset.action === 'productStickerField' || el.dataset.action === 'receiptNumber' || el.dataset.action === 'customerRequest')) {
       handleAction(el.dataset.action, el);
     }
   });
@@ -1145,19 +1120,25 @@
     $btnNext.disabled = true;
     $btnNext.textContent = '제출 중...';
 
-    const sticker = getSelectedSticker();
     const payload = {
       is_express: formState.shipping_type === 'express',
       express_fee: formState.shipping_type === 'express' ? getExpressFee() : 0,
-      desired_ship_date: formState.desired_ship_date || (isDateRequired() ? null : getMinDate()),
-      sticker_selections: sticker ? [{
-        sticker_id: sticker.id,
-        sticker_name: sticker.name,
-        custom_values: { ...formState.sticker_fields },
-      }] : [],
+      products: (orderData.products || []).map(function(p, i) {
+        var ps = formState.products[String(i)] || {};
+        return {
+          product_code: p.product_code,
+          product_name: p.product_name,
+          quantity: p.quantity,
+          desired_ship_date: ps.desired_ship_date || getMinDate(),
+          sticker_type: ps.sticker_type || null,
+          sticker_input: ps.sticker_input || 'none',
+          sticker_fields: ps.sticker_fields || {},
+        };
+      }),
       cash_receipt_yn: formState.cash_receipt_yn,
       receipt_type: formState.receipt_type,
       receipt_number: formState.receipt_number || null,
+      customer_request: formState.customer_request || '',
     };
 
     try {
@@ -1377,6 +1358,18 @@
 
       // Restore saved form state
       loadFormState();
+
+      // Initialize formState.products for each product
+      (orderData.products || []).forEach(function(p, i) {
+        if (!formState.products[String(i)]) {
+          formState.products[String(i)] = {
+            desired_ship_date: null,
+            sticker_type: null,
+            sticker_input: 'none',
+            sticker_fields: {},
+          };
+        }
+      });
 
       // Set header
       $headerOrderNum.textContent = orderData.order_number || '';
