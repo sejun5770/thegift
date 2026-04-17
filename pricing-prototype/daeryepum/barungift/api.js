@@ -210,6 +210,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         customer_name: maskName(row.order_name || row.delivery_name || ''),
         order_date: row.order_date,
         total_amount: row.last_total_price || row.order_total_price || 0,
+        status_seq: row.status_seq,
         status: row.status_seq >= 1 ? 'collected' : 'cancelled',
         info_status: existingInfo?.submitted_at ? 'completed' : 'pending',
         products,
