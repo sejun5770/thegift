@@ -142,28 +142,43 @@ const TEMPLATE_VARIABLES = {
   주문정보URL: { description: '고객 주문정보 입력 페이지 URL', example: 'https://example.com/...' },
 };
 
+// 비즈톡 승인 템플릿 BH0175_3 (회원가입 안내, #{name} 변수 1개)
+// 카카오 승인본과 1바이트도 다르면 발송 거부되므로 정확히 일치해야 함
+const DEFAULT_TEMPLATE_CODE = 'BH0175_3';
 const DEFAULT_TEMPLATE =
-  `[바른손 답례품]\n` +
-  `#{고객명}님, 답례품 주문이 접수되었습니다.\n\n` +
-  `· 주문번호: #{주문번호}\n` +
-  `· 상품: #{상품명}\n\n` +
-  `아래 버튼을 눌러 출고 희망일과 스티커 정보를 입력해 주세요.`;
+  `[바른손카드] 회원가입 안내\n\n` +
+  `안녕하세요 #{name}고객님, 바른손카드 회원가입을 축하드립니다.\n\n` +
+  `바른손카드 회원님께만 드리는 '프리미엄 기프트팩' 햬택이 제공 되었습니다.\n` +
+  `지금 바로 확인하고 주문을 시작해 보세요.\n\n` +
+  `■회원가입 즉시 무료 혜택\n` +
+  `- 청첩장 샘플 12종+배송비 무료\n` +
+  `- 213종 모바일 청첩장 무료 사용\n` +
+  `※예식 후에도 366일간 보관!\n\n` +
+  `■프리미엄 기프트팩 (전체 무료)\n` +
+  `- 거실을 빛낼 최고급 아크릴 액자\n` +
+  `- 청첩장 필수옵션 봉투+스티커 SET\n` +
+  `- 놓치기 쉬운 식권 (신랑/신부측)\n` +
+  `- 퀄리티가 다른 식전/감사 영상\n\n` +
+  `남은 결혼 준비도 바른손카드가 든든하게 지원하겠습니다.\n\n` +
+  `바른손카드 고객센터 (1644-0708)`;
 
-const DEFAULT_BUTTON_NAME = '주문정보 입력하기';
+const DEFAULT_BUTTON_NAME = '';
 
 function getButtonConfig() {
+  // BH0175_3 템플릿은 버튼이 없으므로 기본 비활성화
+  // 환경변수로 강제 활성화하려면 BIZTALK_TEMPLATE_BUTTON_NAME에 값 입력
   if (process.env.BIZTALK_TEMPLATE_BUTTON_DISABLED === 'true') return null;
   const envName = process.env.BIZTALK_TEMPLATE_BUTTON_NAME;
-  if (envName === '') return null;
+  if (!envName) return null; // 값이 없거나 빈 문자열이면 버튼 없음
   return {
-    name: envName || DEFAULT_BUTTON_NAME,
+    name: envName,
     type: 'WL',
   };
 }
 
 function getTemplateConfig() {
   return {
-    templateCode: process.env.BIZTALK_TEMPLATE_CODE_ORDER_INFO || 'MOCK_TEMPLATE',
+    templateCode: process.env.BIZTALK_TEMPLATE_CODE_ORDER_INFO || DEFAULT_TEMPLATE_CODE,
     body: process.env.BIZTALK_TEMPLATE_BODY || DEFAULT_TEMPLATE,
     button: getButtonConfig(),
   };
