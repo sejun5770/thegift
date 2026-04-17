@@ -72,49 +72,12 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const user = result.recordset[0];
       const phone = (user.hand_phone1 || '') + (user.hand_phone2 || '') + (user.hand_phone3 || '');
 
-      // 로그인 성공 → 해당 회원의 답례품/꽃다발 주문만 조회
-      const ordersResult = await pool.request()
-        .input('phone', sql.VarChar, phone.slice(-8))
-        .input('uname', sql.VarChar, user.uname)
-        .query(`
-          SELECT DISTINCT TOP 20
-            co.order_seq, co.order_date, co.order_name, co.order_hphone,
-            co.order_total_price, co.last_total_price, co.status_seq,
-            (SELECT TOP 1 c2.Card_Name FROM custom_order_item coi2 WITH (NOLOCK)
-             INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
-             LEFT JOIN S2_CardKind ck2 WITH (NOLOCK) ON c2.Card_Seq = ck2.Card_Seq AND ck2.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
-             WHERE coi2.order_seq = co.order_seq
-               AND ${DAERYEPUM_WHERE.replace(/ck\./g, 'ck2.').replace(/c\./g, 'c2.')}
-            ) AS card_name
-          FROM custom_order co WITH (NOLOCK)
-          INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
-          INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-          LEFT JOIN S2_CardKind ck WITH (NOLOCK) ON c.Card_Seq = ck.Card_Seq AND ck.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
-          WHERE co.status_seq >= 1
-            AND co.order_date >= DATEADD(month, -6, GETDATE())
-            AND (co.order_hphone LIKE '%' + @phone OR co.order_name = @uname)
-            AND ${DAERYEPUM_WHERE}
-          ORDER BY co.order_date DESC
-        `);
-
-      // 배치 조회로 N+1 쿼리 방지
-      const orderSeqs = ordersResult.recordset.map(r => String(r.order_seq));
-      const customerInfos = await store.getCustomerInfoBatch(orderSeqs);
-      const infoMap = new Map(customerInfos.map(i => [i.order_id, i]));
-
-      const orders = ordersResult.recordset.map(r => {
-        const existing = infoMap.get(String(r.order_seq));
-        return {
-          order_id: String(r.order_seq),
-          order_number: 'BRS-' + r.order_seq,
-          customer_name: r.order_name || '',
-          phone_last4: (r.order_hphone || '').replace(/\D/g, '').slice(-4),
-          order_date: r.order_date,
-          total_amount: r.last_total_price || r.order_total_price || 0,
-          product_name: r.card_name || '답례품',
-          info_status: existing?.submitted_at ? 'completed' : 'pending',
-          status_seq: r.status_seq,
-        };
+      // 로그인 성공 → 해당 회원의 답례품/꽃다발 주문 조회 (CARD + ETC 통합)
+      const orders = await searchDaeryepumOrders(pool, sql, {
+        phone: phone.slice(-8),
+        phoneFull: phone,
+        uname: user.uname,
+        useLike: true,
       });
 
       return json(res, {
@@ -137,49 +100,12 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
     try {
       const pool = await getPool();
-      const request = pool.request();
-      request.input('phone', sql.VarChar, phone); // 숫자만 (예: 01054477835)
-      request.input('name', sql.VarChar, name);
-      const whereClause = "AND REPLACE(co.order_hphone, '-', '') = @phone AND co.order_name = @name";
-      const result = await request.query(`
-        SELECT DISTINCT TOP 20
-          co.order_seq, co.order_date, co.order_name, co.order_hphone,
-          co.order_total_price, co.last_total_price, co.status_seq,
-          (SELECT TOP 1 c2.Card_Name FROM custom_order_item coi2 WITH (NOLOCK)
-           INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
-           LEFT JOIN S2_CardKind ck2 WITH (NOLOCK) ON c2.Card_Seq = ck2.Card_Seq AND ck2.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
-           WHERE coi2.order_seq = co.order_seq
-             AND ${DAERYEPUM_WHERE.replace(/ck\./g, 'ck2.').replace(/c\./g, 'c2.')}
-          ) AS card_name
-        FROM custom_order co WITH (NOLOCK)
-        INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
-        INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-        LEFT JOIN S2_CardKind ck WITH (NOLOCK) ON c.Card_Seq = ck.Card_Seq AND ck.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
-        WHERE co.status_seq >= 1
-          AND co.order_date >= DATEADD(month, -6, GETDATE())
-          AND ${DAERYEPUM_WHERE}
-          ${whereClause}
-        ORDER BY co.order_date DESC
-      `);
-
-      // 배치 조회로 N+1 쿼리 방지
-      const orderSeqs = result.recordset.map(r => String(r.order_seq));
-      const customerInfos = await store.getCustomerInfoBatch(orderSeqs);
-      const infoMap = new Map(customerInfos.map(i => [i.order_id, i]));
-
-      const orders = result.recordset.map(r => {
-        const existing = infoMap.get(String(r.order_seq));
-        return {
-          order_id: String(r.order_seq),
-          order_number: 'BRS-' + r.order_seq,
-          customer_name: maskName(r.order_name || ''),
-          phone_last4: (r.order_hphone || '').replace(/\D/g, '').slice(-4),
-          order_date: r.order_date,
-          total_amount: r.last_total_price || r.order_total_price || 0,
-          product_name: r.card_name || '답례품',
-          info_status: existing?.submitted_at ? 'completed' : 'pending',
-          status_seq: r.status_seq,
-        };
+      const orders = await searchDaeryepumOrders(pool, sql, {
+        phone,
+        phoneFull: phone,
+        uname: name,
+        useLike: false,
+        maskCustomerName: true,
       });
 
       return json(res, { orders });
@@ -195,24 +121,49 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     const orderId = decodeURIComponent(orderDetailMatch[1]);
     try {
       const pool = await getPool();
-      // barunson DB에서 주문 조회 (답례품/꽃다발 아이템만)
-      const result = await pool.request()
-        .input('orderSeq', sql.Int, parseInt(orderId) || 0)
-        .query(`
-          SELECT
-            co.order_seq, co.order_date, co.order_total_price, co.last_total_price,
-            co.order_name, co.order_hphone, co.status_seq,
-            coi.id AS item_id, coi.item_count, coi.item_price, coi.item_sale_price,
-            c.Card_Code, c.Card_Name, c.Card_Price,
-            di.NAME AS delivery_name, di.HPHONE AS delivery_hphone, di.ADDR AS delivery_addr
-          FROM custom_order co WITH (NOLOCK)
-          INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
-          INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-          LEFT JOIN S2_CardKind ck WITH (NOLOCK) ON c.Card_Seq = ck.Card_Seq AND ck.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
-          LEFT JOIN DELIVERY_INFO di WITH (NOLOCK) ON co.order_seq = di.ORDER_SEQ
-          WHERE co.order_seq = @orderSeq
-            AND ${DAERYEPUM_WHERE}
-        `);
+      // ETC-{seq} 형식이면 바른손몰 ETC 주문, 그 외는 custom_order
+      const isEtc = orderId.startsWith('ETC-');
+      const seq = parseInt(isEtc ? orderId.slice(4) : orderId) || 0;
+
+      let result;
+      if (isEtc) {
+        // 바른손몰 ETC 주문
+        result = await pool.request()
+          .input('orderSeq', sql.Int, seq)
+          .query(`
+            SELECT
+              co.order_seq, co.order_date, co.settle_price AS order_total_price, co.settle_price AS last_total_price,
+              co.order_name, co.order_hphone, co.status_seq,
+              ei.seq AS item_id, ei.order_count AS item_count, ei.card_price AS item_price, ei.card_sale_price AS item_sale_price,
+              c.Card_Code, c.Card_Name, c.Card_Price,
+              co.recv_name AS delivery_name, co.recv_hphone AS delivery_hphone, co.recv_address AS delivery_addr
+            FROM CUSTOM_ETC_ORDER co WITH (NOLOCK)
+            INNER JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON co.order_seq = ei.order_seq
+            INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
+            LEFT JOIN S2_CardKind ck WITH (NOLOCK) ON c.Card_Seq = ck.Card_Seq AND ck.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
+            WHERE co.order_seq = @orderSeq
+              AND ${DAERYEPUM_WHERE}
+          `);
+      } else {
+        // 바른손카드 주문
+        result = await pool.request()
+          .input('orderSeq', sql.Int, seq)
+          .query(`
+            SELECT
+              co.order_seq, co.order_date, co.order_total_price, co.last_total_price,
+              co.order_name, co.order_hphone, co.status_seq,
+              coi.id AS item_id, coi.item_count, coi.item_price, coi.item_sale_price,
+              c.Card_Code, c.Card_Name, c.Card_Price,
+              di.NAME AS delivery_name, di.HPHONE AS delivery_hphone, di.ADDR AS delivery_addr
+            FROM custom_order co WITH (NOLOCK)
+            INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+            INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+            LEFT JOIN S2_CardKind ck WITH (NOLOCK) ON c.Card_Seq = ck.Card_Seq AND ck.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
+            LEFT JOIN DELIVERY_INFO di WITH (NOLOCK) ON co.order_seq = di.ORDER_SEQ
+            WHERE co.order_seq = @orderSeq
+              AND ${DAERYEPUM_WHERE}
+          `);
+      }
 
       if (!result.recordset.length) {
         return json(res, { error: '주문을 찾을 수 없습니다.' }, 404);
@@ -254,8 +205,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         : allActiveStickers;
 
       return json(res, {
-        order_id: String(row.order_seq),
-        order_number: `BRS-${row.order_seq}`,
+        order_id: orderId, // 원래 들어온 ID (ETC-prefix 유지)
+        order_number: isEtc ? `BHS-${row.order_seq}` : `BRS-${row.order_seq}`,
         customer_name: maskName(row.order_name || row.delivery_name || ''),
         order_date: row.order_date,
         total_amount: row.last_total_price || row.order_total_price || 0,
@@ -392,6 +343,108 @@ function maskName(name) {
   if (!name || name.length <= 1) return name;
   if (name.length === 2) return name[0] + '*';
   return name[0] + '*'.repeat(name.length - 2) + name[name.length - 1];
+}
+
+/**
+ * 답례품/꽃다발 주문 통합 검색 (바른손카드 + 바른손몰)
+ * @param {Object} opts - {phone, phoneFull, uname, useLike, maskCustomerName}
+ *   useLike=true: LIKE '%' + @phone  (로그인 플로우)
+ *   useLike=false: REPLACE(...) = @phone (정확 매칭, 전화번호+이름 검색)
+ */
+async function searchDaeryepumOrders(pool, sql, opts) {
+  const { phone, uname, useLike, maskCustomerName } = opts;
+
+  // 바른손카드 (custom_order) 조회
+  const cardRequest = pool.request();
+  cardRequest.input('phone', sql.VarChar, phone);
+  cardRequest.input('uname', sql.VarChar, uname);
+  const cardWhere = useLike
+    ? "AND (co.order_hphone LIKE '%' + @phone OR co.order_name = @uname)"
+    : "AND REPLACE(co.order_hphone, '-', '') = @phone AND co.order_name = @uname";
+  const cardResult = await cardRequest.query(`
+    SELECT DISTINCT TOP 20
+      co.order_seq, co.order_date, co.order_name, co.order_hphone,
+      co.order_total_price, co.last_total_price, co.status_seq,
+      (SELECT TOP 1 c2.Card_Name FROM custom_order_item coi2 WITH (NOLOCK)
+       INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+       LEFT JOIN S2_CardKind ck2 WITH (NOLOCK) ON c2.Card_Seq = ck2.Card_Seq AND ck2.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
+       WHERE coi2.order_seq = co.order_seq
+         AND ${DAERYEPUM_WHERE.replace(/ck\./g, 'ck2.').replace(/c\./g, 'c2.')}
+      ) AS card_name
+    FROM custom_order co WITH (NOLOCK)
+    INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+    INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+    LEFT JOIN S2_CardKind ck WITH (NOLOCK) ON c.Card_Seq = ck.Card_Seq AND ck.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
+    WHERE co.status_seq >= 1
+      AND co.order_date >= DATEADD(month, -6, GETDATE())
+      AND ${DAERYEPUM_WHERE}
+      ${cardWhere}
+    ORDER BY co.order_date DESC
+  `);
+
+  // 바른손몰 ETC (CUSTOM_ETC_ORDER) 조회
+  const etcRequest = pool.request();
+  etcRequest.input('phone', sql.VarChar, phone);
+  etcRequest.input('uname', sql.VarChar, uname);
+  const etcWhere = useLike
+    ? "AND (co.order_hphone LIKE '%' + @phone OR co.order_name = @uname)"
+    : "AND REPLACE(co.order_hphone, '-', '') = @phone AND co.order_name = @uname";
+  const etcResult = await etcRequest.query(`
+    SELECT DISTINCT TOP 20
+      co.order_seq, co.order_date, co.order_name, co.order_hphone, co.settle_price,
+      co.status_seq,
+      (SELECT TOP 1 c2.Card_Name FROM CUSTOM_ETC_ORDER_ITEM ei2 WITH (NOLOCK)
+       INNER JOIN S2_Card c2 WITH (NOLOCK) ON ei2.card_seq = c2.Card_Seq
+       LEFT JOIN S2_CardKind ck2 WITH (NOLOCK) ON c2.Card_Seq = ck2.Card_Seq AND ck2.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
+       WHERE ei2.order_seq = co.order_seq
+         AND ${DAERYEPUM_WHERE.replace(/ck\./g, 'ck2.').replace(/c\./g, 'c2.')}
+      ) AS card_name
+    FROM CUSTOM_ETC_ORDER co WITH (NOLOCK)
+    INNER JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON co.order_seq = ei.order_seq
+    INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
+    LEFT JOIN S2_CardKind ck WITH (NOLOCK) ON c.Card_Seq = ck.Card_Seq AND ck.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
+    WHERE co.status_seq >= 1
+      AND co.order_date >= DATEADD(month, -6, GETDATE())
+      AND ${DAERYEPUM_WHERE}
+      ${etcWhere}
+    ORDER BY co.order_date DESC
+  `);
+
+  // 병합 + 정렬
+  const combined = [
+    ...cardResult.recordset.map(r => ({
+      order_id: String(r.order_seq),
+      order_number: 'BRS-' + r.order_seq,
+      customer_name: maskCustomerName ? maskName(r.order_name || '') : (r.order_name || ''),
+      phone_last4: (r.order_hphone || '').replace(/\D/g, '').slice(-4),
+      order_date: r.order_date,
+      total_amount: r.last_total_price || r.order_total_price || 0,
+      product_name: r.card_name || '답례품',
+      status_seq: r.status_seq,
+      source: 'card',
+    })),
+    ...etcResult.recordset.map(r => ({
+      order_id: 'ETC-' + r.order_seq,
+      order_number: 'BHS-' + r.order_seq,
+      customer_name: maskCustomerName ? maskName(r.order_name || '') : (r.order_name || ''),
+      phone_last4: (r.order_hphone || '').replace(/\D/g, '').slice(-4),
+      order_date: r.order_date,
+      total_amount: r.settle_price || 0,
+      product_name: r.card_name || '답례품',
+      status_seq: r.status_seq,
+      source: 'etc',
+    })),
+  ].sort((a, b) => new Date(b.order_date) - new Date(a.order_date));
+
+  // 고객 입력 상태 배치 조회
+  const orderSeqs = combined.map(o => o.order_id);
+  const customerInfos = await store.getCustomerInfoBatch(orderSeqs);
+  const infoMap = new Map(customerInfos.map(i => [i.order_id, i]));
+
+  return combined.map(o => ({
+    ...o,
+    info_status: infoMap.get(o.order_id)?.submitted_at ? 'completed' : 'pending',
+  }));
 }
 
 module.exports = { handleBarungiftApi };
