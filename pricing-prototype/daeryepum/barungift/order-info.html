@@ -1600,7 +1600,7 @@
       products: productInputs,
       sticker_selections: productInputs
         .filter(function(pi){ return pi.sticker_id; })
-        .map(function(pi){ return { product_code: pi.product_code, product_name: pi.product_name, sticker_id: pi.sticker_id, sticker_name: pi.sticker_name, custom_values: pi.custom_values }; }),
+        .map(function(pi){ return { product_code: pi.product_code, product_name: pi.product_name, quantity: pi.quantity, sticker_id: pi.sticker_id, sticker_name: pi.sticker_name, custom_values: pi.custom_values }; }),
       cash_receipt_yn: formState.cash_receipt_yn,
       receipt_type: formState.receipt_type,
       receipt_number: formState.receipt_number || null,
