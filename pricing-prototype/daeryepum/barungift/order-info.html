@@ -747,7 +747,7 @@
       var productCode = p.product_code || '';
       var matching = getStickersForProduct(productCode);
       var selStickerId = ps.sticker_type || '';
-      var stInput = ps.sticker_input || 'none';
+      var stInput = ps.sticker_input || 'custom';
 
       var stTypeHtml = '';
       if (matching.length === 0) {
@@ -1185,7 +1185,7 @@
     var productCode = p ? (p.product_code || '') : '';
     var matching = getStickersForProduct(productCode);
     var selStickerId = ps.sticker_type || '';
-    var stInput = ps.sticker_input || 'none';
+    var stInput = ps.sticker_input || 'custom';
 
     if (!selStickerId || matching.length === 0) return '<div id="sticker-input-wrap-' + idx + '"></div>';
 
