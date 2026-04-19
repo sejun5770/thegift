@@ -187,6 +187,7 @@ nav a:hover{color:var(--gray-900)}
   <a href="#bg-products" onclick="showPage('bg-products')">⚙️ 상품설정</a>
   <a href="#bg-shipping" onclick="showPage('bg-shipping')">📅 출고일설정</a>
   <a href="#bg-alimtalk" onclick="showPage('bg-alimtalk')">📨 알림톡 발송</a>
+  <a href="#bg-orders" onclick="showPage('bg-orders')">📋 고객입력현황</a>
   <div class="user-area" id="user-area"></div>
 </nav>
 
@@ -1180,6 +1181,88 @@ nav a:hover{color:var(--gray-900)}
   </div>
 </div>
 
+<!-- ========== 바른기프트: 고객입력현황 ========== -->
+<div id="page-bg-orders" class="page">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+    <h2 style="margin:0">📋 고객 입력 현황</h2>
+    <button class="btn" onclick="loadBgOrders()">🔄 새로고침</button>
+  </div>
+  <div id="bg-orders-loading" style="text-align:center;padding:40px;color:var(--gray-400)">불러오는 중...</div>
+  <div id="bg-orders-empty" style="display:none;text-align:center;padding:40px;color:var(--gray-400)">아직 제출된 고객 입력이 없습니다.</div>
+  <div id="bg-orders-table-wrap" style="display:none">
+    <table class="data-table" id="bg-orders-table">
+      <thead>
+        <tr>
+          <th>주문번호</th>
+          <th>제출일시</th>
+          <th>희망출고일</th>
+          <th>출고방식</th>
+          <th>스티커</th>
+          <th>현금영수증</th>
+          <th>요청사항</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="bg-orders-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 고객입력 수정 모달 -->
+<div id="bg-order-edit-modal" onclick="if(event.target===this)closeBgOrderEdit()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;max-width:560px;width:90%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
+      <h3 id="bg-edit-modal-title" style="margin:0;font-size:16px">고객 입력 수정</h3>
+      <button onclick="closeBgOrderEdit()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--gray-500)">&times;</button>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:16px">
+      <input type="hidden" id="bg-edit-order-id">
+
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">희망출고일</label>
+        <input type="date" id="bg-edit-ship-date" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px">
+      </div>
+
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">출고방식</label>
+        <select id="bg-edit-shipping-type" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px">
+          <option value="false">일반출고</option>
+          <option value="true">빠른출고</option>
+        </select>
+      </div>
+
+      <div id="bg-edit-stickers-wrap">
+        <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">스티커 문구</label>
+        <div id="bg-edit-stickers"></div>
+      </div>
+
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">현금영수증</label>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <input type="checkbox" id="bg-edit-receipt-yn" onchange="toggleBgReceiptEdit(this.checked)">
+          <label for="bg-edit-receipt-yn" style="font-size:13px">현금영수증 신청</label>
+        </div>
+        <div id="bg-edit-receipt-detail" style="display:none;padding:12px;background:var(--gray-50);border-radius:6px;display:flex;flex-direction:column;gap:8px">
+          <select id="bg-edit-receipt-type" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+            <option value="personal">소득공제용 (휴대폰번호)</option>
+            <option value="business">지출증빙용 (사업자번호)</option>
+          </select>
+          <input type="text" id="bg-edit-receipt-number" placeholder="번호 입력" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+        </div>
+      </div>
+
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">고객 요청사항</label>
+        <textarea id="bg-edit-request" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px;resize:vertical"></textarea>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:12px 20px;border-top:1px solid var(--gray-200)">
+      <button class="btn" onclick="closeBgOrderEdit()">취소</button>
+      <button class="btn btn-primary" onclick="saveBgOrderEdit()">저장</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <!-- 첨부파일 모달 -->
@@ -1313,7 +1396,7 @@ function init() {
 
   // URL hash 기반 페이지 전환
   const hash = location.hash.replace('#', '') || 'dashboard';
-  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-alimtalk'].includes(hash)) showPage(hash);
+  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-alimtalk', 'bg-orders'].includes(hash)) showPage(hash);
 }
 
 function fmt(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -1333,6 +1416,7 @@ function showPage(name) {
   if (name === 'bg-products') loadBgProducts();
   if (name === 'bg-shipping') loadBgShipping();
   if (name === 'bg-alimtalk') loadBgAlimtalk();
+  if (name === 'bg-orders') loadBgOrders();
 }
 
 // --- Category Tabs ---
@@ -4624,6 +4708,144 @@ async function bgAlimtalkSend() {
 
 function closeBgAtResult() {
   document.getElementById('bg-at-result-modal').style.display = 'none';
+}
+
+// ============================================
+// 고객 입력 현황
+// ============================================
+let bgOrdersData = [];
+
+async function loadBgOrders() {
+  document.getElementById('bg-orders-loading').style.display = 'block';
+  document.getElementById('bg-orders-empty').style.display = 'none';
+  document.getElementById('bg-orders-table-wrap').style.display = 'none';
+  try {
+    const res = await fetch(API + '/api/bg/customer-infos');
+    const data = await res.json();
+    bgOrdersData = data.infos || [];
+    renderBgOrders();
+  } catch(e) {
+    document.getElementById('bg-orders-loading').textContent = '불러오기 실패: ' + e.message;
+  }
+}
+
+function renderBgOrders() {
+  document.getElementById('bg-orders-loading').style.display = 'none';
+  if (!bgOrdersData.length) {
+    document.getElementById('bg-orders-empty').style.display = 'block';
+    return;
+  }
+  document.getElementById('bg-orders-table-wrap').style.display = 'block';
+
+  const receiptLabel = { personal: '소득공제', business: '지출증빙' };
+  const rows = bgOrdersData.map(info => {
+    const submittedAt = info.submitted_at ? new Date(info.submitted_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-';
+    const stickerText = (info.sticker_selections || []).map(s => {
+      const vals = Object.values(s.custom_values || {}).filter(Boolean);
+      return s.sticker_name + (vals.length ? ' (' + vals.join(' / ') + ')' : '');
+    }).join(', ') || '없음';
+    const receiptText = info.cash_receipt_yn
+      ? (receiptLabel[info.receipt_type] || '') + ' ' + (info.receipt_number || '')
+      : '미신청';
+    const shippingText = info.is_express ? '⚡ 빠른출고' : '일반';
+    const requestText = info.customer_request || '-';
+
+    return `<tr>
+      <td style="font-weight:600">${info.order_id || '-'}</td>
+      <td style="color:var(--gray-500);font-size:12px">${submittedAt}</td>
+      <td>${info.desired_ship_date || '-'}</td>
+      <td>${shippingText}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${stickerText}">${stickerText}</td>
+      <td style="font-size:12px">${receiptText}</td>
+      <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray-500)" title="${requestText}">${requestText}</td>
+      <td><button class="btn" style="padding:4px 10px;font-size:12px" onclick='openBgOrderEdit(${JSON.stringify(info)})'>수정</button></td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('bg-orders-tbody').innerHTML = rows;
+}
+
+function openBgOrderEdit(info) {
+  document.getElementById('bg-edit-order-id').value = info.order_id;
+  document.getElementById('bg-edit-modal-title').textContent = '고객 입력 수정 — ' + info.order_id;
+  document.getElementById('bg-edit-ship-date').value = info.desired_ship_date || '';
+  document.getElementById('bg-edit-shipping-type').value = info.is_express ? 'true' : 'false';
+  document.getElementById('bg-edit-receipt-yn').checked = !!info.cash_receipt_yn;
+  document.getElementById('bg-edit-receipt-type').value = info.receipt_type || 'personal';
+  document.getElementById('bg-edit-receipt-number').value = info.receipt_number || '';
+  document.getElementById('bg-edit-request').value = info.customer_request || '';
+  toggleBgReceiptEdit(!!info.cash_receipt_yn);
+
+  // 스티커 입력 렌더
+  const stickerWrap = document.getElementById('bg-edit-stickers');
+  const sels = info.sticker_selections || [];
+  if (!sels.length) {
+    stickerWrap.innerHTML = '<p style="color:var(--gray-400);font-size:13px">스티커 선택 없음</p>';
+  } else {
+    stickerWrap.innerHTML = sels.map((s, idx) => {
+      const fields = Object.entries(s.custom_values || {});
+      const fieldInputs = fields.length
+        ? fields.map(([k, v]) => `<div style="margin-top:6px"><label style="font-size:11px;color:var(--gray-500)">${k}</label><input type="text" data-sticker-idx="${idx}" data-field="${k}" value="${String(v).replace(/"/g,'&quot;')}" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px;margin-top:2px"></div>`).join('')
+        : '<p style="font-size:12px;color:var(--gray-400)">문구 입력안함</p>';
+      return `<div style="padding:10px;background:var(--gray-50);border-radius:6px;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">🏷️ ${s.sticker_name || '스티커'}</div>
+        ${fieldInputs}
+      </div>`;
+    }).join('');
+  }
+
+  // 수정 모달에 sticker_selections 원본 임시 저장
+  document.getElementById('bg-order-edit-modal').__stickerSelections = sels;
+  document.getElementById('bg-order-edit-modal').style.display = 'flex';
+}
+
+function toggleBgReceiptEdit(checked) {
+  document.getElementById('bg-edit-receipt-detail').style.display = checked ? 'flex' : 'none';
+}
+
+function closeBgOrderEdit() {
+  document.getElementById('bg-order-edit-modal').style.display = 'none';
+}
+
+async function saveBgOrderEdit() {
+  const orderId = document.getElementById('bg-edit-order-id').value;
+  const modal = document.getElementById('bg-order-edit-modal');
+  const stickerSelections = modal.__stickerSelections || [];
+
+  // 스티커 custom_values 수정값 수집
+  modal.querySelectorAll('input[data-sticker-idx]').forEach(inp => {
+    const idx = parseInt(inp.dataset.stickerIdx);
+    const field = inp.dataset.field;
+    if (stickerSelections[idx]) {
+      if (!stickerSelections[idx].custom_values) stickerSelections[idx].custom_values = {};
+      stickerSelections[idx].custom_values[field] = inp.value;
+    }
+  });
+
+  const payload = {
+    desired_ship_date: document.getElementById('bg-edit-ship-date').value,
+    is_express: document.getElementById('bg-edit-shipping-type').value === 'true',
+    sticker_selections: stickerSelections,
+    cash_receipt_yn: document.getElementById('bg-edit-receipt-yn').checked,
+    receipt_type: document.getElementById('bg-edit-receipt-type').value,
+    receipt_number: document.getElementById('bg-edit-receipt-number').value,
+    customer_request: document.getElementById('bg-edit-request').value,
+  };
+
+  try {
+    const res = await fetch(API + '/api/bg/orders/' + encodeURIComponent(orderId) + '/customer-info', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '저장 실패');
+    showToast('저장되었습니다.');
+    closeBgOrderEdit();
+    loadBgOrders();
+  } catch(e) {
+    alert('저장 실패: ' + e.message);
+  }
 }
 
 init();

@@ -343,6 +343,19 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     return json(res, { infos: await store.getAllCustomerInfos() });
   }
 
+  // PUT /api/bg/orders/:orderId/customer-info - 관리자 수정
+  const customerInfoEditMatch = pathname.match(/^\/api\/bg\/orders\/([^/]+)\/customer-info$/);
+  if (customerInfoEditMatch && method === 'PUT') {
+    const orderId = decodeURIComponent(customerInfoEditMatch[1]);
+    try {
+      const body = await parseBody(req);
+      const updated = await store.updateCustomerInfo(orderId, body);
+      return json(res, { ok: true, info: updated });
+    } catch (err) {
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
   // GET /api/bg/shipping-config - 공통 출고일 설정 조회
   if (pathname === '/api/bg/shipping-config' && method === 'GET') {
     return json(res, { config: await store.getShippingConfig() });

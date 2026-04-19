@@ -302,8 +302,26 @@ async function saveCustomerInfo(orderId, data) {
 }
 
 async function getAllCustomerInfos() {
-  if (USE_SUPABASE) return sbGet('bg_order_customer_info');
-  return readJson(FILES.customerInfo, []);
+  if (USE_SUPABASE) return sbGet('bg_order_customer_info', 'order=submitted_at.desc');
+  const infos = readJson(FILES.customerInfo, []);
+  return [...infos].sort((a, b) => (b.submitted_at || '').localeCompare(a.submitted_at || ''));
+}
+
+async function updateCustomerInfo(orderId, data) {
+  const allowed = ['desired_ship_date', 'is_express', 'sticker_selections', 'cash_receipt_yn', 'receipt_type', 'receipt_number', 'customer_request'];
+  const patch = {};
+  for (const k of allowed) { if (k in data) patch[k] = data[k]; }
+  patch.updated_at = now();
+
+  if (USE_SUPABASE) {
+    return sbUpdate('bg_order_customer_info', `order_id=eq.${encodeURIComponent(orderId)}`, patch);
+  }
+  const infos = readJson(FILES.customerInfo, []);
+  const idx = infos.findIndex(i => i.order_id === orderId);
+  if (idx === -1) throw new Error('NOT_FOUND');
+  infos[idx] = { ...infos[idx], ...patch };
+  writeJson(FILES.customerInfo, infos);
+  return infos[idx];
 }
 
 // ============================================
@@ -442,6 +460,7 @@ module.exports = {
   getCustomerInfoBatch,
   saveCustomerInfo,
   getAllCustomerInfos,
+  updateCustomerInfo,
   getShippingConfig,
   saveShippingConfig,
   logAlimtalkSend,
