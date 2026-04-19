@@ -5193,7 +5193,7 @@ function renderBgUnified() {
     const productName = sel?.product_name
       || (_pm && sel?.product_code ? _pm.get(sel.product_code) : null)
       || order.card_name || '-';
-    const infoJson = ci ? JSON.stringify(ci).replace(/'/g, '&#39;') : null;
+    const infoJson = ci ? JSON.stringify({...ci, _order_seq: order.order_seq}).replace(/'/g, '&#39;') : null;
     const editBtn = infoJson
       ? `<button class="btn" style="padding:4px 10px;font-size:12px" onclick='openBgOrderEdit(${infoJson})'>수정</button>`
       : '';
@@ -5301,8 +5301,10 @@ function openBgOrderEdit(info) {
   const stickerWrap = document.getElementById('bg-edit-stickers');
   const sels = info.sticker_selections || [];
   // bgUnifiedProductMap에서 상품명 조회용 map 준비
-  const _editIsETC = info.order_id && String(info.order_id).startsWith('ETC-');
-  const _editOrderSeq = _editIsETC ? parseInt(String(info.order_id).replace('ETC-', '')) : parseInt(info.order_id);
+  const _editOrderSeq = info._order_seq
+    || (info.order_id && String(info.order_id).startsWith('ETC-')
+      ? parseInt(String(info.order_id).replace('ETC-', ''))
+      : parseInt(info.order_id));
   const _editPm = bgUnifiedProductMap.get(_editOrderSeq);
   if (!sels.length) {
     stickerWrap.innerHTML = '<p style="color:var(--gray-400);font-size:13px">스티커 선택 없음</p>';
