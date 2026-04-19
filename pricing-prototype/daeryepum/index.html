@@ -188,6 +188,7 @@ nav a:hover{color:var(--gray-900)}
   <a href="#bg-shipping" onclick="showPage('bg-shipping')">📅 출고일설정</a>
   <a href="#bg-alimtalk" onclick="showPage('bg-alimtalk')">📨 알림톡 발송</a>
   <a href="#bg-orders" onclick="showPage('bg-orders')">📋 고객입력현황</a>
+  <a href="#bg-unified" onclick="showPage('bg-unified')">🔗 통합현황</a>
   <div class="user-area" id="user-area"></div>
 </nav>
 
@@ -1219,6 +1220,64 @@ nav a:hover{color:var(--gray-900)}
   </div>
 </div>
 
+<!-- ========== UNIFIED VIEW ========== -->
+<div id="page-bg-unified" class="page">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h2 style="margin:0">🔗 통합현황</h2>
+    <button class="btn" onclick="loadBgUnified()">🔄 새로고침</button>
+  </div>
+  <div class="toolbar" style="margin-bottom:12px">
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex:1;min-width:0">
+      <input type="date" id="uni-start" />
+      <span>~</span>
+      <input type="date" id="uni-end" />
+      <button class="btn btn-primary" onclick="loadBgUnified()">조회</button>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:13px;cursor:pointer"><input type="checkbox" id="uni-hide-cancel" onchange="renderBgUnified()"> 취소 제외</label>
+      <label style="font-size:13px;cursor:pointer"><input type="checkbox" id="uni-only-submitted" onchange="renderBgUnified()"> 입력완료만</label>
+      <label style="font-size:13px;cursor:pointer"><input type="checkbox" id="uni-only-unsubmitted" onchange="renderBgUnified()"> 미입력만</label>
+    </div>
+  </div>
+  <div id="uni-loading" style="text-align:center;padding:40px;color:var(--gray-400)">날짜를 선택하고 조회하세요.</div>
+  <div id="uni-table-wrap" style="display:none">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+        <input type="checkbox" id="uni-select-all" onchange="toggleBgUnifiedSelectAll(this)"> 전체선택
+      </label>
+      <span id="uni-selected-count" style="font-size:13px;color:var(--gray-500)">0건 선택</span>
+      <span id="uni-row-count" style="font-size:13px;color:var(--gray-500)"></span>
+      <button class="btn" onclick="copyBgUnified()" style="margin-left:auto">📋 수집복사</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="data-table" id="uni-table">
+        <thead>
+          <tr>
+            <th style="width:36px"></th>
+            <th>주문번호</th>
+            <th>주문일</th>
+            <th>상품명</th>
+            <th style="text-align:center">수량</th>
+            <th>수령인</th>
+            <th>연락처</th>
+            <th>배송지</th>
+            <th style="text-align:center">입력</th>
+            <th>스티커코드</th>
+            <th>스티커명</th>
+            <th>문구</th>
+            <th>희망출고일</th>
+            <th>출고방식</th>
+            <th>현금영수증</th>
+            <th style="max-width:160px">요청사항</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="uni-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <!-- 고객입력 수정 모달 -->
 <div id="bg-order-edit-modal" onclick="if(event.target===this)closeBgOrderEdit()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:12px;max-width:560px;width:90%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
@@ -1407,7 +1466,7 @@ function init() {
 
   // URL hash 기반 페이지 전환
   const hash = location.hash.replace('#', '') || 'dashboard';
-  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-alimtalk', 'bg-orders'].includes(hash)) showPage(hash);
+  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-alimtalk', 'bg-orders', 'bg-unified'].includes(hash)) showPage(hash);
 }
 
 function fmt(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -1428,6 +1487,7 @@ function showPage(name) {
   if (name === 'bg-shipping') loadBgShipping();
   if (name === 'bg-alimtalk') loadBgAlimtalk();
   if (name === 'bg-orders') loadBgOrders();
+  if (name === 'bg-unified') loadBgUnified();
 }
 
 // --- Category Tabs ---
@@ -4908,6 +4968,217 @@ function copyBgOrders() {
     return cells.join('\t');
   });
   const tsv = tsvRows.join('\n');
+
+  if (navigator.clipboard && window.ClipboardItem) {
+    const htmlBlob = new Blob([tableHtml], { type: 'text/html' });
+    const textBlob = new Blob([tsv], { type: 'text/plain' });
+    navigator.clipboard.write([new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })])
+      .then(() => showToast(`${selectedRows.length}건 클립보드 복사 완료`))
+      .catch(() => navigator.clipboard.writeText(tsv).then(() => showToast(`${selectedRows.length}건 복사 완료`)));
+  } else {
+    navigator.clipboard.writeText(tsv).then(() => showToast(`${selectedRows.length}건 복사 완료`));
+  }
+}
+
+// ============================================
+// 통합현황
+// ============================================
+let bgUnifiedOrders = [];   // MSSQL 주문 데이터
+let bgUnifiedCiMap = new Map(); // order_id → customer_info
+let bgUnifiedRows = [];     // 평탄화된 렌더 행
+
+async function loadBgUnified() {
+  document.getElementById('uni-loading').style.display = 'block';
+  document.getElementById('uni-loading').textContent = '불러오는 중...';
+  document.getElementById('uni-table-wrap').style.display = 'none';
+
+  // 날짜 기본값 초기화 (최초 1회)
+  if (!document.getElementById('uni-start').value) {
+    const today = fmt(new Date());
+    const weekAgo = fmt(new Date(Date.now() - 7 * 86400000));
+    document.getElementById('uni-start').value = weekAgo;
+    document.getElementById('uni-end').value = today;
+  }
+
+  const start = document.getElementById('uni-start').value;
+  const end = document.getElementById('uni-end').value;
+  const endPlus = fmt(new Date(new Date(end).getTime() + 86400000));
+
+  try {
+    const [ordersRes, ciRes] = await Promise.all([
+      fetch(`${API}/api/orders?start_date=${start}&end_date=${endPlus}&category=daeryepum`).then(r => r.json()),
+      fetch(`${API}/api/bg/customer-infos`).then(r => r.json()),
+    ]);
+
+    const orders = Array.isArray(ordersRes) ? ordersRes : [];
+    orders.forEach(r => {
+      r.order_date_fmt = r.order_date ? r.order_date.replace('T', ' ').slice(0, 10) : '';
+    });
+    bgUnifiedOrders = orders;
+
+    const ciList = ciRes.infos || [];
+    bgUnifiedCiMap = new Map(ciList.map(ci => [String(ci.order_id), ci]));
+
+    renderBgUnified();
+  } catch (e) {
+    document.getElementById('uni-loading').textContent = '불러오기 실패: ' + e.message;
+  }
+}
+
+function renderBgUnified() {
+  const hideCancel = document.getElementById('uni-hide-cancel')?.checked;
+  const onlySubmitted = document.getElementById('uni-only-submitted')?.checked;
+  const onlyUnsubmitted = document.getElementById('uni-only-unsubmitted')?.checked;
+
+  const receiptLabel = { personal: '소득공제', business: '지출증빙' };
+
+  // 필터링
+  let filtered = bgUnifiedOrders.filter(o => {
+    if (hideCancel && (o.status_seq === 3 || o.status_seq === 5)) return false;
+    const ci = bgUnifiedCiMap.get(String(o.order_seq));
+    if (onlySubmitted && !ci) return false;
+    if (onlyUnsubmitted && ci) return false;
+    return true;
+  });
+
+  // 평탄화 (order × sticker_selection)
+  bgUnifiedRows = [];
+  filtered.forEach(order => {
+    const ci = bgUnifiedCiMap.get(String(order.order_seq)) || null;
+    const sels = ci?.sticker_selections || [];
+    if (sels.length > 0) {
+      sels.forEach(sel => bgUnifiedRows.push({ order, ci, sel }));
+    } else {
+      bgUnifiedRows.push({ order, ci, sel: null });
+    }
+  });
+
+  if (!bgUnifiedRows.length) {
+    document.getElementById('uni-loading').style.display = 'block';
+    document.getElementById('uni-loading').textContent = '조회된 데이터가 없습니다.';
+    document.getElementById('uni-table-wrap').style.display = 'none';
+    return;
+  }
+
+  document.getElementById('uni-loading').style.display = 'none';
+  document.getElementById('uni-table-wrap').style.display = 'block';
+  document.getElementById('uni-row-count').textContent = `총 ${filtered.length}건 / ${bgUnifiedRows.length}행`;
+
+  const isCancelled = o => o.status_seq === 3 || o.status_seq === 5;
+  let html = '';
+
+  bgUnifiedRows.forEach(({ order, ci, sel }, rowIdx) => {
+    const isFirstOfOrder = rowIdx === 0 || bgUnifiedRows[rowIdx - 1].order.order_seq !== order.order_seq;
+    const borderStyle = isFirstOfOrder ? 'border-top:2px solid var(--gray-200)' : '';
+    const cancelStyle = isCancelled(order) ? 'opacity:0.5;text-decoration:line-through;' : '';
+
+    const orderDateFmt = order.order_date_fmt || '-';
+    const recvName = order.display_name || '-';
+    const recvPhone = order.recv_hphone || '-';
+    const recvAddr = order.recv_address || '-';
+    const itemCount = order.item_count || 1;
+
+    const hasInput = !!ci;
+    const inputBadge = hasInput
+      ? '<span style="color:#16a34a;font-size:11px;font-weight:600">✅ 완료</span>'
+      : '<span style="color:var(--gray-300);font-size:11px">미입력</span>';
+
+    // 고객 입력 필드
+    const stickerCode = sel?.sticker_code
+      ? `<span style="font-family:monospace;font-size:12px">${sel.sticker_code}${sel.quantity ? `(${sel.quantity}개)` : ''}</span>`
+      : '<span style="color:var(--gray-300)">-</span>';
+    const stickerName = sel?.sticker_name || '<span style="color:var(--gray-300)">-</span>';
+    const customVals = sel ? Object.entries(sel.custom_values || {}).filter(([, v]) => v) : [];
+    const customText = customVals.length
+      ? customVals.map(([k, v]) => `<span style="color:var(--gray-500)">${k}:</span> ${v}`).join('<br>')
+      : '<span style="color:var(--gray-300)">-</span>';
+    const shipDate = ci?.desired_ship_date || '<span style="color:var(--gray-300)">-</span>';
+    const shipType = ci ? (ci.is_express
+      ? '<span style="color:#dc2626;font-weight:600">⚡ 빠른출고</span>'
+      : '일반') : '<span style="color:var(--gray-300)">-</span>';
+    const receiptText = ci ? (ci.cash_receipt_yn
+      ? (receiptLabel[ci.receipt_type] || '') + ' ' + (ci.receipt_number || '')
+      : '미신청') : '<span style="color:var(--gray-300)">-</span>';
+    const requestText = ci?.customer_request || '';
+
+    const productName = sel?.product_name || order.card_name || '-';
+    const infoJson = ci ? JSON.stringify(ci).replace(/'/g, '&#39;') : null;
+    const editBtn = infoJson
+      ? `<button class="btn" style="padding:4px 10px;font-size:12px" onclick='openBgOrderEdit(${infoJson})'>수정</button>`
+      : '';
+
+    html += `<tr style="${borderStyle}${cancelStyle}">
+      <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()"></td>
+      <td style="font-weight:600;white-space:nowrap">${order.order_seq}</td>
+      <td style="font-size:12px;color:var(--gray-500);white-space:nowrap">${orderDateFmt}</td>
+      <td style="font-size:12px">${productName}</td>
+      <td style="text-align:center;font-size:12px">${itemCount}</td>
+      <td style="font-size:12px;white-space:nowrap">${recvName}</td>
+      <td style="font-size:12px;white-space:nowrap">${recvPhone}</td>
+      <td style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${recvAddr}">${recvAddr}</td>
+      <td style="text-align:center">${inputBadge}</td>
+      <td style="font-size:12px">${stickerCode}</td>
+      <td style="font-size:12px">${stickerName}</td>
+      <td style="font-size:12px;line-height:1.6">${customText}</td>
+      <td style="font-size:12px;white-space:nowrap">${shipDate}</td>
+      <td style="font-size:12px">${shipType}</td>
+      <td style="font-size:12px">${receiptText}</td>
+      <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray-500)" title="${requestText}">${requestText || '<span style="color:var(--gray-300)">-</span>'}</td>
+      <td>${editBtn}</td>
+    </tr>`;
+  });
+
+  document.getElementById('uni-tbody').innerHTML = html;
+  updateBgUnifiedSelectedCount();
+}
+
+function toggleBgUnifiedSelectAll(el) {
+  document.querySelectorAll('.uni-row-check').forEach(cb => { cb.checked = el.checked; });
+  updateBgUnifiedSelectedCount();
+}
+
+function updateBgUnifiedSelectedCount() {
+  const cnt = document.querySelectorAll('.uni-row-check:checked').length;
+  document.getElementById('uni-selected-count').textContent = cnt + '건 선택';
+}
+
+function copyBgUnified() {
+  const checked = [...document.querySelectorAll('.uni-row-check:checked')];
+  if (!checked.length) { showToast('복사할 행을 선택해주세요'); return; }
+
+  const selectedRows = checked.map(cb => bgUnifiedRows[parseInt(cb.dataset.idx)]);
+
+  // 23열 구조: A='', B=택배, C=일반, D=주문번호, E=수령인, F=연락처, G='', H=배송지, I='',
+  //            J=상품명, K=상품코드, L='', M=스티커코드(수량), N-U='', V=희망출고일(빠른출고), W=희망출고일
+  const buildCells = ({ order, ci, sel }) => {
+    const cells = Array(23).fill('');
+    cells[1] = '택배';
+    cells[2] = '일반';
+    cells[3] = String(order.order_seq).replace(/^ETC-/, '');
+    cells[4] = order.display_name || '';
+    cells[5] = order.recv_hphone || '';
+    cells[7] = order.recv_address || '';
+    cells[9] = sel?.product_name || order.card_name || '';
+    cells[10] = sel?.product_code || order.card_code || '';
+    if (sel?.sticker_code) {
+      const qty = sel.quantity ? `(${sel.quantity}개)` : '';
+      cells[12] = `${sel.sticker_code}${qty}`;
+    }
+    if (ci?.is_express) cells[21] = ci.desired_ship_date || '';
+    cells[22] = ci?.desired_ship_date || '';
+    return cells;
+  };
+
+  const htmlRows = selectedRows.map(row => {
+    const cells = buildCells(row);
+    return '<tr>' + cells.map((val, ci) => {
+      const style = (ci === 21 && row.ci?.is_express) ? ' style="color:#8B0000;font-weight:bold"' : '';
+      return `<td${style}>${val}</td>`;
+    }).join('') + '</tr>';
+  }).join('');
+
+  const tableHtml = `<table><tbody>${htmlRows}</tbody></table>`;
+  const tsv = selectedRows.map(row => buildCells(row).join('\t')).join('\n');
 
   if (navigator.clipboard && window.ClipboardItem) {
     const htmlBlob = new Blob([tableHtml], { type: 'text/html' });
