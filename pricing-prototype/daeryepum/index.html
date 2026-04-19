@@ -5308,7 +5308,11 @@ function openBgOrderEdit(info) {
       const fieldInputs = fields.length
         ? fields.map(([k, v]) => `<div style="margin-top:6px"><label style="font-size:11px;color:var(--gray-500)">${k}</label><input type="text" data-sticker-idx="${idx}" data-field="${k}" value="${String(v).replace(/"/g,'&quot;')}" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px;margin-top:2px"></div>`).join('')
         : '<p style="font-size:12px;color:var(--gray-400)">문구 입력안함</p>';
-      return `<div style="padding:10px;background:var(--gray-50);border-radius:6px;margin-bottom:8px">
+      const productLabel = s.product_name || s.product_code
+        ? `<div style="font-size:11px;color:var(--gray-500);margin-bottom:4px">📦 ${s.product_name || ''}${s.product_code ? ' <span style="font-family:monospace">('+s.product_code+')</span>' : ''}</div>`
+        : '';
+      return `<div style="padding:10px;background:var(--gray-50);border-radius:6px;margin-bottom:8px;border-left:3px solid var(--primary)">
+        ${productLabel}
         <div style="font-size:13px;font-weight:600;margin-bottom:4px">🏷️ ${s.sticker_name || '스티커'}${s.sticker_code ? ' <span style="font-family:monospace;font-size:11px;color:var(--gray-500);font-weight:400">[' + s.sticker_code + ']</span>' : ''}</div>
         ${fieldInputs}
       </div>`;

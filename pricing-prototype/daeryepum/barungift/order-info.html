@@ -1306,7 +1306,7 @@
     const ps = ensureProductEntry(productIdx);
     if (ps.sticker_type !== st.id) {
       ps.sticker_type = st.id;
-      ps.sticker_input = 'none';
+      ps.sticker_input = 'custom'; // 스티커 선택 시 문구 입력 필드 기본 노출
       ps.sticker_fields = {};
     }
     closeStickerModal();
