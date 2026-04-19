@@ -4932,6 +4932,7 @@ function copyBgOrders() {
       cells[10] = sel.product_code || '';                        // K
       const qty = sel.quantity ? `(${sel.quantity}개)` : '';
       cells[12] = sel.sticker_code ? `${sel.sticker_code}${qty}` : '';  // M
+      cells[19] = sel.quantity || '';  // T: 주문수량
     }
     // V: 빠른출고인 경우 희망출고일과 동일 날짜 (짙은 빨강)
     if (info.is_express) cells[21] = info.desired_ship_date || '';  // V
@@ -4962,6 +4963,7 @@ function copyBgOrders() {
       cells[10] = sel.product_code || '';
       const qty = sel.quantity ? `(${sel.quantity}개)` : '';
       cells[12] = sel.sticker_code ? `${sel.sticker_code}${qty}` : '';
+      cells[19] = sel.quantity || '';  // T: 주문수량
     }
     if (info.is_express) cells[21] = info.desired_ship_date || '';
     cells[22] = info.desired_ship_date || '';
@@ -5035,7 +5037,8 @@ function renderBgUnified() {
   // 필터링
   let filtered = bgUnifiedOrders.filter(o => {
     if (hideCancel && (o.status_seq === 3 || o.status_seq === 5)) return false;
-    const ci = bgUnifiedCiMap.get(String(o.order_seq));
+    const ciKey = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
+    const ci = bgUnifiedCiMap.get(ciKey);
     if (onlySubmitted && !ci) return false;
     if (onlyUnsubmitted && ci) return false;
     return true;
@@ -5044,7 +5047,8 @@ function renderBgUnified() {
   // 평탄화 (order × sticker_selection)
   bgUnifiedRows = [];
   filtered.forEach(order => {
-    const ci = bgUnifiedCiMap.get(String(order.order_seq)) || null;
+    const ciKey = order.order_type === 'ETC' ? `ETC-${order.order_seq}` : String(order.order_seq);
+    const ci = bgUnifiedCiMap.get(ciKey) || null;
     const sels = ci?.sticker_selections || [];
     if (sels.length > 0) {
       sels.forEach(sel => bgUnifiedRows.push({ order, ci, sel }));
@@ -5164,6 +5168,7 @@ function copyBgUnified() {
       const qty = sel.quantity ? `(${sel.quantity}개)` : '';
       cells[12] = `${sel.sticker_code}${qty}`;
     }
+    cells[19] = sel?.quantity || order.item_count || '';  // T: 주문수량
     if (ci?.is_express) cells[21] = ci.desired_ship_date || '';
     cells[22] = ci?.desired_ship_date || '';
     return cells;
