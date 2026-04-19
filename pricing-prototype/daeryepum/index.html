@@ -1197,7 +1197,10 @@ nav a:hover{color:var(--gray-900)}
           <th>제출일시</th>
           <th>희망출고일</th>
           <th>출고방식</th>
-          <th>스티커</th>
+          <th>상품명</th>
+          <th>스티커코드</th>
+          <th>스티커명</th>
+          <th>문구</th>
           <th>현금영수증</th>
           <th>요청사항</th>
           <th></th>
@@ -4738,32 +4741,72 @@ function renderBgOrders() {
   document.getElementById('bg-orders-table-wrap').style.display = 'block';
 
   const receiptLabel = { personal: '소득공제', business: '지출증빙' };
-  const rows = bgOrdersData.map(info => {
-    const submittedAt = info.submitted_at ? new Date(info.submitted_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-';
-    const stickerText = (info.sticker_selections || []).map(s => {
-      const vals = Object.values(s.custom_values || {}).filter(Boolean);
-      const code = s.sticker_code ? `[${s.sticker_code}] ` : '';
-      return code + (s.sticker_name || '') + (vals.length ? ' (' + vals.join(' / ') + ')' : '');
-    }).join(', ') || '없음';
+  let html = '';
+
+  bgOrdersData.forEach(info => {
+    const submittedAt = info.submitted_at
+      ? new Date(info.submitted_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})
+      : '-';
     const receiptText = info.cash_receipt_yn
       ? (receiptLabel[info.receipt_type] || '') + ' ' + (info.receipt_number || '')
       : '미신청';
     const shippingText = info.is_express ? '⚡ 빠른출고' : '일반';
     const requestText = info.customer_request || '-';
 
-    return `<tr>
-      <td style="font-weight:600">${info.order_id || '-'}</td>
-      <td style="color:var(--gray-500);font-size:12px">${submittedAt}</td>
-      <td>${info.desired_ship_date || '-'}</td>
-      <td>${shippingText}</td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${stickerText}">${stickerText}</td>
-      <td style="font-size:12px">${receiptText}</td>
-      <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray-500)" title="${requestText}">${requestText}</td>
-      <td><button class="btn" style="padding:4px 10px;font-size:12px" onclick='openBgOrderEdit(${JSON.stringify(info)})'>수정</button></td>
-    </tr>`;
-  }).join('');
+    // sticker_selections 기준으로 행 분리. 없으면 1행
+    const sels = (info.sticker_selections || []);
+    const rowCount = Math.max(sels.length, 1);
+    const infoJson = JSON.stringify(info).replace(/'/g, '&#39;');
 
-  document.getElementById('bg-orders-tbody').innerHTML = rows;
+    sels.forEach((s, i) => {
+      const vals = Object.entries(s.custom_values || {}).filter(([,v]) => v);
+      const customText = vals.map(([k, v]) => `<span style="color:var(--gray-500)">${k}:</span> ${v}`).join('<br>') || '<span style="color:var(--gray-300)">없음</span>';
+      const codeText = s.sticker_code ? `<span style="font-family:monospace;font-size:11px">${s.sticker_code}</span>` : '<span style="color:var(--gray-300)">-</span>';
+      const nameText = s.sticker_name || '-';
+      const productText = s.product_name || s.product_code || '-';
+
+      if (i === 0) {
+        // 첫 번째 행: 주문 공통 셀 + 상품 셀
+        html += `<tr style="border-top:2px solid var(--gray-200)">
+          <td rowspan="${rowCount}" style="font-weight:600;vertical-align:top;padding-top:10px">${info.order_id || '-'}</td>
+          <td rowspan="${rowCount}" style="color:var(--gray-500);font-size:12px;vertical-align:top;padding-top:10px;white-space:nowrap">${submittedAt}</td>
+          <td rowspan="${rowCount}" style="vertical-align:top;padding-top:10px;white-space:nowrap">${info.desired_ship_date || '-'}</td>
+          <td rowspan="${rowCount}" style="vertical-align:top;padding-top:10px">${shippingText}</td>
+          <td style="font-size:12px">${productText}</td>
+          <td style="font-size:12px">${codeText}</td>
+          <td style="font-size:12px">${nameText}</td>
+          <td style="font-size:12px;line-height:1.6">${customText}</td>
+          <td rowspan="${rowCount}" style="font-size:12px;vertical-align:top;padding-top:10px">${receiptText}</td>
+          <td rowspan="${rowCount}" style="font-size:12px;vertical-align:top;padding-top:10px;color:var(--gray-500);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${requestText}">${requestText}</td>
+          <td rowspan="${rowCount}" style="vertical-align:top;padding-top:6px"><button class="btn" style="padding:4px 10px;font-size:12px" onclick='openBgOrderEdit(${infoJson})'>수정</button></td>
+        </tr>`;
+      } else {
+        // 이후 행: 상품 셀만
+        html += `<tr>
+          <td style="font-size:12px">${productText}</td>
+          <td style="font-size:12px">${codeText}</td>
+          <td style="font-size:12px">${nameText}</td>
+          <td style="font-size:12px;line-height:1.6">${customText}</td>
+        </tr>`;
+      }
+    });
+
+    // 스티커 선택이 없는 경우 1행만
+    if (sels.length === 0) {
+      html += `<tr style="border-top:2px solid var(--gray-200)">
+        <td style="font-weight:600">${info.order_id || '-'}</td>
+        <td style="color:var(--gray-500);font-size:12px;white-space:nowrap">${submittedAt}</td>
+        <td style="white-space:nowrap">${info.desired_ship_date || '-'}</td>
+        <td>${shippingText}</td>
+        <td colspan="4" style="color:var(--gray-300);font-size:12px">스티커 없음</td>
+        <td style="font-size:12px">${receiptText}</td>
+        <td style="font-size:12px;color:var(--gray-500);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${requestText}">${requestText}</td>
+        <td><button class="btn" style="padding:4px 10px;font-size:12px" onclick='openBgOrderEdit(${infoJson})'>수정</button></td>
+      </tr>`;
+    }
+  });
+
+  document.getElementById('bg-orders-tbody').innerHTML = html;
 }
 
 function openBgOrderEdit(info) {
