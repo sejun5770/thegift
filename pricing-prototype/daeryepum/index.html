@@ -4794,8 +4794,10 @@ function renderBgOrders() {
     if (sel) {
       const vals = Object.entries(sel.custom_values || {}).filter(([,v]) => v);
       const customText = vals.map(([k, v]) => `<span style="color:var(--gray-500)">${k}:</span> ${v}`).join('<br>') || '<span style="color:var(--gray-300)">없음</span>';
-      const qtyText = sel.quantity ? ` <span style="color:var(--gray-500);font-size:11px">${sel.quantity}개</span>` : '';
-      const codeText = sel.sticker_code ? `<span style="font-family:monospace;font-size:11px">${sel.sticker_code}</span>${qtyText}` : `<span style="color:var(--gray-300)">-</span>${qtyText}`;
+      const qtyText = sel.quantity ? `(${sel.quantity}개)` : '';
+      const codeText = sel.sticker_code
+        ? `<span style="font-family:monospace;font-size:12px">${sel.sticker_code}${qtyText}</span>`
+        : `<span style="color:var(--gray-300)">-</span>`;
       const nameText = sel.sticker_name || '-';
       const productText = sel.product_name || sel.product_code || '-';
 
