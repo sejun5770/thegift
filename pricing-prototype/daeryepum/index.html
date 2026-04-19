@@ -5300,6 +5300,10 @@ function openBgOrderEdit(info) {
   // 스티커 입력 렌더
   const stickerWrap = document.getElementById('bg-edit-stickers');
   const sels = info.sticker_selections || [];
+  // bgUnifiedProductMap에서 상품명 조회용 map 준비
+  const _editIsETC = info.order_id && String(info.order_id).startsWith('ETC-');
+  const _editOrderSeq = _editIsETC ? parseInt(String(info.order_id).replace('ETC-', '')) : parseInt(info.order_id);
+  const _editPm = bgUnifiedProductMap.get(_editOrderSeq);
   if (!sels.length) {
     stickerWrap.innerHTML = '<p style="color:var(--gray-400);font-size:13px">스티커 선택 없음</p>';
   } else {
@@ -5308,8 +5312,9 @@ function openBgOrderEdit(info) {
       const fieldInputs = fields.length
         ? fields.map(([k, v]) => `<div style="margin-top:6px"><label style="font-size:11px;color:var(--gray-500)">${k}</label><input type="text" data-sticker-idx="${idx}" data-field="${k}" value="${String(v).replace(/"/g,'&quot;')}" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px;margin-top:2px"></div>`).join('')
         : '<p style="font-size:12px;color:var(--gray-400)">문구 입력안함</p>';
-      const productLabel = s.product_name || s.product_code
-        ? `<div style="font-size:11px;color:var(--gray-500);margin-bottom:4px">📦 ${s.product_name || ''}${s.product_code ? ' <span style="font-family:monospace">('+s.product_code+')</span>' : ''}</div>`
+      const productName = s.product_name || (_editPm && s.product_code ? _editPm.get(s.product_code) : null) || '';
+      const productLabel = productName || s.product_code
+        ? `<div style="font-size:11px;color:var(--gray-500);margin-bottom:4px">📦 ${productName}${s.product_code ? ' <span style="font-family:monospace">('+s.product_code+')</span>' : ''}</div>`
         : '';
       return `<div style="padding:10px;background:var(--gray-50);border-radius:6px;margin-bottom:8px;border-left:3px solid var(--primary)">
         ${productLabel}

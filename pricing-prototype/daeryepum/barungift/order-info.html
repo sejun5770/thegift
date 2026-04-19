@@ -538,9 +538,8 @@
   }
 
   function getTotalAmount() {
-    const base = orderData?.total_amount || 0;
-    const express = formState.shipping_type === 'express' ? getExpressFee() : 0;
-    return base + express;
+    // 추가비용(빠른출고)만 반환. 주문 원금은 포함하지 않음.
+    return formState.shipping_type === 'express' ? getExpressFee() : 0;
   }
 
   // ============================================
@@ -832,14 +831,14 @@
   function renderStep2() {
     const bankInfo = orderData?.bank_info || { bank_name: '신한은행', account_number: '100-013-801261', account_holder: '바른컴퍼니' };
     const total = getTotalAmount();
-    const baseAmount = orderData?.total_amount || 0;
     const expressFee = formState.shipping_type === 'express' ? getExpressFee() : 0;
 
     return `
       <div class="fade-in">
         <h2 class="text-lg font-semibold text-gray-900 mb-1">결제 정보</h2>
-        <p class="text-sm text-gray-500 mb-5">아래 계좌로 입금해주세요.</p>
+        <p class="text-sm text-gray-500 mb-5">${total > 0 ? '아래 계좌로 입금해주세요.' : '추가 결제 금액이 없습니다.'}</p>
 
+        ${total > 0 ? `
         <!-- Bank info card -->
         <div class="bg-white rounded-xl border border-gray-200 p-4 mb-4">
           <div class="flex items-center gap-2 mb-3">
@@ -871,18 +870,28 @@
         <div class="bg-white rounded-xl border border-gray-200 p-4 mb-4">
           <h3 class="text-sm font-semibold text-gray-900 mb-3">결제 금액</h3>
           <div class="space-y-2">
-            ${expressFee > 0 ? `
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-500">빠른출고 추가비용</span>
-                <span class="text-orange-600">+${formatMoney(expressFee)}</span>
-              </div>
-            ` : ''}
+            <div class="flex justify-between text-sm">
+              <span class="text-gray-500">빠른출고 추가비용</span>
+              <span class="text-orange-600">+${formatMoney(expressFee)}</span>
+            </div>
             <div class="border-t border-gray-200 pt-2 flex justify-between">
               <span class="font-semibold text-gray-900">총 결제금액</span>
               <span class="font-bold text-blue-600 text-lg">${formatMoney(total)}</span>
             </div>
           </div>
         </div>
+        ` : `
+        <!-- No additional payment -->
+        <div class="bg-green-50 rounded-xl border border-green-200 p-5 mb-4 flex items-center gap-3">
+          <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+            <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+          </div>
+          <div>
+            <p class="text-sm font-semibold text-green-800">추가 결제 없음</p>
+            <p class="text-xs text-green-600 mt-0.5">일반 출고는 추가 비용이 없습니다.</p>
+          </div>
+        </div>
+        `}
 
         <!-- Cash receipt -->
         <div class="bg-white rounded-xl border border-gray-200 p-4">
@@ -1036,9 +1045,10 @@
             </div>
             <div class="space-y-1.5">
               <div class="flex justify-between text-sm">
-                <span class="text-gray-500">총 결제금액</span>
-                <span class="font-bold text-blue-600">${formatMoney(total)}</span>
+                <span class="text-gray-500">추가 결제금액</span>
+                <span class="font-bold ${total > 0 ? 'text-blue-600' : 'text-green-600'}">${total > 0 ? formatMoney(total) : '없음'}</span>
               </div>
+              ${total > 0 ? `
               <div class="flex justify-between text-sm">
                 <span class="text-gray-500">입금 계좌</span>
                 <span class="text-gray-900">${bankInfo.bank_name || ''} ${bankInfo.account_number || ''}</span>
@@ -1057,7 +1067,7 @@
                   <span class="text-gray-500">현금영수증</span>
                   <span class="text-gray-400">미신청</span>
                 </div>
-              `}
+              `}` : ''}
             </div>
           </div>
 
