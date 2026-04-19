@@ -1190,9 +1190,17 @@ nav a:hover{color:var(--gray-900)}
   <div id="bg-orders-loading" style="text-align:center;padding:40px;color:var(--gray-400)">불러오는 중...</div>
   <div id="bg-orders-empty" style="display:none;text-align:center;padding:40px;color:var(--gray-400)">아직 제출된 고객 입력이 없습니다.</div>
   <div id="bg-orders-table-wrap" style="display:none">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+        <input type="checkbox" id="bg-select-all" onchange="toggleBgSelectAll(this)"> 전체선택
+      </label>
+      <span id="bg-selected-count" style="font-size:13px;color:var(--gray-500)">0건 선택</span>
+      <button class="btn" onclick="copyBgOrders()" style="margin-left:auto">📋 수집복사</button>
+    </div>
     <table class="data-table" id="bg-orders-table">
       <thead>
         <tr>
+          <th style="width:36px"></th>
           <th>주문번호</th>
           <th>제출일시</th>
           <th>희망출고일</th>
@@ -4717,6 +4725,7 @@ function closeBgAtResult() {
 // 고객 입력 현황
 // ============================================
 let bgOrdersData = [];
+let bgOrdersRows = []; // 평탄화된 행 배열 (order × product)
 
 async function loadBgOrders() {
   document.getElementById('bg-orders-loading').style.display = 'block';
@@ -4743,7 +4752,19 @@ function renderBgOrders() {
   const receiptLabel = { personal: '소득공제', business: '지출증빙' };
   let html = '';
 
+  // 평탄화 행 배열 재빌드
+  bgOrdersRows = [];
+
   bgOrdersData.forEach(info => {
+    const sels = (info.sticker_selections || []);
+    if (sels.length === 0) {
+      bgOrdersRows.push({ info, sel: null });
+    } else {
+      sels.forEach(sel => bgOrdersRows.push({ info, sel }));
+    }
+  });
+
+  bgOrdersRows.forEach(({ info, sel }, rowIdx) => {
     const submittedAt = info.submitted_at
       ? new Date(info.submitted_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})
       : '-';
@@ -4752,23 +4773,22 @@ function renderBgOrders() {
       : '미신청';
     const shippingText = info.is_express ? '⚡ 빠른출고' : '일반';
     const requestText = info.customer_request || '-';
-
-    // sticker_selections 기준으로 행 분리. 없으면 1행
-    const sels = (info.sticker_selections || []);
-    const rowCount = Math.max(sels.length, 1);
     const infoJson = JSON.stringify(info).replace(/'/g, '&#39;');
 
-    sels.forEach((s, i) => {
-      const vals = Object.entries(s.custom_values || {}).filter(([,v]) => v);
-      const customText = vals.map(([k, v]) => `<span style="color:var(--gray-500)">${k}:</span> ${v}`).join('<br>') || '<span style="color:var(--gray-300)">없음</span>';
-      const qtyText = s.quantity ? ` <span style="color:var(--gray-500);font-size:11px">${s.quantity}개</span>` : '';
-      const codeText = s.sticker_code ? `<span style="font-family:monospace;font-size:11px">${s.sticker_code}</span>${qtyText}` : `<span style="color:var(--gray-300)">-</span>${qtyText}`;
-      const nameText = s.sticker_name || '-';
-      const productText = s.product_name || s.product_code || '-';
-      const borderStyle = i === 0 ? 'border-top:2px solid var(--gray-200)' : '';
+    // 같은 order_id의 첫 번째 행 여부 (구분선용)
+    const isFirstOfOrder = rowIdx === 0 || bgOrdersRows[rowIdx - 1].info.order_id !== info.order_id;
+    const borderStyle = isFirstOfOrder ? 'border-top:2px solid var(--gray-200)' : '';
 
-      // 모든 행에 공통 셀 + 상품 셀 반복 (rowspan 미사용)
+    if (sel) {
+      const vals = Object.entries(sel.custom_values || {}).filter(([,v]) => v);
+      const customText = vals.map(([k, v]) => `<span style="color:var(--gray-500)">${k}:</span> ${v}`).join('<br>') || '<span style="color:var(--gray-300)">없음</span>';
+      const qtyText = sel.quantity ? ` <span style="color:var(--gray-500);font-size:11px">${sel.quantity}개</span>` : '';
+      const codeText = sel.sticker_code ? `<span style="font-family:monospace;font-size:11px">${sel.sticker_code}</span>${qtyText}` : `<span style="color:var(--gray-300)">-</span>${qtyText}`;
+      const nameText = sel.sticker_name || '-';
+      const productText = sel.product_name || sel.product_code || '-';
+
       html += `<tr style="${borderStyle}">
+        <td><input type="checkbox" class="bg-row-check" data-idx="${rowIdx}" onchange="updateBgSelectedCount()"></td>
         <td style="font-weight:600">${info.order_id || '-'}</td>
         <td style="color:var(--gray-500);font-size:12px;white-space:nowrap">${submittedAt}</td>
         <td style="white-space:nowrap">${info.desired_ship_date || '-'}</td>
@@ -4781,11 +4801,9 @@ function renderBgOrders() {
         <td style="font-size:12px;color:var(--gray-500);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${requestText}">${requestText}</td>
         <td><button class="btn" style="padding:4px 10px;font-size:12px" onclick='openBgOrderEdit(${infoJson})'>수정</button></td>
       </tr>`;
-    });
-
-    // 스티커 선택이 없는 경우 1행만
-    if (sels.length === 0) {
-      html += `<tr style="border-top:2px solid var(--gray-200)">
+    } else {
+      html += `<tr style="${borderStyle}">
+        <td><input type="checkbox" class="bg-row-check" data-idx="${rowIdx}" onchange="updateBgSelectedCount()"></td>
         <td style="font-weight:600">${info.order_id || '-'}</td>
         <td style="color:var(--gray-500);font-size:12px;white-space:nowrap">${submittedAt}</td>
         <td style="white-space:nowrap">${info.desired_ship_date || '-'}</td>
@@ -4799,6 +4817,73 @@ function renderBgOrders() {
   });
 
   document.getElementById('bg-orders-tbody').innerHTML = html;
+}
+
+function toggleBgSelectAll(el) {
+  document.querySelectorAll('.bg-row-check').forEach(cb => { cb.checked = el.checked; });
+  updateBgSelectedCount();
+}
+
+function updateBgSelectedCount() {
+  const cnt = document.querySelectorAll('.bg-row-check:checked').length;
+  document.getElementById('bg-selected-count').textContent = cnt + '건 선택';
+}
+
+function copyBgOrders() {
+  const checked = [...document.querySelectorAll('.bg-row-check:checked')];
+  if (!checked.length) { showToast('복사할 행을 선택해주세요'); return; }
+
+  const selectedRows = checked.map(cb => bgOrdersRows[parseInt(cb.dataset.idx)]);
+
+  // 스프레드시트 컬럼 구조 (A=0 ~ W=22, 총 23열)
+  // A='', B=택배, C=일반, D=주문번호, J=상품명, K=상품코드, M=스티커코드(수량), V=빠른출고, W=희망출고일
+  const htmlRows = selectedRows.map(({ info, sel }) => {
+    const cells = Array(23).fill('');
+    cells[1] = '택배';                         // B
+    cells[2] = '일반';                         // C
+    cells[3] = info.order_id || '';            // D
+    if (sel) {
+      cells[9]  = sel.product_name || sel.product_code || '';  // J
+      cells[10] = sel.product_code || '';                      // K
+      const qty = sel.quantity ? `(${sel.quantity}개)` : '';
+      cells[12] = sel.sticker_code ? `${sel.sticker_code}${qty}` : '';  // M
+    }
+    if (info.is_express) cells[21] = '오늘출발';  // V
+    cells[22] = info.desired_ship_date || '';      // W
+
+    return '<tr>' + cells.map((val, ci) => {
+      const style = (ci === 21 && info.is_express)
+        ? ' style="color:#8B0000;font-weight:bold"'
+        : '';
+      return `<td${style}>${val}</td>`;
+    }).join('') + '</tr>';
+  }).join('');
+
+  const tableHtml = `<table><tbody>${htmlRows}</tbody></table>`;
+  const tsvRows = selectedRows.map(({ info, sel }) => {
+    const cells = Array(23).fill('');
+    cells[1] = '택배'; cells[2] = '일반'; cells[3] = info.order_id || '';
+    if (sel) {
+      cells[9] = sel.product_name || sel.product_code || '';
+      cells[10] = sel.product_code || '';
+      const qty = sel.quantity ? `(${sel.quantity}개)` : '';
+      cells[12] = sel.sticker_code ? `${sel.sticker_code}${qty}` : '';
+    }
+    if (info.is_express) cells[21] = '오늘출발';
+    cells[22] = info.desired_ship_date || '';
+    return cells.join('\t');
+  });
+  const tsv = tsvRows.join('\n');
+
+  if (navigator.clipboard && window.ClipboardItem) {
+    const htmlBlob = new Blob([tableHtml], { type: 'text/html' });
+    const textBlob = new Blob([tsv], { type: 'text/plain' });
+    navigator.clipboard.write([new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })])
+      .then(() => showToast(`${selectedRows.length}건 클립보드 복사 완료`))
+      .catch(() => navigator.clipboard.writeText(tsv).then(() => showToast(`${selectedRows.length}건 복사 완료`)));
+  } else {
+    navigator.clipboard.writeText(tsv).then(() => showToast(`${selectedRows.length}건 복사 완료`));
+  }
 }
 
 function openBgOrderEdit(info) {
