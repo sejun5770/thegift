@@ -340,7 +340,22 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
   // GET /api/bg/customer-infos - 전체 고객 입력 목록 (관리자)
   if (pathname === '/api/bg/customer-infos' && method === 'GET') {
-    return json(res, { infos: await store.getAllCustomerInfos() });
+    const infos = await store.getAllCustomerInfos();
+    // sticker_id → sticker_code / sticker_name join
+    const allStickers = await store.getAllStickers(false);
+    const stickerMap = new Map(allStickers.map(s => [s.id, s]));
+    const enriched = infos.map(info => ({
+      ...info,
+      sticker_selections: (info.sticker_selections || []).map(sel => {
+        const st = stickerMap.get(sel.sticker_id);
+        return {
+          ...sel,
+          sticker_code: st?.sticker_code || null,
+          sticker_name: sel.sticker_name || st?.name || sel.sticker_id,
+        };
+      }),
+    }));
+    return json(res, { infos: enriched });
   }
 
   // PUT /api/bg/orders/:orderId/customer-info - 관리자 수정

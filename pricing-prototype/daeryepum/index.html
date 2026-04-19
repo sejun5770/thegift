@@ -4742,7 +4742,8 @@ function renderBgOrders() {
     const submittedAt = info.submitted_at ? new Date(info.submitted_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-';
     const stickerText = (info.sticker_selections || []).map(s => {
       const vals = Object.values(s.custom_values || {}).filter(Boolean);
-      return s.sticker_name + (vals.length ? ' (' + vals.join(' / ') + ')' : '');
+      const code = s.sticker_code ? `[${s.sticker_code}] ` : '';
+      return code + (s.sticker_name || '') + (vals.length ? ' (' + vals.join(' / ') + ')' : '');
     }).join(', ') || '없음';
     const receiptText = info.cash_receipt_yn
       ? (receiptLabel[info.receipt_type] || '') + ' ' + (info.receipt_number || '')
@@ -4788,7 +4789,7 @@ function openBgOrderEdit(info) {
         ? fields.map(([k, v]) => `<div style="margin-top:6px"><label style="font-size:11px;color:var(--gray-500)">${k}</label><input type="text" data-sticker-idx="${idx}" data-field="${k}" value="${String(v).replace(/"/g,'&quot;')}" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px;margin-top:2px"></div>`).join('')
         : '<p style="font-size:12px;color:var(--gray-400)">문구 입력안함</p>';
       return `<div style="padding:10px;background:var(--gray-50);border-radius:6px;margin-bottom:8px">
-        <div style="font-size:13px;font-weight:600;margin-bottom:4px">🏷️ ${s.sticker_name || '스티커'}</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">🏷️ ${s.sticker_name || '스티커'}${s.sticker_code ? ' <span style="font-family:monospace;font-size:11px;color:var(--gray-500);font-weight:400">[' + s.sticker_code + ']</span>' : ''}</div>
         ${fieldInputs}
       </div>`;
     }).join('');
