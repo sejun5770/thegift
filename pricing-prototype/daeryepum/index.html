@@ -4735,6 +4735,18 @@ async function loadBgOrders() {
     const res = await fetch(API + '/api/bg/customer-infos');
     const data = await res.json();
     bgOrdersData = data.infos || [];
+
+    // 주문 배송정보(수령인/연락처/주소) 병렬 조회
+    const ids = [...new Set(bgOrdersData.map(d => d.order_id).filter(Boolean))];
+    if (ids.length) {
+      try {
+        const sr = await fetch(API + '/api/bg/orders/shipping?ids=' + encodeURIComponent(ids.join(',')));
+        const shippingList = await sr.json();
+        const shippingMap = new Map(shippingList.map(s => [s.order_id, s]));
+        bgOrdersData.forEach(d => { d._shipping = shippingMap.get(d.order_id) || null; });
+      } catch(e) { console.warn('배송정보 조회 실패:', e); }
+    }
+
     renderBgOrders();
   } catch(e) {
     document.getElementById('bg-orders-loading').textContent = '불러오기 실패: ' + e.message;
@@ -4836,12 +4848,20 @@ function copyBgOrders() {
   const selectedRows = checked.map(cb => bgOrdersRows[parseInt(cb.dataset.idx)]);
 
   // 스프레드시트 컬럼 구조 (A=0 ~ W=22, 총 23열)
-  // A='', B=택배, C=일반, D=주문번호, J=상품명, K=상품코드, M=스티커코드(수량), V=빠른출고, W=희망출고일
+  // A='', B=택배, C=일반, D=주문번호, E=수령인(주문자), F=연락처, H=배송지, J=상품명, K=상품코드, M=스티커코드(수량), V=빠른출고, W=희망출고일
   const htmlRows = selectedRows.map(({ info, sel }) => {
     const cells = Array(23).fill('');
+    const sh = info._shipping || {};
     cells[1] = '택배';                         // B
     cells[2] = '일반';                         // C
     cells[3] = info.order_id || '';            // D
+    // E: 수령인(주문자) — recv_name과 order_name이 다르면 "수령인(주문자)" 형식
+    const recvName = sh.recv_name || '';
+    const orderName = sh.order_name || '';
+    cells[4] = recvName && orderName && recvName !== orderName
+      ? `${recvName}(${orderName})` : (recvName || orderName);  // E
+    cells[5] = sh.recv_hphone || '';           // F
+    cells[7] = sh.recv_addr || '';             // H
     if (sel) {
       cells[9]  = sel.product_name || sel.product_code || '';  // J
       cells[10] = sel.product_code || '';                      // K
@@ -4862,7 +4882,12 @@ function copyBgOrders() {
   const tableHtml = `<table><tbody>${htmlRows}</tbody></table>`;
   const tsvRows = selectedRows.map(({ info, sel }) => {
     const cells = Array(23).fill('');
+    const sh = info._shipping || {};
     cells[1] = '택배'; cells[2] = '일반'; cells[3] = info.order_id || '';
+    const recvName = sh.recv_name || '', orderName = sh.order_name || '';
+    cells[4] = recvName && orderName && recvName !== orderName ? `${recvName}(${orderName})` : (recvName || orderName);
+    cells[5] = sh.recv_hphone || '';
+    cells[7] = sh.recv_addr || '';
     if (sel) {
       cells[9] = sel.product_name || sel.product_code || '';
       cells[10] = sel.product_code || '';

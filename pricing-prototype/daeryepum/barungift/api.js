@@ -338,6 +338,55 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     return json(res, { ok: true });
   }
 
+  // GET /api/bg/orders/shipping?ids=1,2,3 — 복수 주문 배송정보 일괄 조회 (관리자)
+  if (pathname === '/api/bg/orders/shipping' && method === 'GET') {
+    const rawIds = (query.ids || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (!rawIds.length) return json(res, []);
+
+    const etcSeqs = rawIds.filter(id => id.startsWith('ETC-')).map(id => parseInt(id.slice(4))).filter(n => n > 0);
+    const normalSeqs = rawIds.filter(id => !id.startsWith('ETC-')).map(id => parseInt(id)).filter(n => n > 0);
+
+    const result = [];
+    const pool = await getPool();
+
+    if (normalSeqs.length) {
+      const inList = normalSeqs.join(',');
+      const r = await pool.request().query(`
+        SELECT DISTINCT co.order_seq, co.order_name,
+          di.NAME AS recv_name, di.HPHONE AS recv_hphone, di.ADDR + ISNULL(' ' + di.ADDR_DETAIL, '') AS recv_addr
+        FROM custom_order co WITH (NOLOCK)
+        LEFT JOIN DELIVERY_INFO di WITH (NOLOCK) ON co.order_seq = di.ORDER_SEQ
+        WHERE co.order_seq IN (${inList})
+      `);
+      r.recordset.forEach(row => result.push({
+        order_id: String(row.order_seq),
+        order_name: row.order_name || '',
+        recv_name: row.recv_name || '',
+        recv_hphone: row.recv_hphone || '',
+        recv_addr: row.recv_addr || '',
+      }));
+    }
+
+    if (etcSeqs.length) {
+      const inList = etcSeqs.join(',');
+      const r = await pool.request().query(`
+        SELECT co.order_seq, co.order_name, co.recv_name, co.recv_hphone,
+          co.recv_address + ISNULL(' ' + co.recv_address_detail, '') AS recv_addr
+        FROM CUSTOM_ETC_ORDER co WITH (NOLOCK)
+        WHERE co.order_seq IN (${inList})
+      `);
+      r.recordset.forEach(row => result.push({
+        order_id: 'ETC-' + String(row.order_seq),
+        order_name: row.order_name || '',
+        recv_name: row.recv_name || '',
+        recv_hphone: row.recv_hphone || '',
+        recv_addr: row.recv_addr || '',
+      }));
+    }
+
+    return json(res, result);
+  }
+
   // GET /api/bg/customer-infos - 전체 고객 입력 목록 (관리자)
   if (pathname === '/api/bg/customer-infos' && method === 'GET') {
     const infos = await store.getAllCustomerInfos();
