@@ -5058,7 +5058,8 @@ function copyBgOrders() {
 // ============================================
 // 통합현황
 // ============================================
-let bgUnifiedOrders = [];   // MSSQL 주문 데이터
+let bgUnifiedOrders = [];   // MSSQL 주문 데이터 (중복 제거)
+let bgUnifiedProductMap = new Map(); // order_seq → Map(card_code → card_name)
 let bgUnifiedCiMap = new Map(); // order_id → customer_info
 let bgUnifiedRows = [];     // 평탄화된 렌더 행
 
@@ -5086,13 +5087,20 @@ async function loadBgUnified() {
     ]);
 
     const rawOrders = Array.isArray(ordersRes) ? ordersRes : [];
-    // order_seq 기준 중복 제거 — MSSQL이 상품 수만큼 행을 반환하므로 첫 번째 행만 유지
+    // order_seq 기준 중복 제거 + card_code→card_name 맵 보존
     const orderMap = new Map();
+    const productMap = new Map();
     rawOrders.forEach(r => {
       r.order_date_fmt = r.order_date ? r.order_date.replace('T', ' ').slice(0, 10) : '';
       if (!orderMap.has(r.order_seq)) orderMap.set(r.order_seq, r);
+      // 상품코드별 상품명 보존
+      if (r.card_code && r.card_name) {
+        if (!productMap.has(r.order_seq)) productMap.set(r.order_seq, new Map());
+        productMap.get(r.order_seq).set(r.card_code, r.card_name);
+      }
     });
     bgUnifiedOrders = [...orderMap.values()];
+    bgUnifiedProductMap = productMap;
 
     const ciList = ciRes.infos || [];
     bgUnifiedCiMap = new Map(ciList.map(ci => [String(ci.order_id), ci]));
@@ -5181,7 +5189,10 @@ function renderBgUnified() {
       : '미신청') : '<span style="color:var(--gray-300)">-</span>';
     const requestText = ci?.customer_request || '';
 
-    const productName = sel?.product_name || order.card_name || '-';
+    const _pm = bgUnifiedProductMap.get(order.order_seq);
+    const productName = sel?.product_name
+      || (_pm && sel?.product_code ? _pm.get(sel.product_code) : null)
+      || order.card_name || '-';
     const infoJson = ci ? JSON.stringify(ci).replace(/'/g, '&#39;') : null;
     const editBtn = infoJson
       ? `<button class="btn" style="padding:4px 10px;font-size:12px" onclick='openBgOrderEdit(${infoJson})'>수정</button>`
@@ -5238,7 +5249,10 @@ function copyBgUnified() {
     cells[4] = order.display_name || '';
     cells[5] = order.recv_hphone || '';
     cells[7] = order.recv_address || '';
-    cells[9] = sel?.product_name || order.card_name || '';
+    const _pm2 = bgUnifiedProductMap.get(order.order_seq);
+    cells[9] = sel?.product_name
+      || (_pm2 && sel?.product_code ? _pm2.get(sel.product_code) : null)
+      || order.card_name || '';
     cells[10] = sel?.product_code || order.card_code || '';
     if (sel?.sticker_code) {
       const qty = sel.quantity ? `(${sel.quantity}개)` : '';
