@@ -4765,31 +4765,22 @@ function renderBgOrders() {
       const codeText = s.sticker_code ? `<span style="font-family:monospace;font-size:11px">${s.sticker_code}</span>${qtyText}` : `<span style="color:var(--gray-300)">-</span>${qtyText}`;
       const nameText = s.sticker_name || '-';
       const productText = s.product_name || s.product_code || '-';
+      const borderStyle = i === 0 ? 'border-top:2px solid var(--gray-200)' : '';
 
-      if (i === 0) {
-        // 첫 번째 행: 주문 공통 셀 + 상품 셀
-        html += `<tr style="border-top:2px solid var(--gray-200)">
-          <td rowspan="${rowCount}" style="font-weight:600;vertical-align:top;padding-top:10px">${info.order_id || '-'}</td>
-          <td rowspan="${rowCount}" style="color:var(--gray-500);font-size:12px;vertical-align:top;padding-top:10px;white-space:nowrap">${submittedAt}</td>
-          <td rowspan="${rowCount}" style="vertical-align:top;padding-top:10px;white-space:nowrap">${info.desired_ship_date || '-'}</td>
-          <td rowspan="${rowCount}" style="vertical-align:top;padding-top:10px">${shippingText}</td>
-          <td style="font-size:12px">${productText}</td>
-          <td style="font-size:12px">${codeText}</td>
-          <td style="font-size:12px">${nameText}</td>
-          <td style="font-size:12px;line-height:1.6">${customText}</td>
-          <td rowspan="${rowCount}" style="font-size:12px;vertical-align:top;padding-top:10px">${receiptText}</td>
-          <td rowspan="${rowCount}" style="font-size:12px;vertical-align:top;padding-top:10px;color:var(--gray-500);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${requestText}">${requestText}</td>
-          <td rowspan="${rowCount}" style="vertical-align:top;padding-top:6px"><button class="btn" style="padding:4px 10px;font-size:12px" onclick='openBgOrderEdit(${infoJson})'>수정</button></td>
-        </tr>`;
-      } else {
-        // 이후 행: 상품 셀만
-        html += `<tr>
-          <td style="font-size:12px">${productText}</td>
-          <td style="font-size:12px">${codeText}</td>
-          <td style="font-size:12px">${nameText}</td>
-          <td style="font-size:12px;line-height:1.6">${customText}</td>
-        </tr>`;
-      }
+      // 모든 행에 공통 셀 + 상품 셀 반복 (rowspan 미사용)
+      html += `<tr style="${borderStyle}">
+        <td style="font-weight:600">${info.order_id || '-'}</td>
+        <td style="color:var(--gray-500);font-size:12px;white-space:nowrap">${submittedAt}</td>
+        <td style="white-space:nowrap">${info.desired_ship_date || '-'}</td>
+        <td>${shippingText}</td>
+        <td style="font-size:12px">${productText}</td>
+        <td style="font-size:12px">${codeText}</td>
+        <td style="font-size:12px">${nameText}</td>
+        <td style="font-size:12px;line-height:1.6">${customText}</td>
+        <td style="font-size:12px">${receiptText}</td>
+        <td style="font-size:12px;color:var(--gray-500);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${requestText}">${requestText}</td>
+        <td><button class="btn" style="padding:4px 10px;font-size:12px" onclick='openBgOrderEdit(${infoJson})'>수정</button></td>
+      </tr>`;
     });
 
     // 스티커 선택이 없는 경우 1행만
