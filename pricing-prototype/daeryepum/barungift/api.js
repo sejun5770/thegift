@@ -352,36 +352,60 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     if (normalSeqs.length) {
       const inList = normalSeqs.join(',');
       const r = await pool.request().query(`
-        SELECT DISTINCT co.order_seq, co.order_name,
-          di.NAME AS recv_name, di.HPHONE AS recv_hphone, di.ADDR + ISNULL(' ' + di.ADDR_DETAIL, '') AS recv_addr
+        SELECT co.order_seq, co.order_name,
+          di.NAME AS recv_name, di.HPHONE AS recv_hphone, di.ADDR + ISNULL(' ' + di.ADDR_DETAIL, '') AS recv_addr,
+          c.Card_Code, c.Card_Name
         FROM custom_order co WITH (NOLOCK)
         LEFT JOIN DELIVERY_INFO di WITH (NOLOCK) ON co.order_seq = di.ORDER_SEQ
+        LEFT JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+        LEFT JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
         WHERE co.order_seq IN (${inList})
       `);
-      r.recordset.forEach(row => result.push({
-        order_id: String(row.order_seq),
-        order_name: row.order_name || '',
-        recv_name: row.recv_name || '',
-        recv_hphone: row.recv_hphone || '',
-        recv_addr: row.recv_addr || '',
-      }));
+      const orderMap = new Map();
+      r.recordset.forEach(row => {
+        const key = String(row.order_seq);
+        if (!orderMap.has(key)) {
+          orderMap.set(key, {
+            order_id: key,
+            order_name: row.order_name || '',
+            recv_name: row.recv_name || '',
+            recv_hphone: row.recv_hphone || '',
+            recv_addr: row.recv_addr || '',
+            products: new Map(),
+          });
+        }
+        if (row.Card_Code) orderMap.get(key).products.set(row.Card_Code, row.Card_Name || row.Card_Code);
+      });
+      orderMap.forEach(o => { o.products = Object.fromEntries(o.products); result.push(o); });
     }
 
     if (etcSeqs.length) {
       const inList = etcSeqs.join(',');
       const r = await pool.request().query(`
         SELECT co.order_seq, co.order_name, co.recv_name, co.recv_hphone,
-          co.recv_address + ISNULL(' ' + co.recv_address_detail, '') AS recv_addr
+          co.recv_address + ISNULL(' ' + co.recv_address_detail, '') AS recv_addr,
+          c.Card_Code, c.Card_Name
         FROM CUSTOM_ETC_ORDER co WITH (NOLOCK)
+        LEFT JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON co.order_seq = ei.order_seq
+        LEFT JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
         WHERE co.order_seq IN (${inList})
       `);
-      r.recordset.forEach(row => result.push({
-        order_id: 'ETC-' + String(row.order_seq),
-        order_name: row.order_name || '',
-        recv_name: row.recv_name || '',
-        recv_hphone: row.recv_hphone || '',
-        recv_addr: row.recv_addr || '',
-      }));
+      const orderMap = new Map();
+      r.recordset.forEach(row => {
+        const key = 'ETC-' + String(row.order_seq);
+        if (!orderMap.has(key)) {
+          orderMap.set(key, {
+            order_id: key,
+            order_name: row.order_name || '',
+            recv_name: row.recv_name || '',
+            recv_hphone: row.recv_hphone || '',
+            recv_addr: row.recv_addr || '',
+            products: new Map(),
+          });
+        }
+        if (row.Card_Code) orderMap.get(key).products.set(row.Card_Code, row.Card_Name || row.Card_Code);
+      });
+      orderMap.forEach(o => { o.products = Object.fromEntries(o.products); result.push(o); });
     }
 
     return json(res, result);

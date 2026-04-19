@@ -4854,7 +4854,7 @@ function copyBgOrders() {
     const sh = info._shipping || {};
     cells[1] = '택배';                         // B
     cells[2] = '일반';                         // C
-    cells[3] = info.order_id || '';            // D
+    cells[3] = (info.order_id || '').replace(/^ETC-/, '');  // D: ETC- 제거, 숫자만
     // E: 수령인(주문자) — recv_name과 order_name이 다르면 "수령인(주문자)" 형식
     const recvName = sh.recv_name || '';
     const orderName = sh.order_name || '';
@@ -4863,12 +4863,16 @@ function copyBgOrders() {
     cells[5] = sh.recv_hphone || '';           // F
     cells[7] = sh.recv_addr || '';             // H
     if (sel) {
-      cells[9]  = sel.product_name || sel.product_code || '';  // J
-      cells[10] = sel.product_code || '';                      // K
+      // J: 상품명 — shipping.products에서 코드로 조회, 없으면 sel.product_name 사용
+      const productName = (sh.products && sel.product_code && sh.products[sel.product_code])
+        || sel.product_name || sel.product_code || '';
+      cells[9]  = productName;                                   // J
+      cells[10] = sel.product_code || '';                        // K
       const qty = sel.quantity ? `(${sel.quantity}개)` : '';
       cells[12] = sel.sticker_code ? `${sel.sticker_code}${qty}` : '';  // M
     }
-    if (info.is_express) cells[21] = '오늘출발';  // V
+    // V: 빠른출고인 경우 희망출고일과 동일 날짜 (짙은 빨강)
+    if (info.is_express) cells[21] = info.desired_ship_date || '';  // V
     cells[22] = info.desired_ship_date || '';      // W
 
     return '<tr>' + cells.map((val, ci) => {
@@ -4883,18 +4887,21 @@ function copyBgOrders() {
   const tsvRows = selectedRows.map(({ info, sel }) => {
     const cells = Array(23).fill('');
     const sh = info._shipping || {};
-    cells[1] = '택배'; cells[2] = '일반'; cells[3] = info.order_id || '';
+    cells[1] = '택배'; cells[2] = '일반';
+    cells[3] = (info.order_id || '').replace(/^ETC-/, '');
     const recvName = sh.recv_name || '', orderName = sh.order_name || '';
     cells[4] = recvName && orderName && recvName !== orderName ? `${recvName}(${orderName})` : (recvName || orderName);
     cells[5] = sh.recv_hphone || '';
     cells[7] = sh.recv_addr || '';
     if (sel) {
-      cells[9] = sel.product_name || sel.product_code || '';
+      const productName = (sh.products && sel.product_code && sh.products[sel.product_code])
+        || sel.product_name || sel.product_code || '';
+      cells[9] = productName;
       cells[10] = sel.product_code || '';
       const qty = sel.quantity ? `(${sel.quantity}개)` : '';
       cells[12] = sel.sticker_code ? `${sel.sticker_code}${qty}` : '';
     }
-    if (info.is_express) cells[21] = '오늘출발';
+    if (info.is_express) cells[21] = info.desired_ship_date || '';
     cells[22] = info.desired_ship_date || '';
     return cells.join('\t');
   });
