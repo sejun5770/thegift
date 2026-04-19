@@ -874,26 +874,47 @@ nav a:hover{color:var(--gray-900)}
   </div>
 </div>
 
-<!-- 상품 설정 모달 (v3 - 스티커 연결만) -->
+<!-- 상품 설정 모달 (v4 - 스티커 선택 UX 개선) -->
 <div id="bg-product-modal" onclick="if(event.target===this)closeBgProductForm()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
-  <div style="background:#fff;border-radius:12px;max-width:480px;width:95%;max-height:90vh;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200);position:sticky;top:0;background:#fff;z-index:10;border-radius:12px 12px 0 0">
-      <h3 id="bg-product-modal-title" style="margin:0;font-size:16px">상품 설정</h3>
-      <button onclick="closeBgProductForm()" style="border:none;background:none;font-size:20px;cursor:pointer;color:var(--gray-500)">&times;</button>
+  <div style="background:#fff;border-radius:12px;max-width:500px;width:95%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <!-- 헤더 -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200);border-radius:12px 12px 0 0;flex-shrink:0">
+      <div>
+        <h3 id="bg-product-modal-title" style="margin:0;font-size:16px">상품 설정</h3>
+        <input type="text" id="bg-p-code" readonly style="display:none">
+      </div>
+      <button onclick="closeBgProductForm()" style="border:none;background:none;font-size:20px;cursor:pointer;color:var(--gray-500);line-height:1">&times;</button>
     </div>
-    <div style="padding:20px" id="bg-p-body">
-      <div style="margin-bottom:12px">
-        <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">상품코드</label>
-        <input type="text" id="bg-p-code" readonly style="width:100%;padding:8px 12px;border:1px solid var(--gray-200);border-radius:var(--radius);font-size:13px;background:var(--gray-50)">
+
+    <!-- 바디 (스크롤 없음 — 내부 리스트만 스크롤) -->
+    <div style="padding:16px 20px;display:flex;flex-direction:column;gap:12px;flex:1;min-height:0">
+
+      <!-- 선택된 스티커 영역 -->
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <span style="font-size:13px;font-weight:600;color:var(--gray-700)">선택됨 <span id="bg-p-sticker-count" style="color:var(--primary)">0</span>개</span>
+          <button onclick="bgStickerClearAll()" style="font-size:11px;padding:3px 10px;border:1px solid var(--gray-300);border-radius:20px;background:#fff;cursor:pointer;color:var(--gray-600)">전체 해제</button>
+        </div>
+        <div id="bg-p-sticker-chips" style="display:flex;flex-wrap:wrap;gap:6px;min-height:38px;padding:8px 10px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px"></div>
       </div>
 
-      <!-- 스티커 연결 -->
-      <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px">
-        <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">스티커 연결</h4>
-        <div id="bg-p-sticker-checks" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      <!-- 구분선 -->
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="flex:1;height:1px;background:var(--gray-200)"></div>
+        <span style="font-size:11px;color:var(--gray-400)">추가하기</span>
+        <div style="flex:1;height:1px;background:var(--gray-200)"></div>
       </div>
+
+      <!-- 검색 -->
+      <input type="text" id="bg-p-sticker-search" placeholder="🔍 스티커 이름 검색..." oninput="renderBgStickerList()"
+        style="padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px;outline:none;width:100%;box-sizing:border-box">
+
+      <!-- 스티커 목록 (스크롤) -->
+      <div id="bg-p-sticker-list" style="flex:1;overflow-y:auto;border:1px solid var(--gray-200);border-radius:8px;min-height:0"></div>
     </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;padding:16px 20px;border-top:1px solid var(--gray-200);position:sticky;bottom:0;background:#fff;border-radius:0 0 12px 12px">
+
+    <!-- 푸터 -->
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:14px 20px;border-top:1px solid var(--gray-200);border-radius:0 0 12px 12px;flex-shrink:0">
       <button class="btn" onclick="closeBgProductForm()">취소</button>
       <button class="btn btn-primary" onclick="saveBgProduct()">저장</button>
     </div>
@@ -4137,11 +4158,17 @@ function renderBgProducts() {
   }).join('');
 }
 
+let _bgAllStickers = [];
+let _bgSelectedStickerIds = new Set();
+
 async function openBgProductForm(productId) {
   if (!productId || !productId.trim()) { alert('상품코드를 입력해주세요.'); return; }
   productId = productId.trim();
   document.getElementById('bg-p-code').value = productId;
   document.getElementById('bg-product-modal-title').textContent = '상품 설정: ' + productId;
+  document.getElementById('bg-p-sticker-search').value = '';
+  document.getElementById('bg-p-sticker-chips').innerHTML = '';
+  document.getElementById('bg-p-sticker-list').innerHTML = '<div style="padding:20px;text-align:center;color:var(--gray-400);font-size:13px">불러오는 중...</div>';
 
   try {
     const [settingsRes, stickersRes] = await Promise.all([
@@ -4149,18 +4176,64 @@ async function openBgProductForm(productId) {
       fetch(API + '/api/bg/stickers?active_only=true'),
     ]);
     const s = (await settingsRes.json()).settings;
-    const stickers = (await stickersRes.json()).stickers || [];
-
-    // 스티커 체크박스
-    const selectedSt = s?.available_sticker_ids || [];
-    document.getElementById('bg-p-sticker-checks').innerHTML = stickers.map(st =>
-      `<label style="display:flex;align-items:center;gap:4px;font-size:12px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:4px;cursor:pointer;background:#fff">
-        <input type="checkbox" value="${st.id}" ${selectedSt.includes(st.id)?'checked':''}> ${st.name}
-      </label>`
-    ).join('') || '<span style="color:var(--gray-500);font-size:12px">등록된 스티커 없음</span>';
+    _bgAllStickers = (await stickersRes.json()).stickers || [];
+    _bgSelectedStickerIds = new Set(s?.available_sticker_ids || []);
+    renderBgStickerModal();
   } catch(e) { console.error('openBgProductForm:', e); }
 
   document.getElementById('bg-product-modal').style.display = 'flex';
+}
+
+function renderBgStickerModal() {
+  // 선택된 chips
+  const selected = _bgAllStickers.filter(s => _bgSelectedStickerIds.has(s.id));
+  const chipsEl = document.getElementById('bg-p-sticker-chips');
+  document.getElementById('bg-p-sticker-count').textContent = selected.length;
+  if (selected.length === 0) {
+    chipsEl.innerHTML = '<span style="color:var(--gray-400);font-size:12px;line-height:2">선택된 스티커 없음</span>';
+  } else {
+    chipsEl.innerHTML = selected.map(s =>
+      `<span style="display:inline-flex;align-items:center;gap:4px;background:#dbeafe;color:#1e40af;border-radius:20px;padding:4px 6px 4px 12px;font-size:12px;font-weight:500;line-height:1.4">
+        ${s.name}
+        <button onclick="bgStickerRemove('${s.id}')" style="border:none;background:rgba(30,64,175,.15);cursor:pointer;color:#1e40af;width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:13px;padding:0;line-height:1">&times;</button>
+      </span>`
+    ).join('');
+  }
+  // 미선택 목록
+  renderBgStickerList();
+}
+
+function renderBgStickerList() {
+  const q = (document.getElementById('bg-p-sticker-search').value || '').trim().toLowerCase();
+  const unselected = _bgAllStickers.filter(s =>
+    !_bgSelectedStickerIds.has(s.id) && (!q || s.name.toLowerCase().includes(q))
+  );
+  const el = document.getElementById('bg-p-sticker-list');
+  if (unselected.length === 0) {
+    el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--gray-400);font-size:12px">${q ? '검색 결과 없음' : '추가할 스티커 없음'}</div>`;
+    return;
+  }
+  el.innerHTML = unselected.map(s =>
+    `<label style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--gray-100);transition:background .1s" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
+      <input type="checkbox" onchange="bgStickerAdd('${s.id}', this)" style="width:15px;height:15px;cursor:pointer;accent-color:var(--primary);flex-shrink:0">
+      <span style="font-size:13px">${s.name}</span>
+    </label>`
+  ).join('');
+}
+
+function bgStickerAdd(id) {
+  _bgSelectedStickerIds.add(id);
+  renderBgStickerModal();
+}
+
+function bgStickerRemove(id) {
+  _bgSelectedStickerIds.delete(id);
+  renderBgStickerModal();
+}
+
+function bgStickerClearAll() {
+  _bgSelectedStickerIds.clear();
+  renderBgStickerModal();
 }
 
 function closeBgProductForm() { document.getElementById('bg-product-modal').style.display = 'none'; }
@@ -4242,7 +4315,7 @@ function calcMinDate(cfg) {
 // 저장 (스티커 연결만)
 async function saveBgProduct() {
   const productId = document.getElementById('bg-p-code').value;
-  const stickerIds = [...document.querySelectorAll('#bg-p-sticker-checks input:checked')].map(c => c.value);
+  const stickerIds = [..._bgSelectedStickerIds];
 
   const body = {
     available_sticker_ids: stickerIds,
@@ -5012,11 +5085,14 @@ async function loadBgUnified() {
       fetch(`${API}/api/bg/customer-infos`).then(r => r.json()),
     ]);
 
-    const orders = Array.isArray(ordersRes) ? ordersRes : [];
-    orders.forEach(r => {
+    const rawOrders = Array.isArray(ordersRes) ? ordersRes : [];
+    // order_seq 기준 중복 제거 — MSSQL이 상품 수만큼 행을 반환하므로 첫 번째 행만 유지
+    const orderMap = new Map();
+    rawOrders.forEach(r => {
       r.order_date_fmt = r.order_date ? r.order_date.replace('T', ' ').slice(0, 10) : '';
+      if (!orderMap.has(r.order_seq)) orderMap.set(r.order_seq, r);
     });
-    bgUnifiedOrders = orders;
+    bgUnifiedOrders = [...orderMap.values()];
 
     const ciList = ciRes.infos || [];
     bgUnifiedCiMap = new Map(ciList.map(ci => [String(ci.order_id), ci]));
