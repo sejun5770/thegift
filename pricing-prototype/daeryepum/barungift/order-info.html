@@ -213,8 +213,8 @@
       <p class="text-sm text-slate-500 mb-6">로그인하시면 주문 내역을 확인할 수 있어요 ✨</p>
 
       <!-- 탭 -->
-      <div class="flex gap-1 p-1 bg-slate-100 rounded-2xl mb-5">
-        <button id="tabLogin" onclick="switchSearchTab('login')" class="pressable flex-1 py-2.5 text-[13px] font-semibold text-white bg-white rounded-xl shadow-soft transition-all" style="color: var(--brand-600)">바른손카드 로그인</button>
+      <div id="searchTabStrip" class="flex gap-1 p-1 bg-slate-100 rounded-2xl mb-5">
+        <button id="tabLogin" onclick="switchSearchTab('login')" class="pressable flex-1 py-2.5 text-[13px] font-semibold bg-white rounded-xl shadow-soft transition-all" style="color: var(--brand-600)">바른손카드 로그인</button>
         <button id="tabSearch" onclick="switchSearchTab('search')" class="pressable flex-1 py-2.5 text-[13px] font-medium text-slate-500 rounded-xl transition-all">전화번호/이름 검색</button>
       </div>
 
@@ -426,7 +426,7 @@
         <button type="button" data-action="closeStickerModal" class="flex-1 py-3 rounded-xl border border-white/40 text-white font-medium text-sm hover:bg-white/10 transition">
           닫기
         </button>
-        <button type="button" data-action="selectStickerFromModal" id="stickerModalSelectBtn" class="flex-1 py-3 rounded-xl bg-blue-500 text-white font-semibold text-sm hover:bg-blue-600 transition">
+        <button type="button" data-action="selectStickerFromModal" id="stickerModalSelectBtn" class="pressable btn-primary flex-1 py-3 rounded-2xl text-sm">
           선택
         </button>
       </div>
@@ -909,19 +909,19 @@
 
       var stTypeHtml = '';
       if (matching.length === 0) {
-        stTypeHtml = '<div class="mt-3 text-xs text-gray-400">이 상품에 적용 가능한 스티커가 없습니다.</div>';
+        stTypeHtml = '<div class="mt-3 text-xs text-slate-400">이 상품에 적용 가능한 스티커가 없습니다.</div>';
       } else {
         // "선택안함" 카드 (즉시 선택, 모달 없이)
         var noneSelected = !selStickerId;
         var noneCardCls = noneSelected
-          ? 'ring-2 ring-blue-500 bg-blue-50'
-          : 'ring-1 ring-gray-200 bg-white hover:ring-blue-300';
+          ? 'ring-2 ring-indigo-500 gradient-brand-soft'
+          : 'ring-1 ring-slate-200 bg-white hover:ring-indigo-300';
         var noneCard = ''
           + '<button type="button" data-action="productStickerType" data-idx="' + idx + '" data-value="" '
-          +   'class="sticker-card ' + noneCardCls + ' rounded-lg overflow-hidden text-left w-full transition touch-manipulation">'
-          +   '<div class="w-full aspect-square flex items-center justify-center bg-gray-50 text-gray-400 text-3xl">✕</div>'
+          +   'class="sticker-card pressable ' + noneCardCls + ' rounded-xl overflow-hidden text-left w-full transition touch-manipulation">'
+          +   '<div class="w-full aspect-square flex items-center justify-center bg-slate-50 text-slate-400 text-3xl">✕</div>'
           +   '<div class="px-2 py-1.5 text-xs">'
-          +     '<div class="font-medium text-gray-700">선택안함</div>'
+          +     '<div class="font-semibold text-slate-700">선택안함</div>'
           +   '</div>'
           + '</button>';
 
@@ -929,26 +929,26 @@
         var cards = matching.map(function(st) {
           var isSelected = selStickerId === st.id;
           var cardCls = isSelected
-            ? 'ring-2 ring-blue-500 bg-blue-50'
-            : 'ring-1 ring-gray-200 bg-white hover:ring-blue-300';
+            ? 'ring-2 ring-indigo-500 gradient-brand-soft'
+            : 'ring-1 ring-slate-200 bg-white hover:ring-indigo-300';
           var safeName = (st.name || '스티커').replace(/"/g, '&quot;');
           var thumb = st.preview_image_url
             ? '<img src="' + st.preview_image_url + '" alt="' + safeName + '" class="w-full aspect-square object-contain bg-white pointer-events-none" loading="lazy" />'
-            : '<div class="w-full aspect-square flex items-center justify-center text-gray-400 text-xs pointer-events-none" style="background:' + (st.preview_color || '#F9FAFB') + '">이미지 없음</div>';
+            : '<div class="w-full aspect-square flex items-center justify-center text-slate-400 text-xs pointer-events-none" style="background:' + (st.preview_color || '#F9FAFB') + '">이미지 없음</div>';
           return ''
             + '<button type="button" data-action="openStickerModal" data-idx="' + idx + '" data-value="' + st.id + '" '
-            +   'class="sticker-card ' + cardCls + ' rounded-lg overflow-hidden text-left w-full transition touch-manipulation relative">'
-            +   (isSelected ? '<span class="absolute top-1 right-1 z-10 bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded">✓</span>' : '')
+            +   'class="sticker-card pressable ' + cardCls + ' rounded-xl overflow-hidden text-left w-full transition touch-manipulation relative">'
+            +   (isSelected ? '<span class="absolute top-1.5 right-1.5 z-10 gradient-brand text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-lifted">✓</span>' : '')
             +   thumb
             +   '<div class="px-2 py-1.5 text-xs">'
-            +     '<div class="font-medium text-gray-800 truncate">' + (st.name || '스티커') + '</div>'
+            +     '<div class="font-semibold text-slate-800 truncate">' + (st.name || '스티커') + '</div>'
             +   '</div>'
             + '</button>';
         }).join('');
 
         stTypeHtml = ''
-          + '<div class="mt-3 sticker-picker" data-product-idx="' + idx + '">'
-          +   '<label class="block text-xs font-medium text-gray-600 mb-2">스티커타입 <span class="text-gray-400 font-normal">(탭하여 크게 보기)</span></label>'
+          + '<div class="mt-4 sticker-picker" data-product-idx="' + idx + '">'
+          +   '<label class="block text-[12px] font-semibold text-slate-700 mb-2">스티커타입 <span class="text-slate-400 font-normal">(탭하여 크게 보기)</span></label>'
           +   '<div class="grid grid-cols-3 sm:grid-cols-4 gap-2">'
           +     noneCard + cards
           +   '</div>'
@@ -958,9 +958,9 @@
       var stInputHtml = buildStickerInputSection(idx);
 
       return (
-        '<div class="bg-white rounded-xl border border-gray-200 p-4 mb-3" data-product-idx="' + idx + '">' +
-          '<h3 class="text-sm font-semibold text-gray-900 mb-1">' + (p.product_name || '상품') + '</h3>' +
-          '<p class="text-xs text-gray-400 mb-1">수량: ' + (p.quantity || 1) + '개 / ' + productCode + '</p>' +
+        '<div class="surface p-5 mb-3" data-product-idx="' + idx + '">' +
+          '<h3 class="text-[15px] font-bold text-slate-900 mb-1">' + (p.product_name || '상품') + '</h3>' +
+          '<p class="text-[12px] text-slate-400">수량 ' + (p.quantity || 1) + '개 · <span class="font-mono">' + productCode + '</span></p>' +
           stTypeHtml +
           stInputHtml +
         '</div>'
@@ -969,8 +969,8 @@
 
     return `
       <div class="fade-in">
-        <h2 class="text-lg font-semibold text-gray-900 mb-1">희망 출고일 ${required ? '<span class="text-red-500">*</span>' : ''}</h2>
-        <p class="text-sm text-gray-500 mb-4">
+        <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">희망 출고일 ${required ? '<span class="text-rose-500">*</span>' : ''}</h2>
+        <p class="text-sm text-slate-500 mb-5">
           ${isToday ? '컷오프 시간 기준으로 출고일이 결정됩니다.' : '주문 전체에 적용될 출고일을 선택해주세요.'}
         </p>
 
@@ -979,10 +979,10 @@
 
         <!-- 상품별 스티커 -->
         ${products.length > 0 ? `
-          <h3 class="text-base font-semibold text-gray-900 mb-1 mt-6">상품별 정보</h3>
-          <p class="text-sm text-gray-500 mb-3">각 상품의 스티커를 선택해주세요.</p>
+          <h3 class="text-[16px] font-bold text-slate-900 mb-1 mt-7 tracking-tight">상품별 정보</h3>
+          <p class="text-sm text-slate-500 mb-3">각 상품의 스티커를 선택해주세요.</p>
         ` : ''}
-        ${cardsHtml || '<p class="text-sm text-gray-400">상품 정보가 없습니다.</p>'}
+        ${cardsHtml || '<p class="text-sm text-slate-400">상품 정보가 없습니다.</p>'}
       </div>
     `;
   }
@@ -994,94 +994,94 @@
 
     return `
       <div class="fade-in">
-        <h2 class="text-lg font-semibold text-gray-900 mb-1">결제 정보</h2>
-        <p class="text-sm text-gray-500 mb-5">${total > 0 ? '아래 계좌로 입금해주세요.' : '추가 결제 금액이 없습니다.'}</p>
+        <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">결제 정보</h2>
+        <p class="text-sm text-slate-500 mb-6">${total > 0 ? '아래 계좌로 입금해주세요.' : '추가 결제 금액이 없습니다.'}</p>
 
         ${total > 0 ? `
         <!-- Bank info card -->
-        <div class="bg-white rounded-xl border border-gray-200 p-4 mb-4">
-          <div class="flex items-center gap-2 mb-3">
-            <div class="w-8 h-8 bg-yellow-100 rounded-lg flex items-center justify-center">
-              <svg class="w-4 h-4 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>
+        <div class="surface p-5 mb-3">
+          <div class="flex items-center gap-2.5 mb-3.5">
+            <div class="w-9 h-9 gradient-celebrate rounded-xl flex items-center justify-center">
+              <span class="text-lg">💳</span>
             </div>
-            <h3 class="text-sm font-semibold text-gray-900">입금 계좌 안내</h3>
+            <h3 class="text-[14px] font-bold text-slate-900">입금 계좌 안내</h3>
           </div>
-          <div class="bg-gray-50 rounded-lg p-3 space-y-2">
+          <div class="bg-slate-50 rounded-xl p-4 space-y-2.5">
             <div class="flex justify-between text-sm">
-              <span class="text-gray-500">은행</span>
-              <span class="font-medium text-gray-900">${bankInfo.bank_name}</span>
+              <span class="text-slate-500">은행</span>
+              <span class="font-semibold text-slate-900">${bankInfo.bank_name}</span>
             </div>
             <div class="flex justify-between items-center text-sm">
-              <span class="text-gray-500">계좌번호</span>
+              <span class="text-slate-500">계좌번호</span>
               <div class="flex items-center gap-2">
-                <span class="font-medium text-gray-900 font-mono">${bankInfo.account_number}</span>
-                <button class="text-xs text-blue-500 font-medium px-2 py-1 bg-blue-50 rounded hover:bg-blue-100 transition-colors" data-action="copyAccount">복사</button>
+                <span class="font-semibold text-slate-900 font-mono">${bankInfo.account_number}</span>
+                <button class="pressable text-xs font-bold px-2.5 py-1 rounded-lg gradient-brand-soft transition-colors" style="color:var(--brand-600)" data-action="copyAccount">복사</button>
               </div>
             </div>
             <div class="flex justify-between text-sm">
-              <span class="text-gray-500">예금주</span>
-              <span class="font-medium text-gray-900">${bankInfo.account_holder}</span>
+              <span class="text-slate-500">예금주</span>
+              <span class="font-semibold text-slate-900">${bankInfo.account_holder}</span>
             </div>
           </div>
         </div>
 
         <!-- Amount card -->
-        <div class="bg-white rounded-xl border border-gray-200 p-4 mb-4">
-          <h3 class="text-sm font-semibold text-gray-900 mb-3">결제 금액</h3>
+        <div class="surface p-5 mb-3">
+          <h3 class="text-[14px] font-bold text-slate-900 mb-3">결제 금액</h3>
           <div class="space-y-2">
             <div class="flex justify-between text-sm">
-              <span class="text-gray-500">빠른출고 추가비용</span>
-              <span class="text-orange-600">+${formatMoney(expressFee)}</span>
+              <span class="text-slate-500">빠른출고 추가비용</span>
+              <span class="font-semibold text-amber-600">+${formatMoney(expressFee)}</span>
             </div>
-            <div class="border-t border-gray-200 pt-2 flex justify-between">
-              <span class="font-semibold text-gray-900">총 결제금액</span>
-              <span class="font-bold text-blue-600 text-lg">${formatMoney(total)}</span>
+            <div class="border-t border-slate-100 pt-3 flex justify-between items-center">
+              <span class="font-bold text-slate-900">총 결제금액</span>
+              <span class="font-bold text-gradient-brand text-xl">${formatMoney(total)}</span>
             </div>
           </div>
         </div>
         ` : `
         <!-- No additional payment -->
-        <div class="bg-green-50 rounded-xl border border-green-200 p-5 mb-4 flex items-center gap-3">
-          <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
-            <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        <div class="rounded-2xl p-5 mb-3 flex items-center gap-3.5" style="background:linear-gradient(135deg,rgba(110,231,183,0.15),rgba(16,185,129,0.1));border:1px solid rgba(16,185,129,0.2)">
+          <div class="w-11 h-11 gradient-success rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lifted" style="box-shadow:0 6px 16px rgba(16,185,129,0.25)">
+            <span class="text-xl text-white font-bold">✓</span>
           </div>
           <div>
-            <p class="text-sm font-semibold text-green-800">추가 결제 없음</p>
-            <p class="text-xs text-green-600 mt-0.5">일반 출고는 추가 비용이 없습니다.</p>
+            <p class="text-[14px] font-bold text-emerald-800">추가 결제 없음</p>
+            <p class="text-[12px] text-emerald-700 mt-0.5">일반 출고는 추가 비용이 없습니다.</p>
           </div>
         </div>
         `}
 
         <!-- Cash receipt -->
-        <div class="bg-white rounded-xl border border-gray-200 p-4">
+        <div class="surface p-5">
           <div class="flex items-center justify-between mb-3">
-            <h3 class="text-sm font-semibold text-gray-900">현금영수증 신청</h3>
+            <h3 class="text-[14px] font-bold text-slate-900">현금영수증 신청</h3>
             <label class="relative inline-flex items-center cursor-pointer">
               <input type="checkbox" class="sr-only peer" ${formState.cash_receipt_yn ? 'checked' : ''} data-action="toggleReceipt" />
-              <div class="w-10 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500"></div>
+              <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all after:shadow-sm peer-checked:bg-gradient-to-r peer-checked:from-indigo-500 peer-checked:to-violet-500"></div>
             </label>
           </div>
 
           ${formState.cash_receipt_yn ? `
-            <div class="space-y-3">
+            <div class="space-y-3 mt-4">
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-2">발급 용도</label>
+                <label class="block text-[12px] font-semibold text-slate-700 mb-2">발급 용도</label>
                 <div class="grid grid-cols-2 gap-2">
-                  <div class="card-select cursor-pointer rounded-lg border-2 p-3 text-center text-sm ${formState.receipt_type === 'personal' ? 'selected' : 'border-gray-200'}" data-action="selectReceiptType" data-value="personal">
+                  <div class="card-select cursor-pointer border-2 p-3 text-center text-sm font-medium ${formState.receipt_type === 'personal' ? 'selected' : 'border-slate-200'}" data-action="selectReceiptType" data-value="personal">
                     소득공제용
                   </div>
-                  <div class="card-select cursor-pointer rounded-lg border-2 p-3 text-center text-sm ${formState.receipt_type === 'business' ? 'selected' : 'border-gray-200'}" data-action="selectReceiptType" data-value="business">
+                  <div class="card-select cursor-pointer border-2 p-3 text-center text-sm font-medium ${formState.receipt_type === 'business' ? 'selected' : 'border-slate-200'}" data-action="selectReceiptType" data-value="business">
                     지출증빙용
                   </div>
                 </div>
               </div>
               ${formState.receipt_type ? `
                 <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-1">
+                  <label class="block text-[12px] font-semibold text-slate-700 mb-1.5">
                     ${formState.receipt_type === 'personal' ? '휴대폰 번호' : '사업자 등록번호'}
                   </label>
                   <input type="text"
-                    class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    class="input-mod"
                     placeholder="${formState.receipt_type === 'personal' ? '01012345678' : '1234567890'}"
                     value="${formState.receipt_number || ''}"
                     data-action="receiptNumber"
@@ -1099,15 +1099,17 @@
   function renderStep3() {
     return `
       <div class="fade-in">
-        <h2 class="text-lg font-semibold text-gray-900 mb-1">요청사항</h2>
-        <p class="text-sm text-gray-500 mb-5">추가 요청사항이 있으시면 입력해주세요. <span class="text-gray-400">(선택)</span></p>
-        <div class="bg-white rounded-xl border border-gray-200 p-4">
+        <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">요청사항</h2>
+        <p class="text-sm text-slate-500 mb-6">추가 요청사항이 있으시면 입력해주세요 <span class="text-slate-400">(선택)</span></p>
+        <div class="surface p-5">
           <textarea rows="5" placeholder="예: 포장을 꼼꼼하게 해주세요, 리본 추가 부탁드립니다."
-            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
+            class="input-mod resize-none"
             maxlength="500"
             data-action="customerRequest">${formState.customer_request || ''}</textarea>
-          <p class="text-xs text-gray-400 mt-2">최대 500자까지 입력 가능합니다.</p>
-          <p class="text-xs text-blue-500 bg-blue-50 rounded-lg px-3 py-2 mt-2">나눔배송 요청시 배송지별 정보를 입력해주세요(수령인/연락처/주소지/상품별 수량)</p>
+          <p class="text-[11px] text-slate-400 mt-2">최대 500자까지 입력 가능합니다.</p>
+          <div class="mt-3 px-3.5 py-2.5 rounded-xl gradient-brand-soft">
+            <p class="text-[12px] leading-relaxed" style="color:var(--brand-700)">💡 나눔배송 요청시 배송지별 정보를 입력해주세요<br><span class="text-[11px] opacity-80">(수령인/연락처/주소지/상품별 수량)</span></p>
+          </div>
         </div>
       </div>
     `;
@@ -1129,102 +1131,105 @@
         fieldHtml = sticker.custom_fields.map(function(f){
           var key = f.field_id || f.name || f.field_label;
           var val = (ps.sticker_fields || {})[key] || '-';
-          return '<div class="flex justify-between text-xs"><span class="text-gray-500">' + (f.field_label || f.label || key) + '</span><span class="text-gray-900">' + val + '</span></div>';
+          return '<div class="flex justify-between text-xs"><span class="text-slate-500">' + (f.field_label || f.label || key) + '</span><span class="text-slate-900 font-medium">' + val + '</span></div>';
         }).join('');
-        if (fieldHtml) fieldHtml = '<div class="mt-2 p-2 bg-gray-50 rounded space-y-1">' + fieldHtml + '</div>';
+        if (fieldHtml) fieldHtml = '<div class="mt-2 p-3 bg-slate-50 rounded-xl space-y-1.5">' + fieldHtml + '</div>';
       }
       var stickerLabel = sticker ? sticker.name : (matching.length === 0 ? '스티커 없음' : '선택안함');
       var inputLabel = ps.sticker_input === 'custom' ? '직접입력' : '선택안함';
       var stickerThumb = '';
       if (sticker && sticker.preview_image_url) {
         var safeName = (sticker.name || '').replace(/"/g, '&quot;');
-        stickerThumb = '<img src="' + sticker.preview_image_url + '" alt="' + safeName + '" class="inline-block w-10 h-10 object-contain rounded border border-gray-200 mr-2 align-middle" />';
+        stickerThumb = '<img src="' + sticker.preview_image_url + '" alt="' + safeName + '" class="inline-block w-10 h-10 object-contain rounded-lg border border-slate-200 mr-2 align-middle" />';
       } else if (sticker) {
-        stickerThumb = '<span class="inline-block w-10 h-10 rounded border border-gray-200 mr-2 align-middle" style="background:' + (sticker.preview_color || '#F3F4F6') + '"></span>';
+        stickerThumb = '<span class="inline-block w-10 h-10 rounded-lg border border-slate-200 mr-2 align-middle" style="background:' + (sticker.preview_color || '#F3F4F6') + '"></span>';
       }
       return (
-        '<div class="bg-white rounded-xl border border-gray-200 p-4 mb-2">' +
+        '<div class="surface p-4 mb-2">' +
           '<div class="flex items-center justify-between mb-2">' +
-            '<h4 class="text-sm font-semibold text-gray-900">' + (p.product_name || '상품') + ' <span class="text-xs text-gray-400">(수량: ' + (p.quantity || 1) + ')</span></h4>' +
+            '<h4 class="text-[14px] font-bold text-slate-900">' + (p.product_name || '상품') + ' <span class="text-[11px] font-medium text-slate-400">(수량 ' + (p.quantity || 1) + ')</span></h4>' +
           '</div>' +
-          '<div class="space-y-1 text-sm">' +
-            '<div class="flex justify-between items-center"><span class="text-gray-500">스티커</span><span class="text-gray-900 flex items-center">' + stickerThumb + stickerLabel + '</span></div>' +
-            (sticker ? '<div class="flex justify-between"><span class="text-gray-500">스티커정보</span><span class="text-gray-900">' + inputLabel + '</span></div>' : '') +
+          '<div class="space-y-1.5 text-sm">' +
+            '<div class="flex justify-between items-center"><span class="text-slate-500">스티커</span><span class="text-slate-900 font-medium flex items-center">' + stickerThumb + stickerLabel + '</span></div>' +
+            (sticker ? '<div class="flex justify-between"><span class="text-slate-500">스티커정보</span><span class="text-slate-900 font-medium">' + inputLabel + '</span></div>' : '') +
           '</div>' +
           fieldHtml +
         '</div>'
       );
     }).join('');
 
+    // 공통 "수정" 버튼 헬퍼
+    var _editBtn = function(step){ return '<button class="pressable text-[11px] font-bold px-2.5 py-1 rounded-lg gradient-brand-soft" style="color:var(--brand-600)" data-action="goToStep" data-step="' + step + '">수정</button>'; };
+
     return `
       <div class="fade-in">
-        <h2 class="text-lg font-semibold text-gray-900 mb-1">입력 내용을 확인해주세요</h2>
-        <p class="text-sm text-gray-500 mb-5">아래 내용이 맞는지 확인 후 제출해주세요.</p>
+        <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">입력 내용을 확인해주세요</h2>
+        <p class="text-sm text-slate-500 mb-6">아래 내용이 맞는지 확인 후 제출해주세요.</p>
 
         <div class="space-y-3">
           <!-- Shipping type -->
-          <div class="bg-white rounded-xl border border-gray-200 p-4">
+          <div class="surface p-4">
             <div class="flex items-center justify-between mb-2">
-              <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">출고 방식</h3>
-              <button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="0">수정</button>
+              <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">출고 방식</h3>
+              ${_editBtn(0)}
             </div>
-            <p class="text-sm font-medium text-gray-900">
-              ${formState.shipping_type === 'express' ? '빠른출고' : '일반출고'}
-              ${expressFee > 0 ? ' <span class="text-orange-600">(+' + formatMoney(expressFee) + ')</span>' : ''}
+            <p class="text-[14px] font-semibold text-slate-900">
+              ${formState.shipping_type === 'express' ? '⚡ 빠른출고' : '📦 일반출고'}
+              ${expressFee > 0 ? ' <span class="text-amber-600 font-bold">(+' + formatMoney(expressFee) + ')</span>' : ''}
             </p>
           </div>
 
           <!-- 주문 단위 출고일 -->
-          <div class="bg-white rounded-xl border border-gray-200 p-4">
+          <div class="surface p-4">
             <div class="flex items-center justify-between mb-2">
-              <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">희망 출고일</h3>
-              <button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="1">수정</button>
+              <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">희망 출고일</h3>
+              ${_editBtn(1)}
             </div>
-            <p class="text-sm font-medium text-gray-900">
-              ${formState.desired_ship_date ? formatDate(formState.desired_ship_date) : '<span class="text-gray-400">미선택 (가장 빠른 출고일 자동 적용)</span>'}
+            <p class="text-[14px] font-semibold text-slate-900">
+              ${formState.desired_ship_date ? '📅 ' + formatDate(formState.desired_ship_date) : '<span class="text-slate-400 font-normal">미선택 (가장 빠른 출고일 자동 적용)</span>'}
             </p>
           </div>
 
           <!-- Per-product info -->
           ${(orderData?.products || []).length > 0 ? `
           <div>
-            <div class="flex items-center justify-between mb-2">
-              <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">상품별 정보</h3>
-              <button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="1">수정</button>
+            <div class="flex items-center justify-between mb-2 px-1">
+              <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">상품별 정보</h3>
+              ${_editBtn(1)}
             </div>
             ${productsHtml}
           </div>
           ` : ''}
 
           <!-- Payment info -->
-          <div class="bg-white rounded-xl border border-gray-200 p-4">
-            <div class="flex items-center justify-between mb-2">
-              <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">결제정보</h3>
-              <button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="2">수정</button>
+          <div class="surface p-4">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">결제정보</h3>
+              ${_editBtn(2)}
             </div>
-            <div class="space-y-1.5">
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-500">추가 결제금액</span>
-                <span class="font-bold ${total > 0 ? 'text-blue-600' : 'text-green-600'}">${total > 0 ? formatMoney(total) : '없음'}</span>
+            <div class="space-y-2">
+              <div class="flex justify-between items-center text-sm">
+                <span class="text-slate-500">추가 결제금액</span>
+                <span class="font-bold ${total > 0 ? 'text-gradient-brand text-base' : 'text-emerald-600'}">${total > 0 ? formatMoney(total) : '없음'}</span>
               </div>
               ${total > 0 ? `
               <div class="flex justify-between text-sm">
-                <span class="text-gray-500">입금 계좌</span>
-                <span class="text-gray-900">${bankInfo.bank_name || ''} ${bankInfo.account_number || ''}</span>
+                <span class="text-slate-500">입금 계좌</span>
+                <span class="text-slate-900 font-medium">${bankInfo.bank_name || ''} ${bankInfo.account_number || ''}</span>
               </div>
               ${formState.cash_receipt_yn ? `
                 <div class="flex justify-between text-sm">
-                  <span class="text-gray-500">현금영수증</span>
-                  <span class="text-gray-900">${RECEIPT_TYPES[formState.receipt_type] || '-'}</span>
+                  <span class="text-slate-500">현금영수증</span>
+                  <span class="text-slate-900 font-medium">${RECEIPT_TYPES[formState.receipt_type] || '-'}</span>
                 </div>
                 <div class="flex justify-between text-sm">
-                  <span class="text-gray-500">발급번호</span>
-                  <span class="text-gray-900">${formState.receipt_number || '-'}</span>
+                  <span class="text-slate-500">발급번호</span>
+                  <span class="text-slate-900 font-medium">${formState.receipt_number || '-'}</span>
                 </div>
               ` : `
                 <div class="flex justify-between text-sm">
-                  <span class="text-gray-500">현금영수증</span>
-                  <span class="text-gray-400">미신청</span>
+                  <span class="text-slate-500">현금영수증</span>
+                  <span class="text-slate-400">미신청</span>
                 </div>
               `}` : ''}
             </div>
@@ -1232,20 +1237,20 @@
 
           <!-- Customer request -->
           ${formState.customer_request ? `
-            <div class="bg-white rounded-xl border border-gray-200 p-4">
+            <div class="surface p-4">
               <div class="flex items-center justify-between mb-2">
-                <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">요청사항</h3>
-                <button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="3">수정</button>
+                <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">요청사항</h3>
+                ${_editBtn(3)}
               </div>
-              <p class="text-sm text-gray-900 whitespace-pre-wrap">${formState.customer_request}</p>
+              <p class="text-sm text-slate-900 whitespace-pre-wrap leading-relaxed">${formState.customer_request}</p>
             </div>
           ` : `
-            <div class="bg-white rounded-xl border border-gray-200 p-4">
+            <div class="surface p-4">
               <div class="flex items-center justify-between">
-                <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">요청사항</h3>
-                <button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="3">추가</button>
+                <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">요청사항</h3>
+                <button class="pressable text-[11px] font-bold px-2.5 py-1 rounded-lg gradient-brand-soft" style="color:var(--brand-600)" data-action="goToStep" data-step="3">추가</button>
               </div>
-              <p class="text-sm text-gray-400 mt-1">요청사항 없음</p>
+              <p class="text-sm text-slate-400 mt-2">요청사항 없음</p>
             </div>
           `}
         </div>
@@ -1289,16 +1294,17 @@
         var isClosed = isDateClosed(ds) || ds < min || ds > max;
         var isToday = ds === todayStr();
         var isSun = col === 0, isSat = col === 6;
-        var cls = 'w-8 h-8 rounded-full mx-auto flex items-center justify-center text-[13px] leading-none select-none ';
-        if (isSel) cls += 'bg-blue-500 text-white font-bold';
-        else if (isClosed) cls += 'text-gray-300';
-        else if (isSun) cls += 'text-red-500 hover:bg-red-50 cursor-pointer' + (isToday ? ' ring-1 ring-red-300' : '');
-        else if (isSat) cls += 'text-blue-500 hover:bg-blue-50 cursor-pointer' + (isToday ? ' ring-1 ring-blue-300' : '');
-        else cls += 'text-gray-700 hover:bg-gray-100 cursor-pointer' + (isToday ? ' ring-1 ring-gray-300' : '');
+        var cls = 'w-9 h-9 rounded-full mx-auto flex items-center justify-center text-[13px] leading-none select-none transition-all ';
+        if (isSel) cls += 'gradient-brand text-white font-bold shadow-lifted';
+        else if (isClosed) cls += 'text-slate-300';
+        else if (isSun) cls += 'text-rose-500 hover:bg-rose-50 cursor-pointer font-medium' + (isToday ? ' ring-1 ring-rose-200' : '');
+        else if (isSat) cls += 'cursor-pointer font-medium hover:bg-indigo-50' + (isToday ? ' ring-1 ring-indigo-200' : '');
+        else cls += 'text-slate-700 hover:bg-slate-100 cursor-pointer' + (isToday ? ' ring-1 ring-slate-300' : '');
+        if (isSat && !isSel && !isClosed) cls += ' text-indigo-500';
         if (isClosed) {
-          row += '<td class="py-0.5 text-center"><span class="' + cls + '">' + dayNum + '</span></td>';
+          row += '<td class="py-1 text-center"><span class="' + cls + '">' + dayNum + '</span></td>';
         } else {
-          row += '<td class="py-0.5 text-center"><button type="button" data-action="calDay" data-date="' + ds + '" class="w-full flex justify-center"><span class="' + cls + '">' + dayNum + '</span></button></td>';
+          row += '<td class="py-1 text-center"><button type="button" data-action="calDay" data-date="' + ds + '" class="pressable w-full flex justify-center"><span class="' + cls + '">' + dayNum + '</span></button></td>';
         }
       }
     }
@@ -1306,36 +1312,36 @@
 
     var selectedInfo = '';
     if (formState.desired_ship_date && !isDateClosed(formState.desired_ship_date)) {
-      selectedInfo = '<p class="text-center text-sm font-semibold text-blue-600 mt-3 pt-3 border-t border-gray-100">' + formatDate(formState.desired_ship_date) + '</p>';
+      selectedInfo = '<p class="text-center text-sm font-bold text-gradient-brand mt-3 pt-3 border-t border-slate-100">📅 ' + formatDate(formState.desired_ship_date) + '</p>';
     } else if (!required) {
-      selectedInfo = '<p class="text-center text-xs text-gray-400 mt-3 pt-3 border-t border-gray-100">미선택 시 가장 빠른 출고일(' + formatDate(min) + ') 자동 적용</p>';
+      selectedInfo = '<p class="text-center text-[11px] text-slate-400 mt-3 pt-3 border-t border-slate-100">미선택 시 가장 빠른 출고일(' + formatDate(min) + ') 자동 적용</p>';
     } else {
-      selectedInfo = '<p class="text-center text-xs text-gray-400 mt-3 pt-3 border-t border-gray-100">출고일을 선택해주세요</p>';
+      selectedInfo = '<p class="text-center text-[11px] text-slate-400 mt-3 pt-3 border-t border-slate-100">출고일을 선택해주세요</p>';
     }
 
-    return '<div class="bg-white rounded-xl border border-gray-200 overflow-hidden mb-4" id="calendarWidget">'
-      + '<div class="flex items-center justify-between px-4 py-3 border-b border-gray-100">'
-      + '<button type="button" data-action="calNav" data-dir="-1" class="p-1.5 rounded-lg ' + (canPrev ? 'hover:bg-gray-100 text-gray-600' : 'text-gray-200 pointer-events-none') + '">'
-      + '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>'
+    return '<div class="surface overflow-hidden mb-4" id="calendarWidget">'
+      + '<div class="flex items-center justify-between px-4 py-3.5 border-b border-slate-100">'
+      + '<button type="button" data-action="calNav" data-dir="-1" class="pressable p-2 rounded-xl ' + (canPrev ? 'hover:bg-slate-100 text-slate-700' : 'text-slate-200 pointer-events-none') + '">'
+      + '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>'
       + '</button>'
-      + '<span class="text-sm font-semibold text-gray-800">' + yr + '년 ' + mo + '월</span>'
-      + '<button type="button" data-action="calNav" data-dir="1" class="p-1.5 rounded-lg ' + (canNext ? 'hover:bg-gray-100 text-gray-600' : 'text-gray-200 pointer-events-none') + '">'
-      + '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>'
+      + '<span class="text-[15px] font-bold text-slate-900">' + yr + '년 ' + mo + '월</span>'
+      + '<button type="button" data-action="calNav" data-dir="1" class="pressable p-2 rounded-xl ' + (canNext ? 'hover:bg-slate-100 text-slate-700' : 'text-slate-200 pointer-events-none') + '">'
+      + '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/></svg>'
       + '</button>'
       + '</div>'
       + '<div class="px-2 py-2">'
       + '<table class="w-full border-collapse"><thead><tr>'
-      + '<th class="text-[11px] font-medium text-red-400 pb-1.5">일</th>'
-      + '<th class="text-[11px] font-medium text-gray-400 pb-1.5">월</th>'
-      + '<th class="text-[11px] font-medium text-gray-400 pb-1.5">화</th>'
-      + '<th class="text-[11px] font-medium text-gray-400 pb-1.5">수</th>'
-      + '<th class="text-[11px] font-medium text-gray-400 pb-1.5">목</th>'
-      + '<th class="text-[11px] font-medium text-gray-400 pb-1.5">금</th>'
-      + '<th class="text-[11px] font-medium text-blue-400 pb-1.5">토</th>'
+      + '<th class="text-[11px] font-semibold text-rose-400 pb-2">일</th>'
+      + '<th class="text-[11px] font-semibold text-slate-400 pb-2">월</th>'
+      + '<th class="text-[11px] font-semibold text-slate-400 pb-2">화</th>'
+      + '<th class="text-[11px] font-semibold text-slate-400 pb-2">수</th>'
+      + '<th class="text-[11px] font-semibold text-slate-400 pb-2">목</th>'
+      + '<th class="text-[11px] font-semibold text-slate-400 pb-2">금</th>'
+      + '<th class="text-[11px] font-semibold text-indigo-400 pb-2">토</th>'
       + '</tr></thead><tbody>' + rows + '</tbody></table>'
       + '</div>'
       + '<div class="px-4 pb-3">' + selectedInfo + '</div>'
-      + (notice ? '<div class="mx-3 mb-3 p-3 bg-amber-50 rounded-lg text-xs text-amber-700 whitespace-pre-wrap">' + notice + '</div>' : '')
+      + (notice ? '<div class="mx-3 mb-3 p-3.5 rounded-xl gradient-celebrate bg-opacity-30 text-[12px] text-amber-900 whitespace-pre-wrap font-medium" style="background:linear-gradient(135deg,rgba(253,230,138,0.4),rgba(245,158,11,0.15))">' + notice + '</div>' : '')
       + '</div>';
   }
 
@@ -1366,13 +1372,13 @@
     // 기본값: sticker_input이 명시적으로 'none'이 아닌 경우 입력 표시
     var isNone = stInput === 'none';
 
-    var headerHtml = '<div class="mt-3">'
-      + (isNone ? '<p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">문구는 샘플이미지로 출력되며 이름은 출력되지 않습니다.</p>' : '')
+    var headerHtml = '<div class="mt-4">'
+      + (isNone ? '<p class="text-[12px] text-amber-800 rounded-xl px-3.5 py-2.5 mb-3 font-medium" style="background:linear-gradient(135deg,rgba(253,230,138,0.4),rgba(245,158,11,0.12));border:1px solid rgba(245,158,11,0.2)">⚠️ 문구는 샘플이미지로 출력되며 이름은 출력되지 않습니다.</p>' : '')
       + '<div class="flex items-center justify-between mb-2">'
-      + '<label class="text-xs font-medium text-gray-600">스티커 문구 입력</label>'
+      + '<label class="text-[12px] font-semibold text-slate-700">스티커 문구 입력</label>'
       + '<label class="flex items-center gap-1.5 cursor-pointer">'
-      + '<input type="checkbox" class="w-4 h-4 accent-blue-500" ' + (isNone ? 'checked' : '') + ' data-action="productStickerInputNone" data-idx="' + idx + '" />'
-      + '<span class="text-xs text-gray-600">입력안함</span>'
+      + '<input type="checkbox" class="w-4 h-4 accent-indigo-500" ' + (isNone ? 'checked' : '') + ' data-action="productStickerInputNone" data-idx="' + idx + '" />'
+      + '<span class="text-[12px] text-slate-600 font-medium">입력안함</span>'
       + '</label>'
       + '</div>'
       + '</div>';
@@ -1382,24 +1388,24 @@
       var fieldInputs = customFields.map(function(f) {
         var fieldKey = f.field_id || f.name || f.field_label;
         var val = (ps.sticker_fields || {})[fieldKey] || '';
-        var reqMark = f.required ? '<span class="text-red-500">*</span>' : '';
+        var reqMark = f.required ? '<span class="text-rose-500">*</span>' : '';
         var safeVal = String(val).replace(/"/g, '&quot;');
         var inputHtml = '';
         if (f.field_type === 'select' && Array.isArray(f.options)) {
           var optHtml = '<option value="">선택</option>' + f.options.map(function(o) {
             return '<option value="' + o + '"' + (val === o ? ' selected' : '') + '>' + o + '</option>';
           }).join('');
-          inputHtml = '<select class="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '">' + optHtml + '</select>';
+          inputHtml = '<select class="input-mod" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '">' + optHtml + '</select>';
         } else if (f.field_type === 'date') {
-          inputHtml = '<input type="date" value="' + safeVal + '" class="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '" />';
+          inputHtml = '<input type="date" value="' + safeVal + '" class="input-mod" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '" />';
         } else if (f.field_type === 'textarea') {
-          inputHtml = '<textarea rows="2" placeholder="' + (f.placeholder || '') + '" maxlength="' + (f.max_length || 200) + '" class="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '">' + safeVal + '</textarea>';
+          inputHtml = '<textarea rows="2" placeholder="' + (f.placeholder || '') + '" maxlength="' + (f.max_length || 200) + '" class="input-mod resize-none" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '">' + safeVal + '</textarea>';
         } else {
-          inputHtml = '<input type="text" value="' + safeVal + '" placeholder="' + (f.placeholder || '') + '" maxlength="' + (f.max_length || 100) + '" class="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '" />';
+          inputHtml = '<input type="text" value="' + safeVal + '" placeholder="' + (f.placeholder || '') + '" maxlength="' + (f.max_length || 100) + '" class="input-mod" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '" />';
         }
-        return '<div><label class="block text-xs text-gray-600 mb-1">' + (f.field_label || fieldKey) + ' ' + reqMark + '</label>' + inputHtml + '</div>';
+        return '<div><label class="block text-[11px] font-medium text-slate-600 mb-1.5">' + (f.field_label || fieldKey) + ' ' + reqMark + '</label>' + inputHtml + '</div>';
       }).join('');
-      fieldsHtml = '<div class="p-3 bg-gray-50 rounded-lg space-y-2">' + fieldInputs + '</div>';
+      fieldsHtml = '<div class="p-4 rounded-xl gradient-brand-soft space-y-3">' + fieldInputs + '</div>';
     }
 
     return '<div id="sticker-input-wrap-' + idx + '">' + headerHtml + fieldsHtml + '</div>';
@@ -1624,10 +1630,16 @@
         const acct = orderData?.bank_info?.account_number || '';
         if (navigator.clipboard) {
           navigator.clipboard.writeText(acct).then(() => {
-            target.textContent = '복사됨!';
-            target.classList.add('bg-green-50', 'text-green-600');
-            target.classList.remove('bg-blue-50', 'text-blue-500');
-            setTimeout(() => { target.textContent = '복사'; target.classList.remove('bg-green-50', 'text-green-600'); target.classList.add('bg-blue-50', 'text-blue-500'); }, 1500);
+            target.textContent = '복사됨 ✓';
+            target.classList.remove('gradient-brand-soft');
+            target.classList.add('bg-emerald-50');
+            target.style.color = '#059669';
+            setTimeout(() => {
+              target.textContent = '복사';
+              target.classList.remove('bg-emerald-50');
+              target.classList.add('gradient-brand-soft');
+              target.style.color = 'var(--brand-600)';
+            }, 1500);
           });
         }
         break;
@@ -1865,7 +1877,7 @@
       if (!orders.length) {
         document.getElementById('loginForm').classList.add('hidden');
         document.getElementById('searchForm').classList.add('hidden');
-        document.querySelectorAll('#searchScreen .flex.border-b').forEach(el => el.classList.add('hidden'));
+        document.querySelectorAll('#searchTabStrip').forEach(el => el.classList.add('hidden'));
         document.getElementById('searchEmpty').classList.remove('hidden');
         return;
       }
@@ -1873,7 +1885,7 @@
       // 로그인 폼 숨기고 결과 표시
       document.getElementById('loginForm').classList.add('hidden');
       document.getElementById('searchForm').classList.add('hidden');
-      document.querySelectorAll('#searchScreen .flex.border-b').forEach(el => el.classList.add('hidden'));
+      document.querySelectorAll('#searchTabStrip').forEach(el => el.classList.add('hidden'));
 
       renderOrderList(orders, data.user?.name ? data.user.name + '님의 주문' : null);
     } catch (err) {
@@ -1944,7 +1956,7 @@
         // 검색폼/탭 숨기고 빈 상태 카드만 표시
         document.getElementById('loginForm').classList.add('hidden');
         document.getElementById('searchForm').classList.add('hidden');
-        document.querySelectorAll('#searchScreen .flex.border-b').forEach(el => el.classList.add('hidden'));
+        document.querySelectorAll('#searchTabStrip').forEach(el => el.classList.add('hidden'));
         document.getElementById('searchEmpty').classList.remove('hidden');
         return;
       }
@@ -1964,7 +1976,7 @@
     document.getElementById('loginForm').classList.remove('hidden');
     document.getElementById('searchForm').classList.remove('hidden');
     // 탭 복원
-    document.querySelectorAll('#searchScreen .flex.border-b').forEach(el => el.classList.remove('hidden'));
+    document.querySelectorAll('#searchTabStrip').forEach(el => el.classList.remove('hidden'));
     switchSearchTab('login');
   };
 
