@@ -187,7 +187,6 @@ nav a:hover{color:var(--gray-900)}
   <a href="#bg-products" onclick="showPage('bg-products')">⚙️ 상품설정</a>
   <a href="#bg-shipping" onclick="showPage('bg-shipping')">📅 출고일설정</a>
   <a href="#bg-alimtalk" onclick="showPage('bg-alimtalk')">📨 알림톡 발송</a>
-  <a href="#bg-orders" onclick="showPage('bg-orders')">📋 고객입력현황</a>
   <a href="#bg-unified" onclick="showPage('bg-unified')">🔗 통합현황</a>
   <div class="user-area" id="user-area"></div>
 </nav>
@@ -1203,44 +1202,6 @@ nav a:hover{color:var(--gray-900)}
   </div>
 </div>
 
-<!-- ========== 바른기프트: 고객입력현황 ========== -->
-<div id="page-bg-orders" class="page">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-    <h2 style="margin:0">📋 고객 입력 현황</h2>
-    <button class="btn" onclick="loadBgOrders()">🔄 새로고침</button>
-  </div>
-  <div id="bg-orders-loading" style="text-align:center;padding:40px;color:var(--gray-400)">불러오는 중...</div>
-  <div id="bg-orders-empty" style="display:none;text-align:center;padding:40px;color:var(--gray-400)">아직 제출된 고객 입력이 없습니다.</div>
-  <div id="bg-orders-table-wrap" style="display:none">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
-        <input type="checkbox" id="bg-select-all" onchange="toggleBgSelectAll(this)"> 전체선택
-      </label>
-      <span id="bg-selected-count" style="font-size:13px;color:var(--gray-500)">0건 선택</span>
-      <button class="btn" onclick="copyBgOrders()" style="margin-left:auto">📋 수집복사</button>
-    </div>
-    <table class="data-table" id="bg-orders-table">
-      <thead>
-        <tr>
-          <th style="width:36px"></th>
-          <th>주문번호</th>
-          <th>제출일시</th>
-          <th>희망출고일</th>
-          <th>출고방식</th>
-          <th>상품명</th>
-          <th>스티커코드</th>
-          <th>스티커명</th>
-          <th>문구</th>
-          <th>현금영수증</th>
-          <th>요청사항</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody id="bg-orders-tbody"></tbody>
-    </table>
-  </div>
-</div>
-
 <!-- ========== UNIFIED VIEW ========== -->
 <div id="page-bg-unified" class="page">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -1487,7 +1448,7 @@ function init() {
 
   // URL hash 기반 페이지 전환
   const hash = location.hash.replace('#', '') || 'dashboard';
-  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-alimtalk', 'bg-orders', 'bg-unified'].includes(hash)) showPage(hash);
+  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-alimtalk', 'bg-unified'].includes(hash)) showPage(hash);
 }
 
 function fmt(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -1507,7 +1468,6 @@ function showPage(name) {
   if (name === 'bg-products') loadBgProducts();
   if (name === 'bg-shipping') loadBgShipping();
   if (name === 'bg-alimtalk') loadBgAlimtalk();
-  if (name === 'bg-orders') loadBgOrders();
   if (name === 'bg-unified') loadBgUnified();
 }
 
@@ -4855,205 +4815,8 @@ function closeBgAtResult() {
 }
 
 // ============================================
-// 고객 입력 현황
+// 통합현황 (구 고객입력현황은 통합현황으로 대체됨)
 // ============================================
-let bgOrdersData = [];
-let bgOrdersRows = []; // 평탄화된 행 배열 (order × product)
-
-async function loadBgOrders() {
-  document.getElementById('bg-orders-loading').style.display = 'block';
-  document.getElementById('bg-orders-empty').style.display = 'none';
-  document.getElementById('bg-orders-table-wrap').style.display = 'none';
-  try {
-    const res = await fetch(API + '/api/bg/customer-infos');
-    const data = await res.json();
-    bgOrdersData = data.infos || [];
-
-    // 주문 배송정보(수령인/연락처/주소) 병렬 조회
-    const ids = [...new Set(bgOrdersData.map(d => d.order_id).filter(Boolean))];
-    if (ids.length) {
-      try {
-        const sr = await fetch(API + '/api/bg/orders/shipping?ids=' + encodeURIComponent(ids.join(',')));
-        const shippingList = await sr.json();
-        const shippingMap = new Map(shippingList.map(s => [s.order_id, s]));
-        bgOrdersData.forEach(d => { d._shipping = shippingMap.get(d.order_id) || null; });
-      } catch(e) { console.warn('배송정보 조회 실패:', e); }
-    }
-
-    renderBgOrders();
-  } catch(e) {
-    document.getElementById('bg-orders-loading').textContent = '불러오기 실패: ' + e.message;
-  }
-}
-
-function renderBgOrders() {
-  document.getElementById('bg-orders-loading').style.display = 'none';
-  if (!bgOrdersData.length) {
-    document.getElementById('bg-orders-empty').style.display = 'block';
-    return;
-  }
-  document.getElementById('bg-orders-table-wrap').style.display = 'block';
-
-  const receiptLabel = { personal: '소득공제', business: '지출증빙' };
-  let html = '';
-
-  // 평탄화 행 배열 재빌드
-  bgOrdersRows = [];
-
-  bgOrdersData.forEach(info => {
-    const sels = (info.sticker_selections || []);
-    if (sels.length === 0) {
-      bgOrdersRows.push({ info, sel: null });
-    } else {
-      sels.forEach(sel => bgOrdersRows.push({ info, sel }));
-    }
-  });
-
-  bgOrdersRows.forEach(({ info, sel }, rowIdx) => {
-    const submittedAt = info.submitted_at
-      ? new Date(info.submitted_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})
-      : '-';
-    const receiptText = info.cash_receipt_yn
-      ? (receiptLabel[info.receipt_type] || '') + ' ' + (info.receipt_number || '')
-      : '미신청';
-    const shippingText = info.is_express ? '⚡ 빠른출고' : '일반';
-    const requestText = info.customer_request || '-';
-    const infoJson = JSON.stringify(info).replace(/'/g, '&#39;');
-
-    // 같은 order_id의 첫 번째 행 여부 (구분선용)
-    const isFirstOfOrder = rowIdx === 0 || bgOrdersRows[rowIdx - 1].info.order_id !== info.order_id;
-    const borderStyle = isFirstOfOrder ? 'border-top:2px solid var(--gray-200)' : '';
-
-    if (sel) {
-      const vals = Object.entries(sel.custom_values || {}).filter(([,v]) => v);
-      const customText = vals.map(([k, v]) => `<span style="color:var(--gray-500)">${k}:</span> ${v}`).join('<br>') || '<span style="color:var(--gray-300)">없음</span>';
-      const qtyText = sel.quantity ? `(${sel.quantity}개)` : '';
-      const codeText = sel.sticker_code
-        ? `<span style="font-family:monospace;font-size:12px">${sel.sticker_code}${qtyText}</span>`
-        : `<span style="color:var(--gray-300)">-</span>`;
-      const nameText = sel.sticker_name || '-';
-      const productText = sel.product_name || sel.product_code || '-';
-
-      html += `<tr style="${borderStyle}">
-        <td><input type="checkbox" class="bg-row-check" data-idx="${rowIdx}" onchange="updateBgSelectedCount()"></td>
-        <td style="font-weight:600">${info.order_id || '-'}</td>
-        <td style="color:var(--gray-500);font-size:12px;white-space:nowrap">${submittedAt}</td>
-        <td style="white-space:nowrap">${info.desired_ship_date || '-'}</td>
-        <td>${shippingText}</td>
-        <td style="font-size:12px">${productText}</td>
-        <td style="font-size:12px">${codeText}</td>
-        <td style="font-size:12px">${nameText}</td>
-        <td style="font-size:12px;line-height:1.6">${customText}</td>
-        <td style="font-size:12px">${receiptText}</td>
-        <td style="font-size:12px;color:var(--gray-500);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${requestText}">${requestText}</td>
-        <td><button class="btn" style="padding:4px 10px;font-size:12px" onclick='openBgOrderEdit(${infoJson})'>수정</button></td>
-      </tr>`;
-    } else {
-      html += `<tr style="${borderStyle}">
-        <td><input type="checkbox" class="bg-row-check" data-idx="${rowIdx}" onchange="updateBgSelectedCount()"></td>
-        <td style="font-weight:600">${info.order_id || '-'}</td>
-        <td style="color:var(--gray-500);font-size:12px;white-space:nowrap">${submittedAt}</td>
-        <td style="white-space:nowrap">${info.desired_ship_date || '-'}</td>
-        <td>${shippingText}</td>
-        <td colspan="4" style="color:var(--gray-300);font-size:12px">스티커 없음</td>
-        <td style="font-size:12px">${receiptText}</td>
-        <td style="font-size:12px;color:var(--gray-500);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${requestText}">${requestText}</td>
-        <td><button class="btn" style="padding:4px 10px;font-size:12px" onclick='openBgOrderEdit(${infoJson})'>수정</button></td>
-      </tr>`;
-    }
-  });
-
-  document.getElementById('bg-orders-tbody').innerHTML = html;
-}
-
-function toggleBgSelectAll(el) {
-  document.querySelectorAll('.bg-row-check').forEach(cb => { cb.checked = el.checked; });
-  updateBgSelectedCount();
-}
-
-function updateBgSelectedCount() {
-  const cnt = document.querySelectorAll('.bg-row-check:checked').length;
-  document.getElementById('bg-selected-count').textContent = cnt + '건 선택';
-}
-
-function copyBgOrders() {
-  const checked = [...document.querySelectorAll('.bg-row-check:checked')];
-  if (!checked.length) { showToast('복사할 행을 선택해주세요'); return; }
-
-  const selectedRows = checked.map(cb => bgOrdersRows[parseInt(cb.dataset.idx)]);
-
-  // 스프레드시트 컬럼 구조 (A=0 ~ W=22, 총 23열)
-  // A='', B=택배, C=일반, D=주문번호, E=수령인(주문자), F=연락처, H=배송지, J=상품명, K=상품코드, M=스티커코드(수량), V=빠른출고, W=희망출고일
-  const htmlRows = selectedRows.map(({ info, sel }) => {
-    const cells = Array(23).fill('');
-    const sh = info._shipping || {};
-    cells[1] = '택배';                         // B
-    cells[2] = '일반';                         // C
-    cells[3] = (info.order_id || '').replace(/^ETC-/, '');  // D: ETC- 제거, 숫자만
-    // E: 수령인(주문자) — recv_name과 order_name이 다르면 "수령인(주문자)" 형식
-    const recvName = sh.recv_name || '';
-    const orderName = sh.order_name || '';
-    cells[4] = recvName && orderName && recvName !== orderName
-      ? `${recvName}(${orderName})` : (recvName || orderName);  // E
-    cells[5] = sh.recv_hphone || '';           // F
-    cells[7] = sh.recv_addr || '';             // H
-    if (sel) {
-      // J: 상품명 — shipping.products에서 코드로 조회, 없으면 sel.product_name 사용
-      const productName = (sh.products && sel.product_code && sh.products[sel.product_code])
-        || sel.product_name || sel.product_code || '';
-      cells[9]  = productName;                                   // J
-      cells[10] = sel.product_code || '';                        // K
-      const qty = sel.quantity ? `(${sel.quantity}개)` : '';
-      cells[12] = sel.sticker_code ? `${sel.sticker_code}${qty}` : '';  // M
-      cells[19] = sel.quantity || '';  // T: 주문수량
-    }
-    // V: 빠른출고인 경우 희망출고일과 동일 날짜 (짙은 빨강)
-    if (info.is_express) cells[21] = info.desired_ship_date || '';  // V
-    cells[22] = info.desired_ship_date || '';      // W
-
-    return '<tr>' + cells.map((val, ci) => {
-      const style = (ci === 21 && info.is_express)
-        ? ' style="color:#8B0000;font-weight:bold"'
-        : '';
-      return `<td${style}>${val}</td>`;
-    }).join('') + '</tr>';
-  }).join('');
-
-  const tableHtml = `<table><tbody>${htmlRows}</tbody></table>`;
-  const tsvRows = selectedRows.map(({ info, sel }) => {
-    const cells = Array(23).fill('');
-    const sh = info._shipping || {};
-    cells[1] = '택배'; cells[2] = '일반';
-    cells[3] = (info.order_id || '').replace(/^ETC-/, '');
-    const recvName = sh.recv_name || '', orderName = sh.order_name || '';
-    cells[4] = recvName && orderName && recvName !== orderName ? `${recvName}(${orderName})` : (recvName || orderName);
-    cells[5] = sh.recv_hphone || '';
-    cells[7] = sh.recv_addr || '';
-    if (sel) {
-      const productName = (sh.products && sel.product_code && sh.products[sel.product_code])
-        || sel.product_name || sel.product_code || '';
-      cells[9] = productName;
-      cells[10] = sel.product_code || '';
-      const qty = sel.quantity ? `(${sel.quantity}개)` : '';
-      cells[12] = sel.sticker_code ? `${sel.sticker_code}${qty}` : '';
-      cells[19] = sel.quantity || '';  // T: 주문수량
-    }
-    if (info.is_express) cells[21] = info.desired_ship_date || '';
-    cells[22] = info.desired_ship_date || '';
-    return cells.join('\t');
-  });
-  const tsv = tsvRows.join('\n');
-
-  if (navigator.clipboard && window.ClipboardItem) {
-    const htmlBlob = new Blob([tableHtml], { type: 'text/html' });
-    const textBlob = new Blob([tsv], { type: 'text/plain' });
-    navigator.clipboard.write([new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })])
-      .then(() => showToast(`${selectedRows.length}건 클립보드 복사 완료`))
-      .catch(() => navigator.clipboard.writeText(tsv).then(() => showToast(`${selectedRows.length}건 복사 완료`)));
-  } else {
-    navigator.clipboard.writeText(tsv).then(() => showToast(`${selectedRows.length}건 복사 완료`));
-  }
-}
 
 // ============================================
 // 통합현황
@@ -5193,7 +4956,9 @@ function renderBgUnified() {
     const productName = sel?.product_name
       || (_pm && sel?.product_code ? _pm.get(sel.product_code) : null)
       || order.card_name || '-';
-    const infoJson = ci ? JSON.stringify({...ci, _order_seq: order.order_seq}).replace(/'/g, '&#39;') : null;
+    // _productNames: {product_code → product_name} 딕셔너리를 infoJson에 포함
+    const _productNames = _pm ? Object.fromEntries(_pm) : {};
+    const infoJson = ci ? JSON.stringify({...ci, _order_seq: order.order_seq, _productNames}).replace(/'/g, '&#39;') : null;
     const editBtn = infoJson
       ? `<button class="btn" style="padding:4px 10px;font-size:12px" onclick='openBgOrderEdit(${infoJson})'>수정</button>`
       : '';
@@ -5300,7 +5065,8 @@ function openBgOrderEdit(info) {
   // 스티커 입력 렌더
   const stickerWrap = document.getElementById('bg-edit-stickers');
   const sels = info.sticker_selections || [];
-  // bgUnifiedProductMap에서 상품명 조회용 map 준비
+  // 상품명 조회: infoJson에 포함된 _productNames 딕셔너리 우선 사용
+  const _productNames = info._productNames || {};
   const _editOrderSeq = info._order_seq
     || (info.order_id && String(info.order_id).startsWith('ETC-')
       ? parseInt(String(info.order_id).replace('ETC-', ''))
@@ -5314,7 +5080,10 @@ function openBgOrderEdit(info) {
       const fieldInputs = fields.length
         ? fields.map(([k, v]) => `<div style="margin-top:6px"><label style="font-size:11px;color:var(--gray-500)">${k}</label><input type="text" data-sticker-idx="${idx}" data-field="${k}" value="${String(v).replace(/"/g,'&quot;')}" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px;margin-top:2px"></div>`).join('')
         : '<p style="font-size:12px;color:var(--gray-400)">문구 입력안함</p>';
-      const productName = s.product_name || (_editPm && s.product_code ? _editPm.get(s.product_code) : null) || '';
+      const productName = s.product_name
+        || (s.product_code && _productNames[s.product_code])
+        || (_editPm && s.product_code ? _editPm.get(s.product_code) : null)
+        || '';
       const productLabel = productName || s.product_code
         ? `<div style="font-size:11px;color:var(--gray-500);margin-bottom:4px">📦 ${productName}${s.product_code ? ' <span style="font-family:monospace">('+s.product_code+')</span>' : ''}</div>`
         : '';
@@ -5374,7 +5143,7 @@ async function saveBgOrderEdit() {
     if (!res.ok) throw new Error(data.error || '저장 실패');
     showToast('저장되었습니다.');
     closeBgOrderEdit();
-    loadBgOrders();
+    loadBgUnified();
   } catch(e) {
     alert('저장 실패: ' + e.message);
   }
