@@ -79,7 +79,7 @@ nav a:hover{color:var(--gray-900)}
 .data-table tr.row-cancel-alert td{color:#dc2626;font-weight:600}
 .data-table tr.row-cancelled{background:#fff1f2}
 .data-table tr.row-cancelled:hover{background:#ffe4e6}
-.data-table tr.row-cancelled td{color:#be123c}
+.data-table tr.row-cancelled td{color:#be123c;text-decoration:line-through}
 .data-table tr.row-pending{background:#f0f9ff}
 .data-table tr.row-pending:hover{background:#e0f2fe}
 .data-table tr.row-pending td{color:#0369a1}
@@ -1215,10 +1215,12 @@ nav a:hover{color:var(--gray-900)}
       <input type="date" id="uni-end" />
       <button class="btn btn-primary" onclick="loadBgUnified()">조회</button>
     </div>
-    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <label style="font-size:13px;cursor:pointer"><input type="checkbox" id="uni-hide-cancel" onchange="renderBgUnified()"> 취소 제외</label>
-      <label style="font-size:13px;cursor:pointer"><input type="checkbox" id="uni-only-submitted" onchange="renderBgUnified()"> 입력완료만</label>
-      <label style="font-size:13px;cursor:pointer"><input type="checkbox" id="uni-only-unsubmitted" onchange="renderBgUnified()"> 미입력만</label>
+      <span style="color:var(--gray-300)">|</span>
+      <label style="font-size:13px;cursor:pointer"><input type="radio" name="uni-filter-status" id="uni-filter-all" value="all" checked onchange="renderBgUnified()"> 전체</label>
+      <label style="font-size:13px;cursor:pointer"><input type="radio" name="uni-filter-status" id="uni-only-submitted" value="submitted" onchange="renderBgUnified()"> 입력완료만</label>
+      <label style="font-size:13px;cursor:pointer"><input type="radio" name="uni-filter-status" id="uni-only-unsubmitted" value="unsubmitted" onchange="renderBgUnified()"> 미입력만</label>
     </div>
   </div>
   <div id="uni-loading" style="text-align:center;padding:40px;color:var(--gray-400)">날짜를 선택하고 조회하세요.</div>
@@ -1462,6 +1464,9 @@ function showPage(name) {
   document.getElementById('page-' + name).classList.add('active');
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
   document.querySelector(`nav a[href="#${name}"]`).classList.add('active');
+  // 탭 전환 시마다 해당 탭 데이터 리로드 (딥링크/왕복 일관성 보장)
+  if (name === 'dashboard') loadDashboard();
+  if (name === 'orders') loadOrders();
   if (name === 'sns') loadSnsInsight();
   if (name === 'worklog') loadWorklog();
   if (name === 'bg-stickers') loadBgStickers();
@@ -4876,18 +4881,17 @@ async function loadBgUnified() {
 
 function renderBgUnified() {
   const hideCancel = document.getElementById('uni-hide-cancel')?.checked;
-  const onlySubmitted = document.getElementById('uni-only-submitted')?.checked;
-  const onlyUnsubmitted = document.getElementById('uni-only-unsubmitted')?.checked;
+  const filterStatus = document.querySelector('input[name="uni-filter-status"]:checked')?.value || 'all';
 
   const receiptLabel = { personal: '소득공제', business: '지출증빙' };
 
-  // 필터링
+  // 필터링 (filterStatus: 'all' | 'submitted' | 'unsubmitted' — 상호배타)
   let filtered = bgUnifiedOrders.filter(o => {
     if (hideCancel && (o.status_seq === 3 || o.status_seq === 5)) return false;
     const ciKey = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
     const ci = bgUnifiedCiMap.get(ciKey);
-    if (onlySubmitted && !ci) return false;
-    if (onlyUnsubmitted && ci) return false;
+    if (filterStatus === 'submitted' && !ci) return false;
+    if (filterStatus === 'unsubmitted' && ci) return false;
     return true;
   });
 
@@ -4921,7 +4925,7 @@ function renderBgUnified() {
   bgUnifiedRows.forEach(({ order, ci, sel }, rowIdx) => {
     const isFirstOfOrder = rowIdx === 0 || bgUnifiedRows[rowIdx - 1].order.order_seq !== order.order_seq;
     const borderStyle = isFirstOfOrder ? 'border-top:2px solid var(--gray-200)' : '';
-    const cancelStyle = isCancelled(order) ? 'opacity:0.5;text-decoration:line-through;' : '';
+    const rowClass = isCancelled(order) ? 'row-cancelled' : '';
 
     const orderDateFmt = order.order_date_fmt || '-';
     const recvName = order.display_name || '-';
@@ -4963,7 +4967,7 @@ function renderBgUnified() {
       ? `<button class="btn" style="padding:4px 10px;font-size:12px" onclick='openBgOrderEdit(${infoJson})'>수정</button>`
       : '';
 
-    html += `<tr style="${borderStyle}${cancelStyle}">
+    html += `<tr class="${rowClass}" style="${borderStyle}">
       <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()"></td>
       <td style="font-weight:600;white-space:nowrap">${order.order_seq}</td>
       <td style="font-size:12px;color:var(--gray-500);white-space:nowrap">${orderDateFmt}</td>
@@ -5005,7 +5009,8 @@ function copyBgUnified() {
   const selectedRows = checked.map(cb => bgUnifiedRows[parseInt(cb.dataset.idx)]);
 
   // 23열 구조: A='', B=택배, C=일반, D=주문번호, E=수령인, F=연락처, G='', H=배송지, I='',
-  //            J=상품명, K=상품코드, L='', M=스티커코드(수량), N-U='', V=희망출고일(빠른출고), W=희망출고일
+  //            J=상품명, K=상품코드, L='', M=스티커코드(수량), N~S='', T=주문수량,
+  //            U='', V=희망출고일(빠른출고시 짙은빨강), W=희망출고일
   const buildCells = ({ order, ci, sel }) => {
     const cells = Array(23).fill('');
     cells[1] = '택배';
