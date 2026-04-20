@@ -4,20 +4,9 @@
 const url = require('url');
 const store = require('./store');
 
-// 답례품/꽃다발 식별 조건 (청첩장 제외)
-const DAERYEPUM_CARDKIND_SEQS = [4, 5, 16]; // 카드형답례장, 한지형답례장, 결혼답례카드
-const DAERYEPUM_CARD_CODES = [
-  'TGJSD03O2','TGIBK01D1','TGOSL006D1','TGOSL003D1','OSL002','TGAMT01O1',
-  'TGJSD05D1','TGJSD08D1','TGJSD01','OSL005','TGJSD02D1','TGJBK05D1',
-  'TGJBK02D1','TGJBK03D1','TGJSD06D1','TGJSD04D1','TGJSD07D1','TGJSD03O3',
-  'TGJBK04D1','TGJSD03O1','TGJBK01D1','TGIKX01',
-];
-
-// 답례품 필터 SQL 조건 (custom_order_item + S2_Card + S2_CardKind JOIN 후 사용)
-const DAERYEPUM_WHERE = `
-  (ck.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
-   OR c.Card_Code IN (${DAERYEPUM_CARD_CODES.map(c => "'" + c + "'").join(',')}))
-`;
+// 답례품 필터 SQL 조건 (관리자 통합현황과 동일: S2_Card.Card_Div = 'D01')
+// custom_order_item + S2_Card JOIN 후 사용. c 에일리어스 사용.
+const DAERYEPUM_WHERE = `c.Card_Div = 'D01'`;
 
 function parseBody(req) {
   return new Promise((resolve, reject) => {
@@ -140,7 +129,6 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
             FROM CUSTOM_ETC_ORDER co WITH (NOLOCK)
             INNER JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON co.order_seq = ei.order_seq
             INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
-            LEFT JOIN S2_CardKind ck WITH (NOLOCK) ON c.Card_Seq = ck.Card_Seq AND ck.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
             WHERE co.order_seq = @orderSeq
               AND ${DAERYEPUM_WHERE}
           `);
@@ -158,7 +146,6 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
             FROM custom_order co WITH (NOLOCK)
             INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
             INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-            LEFT JOIN S2_CardKind ck WITH (NOLOCK) ON c.Card_Seq = ck.Card_Seq AND ck.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
             LEFT JOIN DELIVERY_INFO di WITH (NOLOCK) ON co.order_seq = di.ORDER_SEQ
             WHERE co.order_seq = @orderSeq
               AND ${DAERYEPUM_WHERE}
@@ -527,16 +514,14 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
             ? `SELECT TOP 1 co.order_seq, co.order_name,
                  (SELECT TOP 1 c2.Card_Name FROM CUSTOM_ETC_ORDER_ITEM ei2 WITH (NOLOCK)
                   INNER JOIN S2_Card c2 WITH (NOLOCK) ON ei2.card_seq = c2.Card_Seq
-                  LEFT JOIN S2_CardKind ck2 WITH (NOLOCK) ON c2.Card_Seq = ck2.Card_Seq AND ck2.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
                   WHERE ei2.order_seq = co.order_seq
-                    AND ${DAERYEPUM_WHERE.replace(/ck\./g, 'ck2.').replace(/c\./g, 'c2.')}) AS card_name
+                    AND ${DAERYEPUM_WHERE.replace(/c\./g, 'c2.')}) AS card_name
                 FROM CUSTOM_ETC_ORDER co WITH (NOLOCK) WHERE co.order_seq = @seq`
             : `SELECT TOP 1 co.order_seq, co.order_name,
                  (SELECT TOP 1 c2.Card_Name FROM custom_order_item coi2 WITH (NOLOCK)
                   INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
-                  LEFT JOIN S2_CardKind ck2 WITH (NOLOCK) ON c2.Card_Seq = ck2.Card_Seq AND ck2.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
                   WHERE coi2.order_seq = co.order_seq
-                    AND ${DAERYEPUM_WHERE.replace(/ck\./g, 'ck2.').replace(/c\./g, 'c2.')}) AS card_name
+                    AND ${DAERYEPUM_WHERE.replace(/c\./g, 'c2.')}) AS card_name
                 FROM custom_order co WITH (NOLOCK) WHERE co.order_seq = @seq`;
           const result = await pool.request().input('seq', sql.Int, seq).query(q);
           const row = result.recordset[0];
@@ -599,14 +584,12 @@ async function searchDaeryepumOrders(pool, sql, opts) {
       co.order_total_price, co.last_total_price, co.status_seq,
       (SELECT TOP 1 c2.Card_Name FROM custom_order_item coi2 WITH (NOLOCK)
        INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
-       LEFT JOIN S2_CardKind ck2 WITH (NOLOCK) ON c2.Card_Seq = ck2.Card_Seq AND ck2.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
        WHERE coi2.order_seq = co.order_seq
-         AND ${DAERYEPUM_WHERE.replace(/ck\./g, 'ck2.').replace(/c\./g, 'c2.')}
+         AND ${DAERYEPUM_WHERE.replace(/c\./g, 'c2.')}
       ) AS card_name
     FROM custom_order co WITH (NOLOCK)
     INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
     INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-    LEFT JOIN S2_CardKind ck WITH (NOLOCK) ON c.Card_Seq = ck.Card_Seq AND ck.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
     WHERE co.status_seq >= 1
       AND co.order_date >= DATEADD(month, -6, GETDATE())
       AND ${DAERYEPUM_WHERE}
@@ -627,14 +610,12 @@ async function searchDaeryepumOrders(pool, sql, opts) {
       co.status_seq,
       (SELECT TOP 1 c2.Card_Name FROM CUSTOM_ETC_ORDER_ITEM ei2 WITH (NOLOCK)
        INNER JOIN S2_Card c2 WITH (NOLOCK) ON ei2.card_seq = c2.Card_Seq
-       LEFT JOIN S2_CardKind ck2 WITH (NOLOCK) ON c2.Card_Seq = ck2.Card_Seq AND ck2.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
        WHERE ei2.order_seq = co.order_seq
-         AND ${DAERYEPUM_WHERE.replace(/ck\./g, 'ck2.').replace(/c\./g, 'c2.')}
+         AND ${DAERYEPUM_WHERE.replace(/c\./g, 'c2.')}
       ) AS card_name
     FROM CUSTOM_ETC_ORDER co WITH (NOLOCK)
     INNER JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON co.order_seq = ei.order_seq
     INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
-    LEFT JOIN S2_CardKind ck WITH (NOLOCK) ON c.Card_Seq = ck.Card_Seq AND ck.CardKind_Seq IN (${DAERYEPUM_CARDKIND_SEQS.join(',')})
     WHERE co.status_seq >= 1
       AND co.order_date >= DATEADD(month, -6, GETDATE())
       AND ${DAERYEPUM_WHERE}
