@@ -5,118 +5,282 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>바른손더기프트 - 주문정보 입력</title>
   <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
-    body { font-family: 'Noto Sans KR', sans-serif; }
+    /* ==================================================
+       Design Tokens — 바른손더기프트 프리미엄 gift UI
+       ================================================== */
+    :root {
+      --brand-50:  #EEF2FF;
+      --brand-100: #E0E7FF;
+      --brand-500: #6366F1;  /* indigo-500 */
+      --brand-600: #4F46E5;  /* indigo-600 */
+      --brand-700: #4338CA;
+      --accent:    #F59E0B;  /* amber-500 — celebratory touch */
+      --surface:   #FFFFFF;
+      --bg:        #FAFAFC;
+      --ink-900:   #0F172A;
+      --ink-500:   #64748B;
+      --ink-300:   #CBD5E1;
+      --line:      #EEF0F4;
+    }
+
+    html, body { background: var(--bg); }
+    body {
+      font-family: 'Pretendard Variable', 'Pretendard', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      letter-spacing: -0.015em;
+      color: var(--ink-900);
+    }
+
     input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
-    .step-line { height: 2px; }
-    .fade-in { animation: fadeIn 0.25s ease-in; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-    .spinner { border: 3px solid #E5E7EB; border-top-color: #3B82F6; border-radius: 50%; width: 40px; height: 40px; animation: spin 0.7s linear infinite; }
+
+    /* ==================================================
+       Shadows (soft, multi-layered — Toss style)
+       ================================================== */
+    .shadow-soft { box-shadow: 0 1px 2px rgba(15,23,42,0.04), 0 2px 6px rgba(15,23,42,0.04); }
+    .shadow-card { box-shadow: 0 2px 8px rgba(15,23,42,0.05), 0 1px 2px rgba(15,23,42,0.04); }
+    .shadow-lifted { box-shadow: 0 10px 30px rgba(99,102,241,0.18), 0 2px 6px rgba(15,23,42,0.05); }
+
+    /* ==================================================
+       Gradients
+       ================================================== */
+    .gradient-brand { background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%); }
+    .gradient-brand-soft { background: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(139,92,246,0.08) 100%); }
+    .gradient-celebrate { background: linear-gradient(135deg, #FDE68A 0%, #F59E0B 100%); }
+    .gradient-success { background: linear-gradient(135deg, #6EE7B7 0%, #10B981 100%); }
+    .gradient-error { background: linear-gradient(135deg, #FCA5A5 0%, #EF4444 100%); }
+    .text-gradient-brand {
+      background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+
+    /* ==================================================
+       Animations
+       ================================================== */
+    .fade-in { animation: fadeSlideIn 0.35s cubic-bezier(0.16,1,0.3,1) both; }
+    @keyframes fadeSlideIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pop {
+      0% { transform: scale(0.8); opacity: 0; }
+      60% { transform: scale(1.1); opacity: 1; }
+      100% { transform: scale(1); }
+    }
+    .pop-in { animation: pop 0.5s cubic-bezier(0.34,1.56,0.64,1) both; }
+
+    /* Conic spinner */
+    .spinner {
+      width: 42px; height: 42px; border-radius: 50%;
+      background: conic-gradient(from 0deg, transparent 0%, #6366F1 100%);
+      -webkit-mask: radial-gradient(circle, transparent 55%, black 56%);
+              mask: radial-gradient(circle, transparent 55%, black 56%);
+      animation: spin 0.9s linear infinite;
+    }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .card-select { transition: all 0.15s ease; }
-    .card-select:hover { border-color: #93C5FD; }
-    .card-select.selected { border-color: #3B82F6; background-color: #EFF6FF; box-shadow: 0 0 0 2px #3B82F6; }
+
+    /* ==================================================
+       Pressable / interactive
+       ================================================== */
+    .pressable { transition: transform 0.12s cubic-bezier(0.16,1,0.3,1); }
+    .pressable:active { transform: scale(0.97); }
+
+    /* ==================================================
+       Card selection (출고방식 / 현금영수증 등)
+       ================================================== */
+    .card-select {
+      transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
+      border-radius: 16px;
+    }
+    .card-select:hover {
+      border-color: #C7D2FE;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(99,102,241,0.1);
+    }
+    .card-select.selected {
+      border-color: #6366F1;
+      background: linear-gradient(135deg, rgba(99,102,241,0.06) 0%, rgba(139,92,246,0.06) 100%);
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.15), 0 8px 20px rgba(99,102,241,0.15);
+    }
     .card-select.disabled { opacity: 0.45; pointer-events: none; }
+
+    /* ==================================================
+       Buttons
+       ================================================== */
+    .btn-primary {
+      background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%);
+      color: white; font-weight: 600;
+      box-shadow: 0 4px 14px rgba(99,102,241,0.35);
+      transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
+    }
+    .btn-primary:hover:not(:disabled) {
+      box-shadow: 0 8px 20px rgba(99,102,241,0.45);
+      transform: translateY(-1px);
+    }
+    .btn-primary:active:not(:disabled) { transform: translateY(0) scale(0.98); }
+    .btn-primary:disabled {
+      background: #E2E8F0; color: #94A3B8; box-shadow: none; cursor: not-allowed;
+    }
+    .btn-submit {
+      background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+      color: white; font-weight: 600;
+      box-shadow: 0 4px 14px rgba(16,185,129,0.35);
+      transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
+    }
+    .btn-submit:hover:not(:disabled) {
+      box-shadow: 0 8px 20px rgba(16,185,129,0.45);
+      transform: translateY(-1px);
+    }
+    .btn-submit:active:not(:disabled) { transform: translateY(0) scale(0.98); }
+    .btn-submit:disabled {
+      background: #E2E8F0; color: #94A3B8; box-shadow: none; cursor: not-allowed;
+    }
+    .btn-ghost {
+      background: white; color: #475569; font-weight: 500;
+      border: 1px solid #E2E8F0;
+      transition: all 0.15s ease;
+    }
+    .btn-ghost:hover { background: #F8FAFC; border-color: #CBD5E1; }
+
+    /* ==================================================
+       Step progress — modern gauge bar
+       ================================================== */
+    .step-track {
+      position: relative; height: 6px; background: #EEF0F4;
+      border-radius: 999px; overflow: hidden;
+    }
+    .step-fill {
+      position: absolute; inset: 0 auto 0 0;
+      background: linear-gradient(90deg, #6366F1 0%, #8B5CF6 100%);
+      border-radius: 999px;
+      transition: width 0.5s cubic-bezier(0.16,1,0.3,1);
+    }
+
+    /* ==================================================
+       Surface helper (cards)
+       ================================================== */
+    .surface {
+      background: var(--surface);
+      border-radius: 20px;
+      box-shadow: 0 2px 8px rgba(15,23,42,0.04), 0 1px 2px rgba(15,23,42,0.03);
+    }
+    .surface-flat {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+    }
+
+    /* ==================================================
+       Inputs — softer modern look
+       ================================================== */
+    .input-mod {
+      background: white; border: 1.5px solid #E2E8F0;
+      border-radius: 12px; padding: 12px 14px;
+      font-size: 14px; transition: all 0.15s ease;
+      width: 100%;
+    }
+    .input-mod:focus {
+      outline: none; border-color: #6366F1;
+      box-shadow: 0 0 0 4px rgba(99,102,241,0.12);
+    }
+
+    /* Legacy step line (for backward compat) */
+    .step-line { height: 2px; }
   </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
+<body class="min-h-screen">
 
 <!-- Order Search Screen (oid 없을 때) -->
-<div id="searchScreen" class="hidden min-h-screen bg-gray-50 pb-8">
+<div id="searchScreen" class="hidden min-h-screen pb-8">
   <div class="max-w-lg mx-auto">
     <!-- Header -->
-    <header class="bg-white border-b border-gray-200 sticky top-0 z-30">
-      <div class="flex items-center gap-3 px-4 py-3">
-        <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
-          <span class="text-white font-bold text-xs">G</span>
+    <header class="bg-white/80 backdrop-blur-md border-b border-[var(--line)] sticky top-0 z-30">
+      <div class="flex items-center gap-3 px-5 py-4">
+        <div class="w-10 h-10 gradient-brand rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lifted">
+          <span class="text-white font-bold text-base">🎁</span>
         </div>
         <div>
-          <h1 class="text-sm font-semibold text-gray-900 leading-tight">바른손더기프트</h1>
-          <p class="text-xs text-gray-400">주문정보 입력</p>
+          <h1 class="text-base font-bold text-slate-900 leading-tight">바른손더기프트</h1>
+          <p class="text-[11px] text-slate-400 font-medium tracking-wide">PREMIUM GIFT SERVICE</p>
         </div>
       </div>
     </header>
 
-    <div class="px-4 pt-6">
-      <h2 class="text-lg font-bold text-gray-900 mb-1">주문 내역 조회</h2>
-      <p class="text-sm text-gray-500 mb-4">로그인하시면 주문 내역을 확인할 수 있습니다.</p>
+    <div class="px-5 pt-8">
+      <h2 class="text-2xl font-bold text-slate-900 mb-1.5 tracking-tight">주문 내역 조회</h2>
+      <p class="text-sm text-slate-500 mb-6">로그인하시면 주문 내역을 확인할 수 있어요 ✨</p>
 
       <!-- 탭 -->
-      <div class="flex border-b border-gray-200 mb-4">
-        <button id="tabLogin" onclick="switchSearchTab('login')" class="flex-1 py-2.5 text-sm font-semibold text-blue-600 border-b-2 border-blue-500">바른손카드 로그인</button>
-        <button id="tabSearch" onclick="switchSearchTab('search')" class="flex-1 py-2.5 text-sm font-medium text-gray-400 border-b-2 border-transparent">전화번호/이름 검색</button>
+      <div class="flex gap-1 p-1 bg-slate-100 rounded-2xl mb-5">
+        <button id="tabLogin" onclick="switchSearchTab('login')" class="pressable flex-1 py-2.5 text-[13px] font-semibold text-white bg-white rounded-xl shadow-soft transition-all" style="color: var(--brand-600)">바른손카드 로그인</button>
+        <button id="tabSearch" onclick="switchSearchTab('search')" class="pressable flex-1 py-2.5 text-[13px] font-medium text-slate-500 rounded-xl transition-all">전화번호/이름 검색</button>
       </div>
 
       <!-- 로그인 폼 -->
-      <div id="loginForm" class="bg-white rounded-xl border border-gray-200 p-4 mb-4 shadow-sm">
-        <p class="text-xs text-gray-400 mb-3">바른손카드 통합 회원 계정으로 로그인합니다.</p>
+      <div id="loginForm" class="surface p-5 mb-4">
+        <p class="text-[12px] text-slate-400 mb-4 leading-relaxed">바른손카드 통합 회원 계정으로 로그인합니다.</p>
         <div class="space-y-3">
           <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">아이디</label>
-            <input type="text" id="loginUid" placeholder="바른손카드 아이디" autocomplete="username"
-              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+            <label class="block text-[12px] font-semibold text-slate-700 mb-1.5">아이디</label>
+            <input type="text" id="loginUid" placeholder="바른손카드 아이디" autocomplete="username" class="input-mod">
           </div>
           <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">비밀번호</label>
-            <input type="password" id="loginPwd" placeholder="비밀번호" autocomplete="current-password"
-              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+            <label class="block text-[12px] font-semibold text-slate-700 mb-1.5">비밀번호</label>
+            <input type="password" id="loginPwd" placeholder="비밀번호" autocomplete="current-password" class="input-mod">
           </div>
         </div>
-        <div id="loginError" class="hidden mt-3 text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2"></div>
-        <button id="loginBtn" onclick="loginBarunson()"
-          class="w-full mt-4 py-2.5 bg-blue-500 text-white text-sm font-semibold rounded-lg hover:bg-blue-600 transition disabled:opacity-50 disabled:cursor-not-allowed">
+        <div id="loginError" class="hidden mt-3 text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2.5"></div>
+        <button id="loginBtn" onclick="loginBarunson()" class="btn-primary w-full mt-5 py-3.5 rounded-2xl text-sm">
           로그인
         </button>
       </div>
 
       <!-- 검색 폼 (숨김 상태) -->
-      <div id="searchForm" class="hidden bg-white rounded-xl border border-gray-200 p-4 mb-4 shadow-sm">
-        <p class="text-xs text-gray-400 mb-3">주문 시 입력한 이름과 전화번호를 모두 입력해주세요.</p>
+      <div id="searchForm" class="hidden surface p-5 mb-4">
+        <p class="text-[12px] text-slate-400 mb-4 leading-relaxed">주문 시 입력한 이름과 전화번호를 모두 입력해주세요.</p>
         <div class="space-y-3">
           <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">주문자명 <span class="text-red-400">*</span></label>
-            <input type="text" id="searchName" placeholder="홍길동"
-              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+            <label class="block text-[12px] font-semibold text-slate-700 mb-1.5">주문자명 <span class="text-rose-500">*</span></label>
+            <input type="text" id="searchName" placeholder="홍길동" class="input-mod">
           </div>
           <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">휴대폰번호 <span class="text-red-400">*</span></label>
-            <input type="tel" id="searchPhone" inputmode="numeric" placeholder="01012345678"
-              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            <label class="block text-[12px] font-semibold text-slate-700 mb-1.5">휴대폰번호 <span class="text-rose-500">*</span></label>
+            <input type="tel" id="searchPhone" inputmode="numeric" placeholder="01012345678" class="input-mod"
               oninput="this.value=this.value.replace(/\D/g,'')">
           </div>
         </div>
-        <button id="searchBtn" onclick="searchOrders()"
-          class="w-full mt-4 py-2.5 bg-blue-500 text-white text-sm font-semibold rounded-lg hover:bg-blue-600 transition disabled:opacity-50 disabled:cursor-not-allowed">
+        <button id="searchBtn" onclick="searchOrders()" class="btn-primary w-full mt-5 py-3.5 rounded-2xl text-sm">
           주문 조회
         </button>
       </div>
 
       <!-- 검색 결과 -->
-      <div id="searchLoading" class="hidden text-center py-8">
+      <div id="searchLoading" class="hidden text-center py-10">
         <div class="spinner mx-auto mb-3"></div>
-        <p class="text-sm text-gray-500">검색 중...</p>
+        <p class="text-sm text-slate-500">검색 중...</p>
       </div>
 
       <div id="searchResults" class="hidden space-y-2">
-        <h3 class="text-sm font-semibold text-gray-700 mb-2" id="searchResultCount"></h3>
+        <h3 class="text-sm font-bold text-slate-700 mb-3" id="searchResultCount"></h3>
         <div id="searchResultList"></div>
       </div>
 
       <div id="searchEmpty" class="hidden">
-        <div class="bg-white rounded-2xl border border-gray-200 p-8 text-center shadow-sm mt-4">
-          <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-2.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
+        <div class="surface p-8 text-center mt-4">
+          <div class="w-20 h-20 gradient-brand-soft rounded-full flex items-center justify-center mx-auto mb-5 pop-in">
+            <span class="text-4xl">🔍</span>
           </div>
-          <h3 class="text-lg font-bold text-gray-900 mb-2">주문하신 상품이 없습니다.</h3>
-          <p class="text-sm text-gray-500 mb-1">입력하신 정보로 조회된 답례품/꽃다발 주문이 없습니다.</p>
-          <p class="text-xs text-gray-400 mb-6">주문자명과 전화번호를 다시 확인해주세요.</p>
-          <button onclick="goBackToSearch()" class="w-full py-2.5 bg-blue-500 text-white text-sm font-semibold rounded-lg hover:bg-blue-600 transition">
+          <h3 class="text-lg font-bold text-slate-900 mb-2">주문하신 상품이 없습니다</h3>
+          <p class="text-sm text-slate-500 mb-1">입력하신 정보로 조회된 주문이 없어요.</p>
+          <p class="text-[12px] text-slate-400 mb-6">주문자명과 전화번호를 다시 확인해주세요.</p>
+          <button onclick="goBackToSearch()" class="btn-primary w-full py-3.5 rounded-2xl text-sm">
             되돌아가기
           </button>
-          <div class="mt-4 text-xs text-gray-400">
-            <p>전화: <a href="tel:1644-0708" class="text-blue-500">1644-0708</a></p>
-            <p>카카오 상담: <a href="https://open.kakao.com/o/stUy4gji" target="_blank" class="text-blue-500">오픈채팅 문의</a></p>
+          <div class="mt-5 text-xs text-slate-400 space-y-0.5">
+            <p>전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>
+            <p>카카오 <a href="https://open.kakao.com/o/stUy4gji" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
           </div>
         </div>
       </div>
@@ -128,56 +292,56 @@
 <div id="loadingScreen" class="flex items-center justify-center min-h-screen">
   <div class="text-center">
     <div class="spinner mx-auto mb-4"></div>
-    <p class="text-gray-500 text-sm">주문 정보를 불러오는 중...</p>
+    <p class="text-slate-500 text-sm">주문 정보를 불러오는 중...</p>
   </div>
 </div>
 
 <!-- Error Screen -->
-<div id="errorScreen" class="hidden flex items-center justify-center min-h-screen px-4">
-  <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 max-w-sm w-full text-center">
-    <div class="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-      <svg class="w-7 h-7 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+<div id="errorScreen" class="hidden flex items-center justify-center min-h-screen px-5">
+  <div class="surface p-8 max-w-sm w-full text-center">
+    <div class="w-16 h-16 gradient-error rounded-full flex items-center justify-center mx-auto mb-5 pop-in shadow-lifted" style="box-shadow:0 10px 30px rgba(239,68,68,0.25)">
+      <span class="text-3xl">⚠️</span>
     </div>
-    <h2 class="text-lg font-semibold text-gray-900 mb-2">오류가 발생했습니다</h2>
-    <p id="errorMessage" class="text-sm text-gray-500 mb-6"></p>
-    <div class="bg-gray-50 rounded-lg p-3 text-sm text-gray-600">
-      <p class="font-medium mb-1">고객센터 문의</p>
-      <p>전화: <a href="tel:1644-0708" class="font-medium text-blue-600">1644-0708</a></p>
-      <p>카카오 상담: <a href="https://open.kakao.com/o/stUy4gji" target="_blank" class="font-medium text-blue-600">오픈채팅 문의</a></p>
+    <h2 class="text-xl font-bold text-slate-900 mb-2 tracking-tight">오류가 발생했습니다</h2>
+    <p id="errorMessage" class="text-sm text-slate-500 mb-6 leading-relaxed"></p>
+    <div class="bg-slate-50 rounded-2xl p-4 text-sm text-slate-600">
+      <p class="font-semibold mb-2 text-slate-700">고객센터 문의</p>
+      <p class="text-xs">전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>
+      <p class="text-xs">카카오 <a href="https://open.kakao.com/o/stUy4gji" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
     </div>
   </div>
 </div>
 
 <!-- Already Completed Screen -->
-<div id="completedScreen" class="hidden flex items-center justify-center min-h-screen px-4">
-  <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 max-w-sm w-full text-center">
-    <div class="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-      <svg class="w-7 h-7 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+<div id="completedScreen" class="hidden flex items-center justify-center min-h-screen px-5">
+  <div class="surface p-8 max-w-sm w-full text-center">
+    <div class="w-16 h-16 gradient-success rounded-full flex items-center justify-center mx-auto mb-5 pop-in" style="box-shadow:0 10px 30px rgba(16,185,129,0.25)">
+      <span class="text-3xl">✓</span>
     </div>
-    <h2 class="text-lg font-semibold text-gray-900 mb-2">이미 입력이 완료되었습니다</h2>
-    <p class="text-sm text-gray-500 mb-4">해당 주문의 정보 입력이 이미 완료되었습니다.<br>수정이 필요하시면 고객센터로 연락해주세요.</p>
-    <div class="bg-gray-50 rounded-lg p-3 text-sm text-gray-600">
-      <p class="font-medium mb-1">고객센터 문의</p>
-      <p>전화: <a href="tel:1644-0708" class="font-medium text-blue-600">1644-0708</a></p>
-      <p>카카오 상담: <a href="https://open.kakao.com/o/stUy4gji" target="_blank" class="font-medium text-blue-600">오픈채팅 문의</a></p>
+    <h2 class="text-xl font-bold text-slate-900 mb-2 tracking-tight">입력이 완료됐어요</h2>
+    <p class="text-sm text-slate-500 mb-6 leading-relaxed">해당 주문의 정보 입력이 이미 완료됐습니다.<br>수정이 필요하시면 고객센터로 연락해주세요.</p>
+    <div class="bg-slate-50 rounded-2xl p-4 text-sm text-slate-600">
+      <p class="font-semibold mb-2 text-slate-700">고객센터 문의</p>
+      <p class="text-xs">전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>
+      <p class="text-xs">카카오 <a href="https://open.kakao.com/o/stUy4gji" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
     </div>
   </div>
 </div>
 
 <!-- Success Screen -->
-<div id="successScreen" class="hidden flex items-center justify-center min-h-screen px-4">
-  <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 max-w-sm w-full text-center">
-    <div class="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-      <svg class="w-7 h-7 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+<div id="successScreen" class="hidden flex items-center justify-center min-h-screen px-5">
+  <div class="surface p-8 max-w-sm w-full text-center">
+    <div class="w-20 h-20 gradient-brand rounded-full flex items-center justify-center mx-auto mb-5 pop-in shadow-lifted">
+      <span class="text-4xl">🎉</span>
     </div>
-    <h2 class="text-lg font-semibold text-gray-900 mb-2">입력이 완료되었습니다!</h2>
-    <p class="text-sm text-gray-500 mb-4">주문 정보가 정상적으로 접수되었습니다.</p>
-    <div class="bg-blue-50 rounded-lg p-4 text-sm text-blue-700 mb-4">
-      <p class="font-medium">주문번호</p>
-      <p id="successOrderNumber" class="text-lg font-bold mt-1"></p>
+    <h2 class="text-xl font-bold text-slate-900 mb-2 tracking-tight">제출이 완료됐어요!</h2>
+    <p class="text-sm text-slate-500 mb-5 leading-relaxed">주문 정보가 정상적으로 접수됐습니다.</p>
+    <div class="gradient-brand-soft rounded-2xl p-5 text-sm mb-5">
+      <p class="text-[12px] font-semibold" style="color: var(--brand-600)">주문번호</p>
+      <p id="successOrderNumber" class="text-xl font-bold text-gradient-brand mt-1"></p>
     </div>
-    <p class="text-sm text-gray-500 mb-1">기타 문의가 있을 시 고객센터로 문의해주세요.</p>
-    <p class="text-sm font-semibold text-gray-700">고객센터 : 1688-0708</p>
+    <p class="text-sm text-slate-500 mb-1">기타 문의가 있을 시 고객센터로 문의해주세요.</p>
+    <p class="text-sm font-bold text-slate-700">고객센터 1688-0708</p>
   </div>
 </div>
 
@@ -185,33 +349,41 @@
 <div id="mainApp" class="hidden max-w-lg mx-auto pb-32">
 
   <!-- Header -->
-  <header class="bg-white border-b border-gray-200 sticky top-0 z-30">
-    <div class="flex items-center gap-3 px-4 py-3">
-      <div class="w-9 h-9 bg-blue-500 rounded-xl flex items-center justify-center flex-shrink-0">
-        <span class="text-white font-bold text-lg">G</span>
+  <header class="bg-white/80 backdrop-blur-md border-b border-[var(--line)] sticky top-0 z-30">
+    <div class="flex items-center gap-3 px-5 py-3.5">
+      <div class="w-10 h-10 gradient-brand rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lifted">
+        <span class="text-white font-bold text-base">🎁</span>
       </div>
-      <div>
-        <h1 class="text-sm font-semibold text-gray-900 leading-tight">바른손더기프트</h1>
-        <p class="text-xs text-gray-400" id="headerOrderNumber"></p>
+      <div class="flex-1 min-w-0">
+        <h1 class="text-[15px] font-bold text-slate-900 leading-tight">바른손더기프트</h1>
+        <p class="text-[11px] text-slate-400 font-medium truncate" id="headerOrderNumber"></p>
       </div>
     </div>
 
-    <!-- Step Indicator -->
-    <div class="px-4 pb-3">
-      <div class="flex items-center justify-between" id="stepIndicator"></div>
+    <!-- Step Indicator (gauge bar + label) -->
+    <div class="px-5 pb-4">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-[11px] font-semibold tracking-wide text-slate-400" id="stepCounter"></span>
+        <span class="text-[13px] font-bold text-gradient-brand" id="stepCurrentLabel"></span>
+      </div>
+      <div class="step-track">
+        <div class="step-fill" id="stepFill" style="width:0%"></div>
+      </div>
+      <!-- 전체 단계 라벨 (마이크로) -->
+      <div class="flex items-center justify-between mt-2 text-[10px] font-medium" id="stepIndicator"></div>
     </div>
   </header>
 
   <!-- Step Content Area -->
-  <main class="px-4 pt-4" id="stepContent"></main>
+  <main class="px-5 pt-5" id="stepContent"></main>
 
   <!-- Navigation Buttons -->
-  <div class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 z-30">
+  <div class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t border-[var(--line)] p-4 z-30">
     <div class="max-w-lg mx-auto flex gap-3">
-      <button id="btnBack" class="hidden flex-1 py-3.5 rounded-xl border border-gray-300 text-gray-700 font-medium text-sm hover:bg-gray-50 transition-colors">
+      <button id="btnBack" class="hidden pressable flex-1 py-3.5 rounded-2xl btn-ghost text-sm">
         이전
       </button>
-      <button id="btnNext" class="flex-1 py-3.5 rounded-xl bg-blue-500 text-white font-medium text-sm hover:bg-blue-600 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed" disabled>
+      <button id="btnNext" class="pressable flex-1 py-3.5 rounded-2xl btn-primary text-sm" disabled>
         다음
       </button>
     </div>
@@ -559,39 +731,27 @@
   // Step indicator
   // ============================================
   function renderStepIndicator() {
+    // 게이지 바 + 카운터 + 현재 라벨 + 마이크로 단계 라벨
+    const total = STEP_LABELS.length;
+    const pct = Math.round(((currentStep + 1) / total) * 100);
+    const fill = document.getElementById('stepFill');
+    const counter = document.getElementById('stepCounter');
+    const currentLabel = document.getElementById('stepCurrentLabel');
+    if (fill) fill.style.width = pct + '%';
+    if (counter) counter.textContent = `STEP ${currentStep + 1} / ${total}`;
+    if (currentLabel) currentLabel.textContent = STEP_LABELS[currentStep] || '';
+
+    // 마이크로 라벨 (활성 단계만 강조)
     $stepIndicator.innerHTML = '';
     STEP_LABELS.forEach((label, i) => {
-      // Circle
-      const isActive = i === currentStep;
+      const span = document.createElement('span');
       const isDone = i < currentStep;
-      const circle = document.createElement('div');
-      circle.className = 'flex flex-col items-center flex-shrink-0 relative z-10';
-      const dot = document.createElement('div');
-      dot.className = 'w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold transition-colors ';
-      if (isDone) {
-        dot.className += 'bg-blue-500 text-white';
-        dot.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>';
-      } else if (isActive) {
-        dot.className += 'bg-blue-500 text-white';
-        dot.textContent = i + 1;
-      } else {
-        dot.className += 'bg-gray-200 text-gray-400';
-        dot.textContent = i + 1;
-      }
-      const labelEl = document.createElement('span');
-      labelEl.className = 'text-[10px] mt-1 whitespace-nowrap ' + (isActive ? 'text-blue-600 font-medium' : 'text-gray-400');
-      labelEl.textContent = label;
-      circle.appendChild(dot);
-      circle.appendChild(labelEl);
-      $stepIndicator.appendChild(circle);
-
-      // Line
-      if (i < STEP_LABELS.length - 1) {
-        const line = document.createElement('div');
-        line.className = 'step-line flex-1 mx-1 mt-1 self-start ' + (i < currentStep ? 'bg-blue-500' : 'bg-gray-200');
-        line.style.marginTop = '13px';
-        $stepIndicator.appendChild(line);
-      }
+      const isActive = i === currentStep;
+      span.className = 'transition-colors ' +
+        (isActive ? 'text-slate-700 font-semibold' :
+         isDone ? 'text-slate-400' : 'text-slate-300');
+      span.textContent = label;
+      $stepIndicator.appendChild(span);
     });
   }
 
@@ -643,14 +803,14 @@
   function updateNavButtons() {
     $btnBack.classList.toggle('hidden', currentStep === 0);
     const isLast = currentStep === STEP_LABELS.length - 1;
-    $btnNext.textContent = isLast ? '제출하기' : '다음';
+    $btnNext.textContent = isLast ? '제출하기 🎉' : '다음';
     $btnNext.disabled = !isStepValid(currentStep);
     if (isLast) {
-      $btnNext.classList.remove('bg-blue-500', 'hover:bg-blue-600', 'disabled:bg-gray-300');
-      $btnNext.classList.add('bg-green-500', 'hover:bg-green-600', 'disabled:bg-gray-300');
+      $btnNext.classList.remove('btn-primary');
+      $btnNext.classList.add('btn-submit');
     } else {
-      $btnNext.classList.remove('bg-green-500', 'hover:bg-green-600');
-      $btnNext.classList.add('bg-blue-500', 'hover:bg-blue-600', 'disabled:bg-gray-300');
+      $btnNext.classList.remove('btn-submit');
+      $btnNext.classList.add('btn-primary');
     }
   }
 
@@ -666,46 +826,45 @@
 
     return `
       <div class="fade-in">
-        <h2 class="text-lg font-semibold text-gray-900 mb-1">출고 방식을 선택해주세요</h2>
-        <p class="text-sm text-gray-500 mb-5">주문하신 상품의 출고 방식을 선택합니다.</p>
+        <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">출고 방식을 선택해주세요</h2>
+        <p class="text-sm text-slate-500 mb-6">주문하신 상품의 출고 방식을 선택합니다.</p>
 
         <div class="space-y-3">
-          <div class="card-select cursor-pointer rounded-xl border-2 p-4 bg-white ${isNormal ? 'selected' : 'border-gray-200'}" data-action="selectShipping" data-value="normal">
-            <div class="flex items-start gap-3">
-              <div class="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0 mt-0.5">
-                <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+          <div class="card-select cursor-pointer border-2 p-5 bg-white ${isNormal ? 'selected' : 'border-slate-200'}" data-action="selectShipping" data-value="normal">
+            <div class="flex items-start gap-4">
+              <div class="w-12 h-12 rounded-2xl gradient-brand-soft flex items-center justify-center flex-shrink-0 mt-0.5">
+                <span class="text-2xl">📦</span>
               </div>
               <div class="flex-1">
                 <div class="flex items-center justify-between">
-                  <h3 class="font-semibold text-gray-900">일반출고</h3>
-                  <span class="text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">무료</span>
+                  <h3 class="font-bold text-slate-900 text-[15px]">일반출고</h3>
+                  <span class="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">무료</span>
                 </div>
-                <p class="text-sm text-gray-500 mt-1">일반 제작 일정에 따라 출고됩니다.</p>
+                <p class="text-[13px] text-slate-500 mt-1 leading-relaxed">일반 제작 일정에 따라 출고됩니다.</p>
               </div>
             </div>
           </div>
 
-          <div class="card-select ${!expressAvail ? 'disabled' : 'cursor-pointer'} rounded-xl border-2 p-4 bg-white ${isExpress ? 'selected' : 'border-gray-200'}" data-action="${expressAvail ? 'selectShipping' : ''}" data-value="express">
-            <div class="flex items-start gap-3">
-              <div class="w-10 h-10 rounded-lg ${expressAvail ? 'bg-orange-50' : 'bg-gray-100'} flex items-center justify-center flex-shrink-0 mt-0.5">
-                <svg class="w-5 h-5 ${expressAvail ? 'text-orange-500' : 'text-gray-400'}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          <div class="card-select ${!expressAvail ? 'disabled' : 'cursor-pointer'} border-2 p-5 bg-white ${isExpress ? 'selected' : 'border-slate-200'}" data-action="${expressAvail ? 'selectShipping' : ''}" data-value="express">
+            <div class="flex items-start gap-4">
+              <div class="w-12 h-12 rounded-2xl ${expressAvail ? 'gradient-celebrate' : 'bg-slate-100'} flex items-center justify-center flex-shrink-0 mt-0.5">
+                <span class="text-2xl">${expressAvail ? '⚡' : '⏸️'}</span>
               </div>
               <div class="flex-1">
                 <div class="flex items-center justify-between">
-                  <h3 class="font-semibold ${expressAvail ? 'text-gray-900' : 'text-gray-400'}">빠른출고</h3>
+                  <h3 class="font-bold ${expressAvail ? 'text-slate-900' : 'text-slate-400'} text-[15px]">빠른출고</h3>
                   ${expressFee > 0
-                    ? '<span class="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">+' + formatMoney(expressFee) + '</span>'
-                    : '<span class="text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">무료</span>'}
+                    ? '<span class="text-[11px] font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full">+' + formatMoney(expressFee) + '</span>'
+                    : expressAvail ? '<span class="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">무료</span>' : ''}
                 </div>
-                <p class="text-sm ${expressAvail ? 'text-gray-500' : 'text-gray-400'} mt-1">
+                <p class="text-[13px] ${expressAvail ? 'text-slate-500' : 'text-slate-400'} mt-1 leading-relaxed">
                   ${expressAvail ? '빠른 일정으로 우선 제작 후 출고됩니다.' : '이 상품은 빠른출고가 불가합니다.'}
                 </p>
                 ${expressAvail && expressFee > 0 ? `
-                  <div class="mt-2 p-2 bg-orange-50 rounded-lg">
-                    <p class="text-xs text-orange-700">
-                      💰 빠른출고 추가 비용: <span class="font-bold">${formatMoney(expressFee)}</span>
+                  <div class="mt-3 px-3 py-2.5 rounded-xl gradient-celebrate bg-opacity-20" style="background:linear-gradient(135deg,rgba(253,230,138,0.5),rgba(245,158,11,0.15))">
+                    <p class="text-[12px] text-amber-900">
+                      💰 빠른출고 추가비용 <span class="font-bold">${formatMoney(expressFee)}</span>
                     </p>
-                    <p class="text-[10px] text-orange-500 mt-0.5">추가금액이 발생합니다.</p>
                   </div>
                 ` : ''}
               </div>
@@ -1656,12 +1815,14 @@
     const isLogin = tab === 'login';
     document.getElementById('loginForm').classList.toggle('hidden', !isLogin);
     document.getElementById('searchForm').classList.toggle('hidden', isLogin);
-    document.getElementById('tabLogin').className = isLogin
-      ? 'flex-1 py-2.5 text-sm font-semibold text-blue-600 border-b-2 border-blue-500'
-      : 'flex-1 py-2.5 text-sm font-medium text-gray-400 border-b-2 border-transparent';
-    document.getElementById('tabSearch').className = !isLogin
-      ? 'flex-1 py-2.5 text-sm font-semibold text-blue-600 border-b-2 border-blue-500'
-      : 'flex-1 py-2.5 text-sm font-medium text-gray-400 border-b-2 border-transparent';
+    const activeCls = 'pressable flex-1 py-2.5 text-[13px] font-semibold bg-white rounded-xl shadow-soft transition-all';
+    const inactiveCls = 'pressable flex-1 py-2.5 text-[13px] font-medium text-slate-500 rounded-xl transition-all';
+    const tabLoginEl = document.getElementById('tabLogin');
+    const tabSearchEl = document.getElementById('tabSearch');
+    tabLoginEl.className = isLogin ? activeCls : inactiveCls;
+    tabSearchEl.className = !isLogin ? activeCls : inactiveCls;
+    tabLoginEl.style.color = isLogin ? 'var(--brand-600)' : '';
+    tabSearchEl.style.color = !isLogin ? 'var(--brand-600)' : '';
     // 결과 초기화
     document.getElementById('searchResults').classList.add('hidden');
     document.getElementById('searchEmpty').classList.add('hidden');
@@ -1740,19 +1901,20 @@
       const isCancelled = o.status_seq === 3 || o.status_seq === 5;
       const isDone = o.info_status === 'completed';
       const statusBadge = isCancelled
-        ? '<span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-600">취소</span>'
+        ? '<span class="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-600">취소</span>'
         : isDone
-          ? '<span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-600">입력완료</span>'
-          : '<span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">입력대기</span>';
+          ? '<span class="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700">✓ 입력완료</span>'
+          : '<span class="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700">⏳ 입력대기</span>';
 
       return '<button onclick="selectOrder(\'' + o.order_id + '\')" ' + (isCancelled ? 'disabled' : '') +
-        ' class="w-full text-left bg-white rounded-xl border border-gray-200 p-4 hover:border-blue-300 transition shadow-sm ' + (isCancelled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer') + '">' +
-        '<div class="flex items-center justify-between mb-1.5">' +
-          '<span class="text-sm font-semibold text-gray-900">' + o.order_number + '</span>' + statusBadge +
+        ' class="pressable w-full text-left surface p-4 mb-2 transition-all ' +
+        (isCancelled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:-translate-y-0.5 hover:shadow-lifted') + '">' +
+        '<div class="flex items-center justify-between mb-2">' +
+          '<span class="text-[13px] font-bold text-slate-900">' + o.order_number + '</span>' + statusBadge +
         '</div>' +
-        '<div class="text-xs text-gray-500 space-y-0.5">' +
-          '<div class="flex justify-between"><span>' + (o.customer_name || '') + (o.phone_last4 ? ' (' + o.phone_last4 + ')' : '') + '</span><span>' + dateStr + '</span></div>' +
-          '<div class="flex justify-between"><span class="text-gray-400">' + (o.product_name || '') + '</span><span class="font-medium text-gray-700">' + amount + '원</span></div>' +
+        '<div class="text-[12px] text-slate-500 space-y-1">' +
+          '<div class="flex justify-between items-center"><span class="font-medium text-slate-700">' + (o.customer_name || '') + (o.phone_last4 ? ' <span class="text-slate-400">(' + o.phone_last4 + ')</span>' : '') + '</span><span class="text-slate-400">' + dateStr + '</span></div>' +
+          '<div class="flex justify-between items-center"><span class="text-slate-500 truncate mr-2">' + (o.product_name || '') + '</span><span class="font-bold text-slate-800">' + amount + '원</span></div>' +
         '</div></button>';
     }).join('');
     document.getElementById('searchResults').classList.remove('hidden');
