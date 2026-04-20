@@ -781,7 +781,7 @@ nav a:hover{color:var(--gray-900)}
       <tbody id="bg-sticker-tbody"></tbody>
     </table>
     <div id="bg-sticker-empty" class="hidden" style="text-align:center;padding:40px;color:var(--gray-500)">
-      등록된 스티커가 없습니다. <a href="#" onclick="openBgStickerForm();return false" style="color:var(--primary)">새 스티커 생성</a>
+      등록된 스티커가 없습니다. <a href="javascript:void(0)" onclick="openBgStickerForm();return false" style="color:var(--primary);cursor:pointer">새 스티커 생성</a>
     </div>
   </div>
 </div>
@@ -1413,9 +1413,14 @@ function loadUserInfo() {
     return r.json();
   }).then(user => {
     if (!user) return;
-    const pic = user.picture ? `<img src="${user.picture}" alt="">` : '';
+    // XSS 방어: OAuth provider가 변조됐을 수 있으므로 escape 후 삽입
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    // picture URL은 https 스킴만 허용 (javascript:, data: 차단)
+    const safePicUrl = user.picture && /^https:\/\//.test(user.picture) ? user.picture : '';
+    const pic = safePicUrl ? `<img src="${esc(safePicUrl)}" alt="">` : '';
+    const name = esc(user.name || user.email || '');
     document.getElementById('user-area').innerHTML =
-      `${pic}<span>${user.name || user.email}</span><button onclick="logout()">로그아웃</button>`;
+      `${pic}<span>${name}</span><button onclick="logout()">로그아웃</button>`;
   }).catch(() => {
     document.getElementById('user-area').innerHTML =
       '<span style="color:var(--gray-500);font-size:11px">개발 모드</span>';
@@ -1515,7 +1520,7 @@ async function loadOrders() {
       r.order_type_label = r.order_type === 'ETC' ? '부가상품' : '청첩장+답례품';
       r.status_label = (r.order_type === 'CARD' ? STATUS_MAP_CARD : STATUS_MAP)[r.status_seq] || `상태${r.status_seq ?? '?'}`;
       r.file_count_fmt = r.file_count > 0
-        ? `<a href="#" onclick="showOrderFiles(${r.order_seq});return false" style="color:var(--primary);text-decoration:underline">📎 ${r.file_count}건</a>`
+        ? `<a href="javascript:void(0)" onclick="showOrderFiles(${r.order_seq});return false" style="color:var(--primary);text-decoration:underline;cursor:pointer">📎 ${r.file_count}건</a>`
         : '';
       const rawLead = r.wedding_date && r.order_date ? Math.round((new Date(r.wedding_date) - new Date(r.order_date)) / 86400000) : null;
       r.lead_days_raw = rawLead;
@@ -3962,8 +3967,13 @@ function renderBgStickers() {
     return;
   }
   empty.classList.add('hidden');
-  tbody.innerHTML = bgStickers.map(s => `<tr>
-    <td><div style="width:28px;height:36px;border-radius:4px;border:1px solid var(--gray-200);background:${s.preview_image_url ? 'url(' + s.preview_image_url + ') center/cover' : s.preview_color || '#fff'}"></div></td>
+  tbody.innerHTML = bgStickers.map(s => {
+    // 미리보기: 이미지가 있으면 lazy loading <img>, 없으면 preview_color 박스
+    const thumb = s.preview_image_url
+      ? `<img src="${s.preview_image_url}" loading="lazy" alt="" style="width:28px;height:36px;border-radius:4px;border:1px solid var(--gray-200);object-fit:cover;display:block">`
+      : `<div style="width:28px;height:36px;border-radius:4px;border:1px solid var(--gray-200);background:${s.preview_color || '#fff'}"></div>`;
+    return `<tr>
+    <td>${thumb}</td>
     <td style="font-family:monospace;font-size:11px">${s.sticker_code || '-'}</td>
     <td style="font-size:12px">${s.brand || '-'}</td>
     <td style="font-weight:500;font-size:12px">${s.name}</td>
@@ -3977,7 +3987,8 @@ function renderBgStickers() {
       <button class="btn btn-sm" onclick="editBgSticker('${s.id}')" title="수정">✏️</button>
       <button class="btn btn-sm" onclick="deleteBgSticker('${s.id}')" title="비활성화" style="color:var(--red)">🗑️</button>
     </td>
-  </tr>`).join('');
+  </tr>`;
+  }).join('');
 }
 
 function openBgStickerForm(sticker) {
@@ -4831,9 +4842,13 @@ let bgUnifiedProductMap = new Map(); // order_seq → Map(card_code → card_nam
 let bgUnifiedCiMap = new Map(); // order_id → customer_info
 let bgUnifiedRows = [];     // 평탄화된 렌더 행
 
+// 통합현황 최대 조회 범위 (일)
+const BG_UNIFIED_MAX_RANGE_DAYS = 90;
+
 async function loadBgUnified() {
-  document.getElementById('uni-loading').style.display = 'block';
-  document.getElementById('uni-loading').textContent = '불러오는 중...';
+  const $loading = document.getElementById('uni-loading');
+  $loading.style.display = 'block';
+  $loading.textContent = '불러오는 중...';
   document.getElementById('uni-table-wrap').style.display = 'none';
 
   // 날짜 기본값 초기화 (최초 1회)
@@ -4846,15 +4861,49 @@ async function loadBgUnified() {
 
   const start = document.getElementById('uni-start').value;
   const end = document.getElementById('uni-end').value;
+
+  // 날짜 유효성 + 최대 범위 가드
+  if (!start || !end) {
+    $loading.textContent = '시작일과 종료일을 선택하세요.';
+    return;
+  }
+  if (start > end) {
+    $loading.textContent = '시작일이 종료일보다 늦을 수 없습니다.';
+    return;
+  }
+  const rangeDays = Math.ceil((new Date(end) - new Date(start)) / 86400000);
+  if (rangeDays > BG_UNIFIED_MAX_RANGE_DAYS) {
+    $loading.innerHTML = `조회 범위가 너무 큽니다 (<b>${rangeDays}일</b>). 최대 ${BG_UNIFIED_MAX_RANGE_DAYS}일 이내로 설정해주세요.`;
+    return;
+  }
+
   const endPlus = fmt(new Date(new Date(end).getTime() + 86400000));
 
+  // 각 API 응답을 개별적으로 포착하여 어느 쪽이 실패했는지 진단 가능
   try {
-    const [ordersRes, ciRes] = await Promise.all([
-      fetch(`${API}/api/orders?start_date=${start}&end_date=${endPlus}&category=daeryepum`).then(r => r.json()),
-      fetch(`${API}/api/bg/customer-infos`).then(r => r.json()),
+    const [ordersRes, ciRes] = await Promise.allSettled([
+      fetch(`${API}/api/orders?start_date=${start}&end_date=${endPlus}&category=daeryepum`).then(r => {
+        if (!r.ok) throw new Error(`orders API ${r.status}`);
+        return r.json();
+      }),
+      fetch(`${API}/api/bg/customer-infos`).then(r => {
+        if (!r.ok) throw new Error(`customer-infos API ${r.status}`);
+        return r.json();
+      }),
     ]);
 
-    const rawOrders = Array.isArray(ordersRes) ? ordersRes : [];
+    if (ordersRes.status === 'rejected') {
+      console.error('[loadBgUnified] orders 실패:', ordersRes.reason);
+      $loading.textContent = '주문 데이터 조회 실패: ' + (ordersRes.reason?.message || '알 수 없는 오류');
+      return;
+    }
+    if (ciRes.status === 'rejected') {
+      console.error('[loadBgUnified] customer-infos 실패:', ciRes.reason);
+      $loading.textContent = '고객입력 조회 실패: ' + (ciRes.reason?.message || '알 수 없는 오류');
+      return;
+    }
+
+    const rawOrders = Array.isArray(ordersRes.value) ? ordersRes.value : [];
     // order_seq 기준 중복 제거 + card_code→card_name 맵 보존
     const orderMap = new Map();
     const productMap = new Map();
@@ -4870,12 +4919,22 @@ async function loadBgUnified() {
     bgUnifiedOrders = [...orderMap.values()];
     bgUnifiedProductMap = productMap;
 
-    const ciList = ciRes.infos || [];
-    bgUnifiedCiMap = new Map(ciList.map(ci => [String(ci.order_id), ci]));
+    const ciList = ciRes.value.infos || [];
+    // 중복 order_id 감지 (동일 order에 CI row가 여러 개인 비정상 케이스 로그)
+    const ciMap = new Map();
+    ciList.forEach(ci => {
+      const key = String(ci.order_id);
+      if (ciMap.has(key)) {
+        console.warn('[loadBgUnified] 중복 customer_info:', key, '— 이전 값이 덮어쓰기됨');
+      }
+      ciMap.set(key, ci);
+    });
+    bgUnifiedCiMap = ciMap;
 
     renderBgUnified();
   } catch (e) {
-    document.getElementById('uni-loading').textContent = '불러오기 실패: ' + e.message;
+    console.error('[loadBgUnified] 예상치 못한 오류:', e);
+    $loading.textContent = '불러오기 실패: ' + e.message;
   }
 }
 
@@ -4960,11 +5019,10 @@ function renderBgUnified() {
     const productName = sel?.product_name
       || (_pm && sel?.product_code ? _pm.get(sel.product_code) : null)
       || order.card_name || '-';
-    // _productNames: {product_code → product_name} 딕셔너리를 infoJson에 포함
-    const _productNames = _pm ? Object.fromEntries(_pm) : {};
-    const infoJson = ci ? JSON.stringify({...ci, _order_seq: order.order_seq, _productNames}).replace(/'/g, '&#39;') : null;
-    const editBtn = infoJson
-      ? `<button class="btn" style="padding:4px 10px;font-size:12px" onclick='openBgOrderEdit(${infoJson})'>수정</button>`
+    // 수정 버튼: onclick 인라인 JSON 대신 data-edit-idx로 전달 (XSS 안전)
+    // 클릭 시 window._bgEditCache[idx]에서 info 객체 조회
+    const editBtn = ci
+      ? `<button class="btn" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">수정</button>`
       : '';
 
     html += `<tr class="${rowClass}" style="${borderStyle}">
@@ -5054,6 +5112,16 @@ function copyBgUnified() {
   } else {
     navigator.clipboard.writeText(tsv).then(() => showToast(`${selectedRows.length}건 복사 완료`));
   }
+}
+
+// rowIdx로 bgUnifiedRows에서 info를 재구성 후 수정 모달 오픈 (XSS 안전)
+function openBgOrderEditByIdx(idx) {
+  const row = bgUnifiedRows[parseInt(idx)];
+  if (!row || !row.ci) { console.warn('openBgOrderEditByIdx: row not found', idx); return; }
+  const { order, ci } = row;
+  const _pm = bgUnifiedProductMap.get(order.order_seq);
+  const _productNames = _pm ? Object.fromEntries(_pm) : {};
+  openBgOrderEdit({ ...ci, _order_seq: order.order_seq, _productNames });
 }
 
 function openBgOrderEdit(info) {
