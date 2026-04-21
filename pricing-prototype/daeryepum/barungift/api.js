@@ -431,6 +431,18 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
   }
 
+  // DELETE /api/bg/orders/:orderId/customer-info - 관리자 초기화 (재입력 허용)
+  if (customerInfoEditMatch && method === 'DELETE') {
+    const orderId = decodeURIComponent(customerInfoEditMatch[1]);
+    try {
+      await store.deleteCustomerInfo(orderId);
+      return json(res, { ok: true });
+    } catch (err) {
+      console.error('barungift delete customer-info error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
   // GET /api/bg/shipping-config - 공통 출고일 설정 조회
   if (pathname === '/api/bg/shipping-config' && method === 'GET') {
     return json(res, { config: await store.getShippingConfig() });

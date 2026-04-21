@@ -1326,7 +1326,9 @@ nav a:hover{color:var(--gray-900)}
         <textarea id="bg-edit-request" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px;resize:vertical"></textarea>
       </div>
     </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;padding:12px 20px;border-top:1px solid var(--gray-200)">
+    <div style="display:flex;gap:8px;align-items:center;padding:12px 20px;border-top:1px solid var(--gray-200)">
+      <button class="btn" onclick="resetBgOrderEdit()" style="color:var(--red);border-color:#fca5a5" title="고객 입력 데이터를 삭제해 고객이 재입력 할 수 있게 합니다">🔄 초기화</button>
+      <div style="flex:1"></div>
       <button class="btn" onclick="closeBgOrderEdit()">취소</button>
       <button class="btn btn-primary" onclick="saveBgOrderEdit()">저장</button>
     </div>
@@ -5292,6 +5294,35 @@ function toggleBgReceiptEdit(checked) {
 
 function closeBgOrderEdit() {
   document.getElementById('bg-order-edit-modal').style.display = 'none';
+}
+
+/**
+ * 고객 입력 초기화 — 해당 주문의 customer_info를 삭제해 고객이 재입력 할 수 있게 함.
+ * 삭제 후 통합현황에서는 '미입력' 상태로 표시됨.
+ */
+async function resetBgOrderEdit() {
+  const orderId = document.getElementById('bg-edit-order-id').value;
+  if (!orderId) return;
+  const ok = confirm(
+    `⚠️ 고객 입력 초기화\n\n` +
+    `주문번호 ${orderId}의 고객 입력 정보를 모두 삭제합니다.\n` +
+    `삭제 후 고객이 order-info URL로 다시 접속하면 새로 입력할 수 있습니다.\n\n` +
+    `이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?`
+  );
+  if (!ok) return;
+
+  try {
+    const res = await fetch(API + '/api/bg/orders/' + encodeURIComponent(orderId) + '/customer-info', {
+      method: 'DELETE',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '초기화 실패');
+    showToast('고객 입력이 초기화되었습니다. 고객이 재입력 가능합니다.');
+    closeBgOrderEdit();
+    loadBgUnified();
+  } catch (e) {
+    alert('초기화 실패: ' + e.message);
+  }
 }
 
 async function saveBgOrderEdit() {

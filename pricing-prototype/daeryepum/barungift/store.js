@@ -74,6 +74,17 @@ async function sbUpdate(table, filter, data) {
   return rows[0] || null;
 }
 
+async function sbDelete(table, filter) {
+  const res = await fetch(`${REST_BASE}/${table}?${filter}`, {
+    method: 'DELETE',
+    headers: HEADERS,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase DELETE ${table} [${res.status}]: ${text}`);
+  }
+}
+
 // ============================================
 // JSON 파일 폴백 (개발용)
 // ============================================
@@ -240,8 +251,7 @@ async function upsertProductSettings(productId, data) {
 
 async function deleteProductSettings(productId) {
   if (USE_SUPABASE) {
-    const url = `${SB_URL}/rest/v1/bg_product_settings?product_id=eq.${encodeURIComponent(productId)}`;
-    await fetch(url, { method: 'DELETE', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY } });
+    await sbDelete('bg_product_settings', `product_id=eq.${encodeURIComponent(productId)}`);
     return;
   }
   let settings = readJson(FILES.productSettings, []);
@@ -323,6 +333,19 @@ async function updateCustomerInfo(orderId, data) {
   infos[idx] = { ...infos[idx], ...patch };
   writeJson(FILES.customerInfo, infos);
   return infos[idx];
+}
+
+/** 고객 입력 초기화 (삭제) — 잘못 제출한 고객이 재입력 할 수 있게 */
+async function deleteCustomerInfo(orderId) {
+  if (USE_SUPABASE) {
+    await sbDelete('bg_order_customer_info', `order_id=eq.${encodeURIComponent(orderId)}`);
+    return;
+  }
+  let infos = readJson(FILES.customerInfo, []);
+  const before = infos.length;
+  infos = infos.filter(i => i.order_id !== orderId);
+  if (infos.length === before) throw new Error('NOT_FOUND');
+  writeJson(FILES.customerInfo, infos);
 }
 
 // ============================================
@@ -462,6 +485,7 @@ module.exports = {
   saveCustomerInfo,
   getAllCustomerInfos,
   updateCustomerInfo,
+  deleteCustomerInfo,
   getShippingConfig,
   saveShippingConfig,
   logAlimtalkSend,
