@@ -816,17 +816,24 @@ nav a:hover{color:var(--gray-900)}
     <h2 style="margin:0">🏷️ 바른기프트 스티커 관리</h2>
     <button class="btn btn-primary" onclick="openBgStickerForm()">+ 스티커 생성</button>
   </div>
-  <div class="card">
-    <table class="data-table" id="bg-sticker-table">
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+    <input type="text" id="bg-sticker-search" placeholder="🔍 이름/코드/브랜드 검색" oninput="renderBgStickers()" style="flex:1;min-width:220px;padding:7px 12px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px">
+    <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
+      <input type="checkbox" id="bg-sticker-group" checked onchange="renderBgStickers()"> 상품군별 그룹핑
+    </label>
+    <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
+      <input type="checkbox" id="bg-sticker-inactive" onchange="renderBgStickers()"> 비활성 포함
+    </label>
+    <span id="bg-sticker-count" style="font-size:11px;color:var(--gray-500);margin-left:auto"></span>
+  </div>
+  <div class="card" style="padding:0">
+    <table class="data-table" id="bg-sticker-table" style="table-layout:auto">
       <thead><tr>
-        <th style="width:40px">미리보기</th>
-        <th>스티커코드</th>
-        <th>브랜드</th>
-        <th>스티커명</th>
-        <th>용도</th>
-        <th>매핑코드</th>
-        <th>상태</th>
-        <th style="width:70px">관리</th>
+        <th style="width:64px;padding:8px 10px">미리보기</th>
+        <th style="padding:8px 10px">스티커 정보</th>
+        <th style="padding:8px 10px">매핑 상품</th>
+        <th style="width:70px;padding:8px 10px;text-align:center">상태</th>
+        <th style="width:80px;padding:8px 10px;text-align:center">관리</th>
       </tr></thead>
       <tbody id="bg-sticker-tbody"></tbody>
     </table>
@@ -4383,37 +4390,113 @@ async function loadBgStickers() {
   } catch(e) { console.error('loadBgStickers:', e); }
 }
 
+/** 스티커 코드 prefix (상품군) — 예: TGJSD08S1 → TGJSD08 */
+function bgStickerPrefix(s) {
+  const c = s.sticker_code || '';
+  const m = c.match(/^(.+?)S\d+$/);
+  return m ? m[1] : (c || '_');
+}
+
 function renderBgStickers() {
   const tbody = document.getElementById('bg-sticker-tbody');
   const empty = document.getElementById('bg-sticker-empty');
-  if (!bgStickers.length) {
+  const q = (document.getElementById('bg-sticker-search')?.value || '').trim().toLowerCase();
+  const grouped = document.getElementById('bg-sticker-group')?.checked ?? true;
+  const includeInactive = document.getElementById('bg-sticker-inactive')?.checked ?? false;
+
+  // 필터링
+  let rows = bgStickers.filter(s => {
+    if (!includeInactive && !s.is_active) return false;
+    if (!q) return true;
+    const hay = [s.name, s.sticker_code, s.brand, s.usage, s.type].filter(Boolean).join(' ').toLowerCase();
+    return hay.includes(q);
+  });
+  document.getElementById('bg-sticker-count').textContent = `총 ${rows.length}건`;
+
+  if (!rows.length) {
     tbody.innerHTML = '';
     empty.classList.remove('hidden');
     return;
   }
   empty.classList.add('hidden');
-  tbody.innerHTML = bgStickers.map(s => {
-    // 미리보기: 이미지가 있으면 lazy loading <img>, 없으면 preview_color 박스
-    const thumb = s.preview_image_url
-      ? `<img src="${s.preview_image_url}" loading="lazy" alt="" style="width:28px;height:36px;border-radius:4px;border:1px solid var(--gray-200);object-fit:cover;display:block">`
-      : `<div style="width:28px;height:36px;border-radius:4px;border:1px solid var(--gray-200);background:${s.preview_color || '#fff'}"></div>`;
-    return `<tr>
-    <td>${thumb}</td>
-    <td style="font-family:monospace;font-size:11px">${s.sticker_code || '-'}</td>
-    <td style="font-size:12px">${s.brand || '-'}</td>
-    <td style="font-weight:500;font-size:12px">${s.name}</td>
-    <td style="font-size:11px;color:var(--gray-500)">${s.usage || '-'}</td>
-    <td style="font-size:10px;max-width:160px;overflow:hidden;text-overflow:ellipsis">${(s.product_codes||[]).map(pc => {
+
+  // 썸네일: 이미지 우선, 없으면 preview_color
+  const thumbHtml = s => {
+    const name = (s.name || '').replace(/"/g, '&quot;');
+    if (s.preview_image_url) {
+      return `<img src="${s.preview_image_url}" loading="lazy" alt="${name}" style="width:56px;height:56px;border-radius:6px;border:1px solid var(--gray-200);object-fit:contain;background:#fff;display:block;cursor:zoom-in" onclick="openBgStickerPreview('${s.preview_image_url}','${name}')">`;
+    }
+    return `<div style="width:56px;height:56px;border-radius:6px;border:1px solid var(--gray-200);background:${s.preview_color || '#fff'};display:flex;align-items:center;justify-content:center;color:var(--gray-400);font-size:10px">이미지 없음</div>`;
+  };
+
+  // 상품코드 매핑 배지 (상품명까지 툴팁으로)
+  const productHtml = (s) => {
+    const codes = s.product_codes || [];
+    if (!codes.length) return '<span style="color:var(--gray-300);font-size:11px">-</span>';
+    return codes.map(pc => {
       const ps = bgProductSettings.find(p => p.product_id === pc);
-      return '<span style="font-family:monospace">' + pc + '</span>' + (ps ? ' <span style="color:var(--gray-500)">(' + (ps.product_name||'') + ')</span>' : '');
-    }).join('<br>') || '-'}</td>
-    <td><span class="badge ${s.is_active ? 'badge-up' : 'badge-neutral'}">${s.is_active ? '활성' : '비활성'}</span></td>
-    <td>
+      const pName = ps?.product_name || '';
+      const tooltip = pName ? ` title="${pName.replace(/"/g,'&quot;')}"` : '';
+      return `<span style="display:inline-block;font-family:monospace;font-size:10px;background:var(--gray-50);border:1px solid var(--gray-200);color:var(--gray-700);padding:2px 6px;border-radius:3px;margin:1px 2px 1px 0;line-height:1.4"${tooltip}>${pc}${pName ? ' <span style="color:var(--gray-500);font-family:inherit">·</span> <span style="color:var(--gray-600);font-family:inherit">'+pName.slice(0, 14)+'</span>' : ''}</span>`;
+    }).join('');
+  };
+
+  const rowHtml = s => `<tr>
+    <td style="padding:6px 10px">${thumbHtml(s)}</td>
+    <td style="padding:6px 10px">
+      <div style="font-size:13px;font-weight:600;color:var(--gray-900);line-height:1.3">${s.name || '-'}</div>
+      <div style="font-size:11px;color:var(--gray-500);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span style="font-family:monospace;background:var(--gray-100);padding:1px 5px;border-radius:3px">${s.sticker_code || '-'}</span>
+        ${s.brand ? '<span>' + s.brand + '</span>' : ''}
+        ${s.usage ? '<span style="color:var(--gray-400)">· ' + s.usage + '</span>' : ''}
+      </div>
+    </td>
+    <td style="padding:6px 10px;max-width:280px">${productHtml(s)}</td>
+    <td style="padding:6px 10px;text-align:center"><span class="badge ${s.is_active ? 'badge-up' : 'badge-neutral'}">${s.is_active ? '활성' : '비활성'}</span></td>
+    <td style="padding:6px 10px;text-align:center;white-space:nowrap">
       <button class="btn btn-sm" onclick="editBgSticker('${s.id}')" title="수정">✏️</button>
       <button class="btn btn-sm" onclick="deleteBgSticker('${s.id}')" title="비활성화" style="color:var(--red)">🗑️</button>
     </td>
   </tr>`;
-  }).join('');
+
+  let html = '';
+  if (grouped) {
+    // prefix 기반 그룹핑 + 그룹 헤더
+    const groups = new Map();
+    rows.forEach(s => {
+      const p = bgStickerPrefix(s);
+      if (!groups.has(p)) groups.set(p, []);
+      groups.get(p).push(s);
+    });
+    const sortedPrefixes = [...groups.keys()].sort((a, b) => a.localeCompare(b));
+    sortedPrefixes.forEach(prefix => {
+      const items = groups.get(prefix).sort((a, b) => (a.sticker_code || '').localeCompare(b.sticker_code || ''));
+      const label = prefix === '_' ? '미분류' : prefix;
+      html += `<tr style="background:var(--gray-50)"><td colspan="5" style="padding:8px 12px;font-size:11px;font-weight:600;color:var(--gray-600);font-family:monospace;letter-spacing:.3px;border-top:2px solid var(--gray-200)">
+        ${label} <span style="color:var(--gray-400);font-weight:400">(${items.length}개)</span>
+      </td></tr>`;
+      items.forEach(s => { html += rowHtml(s); });
+    });
+  } else {
+    // 정렬: 코드순
+    rows.sort((a, b) => (a.sticker_code || '').localeCompare(b.sticker_code || ''));
+    rows.forEach(s => { html += rowHtml(s); });
+  }
+  tbody.innerHTML = html;
+}
+
+/** 썸네일 클릭 시 원본 확대 모달 (간단한 라이트박스) */
+function openBgStickerPreview(imgUrl, name) {
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out;padding:40px';
+  modal.onclick = () => modal.remove();
+  modal.innerHTML = `
+    <div style="max-width:90vw;max-height:90vh;background:#fff;padding:20px;border-radius:8px;text-align:center">
+      <img src="${imgUrl}" alt="${name}" style="max-width:100%;max-height:80vh;object-fit:contain;display:block;margin:0 auto">
+      <div style="margin-top:12px;font-size:13px;color:var(--gray-700)">${name}</div>
+    </div>
+  `;
+  document.body.appendChild(modal);
 }
 
 function openBgStickerForm(sticker) {
