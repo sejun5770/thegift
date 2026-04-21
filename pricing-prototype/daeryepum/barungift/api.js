@@ -180,12 +180,19 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         });
       }
 
-      // 모든 상품의 매핑된 스티커 합집합 계산
+      // 상품별 스티커 매핑 + 합집합 계산
+      // stickersByProduct: { product_code: [sticker, ...] } — 고객 화면에서 상품별 필터링에 사용
       const allMappedStickerIds = new Set();
+      const stickersByProduct = {};
+      const stickerById = new Map(allActiveStickers.map(s => [s.id, s]));
       for (const p of products) {
         if (!p.product_code) continue;
         const ps = await store.getProductSettings(p.product_code);
-        (ps?.available_sticker_ids || []).forEach(id => allMappedStickerIds.add(id));
+        const ids = ps?.available_sticker_ids || [];
+        ids.forEach(id => allMappedStickerIds.add(id));
+        stickersByProduct[p.product_code] = ids
+          .map(id => stickerById.get(id))
+          .filter(Boolean);
       }
       const availableStickers = allMappedStickerIds.size > 0
         ? allActiveStickers.filter(s => allMappedStickerIds.has(s.id))
@@ -204,6 +211,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         product_settings: productSettings,
         shipping_config: await store.getShippingConfig(),
         available_stickers: availableStickers,
+        stickers_by_product: stickersByProduct,
         existing_info: existingInfo,
         bank_info: {
           bank_name: '신한은행',

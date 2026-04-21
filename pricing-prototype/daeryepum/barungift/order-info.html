@@ -875,6 +875,13 @@
 
   /** 상품에 매핑된 스티커 목록 */
   function getStickersForProduct(productCode) {
+    // 1순위: 서버에서 내려준 상품별 스티커 매핑 (bg_product_settings.available_sticker_ids 기준)
+    //        이 매핑이 있으면 정확한 양방향 매핑이 보장됨
+    const map = orderData?.stickers_by_product;
+    if (productCode && map && Array.isArray(map[productCode])) {
+      return map[productCode];
+    }
+    // 2순위(구버전 호환): sticker.product_codes 배열로 필터
     const stickers = orderData?.available_stickers || [];
     if (!productCode) return stickers;
     const matched = stickers.filter(function(s) {
