@@ -202,19 +202,56 @@ nav a:hover{color:var(--gray-900)}
     <button class="btn btn-primary" onclick="loadDashboard()">조회</button>
   </div>
 
-  <!-- 상품별 판매 통계 -->
-  <details style="margin-bottom:20px;background:var(--surface);border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px 16px">
-    <summary style="cursor:pointer;font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px">📦 상품별 판매 통계</summary>
-    <div style="margin-top:12px">
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-        <input type="text" id="ps-product-code" placeholder="상품코드 (예: TGJSD08D1)" list="ps-product-suggest" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px">
-        <datalist id="ps-product-suggest"></datalist>
-        <input type="date" id="ps-start" />
-        <span>~</span>
-        <input type="date" id="ps-end" />
-        <button class="btn btn-primary" onclick="loadProductStats()">조회</button>
+  <!-- ============================================
+       상품별 판매 통계 — 썸네일 선택 + 다상품 비교
+       ============================================ -->
+  <details id="ps-root" style="margin-bottom:20px;background:var(--surface);border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px 20px" open>
+    <summary style="cursor:pointer;font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px">📦 상품별 판매 통계 <span style="font-size:11px;font-weight:400;color:var(--gray-500)">(최대 5개 비교)</span></summary>
+
+    <div style="margin-top:16px">
+      <!-- 기간 preset + 전기대비 토글 -->
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+        <span style="font-size:12px;color:var(--gray-600);margin-right:4px">기간:</span>
+        <button class="btn btn-sm ps-preset" data-days="7" onclick="setPsPeriodPreset(7, this)">7일</button>
+        <button class="btn btn-sm ps-preset" data-days="30" onclick="setPsPeriodPreset(30, this)">30일</button>
+        <button class="btn btn-sm ps-preset btn-primary" data-days="90" onclick="setPsPeriodPreset(90, this)">90일</button>
+        <button class="btn btn-sm ps-preset" data-days="180" onclick="setPsPeriodPreset(180, this)">180일</button>
+        <span style="color:var(--gray-300);margin:0 4px">|</span>
+        <input type="date" id="ps-start" onchange="onPsCustomDate()" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+        <span style="font-size:12px">~</span>
+        <input type="date" id="ps-end" onchange="onPsCustomDate()" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+        <label style="display:flex;align-items:center;gap:4px;margin-left:auto;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="ps-compare-prev" onchange="loadProductStats()"> 전기 대비
+        </label>
+        <button class="btn btn-sm" onclick="downloadPsCsv()" style="margin-left:8px" title="선택된 상품들의 일별 데이터 CSV 다운로드">📥 CSV</button>
       </div>
-      <div id="ps-result"></div>
+
+      <!-- 좌측: 상품 선택기  |  우측: 결과 -->
+      <div style="display:grid;grid-template-columns:320px 1fr;gap:16px;min-height:400px">
+
+        <!-- 상품 선택 패널 -->
+        <div style="border:1px solid var(--gray-200);border-radius:var(--radius);background:#fff;display:flex;flex-direction:column;max-height:600px">
+          <div style="padding:10px;border-bottom:1px solid var(--gray-100)">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+              <span style="font-size:12px;font-weight:600">상품 선택</span>
+              <span id="ps-selected-count" style="font-size:11px;color:var(--gray-500);margin-left:auto">0 / 5</span>
+              <button class="btn btn-sm" onclick="clearPsSelection()" style="padding:2px 6px;font-size:11px">전체해제</button>
+            </div>
+            <input type="text" id="ps-search" placeholder="🔍 이름/코드 검색" oninput="renderPsProductList()" style="width:100%;padding:6px 10px;border:1px solid var(--gray-200);border-radius:4px;font-size:12px">
+          </div>
+          <!-- 선택됨 chips -->
+          <div id="ps-chips" style="padding:8px 10px;border-bottom:1px solid var(--gray-100);display:flex;flex-wrap:wrap;gap:4px;min-height:36px;background:#fafafa"></div>
+          <!-- 썸네일 리스트 -->
+          <div id="ps-product-list" style="flex:1;overflow-y:auto;padding:4px"></div>
+        </div>
+
+        <!-- 결과 패널 -->
+        <div id="ps-result" style="display:flex;flex-direction:column;gap:12px">
+          <div id="ps-empty" style="padding:60px 20px;text-align:center;color:var(--gray-400);background:#fafafa;border-radius:var(--radius)">
+            왼쪽에서 비교할 상품을 선택해주세요
+          </div>
+        </div>
+      </div>
     </div>
   </details>
   <!-- Sales Data Toggle -->
@@ -1461,11 +1498,13 @@ function init() {
   document.getElementById('dash-end').value = end;
   document.getElementById('chart-start').value = start30;
   document.getElementById('chart-end').value = end;
-  // 상품별 통계 기본 기간 (최근 30일) + 자동완성
+  // 상품별 통계: 기본 기간 90일 preset + 판매 상품 리스트 로드
+  const ps90Start = fmt(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 89));
   const psStart = document.getElementById('ps-start');
   const psEnd = document.getElementById('ps-end');
-  if (psStart && psEnd) { psStart.value = start30; psEnd.value = end; }
-  populateProductCodeSuggest();
+  if (psStart && psEnd) { psStart.value = ps90Start; psEnd.value = end; }
+  loadPsProductList();
+  renderPsChips();
   // 마케팅 분석 기본 기간 (90일)
   initMkDates(90);
 
@@ -1695,96 +1734,370 @@ function downloadExcel() {
   showToast(`${data.length}건 다운로드 완료`);
 }
 
-// --- 상품별 판매 통계 ---
-async function loadProductStats() {
-  const code = document.getElementById('ps-product-code').value.trim();
-  const start = document.getElementById('ps-start').value;
-  const end = document.getElementById('ps-end').value;
-  const $r = document.getElementById('ps-result');
+// ============================================
+// 상품별 판매 통계 (썸네일 선택 + 다상품 비교)
+// ============================================
+const PS_MAX_SELECTION = 5;
+const PS_CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
-  if (!code) { $r.innerHTML = '<p style="color:var(--red)">상품코드를 입력하세요.</p>'; return; }
-  if (!start || !end) { $r.innerHTML = '<p style="color:var(--red)">시작일/종료일을 선택하세요.</p>'; return; }
-  if (start > end) { $r.innerHTML = '<p style="color:var(--red)">시작일이 종료일보다 늦을 수 없습니다.</p>'; return; }
+let _psAllProducts = [];          // 전체 판매 상품 리스트
+let _psSelected = new Set();      // 선택된 card_code
+let _psLastData = null;           // 가장 최근 조회 결과
+let _psChart = null;              // Chart.js 인스턴스
+let _psMode = 'preset';           // 'preset' | 'custom'
 
-  $r.innerHTML = '<p style="color:var(--gray-500);padding:20px">불러오는 중...</p>';
+/** 상품코드 해시 기반 pastel 색상 + 이니셜 썸네일 */
+function psThumbStyle(code) {
+  let h = 0;
+  for (const c of code) h = (h * 31 + c.charCodeAt(0)) & 0x7fffffff;
+  const hue = h % 360;
+  const bg = `hsl(${hue}, 65%, 85%)`;
+  const fg = `hsl(${hue}, 50%, 30%)`;
+  return { bg, fg };
+}
+
+function psInitial(name) {
+  if (!name) return '?';
+  // 대괄호 prefix 제거 후 첫 글자
+  const cleaned = name.replace(/^\[.*?\]\s*/, '');
+  return cleaned.slice(0, 1).toUpperCase();
+}
+
+function fmtNumK(n) { return (n || 0).toLocaleString('ko-KR'); }
+function fmtKRW(n) { return fmtNumK(n) + '원'; }
+
+/** 페이지 접속 시 상품 목록 최초 로드 */
+async function loadPsProductList() {
   try {
-    const url = `${API}/api/product-stats?product_code=${encodeURIComponent(code)}&start_date=${start}&end_date=${end}`;
-    const data = await fetch(url).then(r => r.json());
-    if (data.error) { $r.innerHTML = `<p style="color:var(--red)">오류: ${data.error}</p>`; return; }
+    const res = await fetch(`${API}/api/bg/products/sales-list?days=180`);
+    _psAllProducts = await res.json();
+  } catch (e) {
+    console.error('[loadPsProductList]', e);
+    _psAllProducts = [];
+  }
+  renderPsProductList();
+}
 
-    if (!data.daily || data.daily.length === 0) {
-      $r.innerHTML = `<div style="padding:20px;text-align:center;color:var(--gray-500)">해당 기간에 <b>${code}</b> 상품의 판매 데이터가 없습니다.</div>`;
+/** 좌측 썸네일 리스트 렌더 */
+function renderPsProductList() {
+  const q = (document.getElementById('ps-search')?.value || '').trim().toLowerCase();
+  const $list = document.getElementById('ps-product-list');
+  if (!$list) return;
+  const items = _psAllProducts.filter(p => {
+    if (!q) return true;
+    return (p.card_name || '').toLowerCase().includes(q)
+        || (p.card_code || '').toLowerCase().includes(q);
+  });
+  if (!items.length) {
+    $list.innerHTML = `<div style="padding:20px;text-align:center;color:var(--gray-400);font-size:12px">${q ? '검색 결과 없음' : '판매 이력 없음'}</div>`;
+    return;
+  }
+  $list.innerHTML = items.map(p => {
+    const isSel = _psSelected.has(p.card_code);
+    const { bg, fg } = psThumbStyle(p.card_code);
+    const initial = psInitial(p.card_name);
+    const nameClean = (p.card_name || '').replace(/"/g,'&quot;');
+    return `<div class="ps-prod-item" data-code="${p.card_code}" onclick="togglePsSelection('${p.card_code}')"
+      style="display:flex;align-items:center;gap:10px;padding:7px 10px;cursor:pointer;border-radius:6px;margin:2px 0;transition:background .12s;${isSel ? 'background:#eff6ff;box-shadow:inset 0 0 0 2px var(--primary);' : ''}"
+      onmouseover="if(!this.classList.contains('sel'))this.style.background='#f8fafc'" onmouseout="if(!${isSel})this.style.background=''">
+      <div style="width:32px;height:32px;border-radius:6px;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0">${initial}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${nameClean}">${p.card_name || '-'}</div>
+        <div style="font-size:10px;color:var(--gray-500);font-family:monospace">${p.card_code}</div>
+      </div>
+      <div style="text-align:right;font-size:10px;color:var(--gray-500);flex-shrink:0">
+        ${fmtKRW(p.total_revenue)}<br><span style="color:var(--gray-400)">${fmtNumK(p.total_qty)}개</span>
+      </div>
+      ${isSel ? '<div style="color:var(--primary);font-size:16px;flex-shrink:0">✓</div>' : ''}
+    </div>`;
+  }).join('');
+}
+
+/** 선택된 chips 렌더 */
+function renderPsChips() {
+  const $c = document.getElementById('ps-chips');
+  const $count = document.getElementById('ps-selected-count');
+  if ($count) $count.textContent = `${_psSelected.size} / ${PS_MAX_SELECTION}`;
+  if (!$c) return;
+  if (_psSelected.size === 0) {
+    $c.innerHTML = '<span style="font-size:11px;color:var(--gray-400);line-height:2">선택 없음</span>';
+    return;
+  }
+  const codes = [..._psSelected];
+  $c.innerHTML = codes.map((code, i) => {
+    const p = _psAllProducts.find(x => x.card_code === code);
+    const name = p?.card_name || code;
+    const color = PS_CHART_COLORS[i % PS_CHART_COLORS.length];
+    return `<span style="display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid ${color};color:${color};border-radius:12px;padding:2px 6px 2px 8px;font-size:11px;font-weight:500">
+      <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color}"></span>
+      <span style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${name}">${name}</span>
+      <button onclick="togglePsSelection('${code}')" style="border:0;background:transparent;color:${color};cursor:pointer;font-size:12px;line-height:1;padding:0 2px">×</button>
+    </span>`;
+  }).join('');
+}
+
+/** 상품 선택/해제 */
+function togglePsSelection(code) {
+  if (_psSelected.has(code)) {
+    _psSelected.delete(code);
+  } else {
+    if (_psSelected.size >= PS_MAX_SELECTION) {
+      showToast(`최대 ${PS_MAX_SELECTION}개까지 선택 가능합니다`);
       return;
     }
+    _psSelected.add(code);
+  }
+  renderPsProductList();
+  renderPsChips();
+  if (_psSelected.size > 0) loadProductStats();
+  else showPsEmpty();
+}
 
-    const fmt = n => (n || 0).toLocaleString('ko-KR');
-    const fmtKRW = n => fmt(n) + '원';
-    const pname = data.product_name || '상품명 미확인';
-    const periodLabel = `${data.period.start} ~ ${data.period.end}`;
+function clearPsSelection() {
+  _psSelected.clear();
+  renderPsProductList();
+  renderPsChips();
+  showPsEmpty();
+}
 
-    const maxRow = data.max_day;
-    const minRow = data.min_day;
+function showPsEmpty() {
+  const $r = document.getElementById('ps-result');
+  if ($r) $r.innerHTML = '<div id="ps-empty" style="padding:60px 20px;text-align:center;color:var(--gray-400);background:#fafafa;border-radius:var(--radius)">왼쪽에서 비교할 상품을 선택해주세요</div>';
+  if (_psChart) { _psChart.destroy(); _psChart = null; }
+}
 
-    // 요약 카드 + 일자별 테이블
-    $r.innerHTML = `
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:10px 14px;background:var(--gray-50);border-radius:var(--radius)">
-        <span style="font-weight:700;font-size:14px">${pname}</span>
-        <span style="font-family:monospace;font-size:12px;color:var(--gray-500)">(${data.product_code})</span>
-        <span style="margin-left:auto;font-size:12px;color:var(--gray-500)">${periodLabel}</span>
-      </div>
-      <div class="card-grid card-grid-4" style="margin-bottom:16px">
-        <div class="card"><h3>총 매출</h3><div class="value">${fmtKRW(data.total.revenue)}</div></div>
-        <div class="card"><h3>총 판매수량</h3><div class="value">${fmt(data.total.qty)}<span style="font-size:13px;font-weight:400">개</span></div></div>
-        <div class="card"><h3>주문 건수</h3><div class="value">${fmt(data.total.orders)}<span style="font-size:13px;font-weight:400">건</span></div></div>
-        <div class="card">
-          <h3>매출 최대/최소일</h3>
-          <div style="font-size:12px;line-height:1.5">
-            ${maxRow ? `<div>🔺 <b>${maxRow.date}</b>: ${fmtKRW(maxRow.revenue)} <span style="color:var(--gray-500)">(${fmt(maxRow.qty)}개/${fmt(maxRow.orders)}건)</span></div>` : '<div style="color:var(--gray-400)">-</div>'}
-            ${minRow ? `<div>🔻 <b>${minRow.date}</b>: ${fmtKRW(minRow.revenue)} <span style="color:var(--gray-500)">(${fmt(minRow.qty)}개/${fmt(minRow.orders)}건)</span></div>` : ''}
-          </div>
-        </div>
-      </div>
-      <div class="card" style="padding:0;overflow-x:auto">
-        <table class="data-table">
-          <thead><tr>
-            <th>일자</th>
-            <th class="num">판매수량</th>
-            <th class="num">주문수</th>
-            <th class="num">매출</th>
-          </tr></thead>
-          <tbody>
-            ${data.daily.map(d => {
-              const isMax = maxRow && d.date === maxRow.date;
-              const isMin = minRow && d.date === minRow.date && d.date !== maxRow?.date;
-              const cls = isMax ? 'row-pending' : (isMin ? 'row-cancel-alert' : '');
-              const tag = isMax ? ' 🔺' : (isMin ? ' 🔻' : '');
-              return `<tr class="${cls}">
-                <td style="font-weight:500">${d.date}${tag}</td>
-                <td class="num">${fmt(d.qty)}개</td>
-                <td class="num">${fmt(d.orders)}건</td>
-                <td class="num" style="font-weight:600">${fmtKRW(d.revenue)}</td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
-    `;
+/** 기간 프리셋 */
+function setPsPeriodPreset(days, btn) {
+  const end = fmt(new Date());
+  const start = fmt(new Date(Date.now() - (days - 1) * 86400000));
+  document.getElementById('ps-start').value = start;
+  document.getElementById('ps-end').value = end;
+  document.querySelectorAll('.ps-preset').forEach(b => {
+    b.classList.remove('btn-primary');
+    b.classList.add('btn-sm');
+  });
+  if (btn) btn.classList.add('btn-primary');
+  _psMode = 'preset';
+  if (_psSelected.size > 0) loadProductStats();
+}
+
+function onPsCustomDate() {
+  document.querySelectorAll('.ps-preset').forEach(b => b.classList.remove('btn-primary'));
+  _psMode = 'custom';
+  if (_psSelected.size > 0) loadProductStats();
+}
+
+/** 상품 판매 통계 조회 */
+async function loadProductStats() {
+  if (_psSelected.size === 0) return showPsEmpty();
+  const start = document.getElementById('ps-start').value;
+  const end = document.getElementById('ps-end').value;
+  const comparePrev = document.getElementById('ps-compare-prev').checked;
+  const $r = document.getElementById('ps-result');
+  if (!start || !end) {
+    $r.innerHTML = '<div style="padding:20px;color:var(--red)">시작일/종료일을 선택하세요.</div>';
+    return;
+  }
+
+  $r.innerHTML = '<div style="padding:60px;text-align:center;color:var(--gray-500)">불러오는 중...</div>';
+  try {
+    const codes = [..._psSelected].join(',');
+    const url = `${API}/api/product-stats?product_codes=${encodeURIComponent(codes)}&start_date=${start}&end_date=${end}${comparePrev ? '&compare_prev=1' : ''}`;
+    const data = await fetch(url).then(r => r.json());
+    if (data.error) { $r.innerHTML = `<div style="padding:20px;color:var(--red)">오류: ${data.error}</div>`; return; }
+    _psLastData = data;
+    renderPsResult(data);
   } catch (e) {
     console.error('[loadProductStats]', e);
-    $r.innerHTML = `<p style="color:var(--red)">조회 실패: ${e.message}</p>`;
+    $r.innerHTML = `<div style="padding:20px;color:var(--red)">조회 실패: ${e.message}</div>`;
   }
 }
 
-// 상품코드 자동완성 suggest (스티커 매핑 테이블에서 수집)
-async function populateProductCodeSuggest() {
-  try {
-    const res = await fetch(`${API}/api/bg/stickers?active_only=false`);
-    const data = await res.json();
-    const codes = new Set();
-    (data.stickers || []).forEach(s => (s.product_codes || []).forEach(c => codes.add(c)));
-    const $dl = document.getElementById('ps-product-suggest');
-    if ($dl) $dl.innerHTML = [...codes].sort().map(c => `<option value="${c}">`).join('');
-  } catch(e) { /* ignore */ }
+/** 결과 렌더: KPI 카드 + 차트 + 비교 테이블 */
+function renderPsResult(data) {
+  const $r = document.getElementById('ps-result');
+  const products = data.products || [];
+  const totals = data.totals || { qty: 0, orders: 0, revenue: 0, avg_order_value: 0 };
+  const hasPrev = !!data.prev_period;
+
+  // 전기 대비 퍼센트 (전체 합계 기준)
+  let prevTotalRevenue = 0, prevTotalQty = 0, prevTotalOrders = 0;
+  if (hasPrev) {
+    products.forEach(p => {
+      if (p.prev_total) {
+        prevTotalRevenue += p.prev_total.revenue;
+        prevTotalQty += p.prev_total.qty;
+        prevTotalOrders += p.prev_total.orders;
+      }
+    });
+  }
+  const deltaRev = hasPrev && prevTotalRevenue > 0
+    ? Math.round((totals.revenue - prevTotalRevenue) / prevTotalRevenue * 1000) / 10
+    : null;
+  const deltaQty = hasPrev && prevTotalQty > 0
+    ? Math.round((totals.qty - prevTotalQty) / prevTotalQty * 1000) / 10
+    : null;
+  const deltaOrders = hasPrev && prevTotalOrders > 0
+    ? Math.round((totals.orders - prevTotalOrders) / prevTotalOrders * 1000) / 10
+    : null;
+
+  const deltaBadge = (v) => {
+    if (v === null) return '';
+    const color = v >= 0 ? '#16a34a' : '#dc2626';
+    const arrow = v >= 0 ? '▲' : '▼';
+    return `<span style="font-size:11px;color:${color};font-weight:600;margin-left:6px">${arrow}${Math.abs(v)}%</span>`;
+  };
+
+  // 선택된 상품 이름 요약
+  const productLabel = products.length === 1
+    ? `${products[0].product_name || products[0].product_code}`
+    : `${products.length}개 상품`;
+
+  // 일별 모든 날짜 수집 (차트 x축)
+  const allDates = new Set();
+  products.forEach(p => p.daily.forEach(d => allDates.add(d.date)));
+  const sortedDates = [...allDates].sort();
+
+  // HTML 구성 (차트는 이후 별도 JS로 채움)
+  $r.innerHTML = `
+    <!-- KPI 카드 -->
+    <div class="card-grid card-grid-4">
+      <div class="card">
+        <h3>총 매출 ${deltaBadge(deltaRev)}</h3>
+        <div class="value">${fmtKRW(totals.revenue)}</div>
+        ${hasPrev ? `<div class="sub">전기 ${fmtKRW(prevTotalRevenue)}</div>` : `<div class="sub">${productLabel}</div>`}
+      </div>
+      <div class="card">
+        <h3>총 판매수량 ${deltaBadge(deltaQty)}</h3>
+        <div class="value">${fmtNumK(totals.qty)}<span style="font-size:13px;font-weight:400">개</span></div>
+        ${hasPrev ? `<div class="sub">전기 ${fmtNumK(prevTotalQty)}개</div>` : ''}
+      </div>
+      <div class="card">
+        <h3>주문 건수 ${deltaBadge(deltaOrders)}</h3>
+        <div class="value">${fmtNumK(totals.orders)}<span style="font-size:13px;font-weight:400">건</span></div>
+        ${hasPrev ? `<div class="sub">전기 ${fmtNumK(prevTotalOrders)}건</div>` : ''}
+      </div>
+      <div class="card">
+        <h3>평균 주문가</h3>
+        <div class="value">${fmtKRW(totals.avg_order_value)}</div>
+        <div class="sub">총매출 ÷ 주문수</div>
+      </div>
+    </div>
+
+    <!-- 일별 추이 차트 -->
+    <div class="card" style="padding:16px">
+      <h3 style="margin:0 0 10px;font-size:13px">일별 매출 추이</h3>
+      <div style="height:260px;position:relative"><canvas id="ps-chart"></canvas></div>
+    </div>
+
+    <!-- 상품별 비교 테이블 -->
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table class="data-table">
+        <thead><tr>
+          <th style="width:24px"></th>
+          <th>상품</th>
+          <th class="num">총매출</th>
+          <th class="num">수량</th>
+          <th class="num">주문수</th>
+          <th class="num">평균 주문가</th>
+          ${hasPrev ? '<th class="num">전기 대비</th>' : ''}
+          <th class="num" style="min-width:100px">🔺 최대일</th>
+          <th class="num" style="min-width:100px">🔻 최소일</th>
+        </tr></thead>
+        <tbody>
+          ${products.map((p, i) => {
+            const color = PS_CHART_COLORS[i % PS_CHART_COLORS.length];
+            let revDelta = '';
+            if (hasPrev && p.prev_total && p.prev_total.revenue > 0) {
+              const d = (p.total.revenue - p.prev_total.revenue) / p.prev_total.revenue * 100;
+              revDelta = deltaBadge(Math.round(d * 10) / 10);
+            }
+            return `<tr>
+              <td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color}"></span></td>
+              <td>
+                <div style="font-size:12px;font-weight:500">${p.product_name || '-'}</div>
+                <div style="font-size:10px;color:var(--gray-500);font-family:monospace">${p.product_code}</div>
+              </td>
+              <td class="num" style="font-weight:600">${fmtKRW(p.total.revenue)}</td>
+              <td class="num">${fmtNumK(p.total.qty)}</td>
+              <td class="num">${fmtNumK(p.total.orders)}</td>
+              <td class="num">${fmtKRW(p.total.avg_order_value)}</td>
+              ${hasPrev ? `<td class="num">${hasPrev && p.prev_total ? fmtKRW(p.prev_total.revenue) + ' ' + revDelta : '-'}</td>` : ''}
+              <td class="num" style="font-size:11px">
+                ${p.max_day ? `<b>${p.max_day.date}</b><br><span style="color:var(--gray-500)">${fmtKRW(p.max_day.revenue)}</span>` : '-'}
+              </td>
+              <td class="num" style="font-size:11px">
+                ${p.min_day ? `<b>${p.min_day.date}</b><br><span style="color:var(--gray-500)">${fmtKRW(p.min_day.revenue)}</span>` : '-'}
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  // Chart.js 라인 차트
+  if (_psChart) { _psChart.destroy(); _psChart = null; }
+  const $canvas = document.getElementById('ps-chart');
+  if ($canvas && sortedDates.length > 0) {
+    const datasets = products.map((p, i) => {
+      const color = PS_CHART_COLORS[i % PS_CHART_COLORS.length];
+      const byDate = new Map(p.daily.map(d => [d.date, d.revenue]));
+      return {
+        label: p.product_name || p.product_code,
+        data: sortedDates.map(d => byDate.get(d) || 0),
+        borderColor: color,
+        backgroundColor: color + '22',
+        tension: 0.25,
+        fill: products.length === 1,
+        pointRadius: 2,
+        pointHoverRadius: 5,
+      };
+    });
+    _psChart = new Chart($canvas.getContext('2d'), {
+      type: 'line',
+      data: { labels: sortedDates, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: products.length > 1, position: 'top', labels: { font: { size: 11 }, usePointStyle: true } },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.dataset.label}: ${fmtKRW(ctx.parsed.y)}`,
+            },
+          },
+        },
+        scales: {
+          y: { ticks: { callback: v => fmtKRW(v), font: { size: 10 } }, beginAtZero: true },
+          x: { ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } },
+        },
+        interaction: { mode: 'index', intersect: false },
+      },
+    });
+  }
+}
+
+/** CSV 다운로드 */
+function downloadPsCsv() {
+  if (!_psLastData) { showToast('먼저 조회를 실행하세요'); return; }
+  const data = _psLastData;
+  const lines = ['상품코드,상품명,일자,판매수량,주문수,매출'];
+  data.products.forEach(p => {
+    p.daily.forEach(d => {
+      const nameEsc = '"' + (p.product_name || '').replace(/"/g, '""') + '"';
+      lines.push(`${p.product_code},${nameEsc},${d.date},${d.qty},${d.orders},${d.revenue}`);
+    });
+  });
+  const csv = '\uFEFF' + lines.join('\n');  // UTF-8 BOM (엑셀 한글)
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const codes = [..._psSelected].join('_');
+  a.href = url;
+  a.download = `product_stats_${codes}_${data.period.start}_${data.period.end}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('CSV 다운로드 시작');
 }
 
 // --- Dashboard ---
