@@ -471,6 +471,134 @@ const ETC_AMOUNT_EXPR = `
     ELSE CAST(oi.card_sale_price AS float) - ISNULL(o.coupon_price, 0)
   END`;
 
+/**
+ * 상품별 판매 통계 (특정 product_code + 기간)
+ * GET /api/product-stats?product_code=TGJSD08D1&start_date=2026-03-21&end_date=2026-04-20
+ *
+ * 반환:
+ *   { product_code, product_name, period: {start, end},
+ *     total: {qty, orders, revenue},
+ *     max_day: {date, qty, orders, revenue} | null,
+ *     min_day: {date, qty, orders, revenue} | null,
+ *     daily: [{date, qty, orders, revenue}, ...] }
+ */
+async function apiProductStats(query) {
+  const productCode = (query.product_code || '').trim();
+  const startStr = query.start_date;
+  const endStr = query.end_date;
+  if (!productCode) return { error: 'product_code required' };
+  if (!startStr || !endStr) return { error: 'start_date and end_date required' };
+
+  // endPlus = end + 1일 (end date inclusive 처리)
+  const endPlus = fmtDate(addDays(new Date(endStr + 'T00:00:00'), 1));
+
+  const p = await getPool();
+
+  // CARD 주문 일별 집계
+  const cardResult = await p.request()
+    .input('pc', sql.VarChar, productCode)
+    .input('s', sql.VarChar, startStr)
+    .input('e', sql.VarChar, endPlus)
+    .query(`
+      SELECT
+        CAST(co.order_date AS DATE) AS d,
+        co.order_seq,
+        MAX(c.Card_Name) AS card_name,
+        SUM(coi.item_count) AS qty,
+        SUM(CAST(coi.item_sale_price AS float) * coi.item_count
+            / ISNULL(NULLIF(c.Unit_Value, 0), 1)) AS amount
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      WHERE c.Card_Code = @pc
+        AND co.order_date >= @s AND co.order_date < @e
+        AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+      GROUP BY CAST(co.order_date AS DATE), co.order_seq
+    `);
+
+  // ETC 주문 일별 집계
+  const etcResult = await p.request()
+    .input('pc', sql.VarChar, productCode)
+    .input('s', sql.VarChar, startStr)
+    .input('e', sql.VarChar, endPlus)
+    .query(`
+      SELECT
+        CAST(o.order_date AS DATE) AS d,
+        o.order_seq,
+        MAX(c.Card_Name) AS card_name,
+        SUM(ei.order_count) AS qty,
+        SUM(CAST(ei.card_sale_price AS float) * ei.order_count
+            / ISNULL(NULLIF(c.Unit_Value, 0), 1)) AS amount
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON o.order_seq = ei.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
+      WHERE c.Card_Code = @pc
+        AND o.order_date >= @s AND o.order_date < @e
+        AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+      GROUP BY CAST(o.order_date AS DATE), o.order_seq
+    `);
+
+  // 일별 집계 (CARD + ETC 합산)
+  const dayMap = new Map();  // key: 'YYYY-MM-DD' → {qty, orders:Set, revenue}
+  let cardName = null;
+
+  const consume = (rows) => {
+    for (const r of rows) {
+      if (!cardName && r.card_name) cardName = r.card_name;
+      const dKey = r.d instanceof Date
+        ? fmtDate(r.d)
+        : String(r.d).slice(0, 10);
+      if (!dayMap.has(dKey)) dayMap.set(dKey, { qty: 0, orders: new Set(), revenue: 0 });
+      const bucket = dayMap.get(dKey);
+      bucket.qty += (r.qty || 0);
+      bucket.revenue += (r.amount || 0);
+      bucket.orders.add(r.order_seq);
+    }
+  };
+  consume(cardResult.recordset);
+  consume(etcResult.recordset);
+
+  // 일자 순 정렬 + Set → count 변환
+  const daily = [...dayMap.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, v]) => ({
+      date,
+      qty: v.qty,
+      orders: v.orders.size,
+      revenue: Math.round(v.revenue),
+    }));
+
+  // 합계 계산
+  const totalQty = daily.reduce((s, d) => s + d.qty, 0);
+  const totalRevenue = daily.reduce((s, d) => s + d.revenue, 0);
+  // 중복 주문 방지용 전체 Set
+  const allOrders = new Set();
+  dayMap.forEach(v => v.orders.forEach(o => allOrders.add(o)));
+
+  // 매출 최대/최소일 (매출 > 0인 일자만 대상)
+  const withSales = daily.filter(d => d.revenue > 0);
+  const maxDay = withSales.length
+    ? withSales.reduce((a, b) => (b.revenue > a.revenue ? b : a))
+    : null;
+  const minDay = withSales.length
+    ? withSales.reduce((a, b) => (b.revenue < a.revenue ? b : a))
+    : null;
+
+  return {
+    product_code: productCode,
+    product_name: cardName,
+    period: { start: startStr, end: endStr },
+    total: {
+      qty: totalQty,
+      orders: allOrders.size,
+      revenue: totalRevenue,
+    },
+    max_day: maxDay,
+    min_day: minDay,
+    daily,
+  };
+}
+
 async function apiDashboardComparison() {
   const p = await getPool();
   const todayStr = fmtDate(today());
@@ -1770,6 +1898,8 @@ const server = http.createServer(async (req, res) => {
         } else { data = { error: 'order_seq required' }; }
       } else if (pathname === '/api/order-files') {
         data = await apiOrderFiles(parsed.query);
+      } else if (pathname === '/api/product-stats') {
+        data = await apiProductStats(parsed.query);
       } else if (pathname === '/api/categories') {
         data = Object.entries(CATEGORY_FILTERS).map(([key, val]) => ({ key, label: val.label }));
       } else if (pathname === '/api/worklog') {

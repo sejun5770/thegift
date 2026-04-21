@@ -201,6 +201,22 @@ nav a:hover{color:var(--gray-900)}
     <input type="date" id="dash-end" />
     <button class="btn btn-primary" onclick="loadDashboard()">조회</button>
   </div>
+
+  <!-- 상품별 판매 통계 -->
+  <details style="margin-bottom:20px;background:var(--surface);border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px 16px">
+    <summary style="cursor:pointer;font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px">📦 상품별 판매 통계</summary>
+    <div style="margin-top:12px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+        <input type="text" id="ps-product-code" placeholder="상품코드 (예: TGJSD08D1)" list="ps-product-suggest" style="flex:1;min-width:180px;padding:8px 12px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px">
+        <datalist id="ps-product-suggest"></datalist>
+        <input type="date" id="ps-start" />
+        <span>~</span>
+        <input type="date" id="ps-end" />
+        <button class="btn btn-primary" onclick="loadProductStats()">조회</button>
+      </div>
+      <div id="ps-result"></div>
+    </div>
+  </details>
   <!-- Sales Data Toggle -->
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
     <span style="font-size:15px;font-weight:700">📋 기간 매출 현황</span>
@@ -1443,6 +1459,11 @@ function init() {
   document.getElementById('dash-end').value = end;
   document.getElementById('chart-start').value = start30;
   document.getElementById('chart-end').value = end;
+  // 상품별 통계 기본 기간 (최근 30일) + 자동완성
+  const psStart = document.getElementById('ps-start');
+  const psEnd = document.getElementById('ps-end');
+  if (psStart && psEnd) { psStart.value = start30; psEnd.value = end; }
+  populateProductCodeSuggest();
   // 마케팅 분석 기본 기간 (90일)
   initMkDates(90);
 
@@ -1670,6 +1691,98 @@ function downloadExcel() {
   a.download = `답례품_주문_${document.getElementById('ord-start').value}.tsv`;
   a.click();
   showToast(`${data.length}건 다운로드 완료`);
+}
+
+// --- 상품별 판매 통계 ---
+async function loadProductStats() {
+  const code = document.getElementById('ps-product-code').value.trim();
+  const start = document.getElementById('ps-start').value;
+  const end = document.getElementById('ps-end').value;
+  const $r = document.getElementById('ps-result');
+
+  if (!code) { $r.innerHTML = '<p style="color:var(--red)">상품코드를 입력하세요.</p>'; return; }
+  if (!start || !end) { $r.innerHTML = '<p style="color:var(--red)">시작일/종료일을 선택하세요.</p>'; return; }
+  if (start > end) { $r.innerHTML = '<p style="color:var(--red)">시작일이 종료일보다 늦을 수 없습니다.</p>'; return; }
+
+  $r.innerHTML = '<p style="color:var(--gray-500);padding:20px">불러오는 중...</p>';
+  try {
+    const url = `${API}/api/product-stats?product_code=${encodeURIComponent(code)}&start_date=${start}&end_date=${end}`;
+    const data = await fetch(url).then(r => r.json());
+    if (data.error) { $r.innerHTML = `<p style="color:var(--red)">오류: ${data.error}</p>`; return; }
+
+    if (!data.daily || data.daily.length === 0) {
+      $r.innerHTML = `<div style="padding:20px;text-align:center;color:var(--gray-500)">해당 기간에 <b>${code}</b> 상품의 판매 데이터가 없습니다.</div>`;
+      return;
+    }
+
+    const fmt = n => (n || 0).toLocaleString('ko-KR');
+    const fmtKRW = n => fmt(n) + '원';
+    const pname = data.product_name || '상품명 미확인';
+    const periodLabel = `${data.period.start} ~ ${data.period.end}`;
+
+    const maxRow = data.max_day;
+    const minRow = data.min_day;
+
+    // 요약 카드 + 일자별 테이블
+    $r.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:10px 14px;background:var(--gray-50);border-radius:var(--radius)">
+        <span style="font-weight:700;font-size:14px">${pname}</span>
+        <span style="font-family:monospace;font-size:12px;color:var(--gray-500)">(${data.product_code})</span>
+        <span style="margin-left:auto;font-size:12px;color:var(--gray-500)">${periodLabel}</span>
+      </div>
+      <div class="card-grid card-grid-4" style="margin-bottom:16px">
+        <div class="card"><h3>총 매출</h3><div class="value">${fmtKRW(data.total.revenue)}</div></div>
+        <div class="card"><h3>총 판매수량</h3><div class="value">${fmt(data.total.qty)}<span style="font-size:13px;font-weight:400">개</span></div></div>
+        <div class="card"><h3>주문 건수</h3><div class="value">${fmt(data.total.orders)}<span style="font-size:13px;font-weight:400">건</span></div></div>
+        <div class="card">
+          <h3>매출 최대/최소일</h3>
+          <div style="font-size:12px;line-height:1.5">
+            ${maxRow ? `<div>🔺 <b>${maxRow.date}</b>: ${fmtKRW(maxRow.revenue)} <span style="color:var(--gray-500)">(${fmt(maxRow.qty)}개/${fmt(maxRow.orders)}건)</span></div>` : '<div style="color:var(--gray-400)">-</div>'}
+            ${minRow ? `<div>🔻 <b>${minRow.date}</b>: ${fmtKRW(minRow.revenue)} <span style="color:var(--gray-500)">(${fmt(minRow.qty)}개/${fmt(minRow.orders)}건)</span></div>` : ''}
+          </div>
+        </div>
+      </div>
+      <div class="card" style="padding:0;overflow-x:auto">
+        <table class="data-table">
+          <thead><tr>
+            <th>일자</th>
+            <th class="num">판매수량</th>
+            <th class="num">주문수</th>
+            <th class="num">매출</th>
+          </tr></thead>
+          <tbody>
+            ${data.daily.map(d => {
+              const isMax = maxRow && d.date === maxRow.date;
+              const isMin = minRow && d.date === minRow.date && d.date !== maxRow?.date;
+              const cls = isMax ? 'row-pending' : (isMin ? 'row-cancel-alert' : '');
+              const tag = isMax ? ' 🔺' : (isMin ? ' 🔻' : '');
+              return `<tr class="${cls}">
+                <td style="font-weight:500">${d.date}${tag}</td>
+                <td class="num">${fmt(d.qty)}개</td>
+                <td class="num">${fmt(d.orders)}건</td>
+                <td class="num" style="font-weight:600">${fmtKRW(d.revenue)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (e) {
+    console.error('[loadProductStats]', e);
+    $r.innerHTML = `<p style="color:var(--red)">조회 실패: ${e.message}</p>`;
+  }
+}
+
+// 상품코드 자동완성 suggest (스티커 매핑 테이블에서 수집)
+async function populateProductCodeSuggest() {
+  try {
+    const res = await fetch(`${API}/api/bg/stickers?active_only=false`);
+    const data = await res.json();
+    const codes = new Set();
+    (data.stickers || []).forEach(s => (s.product_codes || []).forEach(c => codes.add(c)));
+    const $dl = document.getElementById('ps-product-suggest');
+    if ($dl) $dl.innerHTML = [...codes].sort().map(c => `<option value="${c}">`).join('');
+  } catch(e) { /* ignore */ }
 }
 
 // --- Dashboard ---
