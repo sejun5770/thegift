@@ -494,6 +494,10 @@ async function apiProductStats(query) {
 
   const p = await getPool();
 
+  // 매출 계산 규칙 (ETC_AMOUNT_EXPR와 동일):
+  // - SiteName IS NULL (자사): price × count / Unit_Value  (price는 단가)
+  // - SiteName IS NOT NULL (외부): price  (이미 라인 총액)
+
   // CARD 주문 일별 집계
   const cardResult = await p.request()
     .input('pc', sql.VarChar, productCode)
@@ -505,11 +509,18 @@ async function apiProductStats(query) {
         co.order_seq,
         MAX(c.Card_Name) AS card_name,
         SUM(coi.item_count) AS qty,
-        SUM(CAST(coi.item_sale_price AS float) * coi.item_count
-            / ISNULL(NULLIF(c.Unit_Value, 0), 1)) AS amount
+        SUM(
+          CASE
+            WHEN si.SiteName IS NULL
+            THEN CAST(coi.item_sale_price AS float) * coi.item_count
+                 / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+            ELSE CAST(coi.item_sale_price AS float)
+          END
+        ) AS amount
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
       WHERE c.Card_Code = @pc
         AND co.order_date >= @s AND co.order_date < @e
         AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
@@ -527,11 +538,19 @@ async function apiProductStats(query) {
         o.order_seq,
         MAX(c.Card_Name) AS card_name,
         SUM(ei.order_count) AS qty,
-        SUM(CAST(ei.card_sale_price AS float) * ei.order_count
-            / ISNULL(NULLIF(c.Unit_Value, 0), 1)) AS amount
+        SUM(
+          CASE
+            WHEN si.SiteName IS NULL
+            THEN CAST(ei.card_sale_price AS float) * ei.order_count
+                 / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                 - ISNULL(o.coupon_price, 0)
+            ELSE CAST(ei.card_sale_price AS float) - ISNULL(o.coupon_price, 0)
+          END
+        ) AS amount
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON o.order_seq = ei.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
       WHERE c.Card_Code = @pc
         AND o.order_date >= @s AND o.order_date < @e
         AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
