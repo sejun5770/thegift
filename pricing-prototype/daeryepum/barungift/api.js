@@ -340,6 +340,74 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     return json(res, { settings: await store.getAllProductSettings() });
   }
 
+  // GET /api/bg/products/sales-list - 판매 이력 있는 D01 상품 목록 (상품별 판매통계 선택기용)
+  if (pathname === '/api/bg/products/sales-list' && method === 'GET') {
+    try {
+      const days = Math.max(1, Math.min(365, parseInt(query.days) || 180));
+      const startDate = new Date(Date.now() - days * 86400000);
+      const startStr = startDate.toISOString().slice(0, 10);
+      const pool = await getPool();
+      const r = await pool.request().input('s', sql.VarChar, startStr).query(`
+        WITH card_agg AS (
+          SELECT c.Card_Code AS code, MAX(c.Card_Name) AS name,
+                 SUM(coi.item_count) AS qty,
+                 SUM(
+                   CASE WHEN si.SiteName IS NULL
+                        THEN CAST(coi.item_sale_price AS float) * coi.item_count
+                             / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                        ELSE CAST(coi.item_sale_price AS float)
+                   END
+                 ) AS revenue,
+                 MAX(co.order_date) AS last_sold
+          FROM custom_order co WITH (NOLOCK)
+          INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+          INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+          LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+          WHERE c.Card_Div = 'D01' AND co.order_date >= @s
+            AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+          GROUP BY c.Card_Code
+        ),
+        etc_agg AS (
+          SELECT c.Card_Code AS code, MAX(c.Card_Name) AS name,
+                 SUM(ei.order_count) AS qty,
+                 SUM(
+                   CASE WHEN si.SiteName IS NULL
+                        THEN CAST(ei.card_sale_price AS float) * ei.order_count
+                             / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                             - ISNULL(o.coupon_price, 0)
+                        ELSE CAST(ei.card_sale_price AS float) - ISNULL(o.coupon_price, 0)
+                   END
+                 ) AS revenue,
+                 MAX(o.order_date) AS last_sold
+          FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+          INNER JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON o.order_seq = ei.order_seq
+          INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
+          LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+          WHERE c.Card_Div = 'D01' AND o.order_date >= @s
+            AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+          GROUP BY c.Card_Code
+        )
+        SELECT code, MAX(name) AS name,
+               SUM(qty) AS total_qty,
+               SUM(revenue) AS total_revenue,
+               MAX(last_sold) AS last_sold_at
+        FROM (SELECT * FROM card_agg UNION ALL SELECT * FROM etc_agg) AS u
+        GROUP BY code
+        ORDER BY SUM(revenue) DESC
+      `);
+      return json(res, r.recordset.map(row => ({
+        card_code: row.code,
+        card_name: (row.name || '').replace(/^\[.*?\]\s*/g, ''),
+        total_qty: row.total_qty || 0,
+        total_revenue: Math.round(row.total_revenue || 0),
+        last_sold_at: row.last_sold_at,
+      })));
+    } catch (err) {
+      console.error('[products/sales-list] error:', err.message);
+      return json(res, { error: 'MSSQL 조회 실패: ' + err.message }, 500);
+    }
+  }
+
   // GET /api/bg/products/:productId/settings
   const productSettingsMatch = pathname.match(/^\/api\/bg\/products\/([^/]+)\/settings$/);
   if (productSettingsMatch && method === 'GET') {
