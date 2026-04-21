@@ -5067,16 +5067,21 @@ async function loadBgUnified() {
     }
 
     const rawOrders = Array.isArray(ordersRes.value) ? ordersRes.value : [];
-    // order_seq 기준 중복 제거 + card_code→card_name 맵 보존
+    // order_seq 기준 중복 제거 + 상품(card_code)별 상품명/수량 보존
+    // productMap 구조: Map(order_seq → Map(card_code → {card_name, item_count}))
     const orderMap = new Map();
     const productMap = new Map();
     rawOrders.forEach(r => {
       r.order_date_fmt = r.order_date ? r.order_date.replace('T', ' ').slice(0, 10) : '';
       if (!orderMap.has(r.order_seq)) orderMap.set(r.order_seq, r);
-      // 상품코드별 상품명 보존
+      // 상품 상세 (동일 card_code 중복 행이면 수량 합산)
       if (r.card_code && r.card_name) {
         if (!productMap.has(r.order_seq)) productMap.set(r.order_seq, new Map());
-        productMap.get(r.order_seq).set(r.card_code, r.card_name);
+        const pm = productMap.get(r.order_seq);
+        if (!pm.has(r.card_code)) {
+          pm.set(r.card_code, { card_name: r.card_name, item_count: 0 });
+        }
+        pm.get(r.card_code).item_count += (r.item_count || 0);
       }
     });
     bgUnifiedOrders = [...orderMap.values()];
@@ -5117,16 +5122,48 @@ function renderBgUnified() {
     return true;
   });
 
-  // 평탄화 (order × sticker_selection)
+  // 평탄화: 한 주문에 여러 상품이 있으면 상품별로 각각 1행씩 생성
+  // - 미입력 상태(sels=[]): 주문의 모든 상품에 대해 각각 sel=null 행 생성
+  // - 입력완료: 각 상품마다 매칭되는 sticker_selection을 찾아 붙이고, 없으면 null
   bgUnifiedRows = [];
   filtered.forEach(order => {
     const ciKey = order.order_type === 'ETC' ? `ETC-${order.order_seq}` : String(order.order_seq);
     const ci = bgUnifiedCiMap.get(ciKey) || null;
     const sels = ci?.sticker_selections || [];
-    if (sels.length > 0) {
-      sels.forEach(sel => bgUnifiedRows.push({ order, ci, sel }));
+    const pm = bgUnifiedProductMap.get(order.order_seq);
+
+    if (pm && pm.size > 0) {
+      // 주문의 각 상품에 대해 1행씩
+      for (const [productCode, productInfo] of pm) {
+        // 이 상품과 매칭되는 sticker_selection 찾기 (없으면 null)
+        const sel = sels.find(s => s.product_code === productCode) || null;
+        bgUnifiedRows.push({
+          order, ci, sel,
+          product_code: productCode,
+          product_name: productInfo.card_name,
+          product_qty: productInfo.item_count,
+        });
+      }
+      // 상품코드가 없는 sticker_selection이 있으면 별도 행 추가
+      // (비정상 데이터지만 누락 방지)
+      sels.forEach(sel => {
+        if (sel.product_code && !pm.has(sel.product_code)) {
+          bgUnifiedRows.push({
+            order, ci, sel,
+            product_code: sel.product_code,
+            product_name: sel.product_name || sel.product_code,
+            product_qty: sel.quantity || 0,
+          });
+        }
+      });
     } else {
-      bgUnifiedRows.push({ order, ci, sel: null });
+      // productMap이 비어있는 경우 (비정상): 주문 1건을 단일 행으로
+      bgUnifiedRows.push({
+        order, ci, sel: null,
+        product_code: null,
+        product_name: order.card_name || '-',
+        product_qty: order.item_count || 1,
+      });
     }
   });
 
@@ -5144,7 +5181,7 @@ function renderBgUnified() {
   const isCancelled = o => o.status_seq === 3 || o.status_seq === 5;
   let html = '';
 
-  bgUnifiedRows.forEach(({ order, ci, sel }, rowIdx) => {
+  bgUnifiedRows.forEach(({ order, ci, sel, product_code, product_name, product_qty }, rowIdx) => {
     const isFirstOfOrder = rowIdx === 0 || bgUnifiedRows[rowIdx - 1].order.order_seq !== order.order_seq;
     const borderStyle = isFirstOfOrder ? 'border-top:2px solid var(--gray-200)' : '';
     const rowClass = isCancelled(order) ? 'row-cancelled' : '';
@@ -5153,7 +5190,7 @@ function renderBgUnified() {
     const recvName = order.display_name || '-';
     const recvPhone = order.recv_hphone || '-';
     const recvAddr = order.recv_address || '-';
-    const itemCount = order.item_count || 1;
+    const itemCount = product_qty || 1;
 
     const hasInput = !!ci;
     const inputBadge = hasInput
@@ -5178,12 +5215,9 @@ function renderBgUnified() {
       : '미신청') : '<span style="color:var(--gray-300)">-</span>';
     const requestText = ci?.customer_request || '';
 
-    const _pm = bgUnifiedProductMap.get(order.order_seq);
-    const productName = sel?.product_name
-      || (_pm && sel?.product_code ? _pm.get(sel.product_code) : null)
-      || order.card_name || '-';
+    // 상품명: 행 단위로 이미 product_name 제공. sel.product_name이 있으면 우선 사용 (사용자 저장값).
+    const productName = sel?.product_name || product_name || '-';
     // 수정 버튼: onclick 인라인 JSON 대신 data-edit-idx로 전달 (XSS 안전)
-    // 클릭 시 window._bgEditCache[idx]에서 info 객체 조회
     const editBtn = ci
       ? `<button class="btn" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">수정</button>`
       : '';
@@ -5232,7 +5266,7 @@ function copyBgUnified() {
   // 23열 구조: A='', B=택배, C=일반, D=주문번호, E=수령인, F=연락처, G='', H=배송지, I='',
   //            J=상품명, K=상품코드, L='', M=스티커코드(수량), N~S='', T=주문수량,
   //            U='', V=희망출고일(빠른출고시 짙은빨강), W=희망출고일
-  const buildCells = ({ order, ci, sel }) => {
+  const buildCells = ({ order, ci, sel, product_code, product_name, product_qty }) => {
     const cells = Array(23).fill('');
     cells[1] = '택배';
     cells[2] = '일반';
@@ -5240,16 +5274,14 @@ function copyBgUnified() {
     cells[4] = order.display_name || '';
     cells[5] = order.recv_hphone || '';
     cells[7] = order.recv_address || '';
-    const _pm2 = bgUnifiedProductMap.get(order.order_seq);
-    cells[9] = sel?.product_name
-      || (_pm2 && sel?.product_code ? _pm2.get(sel.product_code) : null)
-      || order.card_name || '';
-    cells[10] = sel?.product_code || order.card_code || '';
+    // 상품명/코드/수량: 행 단위로 이미 제공됨 (상품별 분리)
+    cells[9] = sel?.product_name || product_name || '';
+    cells[10] = sel?.product_code || product_code || '';
     if (sel?.sticker_code) {
       const qty = sel.quantity ? `(${sel.quantity}개)` : '';
       cells[12] = `${sel.sticker_code}${qty}`;
     }
-    cells[19] = sel?.quantity || order.item_count || '';  // T: 주문수량
+    cells[19] = sel?.quantity || product_qty || '';  // T: 주문수량
     if (ci?.is_express) cells[21] = ci.desired_ship_date || '';
     cells[22] = ci?.desired_ship_date || '';
     return cells;
@@ -5283,7 +5315,10 @@ function openBgOrderEditByIdx(idx) {
   if (!row || !row.ci) { console.warn('openBgOrderEditByIdx: row not found', idx); return; }
   const { order, ci } = row;
   const _pm = bgUnifiedProductMap.get(order.order_seq);
-  const _productNames = _pm ? Object.fromEntries(_pm) : {};
+  // productMap 값은 {card_name, item_count} 객체. 모달에 넘길 때는 {code: name} 딕셔너리로 변환
+  const _productNames = _pm
+    ? Object.fromEntries([..._pm.entries()].map(([code, info]) => [code, info.card_name]))
+    : {};
   openBgOrderEdit({ ...ci, _order_seq: order.order_seq, _productNames });
 }
 
@@ -5316,9 +5351,10 @@ function openBgOrderEdit(info) {
       const fieldInputs = fields.length
         ? fields.map(([k, v]) => `<div style="margin-top:6px"><label style="font-size:11px;color:var(--gray-500)">${k}</label><input type="text" data-sticker-idx="${idx}" data-field="${k}" value="${String(v).replace(/"/g,'&quot;')}" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px;margin-top:2px"></div>`).join('')
         : '<p style="font-size:12px;color:var(--gray-400)">문구 입력안함</p>';
+      // _productNames(딕셔너리)가 1순위, _editPm(내부 Map)은 {card_name, ...} 객체이므로 .card_name 접근
       const productName = s.product_name
         || (s.product_code && _productNames[s.product_code])
-        || (_editPm && s.product_code ? _editPm.get(s.product_code) : null)
+        || (_editPm && s.product_code ? (_editPm.get(s.product_code)?.card_name) : null)
         || '';
       const productLabel = productName || s.product_code
         ? `<div style="font-size:11px;color:var(--gray-500);margin-bottom:4px">📦 ${productName}${s.product_code ? ' <span style="font-family:monospace">('+s.product_code+')</span>' : ''}</div>`
