@@ -641,10 +641,10 @@
     const isExpress = formState.shipping_type === 'express';
 
     if (isExpress && s.shipping_type === 'today_shipping') {
-      // 빠른출고(오늘출발): 출고일 = 접수일
-      // - 컷오프 ON + 영업일 + 컷오프 전 → 당일(today) 출고
-      // - 컷오프 OFF 또는 컷오프 후 또는 비영업일 → 익영업일 출고
-      // lead_time_days는 희망출고 모드에서만 의미를 가지므로 여기선 무시
+      // 빠른출고(오늘출발): 최소 선택일 = 접수일 (receipt)
+      // - 컷오프 ON + 영업일 + 컷오프 전 → 당일(today) 출고 가능
+      // - 컷오프 OFF / 컷오프 후 / 비영업일 → 익영업일 출고 가능
+      // 실제 선택 범위는 receipt ~ receipt + leadTime 영업일 (관리자 프리뷰와 동일)
       return getReceiptDate();
     }
 
@@ -662,8 +662,11 @@
     const isExpress = formState.shipping_type === 'express';
 
     if (isExpress && s.shipping_type === 'today_shipping') {
-      // 빠른출고(오늘출발): min과 동일한 날짜만 선택 가능 (출고일 1일 고정)
-      return getReceiptDate();
+      // 빠른출고(오늘출발): 최대 선택일 = 접수일 + 리드타임 영업일
+      // leadTime=0 → 당일만, leadTime=2 → receipt~receipt+2일 범위
+      const leadTime = s.lead_time_days ?? 2;
+      const receipt = getReceiptDate();
+      return addBizDays(receipt, leadTime);
     }
 
     // 일반출고: 최대 선택가능일
