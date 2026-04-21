@@ -33,11 +33,12 @@ function parseStickerCodes(baseNameNoExt) {
 }
 
 /**
- * PDF viewer 스크린샷에서 흰색 PDF 페이지 영역만 crop.
- * Chrome PDF viewer는 회색(#525659) 배경 + 상단 툴바 + 중앙에 흰색 PDF 페이지 구조.
- * 흰색에 가까운 픽셀이 가장 왼쪽/오른쪽/위/아래에 나타나는 경계를 찾아 crop.
+ * PDF viewer 스크린샷에서 PDF 페이지 영역만 crop.
+ * Chrome PDF viewer 배경은 항상 어두운 회색(#525659 또는 유사). 이 배경색을 4 모서리에서
+ * 샘플링해 판별하고, 그 배경색과 다른 픽셀 영역을 찾아 crop. 이렇게 하면 PDF 페이지의
+ * 배경색이 흰색이든 크림색이든 관계없이 정확한 경계를 찾을 수 있음.
  */
-async function autoCropToWhite(pngBuffer) {
+async function autoCropPdfPage(pngBuffer) {
   const { createCanvas, loadImage } = require('@napi-rs/canvas');
   const img = await loadImage(pngBuffer);
   const w = img.width, h = img.height;
@@ -47,14 +48,34 @@ async function autoCropToWhite(pngBuffer) {
   const imgData = ctx.getImageData(0, 0, w, h);
   const data = imgData.data;
 
-  // 흰색 판정: RGB 각각 ≥ 240 (거의 완전한 흰색)
-  const isWhite = (i) => data[i] >= 240 && data[i + 1] >= 240 && data[i + 2] >= 240;
+  // 4 모서리에서 샘플링해 중앙값 계산 (viewer 배경색)
+  const sample = [];
+  const samplePoints = [
+    [2, 2], [w - 3, 2], [2, h - 3], [w - 3, h - 3],
+    [5, 5], [w - 6, 5], [5, h - 6], [w - 6, h - 6],
+  ];
+  for (const [x, y] of samplePoints) {
+    const i = (y * w + x) * 4;
+    sample.push([data[i], data[i + 1], data[i + 2]]);
+  }
+  const median = (arr) => arr.slice().sort((a, b) => a - b)[Math.floor(arr.length / 2)];
+  const bgR = median(sample.map(s => s[0]));
+  const bgG = median(sample.map(s => s[1]));
+  const bgB = median(sample.map(s => s[2]));
 
+  // 각 픽셀이 배경과 유의미하게 다른지 판정 (유클리드 거리 기준)
+  const THRESHOLD_SQ = 40 * 40; // 각 채널 평균 ~23 이상 차이
+  const isPageContent = (i) => {
+    const dr = data[i] - bgR, dg = data[i + 1] - bgG, db = data[i + 2] - bgB;
+    return (dr * dr + dg * dg + db * db) > THRESHOLD_SQ;
+  };
+
+  // #toolbar=0 URL 파라미터로 툴바가 이미 숨겨져 있으므로 별도 스킵 불필요
   let top = h, bottom = 0, left = w, right = 0;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = (y * w + x) * 4;
-      if (isWhite(i)) {
+      if (isPageContent(i)) {
         if (y < top) top = y;
         if (y > bottom) bottom = y;
         if (x < left) left = x;
@@ -63,10 +84,7 @@ async function autoCropToWhite(pngBuffer) {
     }
   }
 
-  if (top >= bottom || left >= right) {
-    // 흰색 없으면 원본 반환 (비정상)
-    return pngBuffer;
-  }
+  if (top >= bottom || left >= right) return pngBuffer;
 
   // 약간의 여백 추가
   const pad = 2;
@@ -143,8 +161,9 @@ async function main() {
         const fullBuf = await page.screenshot({ type: 'png', omitBackground: false });
         await page.close();
 
-        // 자동 crop: PDF 페이지의 흰색 영역만 남기고 viewer의 회색 배경·툴바 제거
-        const buf = await autoCropToWhite(fullBuf);
+        // 자동 crop: viewer 배경색(모서리 샘플링)과 다른 영역 = PDF 페이지만 남김
+        // 페이지 배경이 흰/크림/컬러 어떤 색이든 정확히 처리
+        const buf = await autoCropPdfPage(fullBuf);
 
         // 각 sticker_code에 저장
         for (const code of codes) {
