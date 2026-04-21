@@ -289,6 +289,7 @@ async function saveCustomerInfo(orderId, data) {
     cash_receipt_yn: data.cash_receipt_yn || false,
     receipt_type: data.receipt_type || null,
     receipt_number: data.receipt_number || null,
+    customer_request: data.customer_request || null,
     submitted_at: now(),
   };
 
