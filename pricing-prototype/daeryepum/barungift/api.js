@@ -198,6 +198,35 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         ? allActiveStickers.filter(s => allMappedStickerIds.has(s.id))
         : allActiveStickers;
 
+      // 결제대기(status_seq === 1) 상태일 때만 toss_vaccount 조회
+      // toss_vaccount.order_type: 'C'=CARD, 'E'=ETC
+      let virtualAccount = null;
+      if (row.status_seq === 1) {
+        try {
+          const vaRes = await pool.request()
+            .input('seq', sql.Int, seq)
+            .input('otype', sql.Char(1), isEtc ? 'E' : 'C')
+            .query(`
+              SELECT TOP 1 bank_name, vacct_number, vacct_name, settle_price, due_date, status
+              FROM toss_vaccount WITH (NOLOCK)
+              WHERE order_seq = @seq AND order_type = @otype
+              ORDER BY vacct_seq DESC
+            `);
+          if (vaRes.recordset.length) {
+            const va = vaRes.recordset[0];
+            virtualAccount = {
+              bank_name: va.bank_name,
+              account_number: va.vacct_number,
+              account_holder: va.vacct_name,
+              amount: va.settle_price,
+              due_date: va.due_date,
+            };
+          }
+        } catch (e) {
+          console.warn('[orders/:id] toss_vaccount 조회 실패:', e.message);
+        }
+      }
+
       return json(res, {
         order_id: orderId, // 원래 들어온 ID (ETC-prefix 유지)
         order_number: isEtc ? `BHS-${row.order_seq}` : `BRS-${row.order_seq}`,
@@ -213,7 +242,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         available_stickers: availableStickers,
         stickers_by_product: stickersByProduct,
         existing_info: existingInfo,
-        bank_info: {
+        virtual_account: virtualAccount,  // 주문 결제용 가상계좌 (결제대기 상태일 때만)
+        bank_info: {                       // 오늘출발 추가비용용 고정 계좌 (항상)
           bank_name: '신한은행',
           account_number: '100-013-801261',
           account_holder: '바른컴퍼니',

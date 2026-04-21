@@ -357,6 +357,7 @@
         </div>
         <div class="flex justify-between"><span class="text-slate-500">예금주</span><span id="paymentPendingHolder" class="font-medium text-slate-900">-</span></div>
       </div>
+      <p id="paymentPendingDueDate" class="hidden mt-3 pt-3 border-t border-slate-200 text-[12px] text-center font-semibold text-amber-700"></p>
     </div>
 
     <p class="text-[12px] text-slate-500 mb-3">입금 확인 후 별도 안내를 드립니다.</p>
@@ -2048,21 +2049,39 @@
   document.getElementById('searchPhone')?.addEventListener('keydown', e => { if (e.key === 'Enter') searchOrders(); });
   document.getElementById('searchName')?.addEventListener('keydown', e => { if (e.key === 'Enter') searchOrders(); });
 
-  /** 결제대기 화면 채우기 */
+  /** 결제대기 화면 채우기 — 주문별 가상계좌(virtual_account) 우선 */
   function fillPaymentPendingScreen() {
-    const bank = orderData?.bank_info || {};
-    const amount = orderData?.total_amount || 0;
+    // 1순위: 주문별 발급된 가상계좌 (결제대기 상태에서 제공됨)
+    // 2순위(폴백): 고정 계좌 (가상계좌 정보가 없을 때만)
+    const va = orderData?.virtual_account;
+    const bank = va || orderData?.bank_info || {};
+    const amount = va?.amount || orderData?.total_amount || 0;
+
     const $amountBox = document.getElementById('paymentPendingAmount');
     const $amountVal = document.getElementById('paymentPendingAmountValue');
     const $bank = document.getElementById('paymentPendingBank');
     const $acct = document.getElementById('paymentPendingAccount');
     const $holder = document.getElementById('paymentPendingHolder');
+    const $due = document.getElementById('paymentPendingDueDate');
+
     if ($bank) $bank.textContent = bank.bank_name || '-';
     if ($acct) $acct.textContent = bank.account_number || '-';
     if ($holder) $holder.textContent = bank.account_holder || '-';
+
     if (amount > 0 && $amountBox && $amountVal) {
       $amountVal.textContent = formatMoney(amount);
       $amountBox.classList.remove('hidden');
+    }
+
+    // 입금 기한 표시 (가상계좌인 경우만)
+    if ($due) {
+      if (va?.due_date) {
+        const dueStr = String(va.due_date).replace('T', ' ').slice(0, 16);
+        $due.textContent = `입금 기한: ${dueStr}까지`;
+        $due.classList.remove('hidden');
+      } else {
+        $due.classList.add('hidden');
+      }
     }
   }
 
