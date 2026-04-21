@@ -921,7 +921,7 @@ nav a:hover{color:var(--gray-900)}
       </div>
 
       <!-- 검색 -->
-      <input type="text" id="bg-p-sticker-search" placeholder="🔍 스티커 이름 검색..." oninput="renderBgStickerList()"
+      <input type="text" id="bg-p-sticker-search" placeholder="🔍 스티커 이름 또는 코드 검색 (예: TGJSD08)" oninput="renderBgStickerList()"
         style="padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px;outline:none;width:100%;box-sizing:border-box">
 
       <!-- 스티커 목록 (스크롤) -->
@@ -4275,20 +4275,34 @@ async function openBgProductForm(productId) {
   document.getElementById('bg-product-modal').style.display = 'flex';
 }
 
+/** 스티커 코드에서 상품 prefix 추출 (S1~S99 접미사 제거) */
+function _stickerPrefix(s) {
+  const code = s.sticker_code || '';
+  const m = code.match(/^(.+?)S\d+$/);
+  return m ? m[1] : (code || '_');
+}
+
 function renderBgStickerModal() {
-  // 선택된 chips
-  const selected = _bgAllStickers.filter(s => _bgSelectedStickerIds.has(s.id));
+  // 선택된 chips (prefix별 그룹 정렬 → 스티커 코드 순)
+  const selected = _bgAllStickers
+    .filter(s => _bgSelectedStickerIds.has(s.id))
+    .sort((a, b) => {
+      const pa = _stickerPrefix(a), pb = _stickerPrefix(b);
+      if (pa !== pb) return pa.localeCompare(pb);
+      return (a.sticker_code || '').localeCompare(b.sticker_code || '');
+    });
   const chipsEl = document.getElementById('bg-p-sticker-chips');
   document.getElementById('bg-p-sticker-count').textContent = selected.length;
   if (selected.length === 0) {
     chipsEl.innerHTML = '<span style="color:var(--gray-400);font-size:12px;line-height:2">선택된 스티커 없음</span>';
   } else {
-    chipsEl.innerHTML = selected.map(s =>
-      `<span style="display:inline-flex;align-items:center;gap:4px;background:#dbeafe;color:#1e40af;border-radius:20px;padding:4px 6px 4px 12px;font-size:12px;font-weight:500;line-height:1.4">
-        ${s.name}
+    chipsEl.innerHTML = selected.map(s => {
+      const code = s.sticker_code || '';
+      return `<span style="display:inline-flex;align-items:center;gap:4px;background:#dbeafe;color:#1e40af;border-radius:20px;padding:4px 6px 4px 12px;font-size:12px;font-weight:500;line-height:1.4">
+        ${s.name}${code ? ` <span style="font-family:monospace;font-size:11px;opacity:.7">[${code}]</span>` : ''}
         <button onclick="bgStickerRemove('${s.id}')" style="border:none;background:rgba(30,64,175,.15);cursor:pointer;color:#1e40af;width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:13px;padding:0;line-height:1">&times;</button>
-      </span>`
-    ).join('');
+      </span>`;
+    }).join('');
   }
   // 미선택 목록
   renderBgStickerList();
@@ -4296,20 +4310,54 @@ function renderBgStickerModal() {
 
 function renderBgStickerList() {
   const q = (document.getElementById('bg-p-sticker-search').value || '').trim().toLowerCase();
-  const unselected = _bgAllStickers.filter(s =>
-    !_bgSelectedStickerIds.has(s.id) && (!q || s.name.toLowerCase().includes(q))
-  );
+  // 검색은 name + sticker_code 모두 대상
+  const unselected = _bgAllStickers.filter(s => {
+    if (_bgSelectedStickerIds.has(s.id)) return false;
+    if (!q) return true;
+    const name = (s.name || '').toLowerCase();
+    const code = (s.sticker_code || '').toLowerCase();
+    return name.includes(q) || code.includes(q);
+  });
+
   const el = document.getElementById('bg-p-sticker-list');
   if (unselected.length === 0) {
     el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--gray-400);font-size:12px">${q ? '검색 결과 없음' : '추가할 스티커 없음'}</div>`;
     return;
   }
-  el.innerHTML = unselected.map(s =>
-    `<label style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--gray-100);transition:background .1s" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
-      <input type="checkbox" onchange="bgStickerAdd('${s.id}', this)" style="width:15px;height:15px;cursor:pointer;accent-color:var(--primary);flex-shrink:0">
-      <span style="font-size:13px">${s.name}</span>
-    </label>`
-  ).join('');
+
+  // prefix로 그룹핑 + 정렬
+  const groups = new Map();
+  unselected.forEach(s => {
+    const p = _stickerPrefix(s);
+    if (!groups.has(p)) groups.set(p, []);
+    groups.get(p).push(s);
+  });
+  const sortedPrefixes = [...groups.keys()].sort((a, b) => a.localeCompare(b));
+
+  let html = '';
+  sortedPrefixes.forEach(prefix => {
+    const items = groups.get(prefix).sort((a, b) =>
+      (a.sticker_code || '').localeCompare(b.sticker_code || '')
+    );
+    // 그룹 헤더
+    const label = prefix === '_' ? '미분류' : prefix;
+    html += `<div style="padding:6px 14px;background:var(--gray-50);border-top:1px solid var(--gray-100);border-bottom:1px solid var(--gray-100);font-size:11px;font-weight:600;color:var(--gray-500);font-family:monospace;letter-spacing:.5px">
+      ${label} <span style="color:var(--gray-400);font-weight:400">(${items.length})</span>
+    </div>`;
+    // 스티커 행
+    items.forEach(s => {
+      const code = s.sticker_code || '';
+      const codeHtml = code
+        ? `<span style="font-family:monospace;font-size:11px;color:var(--gray-500);margin-left:auto;padding-left:8px">${code}</span>`
+        : '';
+      html += `<label style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--gray-100);transition:background .1s" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
+        <input type="checkbox" onchange="bgStickerAdd('${s.id}', this)" style="width:15px;height:15px;cursor:pointer;accent-color:var(--primary);flex-shrink:0">
+        <span style="font-size:13px">${s.name}</span>
+        ${codeHtml}
+      </label>`;
+    });
+  });
+  el.innerHTML = html;
 }
 
 function bgStickerAdd(id) {
