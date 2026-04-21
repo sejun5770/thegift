@@ -328,6 +328,50 @@
   </div>
 </div>
 
+<!-- Payment Pending Screen (status_seq = 1) -->
+<div id="paymentPendingScreen" class="hidden flex items-center justify-center min-h-screen px-5">
+  <div class="surface p-8 max-w-sm w-full text-center">
+    <div class="w-16 h-16 gradient-celebrate rounded-full flex items-center justify-center mx-auto mb-5 pop-in" style="box-shadow:0 10px 30px rgba(245,158,11,0.25)">
+      <span class="text-3xl">💳</span>
+    </div>
+    <h2 class="text-xl font-bold text-slate-900 mb-2 tracking-tight">입금을 기다리고 있어요</h2>
+    <p class="text-sm text-slate-500 mb-5 leading-relaxed">결제가 완료된 후 스티커·출고일 정보를<br>입력하실 수 있습니다.</p>
+
+    <!-- Order amount -->
+    <div id="paymentPendingAmount" class="gradient-brand-soft rounded-2xl p-4 mb-4 hidden">
+      <p class="text-[12px] font-semibold" style="color: var(--brand-600)">주문 결제 금액</p>
+      <p id="paymentPendingAmountValue" class="text-xl font-bold text-gradient-brand mt-1"></p>
+    </div>
+
+    <!-- Bank info -->
+    <div class="bg-slate-50 rounded-2xl p-4 text-left mb-4">
+      <p class="text-[12px] font-bold text-slate-700 mb-2">입금 계좌 안내</p>
+      <div class="space-y-1.5 text-sm">
+        <div class="flex justify-between"><span class="text-slate-500">은행</span><span id="paymentPendingBank" class="font-medium text-slate-900">-</span></div>
+        <div class="flex justify-between items-center">
+          <span class="text-slate-500">계좌번호</span>
+          <div class="flex items-center gap-2">
+            <span id="paymentPendingAccount" class="font-mono font-medium text-slate-900">-</span>
+            <button class="pressable text-xs font-bold px-2 py-1 rounded-lg gradient-brand-soft" style="color:var(--brand-600)" data-action="copyAccountPending">복사</button>
+          </div>
+        </div>
+        <div class="flex justify-between"><span class="text-slate-500">예금주</span><span id="paymentPendingHolder" class="font-medium text-slate-900">-</span></div>
+      </div>
+    </div>
+
+    <p class="text-[12px] text-slate-500 mb-3">입금 확인 후 별도 안내를 드립니다.</p>
+
+    <button onclick="window.location.reload()" class="btn-primary pressable w-full py-3 rounded-2xl text-sm mb-3">
+      🔄 결제 상태 새로고침
+    </button>
+
+    <div class="text-[11px] text-slate-400 space-y-0.5">
+      <p>전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>
+      <p>카카오 <a href="https://open.kakao.com/o/stUy4gji" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
+    </div>
+  </div>
+</div>
+
 <!-- Success Screen -->
 <div id="successScreen" class="hidden flex items-center justify-center min-h-screen px-5">
   <div class="surface p-8 max-w-sm w-full text-center">
@@ -475,6 +519,7 @@
   const $error = document.getElementById('errorScreen');
   const $errorMsg = document.getElementById('errorMessage');
   const $completed = document.getElementById('completedScreen');
+  const $paymentPending = document.getElementById('paymentPendingScreen');
   const $success = document.getElementById('successScreen');
   const $successOrderNum = document.getElementById('successOrderNumber');
   const $main = document.getElementById('mainApp');
@@ -716,7 +761,7 @@
   // Screen transitions
   // ============================================
   function showScreen(id) {
-    [$loading, $error, $completed, $success, $main].forEach(el => el.classList.add('hidden'));
+    [$loading, $error, $completed, $paymentPending, $success, $main].forEach(el => el.classList.add('hidden'));
     document.getElementById(id).classList.remove('hidden');
   }
 
@@ -1631,7 +1676,8 @@
         updateNavButtons();
         break;
       }
-      case 'copyAccount': {
+      case 'copyAccount':
+      case 'copyAccountPending': {
         const acct = orderData?.bank_info?.account_number || '';
         if (navigator.clipboard) {
           navigator.clipboard.writeText(acct).then(() => {
@@ -1704,6 +1750,12 @@
 
   // Delegated click/change listeners on step content
   $stepContent.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-action]');
+    if (el) handleAction(el.dataset.action, el);
+  });
+
+  // 결제대기 화면도 data-action 동작 지원 (계좌 복사 등)
+  $paymentPending.addEventListener('click', (e) => {
     const el = e.target.closest('[data-action]');
     if (el) handleAction(el.dataset.action, el);
   });
@@ -1996,6 +2048,24 @@
   document.getElementById('searchPhone')?.addEventListener('keydown', e => { if (e.key === 'Enter') searchOrders(); });
   document.getElementById('searchName')?.addEventListener('keydown', e => { if (e.key === 'Enter') searchOrders(); });
 
+  /** 결제대기 화면 채우기 */
+  function fillPaymentPendingScreen() {
+    const bank = orderData?.bank_info || {};
+    const amount = orderData?.total_amount || 0;
+    const $amountBox = document.getElementById('paymentPendingAmount');
+    const $amountVal = document.getElementById('paymentPendingAmountValue');
+    const $bank = document.getElementById('paymentPendingBank');
+    const $acct = document.getElementById('paymentPendingAccount');
+    const $holder = document.getElementById('paymentPendingHolder');
+    if ($bank) $bank.textContent = bank.bank_name || '-';
+    if ($acct) $acct.textContent = bank.account_number || '-';
+    if ($holder) $holder.textContent = bank.account_holder || '-';
+    if (amount > 0 && $amountBox && $amountVal) {
+      $amountVal.textContent = formatMoney(amount);
+      $amountBox.classList.remove('hidden');
+    }
+  }
+
   async function init() {
     const orderId = getOrderId();
     if (!orderId) {
@@ -2005,6 +2075,13 @@
 
     try {
       orderData = await fetchOrder(orderId);
+
+      // 결제대기 상태 (status_seq === 1): 입금 안내 화면으로 직행
+      if (orderData.status_seq === 1) {
+        fillPaymentPendingScreen();
+        showScreen('paymentPendingScreen');
+        return;
+      }
 
       // Already completed check
       if (orderData.info_status === 'completed') {
