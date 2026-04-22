@@ -586,6 +586,33 @@
     return params.get('oid') || null;
   }
 
+  /**
+   * URL 의 서명 파라미터(t, sig) 를 추출해 서버 API 호출에 전달하기 위한 쿼리 문자열 생성.
+   * 관리자가 발급한 서명 링크로 접속한 경우 모든 주문 관련 API 호출에 서명을 실어보내
+   * 서버측 HMAC 검증이 실제로 동작하도록 한다 (STRICT 모드 대비).
+   * @returns '' | '?t=...&sig=...' 형태
+   */
+  function signedQueryString() {
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get('t');
+    const sig = params.get('sig');
+    if (!t || !sig) return '';
+    const q = new URLSearchParams();
+    q.set('t', t);
+    q.set('sig', sig);
+    return '?' + q.toString();
+  }
+
+  /** URL 뒤에 서명 쿼리 이어붙이기 (기존 ? 존재 여부 자동 처리) */
+  function withSignature(urlStr) {
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get('t');
+    const sig = params.get('sig');
+    if (!t || !sig) return urlStr;
+    const sep = urlStr.includes('?') ? '&' : '?';
+    return urlStr + sep + 't=' + encodeURIComponent(t) + '&sig=' + encodeURIComponent(sig);
+  }
+
   function storageKey(orderId) {
     return 'bg_form_' + orderId;
   }
@@ -2018,7 +2045,9 @@
   // API calls
   // ============================================
   async function fetchOrder(orderId) {
-    const resp = await fetch(API_BASE + '/api/bg/orders/' + encodeURIComponent(orderId));
+    // URL 에 t/sig 가 있으면 서버 HMAC 검증용으로 그대로 전달
+    const url = withSignature(API_BASE + '/api/bg/orders/' + encodeURIComponent(orderId));
+    const resp = await fetch(url);
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({}));
       throw new Error(body.error || '주문을 불러올 수 없습니다. (HTTP ' + resp.status + ')');
@@ -2066,7 +2095,8 @@
     };
 
     try {
-      const resp = await fetch(API_BASE + '/api/bg/orders/' + encodeURIComponent(orderData.order_id) + '/customer-info', {
+      const submitUrl = withSignature(API_BASE + '/api/bg/orders/' + encodeURIComponent(orderData.order_id) + '/customer-info');
+      const resp = await fetch(submitUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

@@ -367,6 +367,19 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       logAccess(req, 'rate_limited', orderId, { status_code: 429, metadata: { action: 'submit', retry_after: rl.retryAfterSec } });
       return rateLimitResponse(res, rl);
     }
+    // HMAC 서명 검증 — view 엔드포인트와 동일 정책 (STRICT 모드에서만 차단)
+    if (query.t || query.sig || signedUrl.STRICT) {
+      const sigCheck = signedUrl.verify(orderId, query.t, query.sig);
+      if (!sigCheck.valid) {
+        logAccess(req, 'invalid_signature', orderId, {
+          status_code: signedUrl.STRICT ? 403 : 200,
+          metadata: { reason: sigCheck.reason, strict: signedUrl.STRICT, endpoint: 'submit' },
+        });
+        if (signedUrl.STRICT) {
+          return json(res, { error: '유효한 접근 링크가 아닙니다. 발송된 링크로 다시 접속해주세요.' }, 403);
+        }
+      }
+    }
     try {
       const body = await parseBody(req);
 
