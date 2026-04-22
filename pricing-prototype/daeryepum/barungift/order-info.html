@@ -1032,6 +1032,24 @@
         ${products.length > 0 ? `
           <h3 class="text-[16px] font-bold text-slate-900 mb-1 mt-7 tracking-tight">상품별 정보</h3>
           <p class="text-sm text-slate-500 mb-3">각 상품의 스티커를 선택해주세요.</p>
+
+          <!-- 스티커 안내 FAQ -->
+          <div class="rounded-2xl p-4 mb-4" style="background:linear-gradient(135deg,rgba(99,102,241,0.06),rgba(139,92,246,0.06));border:1px solid rgba(99,102,241,0.15)">
+            <div class="flex items-start gap-2.5 mb-3">
+              <span class="text-lg flex-shrink-0" style="line-height:1.3">💡</span>
+              <p class="text-[13px] font-bold text-slate-800 leading-tight">스티커 안내</p>
+            </div>
+            <div class="space-y-3 text-[12.5px] leading-relaxed">
+              <div>
+                <p class="font-semibold" style="color:var(--brand-700)">Q. 스티커는 부착돼서 배송되나요?</p>
+                <p class="text-slate-700 mt-0.5">A. 주문 수량 만큼 스티커를 출력해 부착해서 보내드려요.</p>
+              </div>
+              <div>
+                <p class="font-semibold" style="color:var(--brand-700)">Q. 원하시는 문구가 따로 있으신가요?</p>
+                <p class="text-slate-700 mt-0.5">A. 스티커 문구도 자유롭게 수정할 수 있어요.<br>성함과 함께 원하시는 문구를 입력란에 남겨주세요.</p>
+              </div>
+            </div>
+          </div>
         ` : ''}
         ${cardsHtml || '<p class="text-sm text-slate-400">상품 정보가 없습니다.</p>'}
       </div>
