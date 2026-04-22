@@ -707,9 +707,10 @@ async function searchDaeryepumOrders(pool, sql, opts) {
   const cardRequest = pool.request();
   cardRequest.input('phone', sql.VarChar, phone);
   cardRequest.input('uname', sql.VarChar, uname);
+  // LTRIM/RTRIM: MSSQL char 컬럼 공백 패딩 + 사용자 공백 실수 모두 흡수
   const cardWhere = useLike
-    ? "AND (co.order_hphone LIKE '%' + @phone OR co.order_name = @uname)"
-    : "AND REPLACE(co.order_hphone, '-', '') = @phone AND co.order_name = @uname";
+    ? "AND (co.order_hphone LIKE '%' + @phone OR LTRIM(RTRIM(co.order_name)) = LTRIM(RTRIM(@uname)))"
+    : "AND REPLACE(co.order_hphone, '-', '') = @phone AND LTRIM(RTRIM(co.order_name)) = LTRIM(RTRIM(@uname))";
   const cardResult = await cardRequest.query(`
     SELECT DISTINCT TOP 20
       co.order_seq, co.order_date, co.order_name, co.order_hphone,
@@ -734,8 +735,8 @@ async function searchDaeryepumOrders(pool, sql, opts) {
   etcRequest.input('phone', sql.VarChar, phone);
   etcRequest.input('uname', sql.VarChar, uname);
   const etcWhere = useLike
-    ? "AND (co.order_hphone LIKE '%' + @phone OR co.order_name = @uname)"
-    : "AND REPLACE(co.order_hphone, '-', '') = @phone AND co.order_name = @uname";
+    ? "AND (co.order_hphone LIKE '%' + @phone OR LTRIM(RTRIM(co.order_name)) = LTRIM(RTRIM(@uname)))"
+    : "AND REPLACE(co.order_hphone, '-', '') = @phone AND LTRIM(RTRIM(co.order_name)) = LTRIM(RTRIM(@uname))";
   const etcResult = await etcRequest.query(`
     SELECT DISTINCT TOP 20
       co.order_seq, co.order_date, co.order_name, co.order_hphone, co.settle_price,
@@ -780,6 +781,34 @@ async function searchDaeryepumOrders(pool, sql, opts) {
       source: 'etc',
     })),
   ].sort((a, b) => new Date(b.order_date) - new Date(a.order_date));
+
+  // 검색 결과가 0건이면 어느 조건에서 탈락했는지 진단 로그 (개발 운영 지원)
+  if (combined.length === 0 && !useLike) {
+    try {
+      const diag = await pool.request()
+        .input('phone', sql.VarChar, phone)
+        .input('uname', sql.VarChar, uname)
+        .query(`
+          SELECT TOP 5 co.order_seq, co.order_name, co.order_hphone, co.order_date, co.status_seq,
+                 (SELECT TOP 1 c.Card_Div FROM custom_order_item coi WITH (NOLOCK)
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                  WHERE coi.order_seq = co.order_seq) AS first_card_div,
+                 DATEDIFF(day, co.order_date, GETDATE()) AS days_ago
+          FROM custom_order co WITH (NOLOCK)
+          WHERE REPLACE(co.order_hphone, '-', '') = @phone
+             OR LTRIM(RTRIM(co.order_name)) = LTRIM(RTRIM(@uname))
+          ORDER BY co.order_date DESC
+        `);
+      if (diag.recordset.length) {
+        console.log('[search diagnostic] phone/uname 일치 주문은 있으나 필터 탈락:');
+        diag.recordset.forEach(o => console.log(`  seq=${o.order_seq} name="${o.order_name}" hphone=${o.order_hphone} status=${o.status_seq} div=${o.first_card_div} ${o.days_ago}일전`));
+      } else {
+        console.log(`[search diagnostic] phone="${phone}" uname="${uname}" 일치하는 주문 자체가 없음`);
+      }
+    } catch (e) {
+      console.warn('[search diagnostic] 실패:', e.message);
+    }
+  }
 
   // 고객 입력 상태 배치 조회
   const orderSeqs = combined.map(o => o.order_id);
