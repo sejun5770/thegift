@@ -534,7 +534,7 @@
   // ============================================
   // Constants
   // ============================================
-  const STEP_LABELS = ['출고 방식', '희망출고일', '스티커 선택', '결제정보', '최종 확인'];
+  const STEP_LABELS = ['출고 방식', '희망출고일', '스티커 선택', '결제정보', '요청사항', '최종 확인'];
   const RECEIPT_TYPES = { personal: '소득공제용 (휴대폰번호)', business: '지출증빙용 (사업자번호)' };
   const HOLIDAYS_2026 = ['2026-01-01','2026-02-16','2026-02-17','2026-02-18','2026-03-01','2026-05-05','2026-05-24','2026-06-06','2026-08-15','2026-09-24','2026-09-25','2026-09-26','2026-10-03','2026-10-09','2026-12-25'];
   // BASE_PATH 자동 감지: /c/barungift/order-info → '/c/barungift'
@@ -907,19 +907,22 @@
     switch (step) {
       case 0: return !!formState.shipping_type;
       case 1: {
-        // 주문 단위 출고일(필수) + 상품별 스티커 직접입력 시 필수 필드
-        const products = orderData?.products || [];
+        // 희망출고일 — 필수시 유효한 날짜 선택 필요
         const required = isDateRequired();
         if (required) {
           if (!formState.desired_ship_date || isDateClosed(formState.desired_ship_date)) return false;
         }
+        return true;
+      }
+      case 2: {
+        // 스티커 선택 — 직접입력 모드 스티커는 필수 필드 검증
+        const products = orderData?.products || [];
         for (let i = 0; i < products.length; i++) {
           const ps = formState.products[String(i)] || {};
           if (ps.sticker_input === 'custom' && ps.sticker_type) {
             const matching = getStickersForProduct(products[i].product_code);
             const sticker = matching.find(s => s.id === ps.sticker_type);
             // custom_fields가 비어있으면 기본 fallback 필드(text)를 필수로 간주
-            // — buildStickerInputSection의 폴백 로직과 동일
             const fieldsToCheck = (sticker && Array.isArray(sticker.custom_fields) && sticker.custom_fields.length > 0)
               ? sticker.custom_fields
               : [{ field_id: 'text', field_label: '스티커 문구', required: true }];
@@ -934,16 +937,16 @@
         }
         return true;
       }
-      case 2: {
-        // 결제정보
+      case 3: {
+        // 결제정보 — 현금영수증 신청시 타입/번호 필수
         if (formState.cash_receipt_yn) {
           if (!formState.receipt_type) return false;
           if (!formState.receipt_number || formState.receipt_number.trim() === '') return false;
         }
         return true;
       }
-      case 3: return true; // 요청사항 (선택)
-      case 4: return true; // 최종확인
+      case 4: return true; // 요청사항 (선택)
+      case 5: return true; // 최종확인
       default: return false;
     }
   }
@@ -1046,18 +1049,31 @@
     // 진입시마다 이전 선택값을 관리자 최신 설정 기준으로 재검증 (무효하면 초기화)
     validateShipDate();
 
-    const products = orderData?.products || [];
     const minDate = getMinDate();
-    const maxDate = getMaxDate();
     const required = isDateRequired();
-    const notice = getNoticeText();
-    const isToday = formState.shipping_type === 'express' && getSettings().shipping_type === 'today_shipping';
-    const orderDate = formState.desired_ship_date || '';
 
     // calendarViewMonth 초기화 (날짜 선택된 달 or minDate 달)
     if (!calendarViewMonth) {
       calendarViewMonth = (formState.desired_ship_date || minDate).substring(0, 7);
     }
+
+    return `
+      <div class="fade-in">
+        <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">희망 출고일 ${required ? '<span class="text-rose-500">*</span>' : ''}</h2>
+        <div class="text-sm text-slate-500 mb-5 leading-relaxed">
+          <p>출고일을 선택해 주세요.</p>
+          <p class="text-[13px] text-slate-400">당일출고는 오전 11시에 마감됩니다.</p>
+        </div>
+
+        <!-- 인라인 캘린더 -->
+        ${renderCalendar()}
+      </div>
+    `;
+  }
+
+  /** 스티커 선택 전용 스텝 (상품별 스티커 카드 + 직접입력 UI + FAQ) */
+  function renderStep2() {
+    const products = orderData?.products || [];
 
     var cardsHtml = products.map(function(p, i) {
       var idx = String(i);
@@ -1065,7 +1081,6 @@
       var productCode = p.product_code || '';
       var matching = getStickersForProduct(productCode);
       var selStickerId = ps.sticker_type || '';
-      var stInput = ps.sticker_input || 'custom';
 
       var stTypeHtml = '';
       if (matching.length === 0) {
@@ -1129,20 +1144,10 @@
 
     return `
       <div class="fade-in">
-        <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">희망 출고일 ${required ? '<span class="text-rose-500">*</span>' : ''}</h2>
-        <div class="text-sm text-slate-500 mb-5 leading-relaxed">
-          <p>출고일을 선택해 주세요.</p>
-          <p class="text-[13px] text-slate-400">당일출고는 오전 11시에 마감됩니다.</p>
-        </div>
+        <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">스티커 선택</h2>
+        <p class="text-sm text-slate-500 mb-5">각 상품의 스티커를 선택해주세요.</p>
 
-        <!-- 인라인 캘린더 -->
-        ${renderCalendar()}
-
-        <!-- 상품별 스티커 -->
         ${products.length > 0 ? `
-          <h3 class="text-[16px] font-bold text-slate-900 mb-1 mt-7 tracking-tight">상품별 정보</h3>
-          <p class="text-sm text-slate-500 mb-3">각 상품의 스티커를 선택해주세요.</p>
-
           <!-- 스티커 안내 FAQ (접기/펼치기, 기본 펼침) -->
           <details class="rounded-2xl mb-4 overflow-hidden" style="background:linear-gradient(135deg,rgba(99,102,241,0.06),rgba(139,92,246,0.06));border:1px solid rgba(99,102,241,0.15)" open>
             <summary class="flex items-center gap-2.5 p-4 cursor-pointer select-none list-none" style="list-style:none">
@@ -1175,7 +1180,7 @@
     `;
   }
 
-  function renderStep2() {
+  function renderStep3() {
     const bankInfo = orderData?.bank_info || { bank_name: '신한은행', account_number: '100-013-801261', account_holder: '바른컴퍼니' };
     const total = getTotalAmount();
     const expressFee = formState.shipping_type === 'express' ? getExpressFee() : 0;
@@ -1296,7 +1301,7 @@
     `;
   }
 
-  function renderStep3() {
+  function renderStep4() {
     return `
       <div class="fade-in">
         <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">요청사항</h2>
@@ -1315,7 +1320,7 @@
     `;
   }
 
-  function renderStep4() {
+  function renderStep5() {
     const products = orderData?.products || [];
     const total = getTotalAmount();
     const bankInfo = orderData?.bank_info || {};
@@ -1390,12 +1395,12 @@
             </p>
           </div>
 
-          <!-- Per-product info -->
+          <!-- Per-product info (스티커 선택) -->
           ${(orderData?.products || []).length > 0 ? `
           <div>
             <div class="flex items-center justify-between mb-2 px-1">
               <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">상품별 정보</h3>
-              ${_editBtn(1)}
+              ${_editBtn(2)}
             </div>
             ${productsHtml}
           </div>
@@ -1405,7 +1410,7 @@
           <div class="surface p-4">
             <div class="flex items-center justify-between mb-3">
               <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">결제정보</h3>
-              ${_editBtn(2)}
+              ${_editBtn(3)}
             </div>
             <div class="space-y-2">
               <div class="flex justify-between items-center text-sm">
@@ -1440,7 +1445,7 @@
             <div class="surface p-4">
               <div class="flex items-center justify-between mb-2">
                 <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">요청사항</h3>
-                ${_editBtn(3)}
+                ${_editBtn(4)}
               </div>
               <p class="text-sm text-slate-900 whitespace-pre-wrap leading-relaxed">${formState.customer_request}</p>
             </div>
@@ -1448,7 +1453,7 @@
             <div class="surface p-4">
               <div class="flex items-center justify-between">
                 <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">요청사항</h3>
-                <button class="pressable text-[11px] font-bold px-2.5 py-1 rounded-lg gradient-brand-soft" style="color:var(--brand-600)" data-action="goToStep" data-step="3">추가</button>
+                <button class="pressable text-[11px] font-bold px-2.5 py-1 rounded-lg gradient-brand-soft" style="color:var(--brand-600)" data-action="goToStep" data-step="4">추가</button>
               </div>
               <p class="text-sm text-slate-400 mt-2">요청사항 없음</p>
             </div>
@@ -1617,7 +1622,7 @@
     return '<div id="sticker-input-wrap-' + idx + '">' + headerHtml + fieldsHtml + '</div>';
   }
 
-  const STEP_RENDERERS = [renderStep0, renderStep1, renderStep2, renderStep3, renderStep4];
+  const STEP_RENDERERS = [renderStep0, renderStep1, renderStep2, renderStep3, renderStep4, renderStep5];
 
   // ============================================
   // 스티커 라이트박스 모달
