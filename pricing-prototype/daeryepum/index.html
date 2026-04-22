@@ -1367,8 +1367,22 @@ nav a:hover{color:var(--gray-900)}
         <textarea id="bg-edit-request" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px;resize:vertical"></textarea>
       </div>
 
+      <!-- 고객 화면 보안 링크 (HMAC 서명) -->
+      <details style="margin-top:16px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;padding:8px 12px">
+        <summary style="cursor:pointer;font-size:12px;font-weight:600;color:#4338ca;list-style:disclosure-closed">🔐 고객 화면 보안 링크 (HMAC 서명)</summary>
+        <div style="margin-top:8px;font-size:11px;color:var(--gray-600);line-height:1.5">
+          <p style="margin:0 0 6px">관리자가 발급한 <b>서명된 링크</b>는 위·변조나 주문번호 유추 접근을 차단합니다.</p>
+          <div id="bg-edit-signed-url-box" style="display:flex;gap:6px;align-items:center;margin-top:8px">
+            <input id="bg-edit-signed-url" type="text" readonly placeholder="발급 버튼을 눌러주세요" style="flex:1;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-family:monospace;font-size:11px;background:#fff" />
+            <button class="btn" onclick="generateBgSignedUrl()" style="font-size:11px;padding:5px 10px">발급</button>
+            <button class="btn" onclick="copyBgSignedUrl()" style="font-size:11px;padding:5px 10px">복사</button>
+          </div>
+          <div id="bg-edit-signed-url-meta" style="margin-top:6px;color:var(--gray-500);font-size:10px"></div>
+        </div>
+      </details>
+
       <!-- 고객 접근 로그 (감사용) -->
-      <details style="margin-top:16px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px;padding:8px 12px">
+      <details style="margin-top:12px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px;padding:8px 12px">
         <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--gray-600);list-style:disclosure-closed">🔍 최근 고객 접근 이력 (로그)</summary>
         <div id="bg-edit-audit-log" style="margin-top:8px;max-height:240px;overflow-y:auto;font-size:11px">
           <div style="color:var(--gray-400);padding:12px;text-align:center">불러오는 중…</div>
@@ -5776,6 +5790,44 @@ function openBgOrderEdit(info) {
   loadBgEditAuditLog(info.order_id);
 }
 
+/** 수정 모달 — HMAC 서명 URL 발급 (관리자 → 고객에게 안전한 접근 링크 전달용) */
+async function generateBgSignedUrl() {
+  const orderId = document.getElementById('bg-edit-order-id').value;
+  const $input = document.getElementById('bg-edit-signed-url');
+  const $meta = document.getElementById('bg-edit-signed-url-meta');
+  if (!orderId) { alert('주문번호가 없습니다.'); return; }
+  $meta.textContent = '발급 중…';
+  try {
+    const res = await fetch(`${API}/api/bg/audit/sign-url?oid=${encodeURIComponent(orderId)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '발급 실패');
+    $input.value = data.url;
+    const expires = data.expires_at ? new Date(data.expires_at).toLocaleString('ko-KR') : '-';
+    const strictTag = data.strict_mode ? '<span style="color:#dc2626">STRICT</span>' : '<span style="color:#6b7280">WARN</span>';
+    $meta.innerHTML = `유효기간: ~${expires} · 모드: ${strictTag} · 이 링크를 고객에게 전달하면 서명 검증된 접근만 허용됩니다.`;
+  } catch (e) {
+    $meta.textContent = '실패: ' + e.message;
+  }
+}
+
+/** 수정 모달 — 서명 URL 클립보드 복사 */
+function copyBgSignedUrl() {
+  const $input = document.getElementById('bg-edit-signed-url');
+  const url = $input.value;
+  if (!url) { alert('먼저 발급 버튼을 눌러주세요.'); return; }
+  $input.select();
+  try {
+    navigator.clipboard.writeText(url).then(() => {
+      showToast && showToast('✅ 링크가 복사되었습니다');
+    }).catch(() => {
+      document.execCommand && document.execCommand('copy');
+      showToast && showToast('✅ 링크가 복사되었습니다');
+    });
+  } catch {
+    document.execCommand && document.execCommand('copy');
+  }
+}
+
 /** 수정 모달 하단 접근 로그 섹션 로드 */
 async function loadBgEditAuditLog(orderId) {
   const $log = document.getElementById('bg-edit-audit-log');
@@ -5792,10 +5844,12 @@ async function loadBgEditAuditLog(orderId) {
     const actionEmoji = {
       view: '👁️', submit: '✏️', reset: '🔄', not_found: '❓',
       search: '🔍', login_success: '🔑', login_fail: '🚫',
+      rate_limited: '🚦', invalid_signature: '⚠️',
     };
     const actionLabel = {
       view: '조회', submit: '제출', reset: '초기화', not_found: '찾을수없음',
       search: '검색', login_success: '로그인성공', login_fail: '로그인실패',
+      rate_limited: '요청제한초과', invalid_signature: '서명오류',
     };
     $log.innerHTML = '<table style="width:100%;border-collapse:collapse">'
       + '<thead><tr style="border-bottom:1px solid var(--gray-200);color:var(--gray-500);font-size:10px">'

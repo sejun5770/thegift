@@ -4,6 +4,8 @@
 const url = require('url');
 const store = require('./store');
 const { logAccess, getRecentLogs } = require('./audit-log');
+const { check: rlCheck, rateLimitResponse, LIMITS: RL_LIMITS } = require('./rate-limit');
+const signedUrl = require('./signed-url');
 
 // 답례품 필터 SQL 조건 (관리자 통합현황과 동일: S2_Card.Card_Div = 'D01')
 // custom_order_item + S2_Card JOIN 후 사용. c 에일리어스 사용.
@@ -38,6 +40,12 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
   // POST /api/bg/auth/login - 바른손카드 회원 로그인
   if (pathname === '/api/bg/auth/login' && method === 'POST') {
+    // Rate limit (무차별 로그인 대응)
+    const rl = rlCheck(req, 'login', RL_LIMITS.login);
+    if (!rl.allowed) {
+      logAccess(req, 'rate_limited', null, { status_code: 429, metadata: { action: 'login', retry_after: rl.retryAfterSec } });
+      return rateLimitResponse(res, rl);
+    }
     try {
       const body = await parseBody(req);
       const { uid, password } = body;
@@ -95,6 +103,12 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
   // GET /api/bg/orders/search?phone=xxx&name=xxx - 고객 주문 검색 (AND 조건)
   if (pathname === '/api/bg/orders/search' && method === 'GET') {
+    // Rate limit (이름+전화 열거 공격 대응)
+    const rl = rlCheck(req, 'search', RL_LIMITS.search);
+    if (!rl.allowed) {
+      logAccess(req, 'rate_limited', null, { status_code: 429, metadata: { action: 'search', retry_after: rl.retryAfterSec } });
+      return rateLimitResponse(res, rl);
+    }
     const phone = (query.phone || '').replace(/\D/g, '');
     const name = (query.name || '').trim();
     if (!phone || !name) {
@@ -131,6 +145,28 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   const orderDetailMatch = pathname.match(/^\/api\/bg\/orders\/([^/]+)$/);
   if (orderDetailMatch && method === 'GET') {
     const orderId = decodeURIComponent(orderDetailMatch[1]);
+    // Rate limit (한 IP가 여러 주문ID 열거하는 경우 차단)
+    const rl = rlCheck(req, 'view', RL_LIMITS.view);
+    if (!rl.allowed) {
+      logAccess(req, 'rate_limited', orderId, { status_code: 429, metadata: { action: 'view', retry_after: rl.retryAfterSec } });
+      return rateLimitResponse(res, rl);
+    }
+    // HMAC 서명 검증 (Phase 3)
+    //  - STRICT 모드: 서명 누락/무효 시 403 (관리자가 발급한 링크만 접근 허용)
+    //  - 비-STRICT 모드(기본): 기존 LMS bare URL 호환 — 검증 결과를 감사로그에만 기록
+    if (query.t || query.sig || signedUrl.STRICT) {
+      const sigCheck = signedUrl.verify(orderId, query.t, query.sig);
+      if (!sigCheck.valid) {
+        logAccess(req, 'invalid_signature', orderId, {
+          status_code: signedUrl.STRICT ? 403 : 200,
+          metadata: { reason: sigCheck.reason, strict: signedUrl.STRICT, has_t: !!query.t, has_sig: !!query.sig },
+        });
+        if (signedUrl.STRICT) {
+          return json(res, { error: '유효한 접근 링크가 아닙니다. 발송된 링크로 다시 접속해주세요.' }, 403);
+        }
+        // 비-STRICT 모드는 통과시킴 (운영 도입 전 모니터링 단계)
+      }
+    }
     try {
       const pool = await getPool();
       // ETC-{seq} 형식이면 바른손몰 ETC 주문, 그 외는 custom_order
@@ -325,6 +361,12 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   const customerInfoMatch = pathname.match(/^\/api\/bg\/orders\/([^/]+)\/customer-info$/);
   if (customerInfoMatch && method === 'POST') {
     const orderId = decodeURIComponent(customerInfoMatch[1]);
+    // Rate limit (제출은 본래 1회성이므로 보수적)
+    const rl = rlCheck(req, 'submit', RL_LIMITS.submit);
+    if (!rl.allowed) {
+      logAccess(req, 'rate_limited', orderId, { status_code: 429, metadata: { action: 'submit', retry_after: rl.retryAfterSec } });
+      return rateLimitResponse(res, rl);
+    }
     try {
       const body = await parseBody(req);
 
@@ -621,6 +663,29 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       since: query.since,
     });
     return json(res, { logs });
+  }
+
+  // GET /api/bg/audit/sign-url?oid=BHS-1234567&base=https://...  - 관리자 서명 URL 발급
+  // 관리자가 수동으로 고객에게 안전한 링크를 보낼 때 사용 (LMS 자동 발송측은 미연동)
+  if (pathname === '/api/bg/audit/sign-url' && method === 'GET') {
+    const oid = (query.oid || '').trim();
+    if (!oid) return json(res, { error: 'oid 가 필요합니다.' }, 400);
+    // base 미지정 시 요청 호스트 기준 자동 구성
+    const proto = (req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim();
+    const host = req.headers['x-forwarded-host'] || req.headers.host || 'localhost';
+    const defaultBase = `${proto}://${host}/c/barungift/order-info`;
+    const base = (query.base || defaultBase).trim();
+    const url = signedUrl.buildUrl(base, oid);
+    const { t, sig } = signedUrl.sign(oid);
+    return json(res, {
+      url,
+      oid,
+      t,
+      sig,
+      max_age_sec: signedUrl.MAX_AGE_SEC,
+      strict_mode: signedUrl.STRICT,
+      expires_at: new Date((t + signedUrl.MAX_AGE_SEC) * 1000).toISOString(),
+    });
   }
 
   // GET /api/bg/shipping-config - 공통 출고일 설정 조회
