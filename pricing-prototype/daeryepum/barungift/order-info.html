@@ -534,7 +534,9 @@
   // ============================================
   // Constants
   // ============================================
-  const STEP_LABELS = ['출고 방식', '희망출고일', '스티커 선택', '결제정보', '요청사항', '최종 확인'];
+  // 스텝 순서: 스티커(상품 개인화) → 희망출고일(+자동 출고방식) → 결제정보(조건부) → 요청사항 → 최종 확인
+  // 결제정보는 getTotalAmount() === 0 일 때 네비게이션에서 자동 스킵 (getVisibleSteps)
+  const STEP_LABELS = ['스티커 선택', '희망출고일', '결제정보', '요청사항', '최종 확인'];
   const RECEIPT_TYPES = { personal: '소득공제용 (휴대폰번호)', business: '지출증빙용 (사업자번호)' };
   const HOLIDAYS_2026 = ['2026-01-01','2026-02-16','2026-02-17','2026-02-18','2026-03-01','2026-05-05','2026-05-24','2026-06-06','2026-08-15','2026-09-24','2026-09-25','2026-09-26','2026-10-03','2026-10-09','2026-12-25'];
   // BASE_PATH 자동 감지: /c/barungift/order-info → '/c/barungift'
@@ -613,6 +615,12 @@
     return urlStr + sep + 't=' + encodeURIComponent(t) + '&sig=' + encodeURIComponent(sig);
   }
 
+  // 스텝 구조가 바뀔 때마다 증가시켜 구버전 세션 데이터를 무시하게 함.
+  // v1: 원본 5스텝 ('출고방식','희망출고일','결제정보','요청사항','최종확인')
+  // v2: 6스텝 ('출고방식','희망출고일','스티커선택','결제정보','요청사항','최종확인')
+  // v3: 5스텝 재구성 — 스티커 맨앞으로, 출고방식 스텝 제거, 결제 조건부
+  const FORM_STATE_VERSION = 3;
+
   function storageKey(orderId) {
     return 'bg_form_' + orderId;
   }
@@ -620,7 +628,11 @@
   function saveFormState() {
     if (!orderData) return;
     try {
-      sessionStorage.setItem(storageKey(orderData.order_id), JSON.stringify({ currentStep, formState }));
+      sessionStorage.setItem(storageKey(orderData.order_id), JSON.stringify({
+        v: FORM_STATE_VERSION,
+        currentStep,
+        formState,
+      }));
     } catch(e) { /* ignore */ }
   }
 
@@ -630,9 +642,15 @@
       const raw = sessionStorage.getItem(storageKey(orderData.order_id));
       if (raw) {
         const saved = JSON.parse(raw);
-        if (saved.formState) formState = { ...formState, ...saved.formState };
-        if (typeof saved.currentStep === 'number' && saved.currentStep >= 0 && saved.currentStep < STEP_LABELS.length) {
-          currentStep = saved.currentStep;
+        // 구버전 저장값은 무시 (스텝 인덱스 의미가 달라짐)
+        if (saved.v !== FORM_STATE_VERSION) {
+          console.info('[form-state] 구버전 세션 감지 — 무시:', saved.v, '→', FORM_STATE_VERSION);
+          sessionStorage.removeItem(storageKey(orderData.order_id));
+        } else {
+          if (saved.formState) formState = { ...formState, ...saved.formState };
+          if (typeof saved.currentStep === 'number' && saved.currentStep >= 0 && saved.currentStep < STEP_LABELS.length) {
+            currentStep = saved.currentStep;
+          }
         }
       }
     } catch(e) { /* ignore */ }
@@ -755,12 +773,16 @@
     return cur;
   }
 
-  /** 접수일 계산 (컷오프/영업일 기준, 고객 출고방식 선택 반영) */
-  function getReceiptDate() {
+  /**
+   * 접수일 계산 (컷오프/영업일 기준)
+   * @param {'express'|'normal'} [mode] — 지정 없으면 formState.shipping_type 사용 (구 호환)
+   */
+  function getReceiptDate(mode) {
     const s = getSettings();
     const today = todayStr();
     const isTodayBiz = !isDateClosed(today);
-    const isExpress = formState.shipping_type === 'express';
+    const effectiveMode = mode || (formState.shipping_type === 'express' ? 'express' : 'normal');
+    const isExpress = effectiveMode === 'express';
 
     // 빠른출고(오늘출발) + 컷오프 설정 시
     if (isExpress && s.shipping_type === 'today_shipping' && s.cutoff_enabled) {
@@ -780,45 +802,79 @@
     return today;
   }
 
-  /** 최소 선택 가능일 계산 */
-  function getMinDate() {
+  /**
+   * 빠른출고(오늘출발) 가능 날짜 범위.
+   * 빠른출고가 불가능한 설정이면 null 반환.
+   * @returns {{min:string, max:string}|null}
+   */
+  function getExpressRange() {
     const s = getSettings();
-    const today = todayStr();
+    if (!isExpressAvailable()) return null;
+    // express 는 shipping_type === 'today_shipping' 일 때만 당일 범위 의미가 있음
+    if (s.shipping_type !== 'today_shipping') return null;
+    const receipt = getReceiptDate('express');
     const leadTime = s.lead_time_days ?? 2;
-    const isExpress = formState.shipping_type === 'express';
-
-    if (isExpress && s.shipping_type === 'today_shipping') {
-      // 빠른출고(오늘출발): 최소 선택일 = 접수일 (receipt)
-      // - 컷오프 ON + 영업일 + 컷오프 전 → 당일(today) 출고 가능
-      // - 컷오프 OFF / 컷오프 후 / 비영업일 → 익영업일 출고 가능
-      // 실제 선택 범위는 receipt ~ receipt + leadTime 영업일 (관리자 프리뷰와 동일)
-      return getReceiptDate();
-    }
-
-    // 일반출고(희망출고): max(주문일+최소선택가능일, 접수일+리드타임영업일)
-    const minSelectDays = s.min_select_days ?? 3;
-    const calendarMin = addDays(today, minSelectDays);
-    const receipt = getReceiptDate();
-    const bizMin = addBizDays(receipt, leadTime);
-    const later = calendarMin > bizMin ? calendarMin : bizMin;
-    return nextBizDay(later);
+    const max = leadTime > 0 ? addBizDays(receipt, leadTime) : receipt;
+    return { min: receipt, max };
   }
 
-  function getMaxDate() {
+  /**
+   * 일반출고(희망출고) 가능 날짜 범위.
+   * @returns {{min:string, max:string}}
+   */
+  function getNormalRange() {
     const s = getSettings();
-    const isExpress = formState.shipping_type === 'express';
-
-    if (isExpress && s.shipping_type === 'today_shipping') {
-      // 빠른출고(오늘출발): 최대 선택일 = 접수일 + 리드타임 영업일
-      // leadTime=0 → 당일만, leadTime=2 → receipt~receipt+2일 범위
-      const leadTime = s.lead_time_days ?? 2;
-      const receipt = getReceiptDate();
-      return addBizDays(receipt, leadTime);
-    }
-
-    // 일반출고: 최대 선택가능일
+    const today = todayStr();
+    const minSelectDays = s.min_select_days ?? 3;
+    const leadTime = s.lead_time_days ?? 2;
+    const receipt = getReceiptDate('normal');
+    const calendarMin = addDays(today, minSelectDays);
+    const bizMin = addBizDays(receipt, leadTime);
+    const later = calendarMin > bizMin ? calendarMin : bizMin;
+    const min = nextBizDay(later);
     const maxDays = s.max_select_days || 60;
-    return addDays(todayStr(), maxDays);
+    const max = addDays(today, maxDays);
+    return { min, max };
+  }
+
+  /**
+   * 특정 날짜가 속한 존(zone) 판정
+   * @returns {'closed'|'express'|'normal'} closed=선택불가, express=빠른출고존, normal=일반출고존
+   * 빠른/일반 존이 겹치는 경우엔 빠른출고(고객 유리하지 않은쪽)보다 express 우선 표기.
+   * 실제 클릭시 존에 따라 shipping_type 이 결정됨.
+   */
+  function getDateZone(dateStr) {
+    if (!dateStr) return 'closed';
+    if (isDateClosed(dateStr)) return 'closed';
+    const expr = getExpressRange();
+    const norm = getNormalRange();
+    const inExpr = expr && dateStr >= expr.min && dateStr <= expr.max;
+    const inNorm = norm && dateStr >= norm.min && dateStr <= norm.max;
+    if (inExpr) return 'express';
+    if (inNorm) return 'normal';
+    return 'closed';
+  }
+
+  /** 통합 최소 선택 가능일 (빠른·일반 중 더 이른 쪽) */
+  function getMinDate() {
+    const expr = getExpressRange();
+    const norm = getNormalRange();
+    const candidates = [];
+    if (expr) candidates.push(expr.min);
+    if (norm) candidates.push(norm.min);
+    if (!candidates.length) return norm ? norm.min : todayStr();
+    return candidates.reduce((a, b) => a < b ? a : b);
+  }
+
+  /** 통합 최대 선택 가능일 (빠른·일반 중 더 늦은 쪽) */
+  function getMaxDate() {
+    const expr = getExpressRange();
+    const norm = getNormalRange();
+    const candidates = [];
+    if (expr) candidates.push(expr.max);
+    if (norm) candidates.push(norm.max);
+    if (!candidates.length) return norm ? norm.max : addDays(todayStr(), 60);
+    return candidates.reduce((a, b) => a > b ? a : b);
   }
 
   function getExpressFee() {
@@ -873,24 +929,49 @@
   }
 
   // ============================================
-  // Step indicator
+  // Step indicator / Visible steps
   // ============================================
+
+  /**
+   * 현재 formState 기준으로 실제 노출되는 스텝 인덱스 배열.
+   * - 결제정보(index 2) 는 getTotalAmount() === 0 이면 건너뜀 (일반출고 또는 무료 빠른출고)
+   * @returns {number[]} 예: [0,1,2,3,4] (결제 있음) / [0,1,3,4] (결제 없음)
+   */
+  function getVisibleSteps() {
+    const steps = [];
+    for (let i = 0; i < STEP_LABELS.length; i++) {
+      if (i === 2 && getTotalAmount() <= 0) continue; // 결제정보 스킵
+      steps.push(i);
+    }
+    return steps;
+  }
+
+  /** visibleSteps 배열에서 currentStep 의 position (0-based) */
+  function getVisibleIndex() {
+    const vis = getVisibleSteps();
+    const idx = vis.indexOf(currentStep);
+    return idx < 0 ? 0 : idx;
+  }
+
   function renderStepIndicator() {
     // 게이지 바 + 카운터 + 현재 라벨 + 마이크로 단계 라벨
-    const total = STEP_LABELS.length;
-    const pct = Math.round(((currentStep + 1) / total) * 100);
+    const visible = getVisibleSteps();
+    const total = visible.length;
+    const visIdx = getVisibleIndex();
+    const pct = Math.round(((visIdx + 1) / total) * 100);
     const fill = document.getElementById('stepFill');
     const counter = document.getElementById('stepCounter');
     const currentLabel = document.getElementById('stepCurrentLabel');
     if (fill) fill.style.width = pct + '%';
-    if (counter) counter.textContent = `STEP ${currentStep + 1} / ${total}`;
+    if (counter) counter.textContent = `STEP ${visIdx + 1} / ${total}`;
     if (currentLabel) currentLabel.textContent = STEP_LABELS[currentStep] || '';
 
-    // 마이크로 라벨 (활성 단계만 강조)
+    // 마이크로 라벨 — 숨겨진 스텝은 미노출
     $stepIndicator.innerHTML = '';
-    STEP_LABELS.forEach((label, i) => {
+    visible.forEach((i) => {
+      const label = STEP_LABELS[i];
       const span = document.createElement('span');
-      const isDone = i < currentStep;
+      const isDone = visible.indexOf(i) < visIdx;
       const isActive = i === currentStep;
       span.className = 'transition-colors ' +
         (isActive ? 'text-slate-700 font-semibold' :
@@ -905,16 +986,7 @@
   // ============================================
   function isStepValid(step) {
     switch (step) {
-      case 0: return !!formState.shipping_type;
-      case 1: {
-        // 희망출고일 — 필수시 유효한 날짜 선택 필요
-        const required = isDateRequired();
-        if (required) {
-          if (!formState.desired_ship_date || isDateClosed(formState.desired_ship_date)) return false;
-        }
-        return true;
-      }
-      case 2: {
+      case 0: {
         // 스티커 선택 — 직접입력 모드 스티커는 필수 필드 검증
         const products = orderData?.products || [];
         for (let i = 0; i < products.length; i++) {
@@ -922,7 +994,7 @@
           if (ps.sticker_input === 'custom' && ps.sticker_type) {
             const matching = getStickersForProduct(products[i].product_code);
             const sticker = matching.find(s => s.id === ps.sticker_type);
-            // custom_fields가 비어있으면 기본 fallback 필드(text)를 필수로 간주
+            // custom_fields 비어있으면 기본 fallback 필드(text)를 필수로 간주
             const fieldsToCheck = (sticker && Array.isArray(sticker.custom_fields) && sticker.custom_fields.length > 0)
               ? sticker.custom_fields
               : [{ field_id: 'text', field_label: '스티커 문구', required: true }];
@@ -937,7 +1009,16 @@
         }
         return true;
       }
-      case 3: {
+      case 1: {
+        // 희망출고일 — 날짜 + shipping_type 둘 다 확정 필요
+        const required = isDateRequired();
+        if (required) {
+          if (!formState.desired_ship_date || isDateClosed(formState.desired_ship_date)) return false;
+        }
+        if (!formState.shipping_type) return false;
+        return true;
+      }
+      case 2: {
         // 결제정보 — 현금영수증 신청시 타입/번호 필수
         if (formState.cash_receipt_yn) {
           if (!formState.receipt_type) return false;
@@ -945,15 +1026,19 @@
         }
         return true;
       }
-      case 4: return true; // 요청사항 (선택)
-      case 5: return true; // 최종확인
+      case 3: return true; // 요청사항 (선택)
+      case 4: return true; // 최종확인
       default: return false;
     }
   }
 
   function updateNavButtons() {
-    $btnBack.classList.toggle('hidden', currentStep === 0);
-    const isLast = currentStep === STEP_LABELS.length - 1;
+    // visibleSteps 배열 기준으로 현재 위치 / last 판단
+    const visible = getVisibleSteps();
+    const visIdx = getVisibleIndex();
+    const isFirst = visIdx === 0;
+    const isLast = visIdx === visible.length - 1;
+    $btnBack.classList.toggle('hidden', isFirst);
     $btnNext.textContent = isLast ? '제출하기 🎉' : '다음';
     $btnNext.disabled = !isStepValid(currentStep);
     if (isLast) {
@@ -965,68 +1050,29 @@
     }
   }
 
+  /** visibleSteps 배열 기준으로 다음/이전 스텝 이동 */
+  function goNextStep() {
+    const visible = getVisibleSteps();
+    const visIdx = getVisibleIndex();
+    if (visIdx < visible.length - 1) {
+      currentStep = visible[visIdx + 1];
+      renderCurrentStep();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }
+  function goPrevStep() {
+    const visible = getVisibleSteps();
+    const visIdx = getVisibleIndex();
+    if (visIdx > 0) {
+      currentStep = visible[visIdx - 1];
+      renderCurrentStep();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }
+
   // ============================================
   // Step renderers
   // ============================================
-
-  function renderStep0() {
-    const expressAvail = isExpressAvailable();
-    const expressFee = getExpressFee();
-    const isNormal = formState.shipping_type === 'normal';
-    const isExpress = formState.shipping_type === 'express';
-
-    return `
-      <div class="fade-in">
-        <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">출고 방식을 선택해주세요</h2>
-        <p class="text-sm text-slate-500 mb-6">주문하신 상품의 출고 방식을 선택합니다.</p>
-
-        <div class="space-y-3">
-          <div class="card-select cursor-pointer border-2 p-5 bg-white ${isNormal ? 'selected' : 'border-slate-200'}" data-action="selectShipping" data-value="normal">
-            <div class="flex items-start gap-4">
-              <div class="w-12 h-12 rounded-2xl gradient-brand-soft flex items-center justify-center flex-shrink-0 mt-0.5">
-                <span class="text-2xl">📦</span>
-              </div>
-              <div class="flex-1">
-                <div class="flex items-center justify-between">
-                  <h3 class="font-bold text-slate-900 text-[15px]">일반출고</h3>
-                  <span class="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">무료</span>
-                </div>
-                <p class="text-[13px] text-slate-500 mt-1 leading-relaxed">일반 제작 일정에 따라 출고됩니다.</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="card-select ${!expressAvail ? 'disabled' : 'cursor-pointer'} border-2 p-5 bg-white ${isExpress ? 'selected' : 'border-slate-200'}" data-action="${expressAvail ? 'selectShipping' : ''}" data-value="express">
-            <div class="flex items-start gap-4">
-              <div class="w-12 h-12 rounded-2xl ${expressAvail ? 'gradient-celebrate' : 'bg-slate-100'} flex items-center justify-center flex-shrink-0 mt-0.5">
-                ${expressAvail
-                  ? '<svg viewBox="0 0 24 24" width="26" height="26" fill="#4F46E5" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 1px 2px rgba(67,56,202,0.3))"><path d="M13 2L3 14h7l-1 8 11-12h-7l0-8z"/></svg>'
-                  : '<span class="text-2xl">⏸️</span>'}
-              </div>
-              <div class="flex-1">
-                <div class="flex items-center justify-between">
-                  <h3 class="font-bold ${expressAvail ? 'text-slate-900' : 'text-slate-400'} text-[15px]">빠른출고</h3>
-                  ${expressFee > 0
-                    ? '<span class="text-[11px] font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full">+' + formatMoney(expressFee) + '</span>'
-                    : expressAvail ? '<span class="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">무료</span>' : ''}
-                </div>
-                <p class="text-[13px] ${expressAvail ? 'text-slate-500' : 'text-slate-400'} mt-1 leading-relaxed">
-                  ${expressAvail ? '빠른 일정으로 우선 제작 후 출고됩니다.' : '이 상품은 빠른출고가 불가합니다.'}
-                </p>
-                ${expressAvail && expressFee > 0 ? `
-                  <div class="mt-3 px-3 py-2.5 rounded-xl gradient-celebrate bg-opacity-20" style="background:linear-gradient(135deg,rgba(253,230,138,0.5),rgba(245,158,11,0.15))">
-                    <p class="text-[12px] text-amber-900">
-                      💰 빠른출고 추가비용 <span class="font-bold">${formatMoney(expressFee)}</span>
-                    </p>
-                  </div>
-                ` : ''}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-  }
 
   /** 상품에 매핑된 스티커 목록 */
   function getStickersForProduct(productCode) {
@@ -1071,8 +1117,8 @@
     `;
   }
 
-  /** 스티커 선택 전용 스텝 (상품별 스티커 카드 + 직접입력 UI + FAQ) */
-  function renderStep2() {
+  /** 스티커 선택 (Step 0) — 상품 개인화를 먼저 받아 고객 몰입도 확보 */
+  function renderStep0() {
     const products = orderData?.products || [];
 
     var cardsHtml = products.map(function(p, i) {
@@ -1180,7 +1226,8 @@
     `;
   }
 
-  function renderStep3() {
+  /** 결제정보 (Step 2) — 빠른출고 + 추가비용 있을 때만 진입 (getVisibleSteps 에서 필터) */
+  function renderStep2() {
     const bankInfo = orderData?.bank_info || { bank_name: '신한은행', account_number: '100-013-801261', account_holder: '바른컴퍼니' };
     const total = getTotalAmount();
     const expressFee = formState.shipping_type === 'express' ? getExpressFee() : 0;
@@ -1301,7 +1348,8 @@
     `;
   }
 
-  function renderStep4() {
+  /** 요청사항 (Step 3) — 선택 */
+  function renderStep3() {
     return `
       <div class="fade-in">
         <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">요청사항</h2>
@@ -1320,7 +1368,8 @@
     `;
   }
 
-  function renderStep5() {
+  /** 최종 확인 (Step 4) */
+  function renderStep4() {
     const products = orderData?.products || [];
     const total = getTotalAmount();
     const bankInfo = orderData?.bank_info || {};
@@ -1372,19 +1421,18 @@
         <p class="text-sm text-slate-500 mb-6">아래 내용이 맞는지 확인 후 제출해주세요.</p>
 
         <div class="space-y-3">
-          <!-- Shipping type -->
-          <div class="surface p-4">
-            <div class="flex items-center justify-between mb-2">
-              <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">출고 방식</h3>
+          <!-- Per-product info (스티커 선택) — Step 0 -->
+          ${(orderData?.products || []).length > 0 ? `
+          <div>
+            <div class="flex items-center justify-between mb-2 px-1">
+              <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">상품별 정보</h3>
               ${_editBtn(0)}
             </div>
-            <p class="text-[14px] font-semibold text-slate-900">
-              ${formState.shipping_type === 'express' ? '⚡ 빠른출고' : '📦 일반출고'}
-              ${expressFee > 0 ? ' <span class="text-amber-600 font-bold">(+' + formatMoney(expressFee) + ')</span>' : ''}
-            </p>
+            ${productsHtml}
           </div>
+          ` : ''}
 
-          <!-- 주문 단위 출고일 -->
+          <!-- 희망 출고일 + 출고방식 (Step 1 — 통합됨) -->
           <div class="surface p-4">
             <div class="flex items-center justify-between mb-2">
               <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">희망 출고일</h3>
@@ -1393,31 +1441,24 @@
             <p class="text-[14px] font-semibold text-slate-900">
               ${formState.desired_ship_date ? '📅 ' + formatDate(formState.desired_ship_date) : '<span class="text-slate-400 font-normal">미선택 (가장 빠른 출고일 자동 적용)</span>'}
             </p>
+            <p class="text-[12px] mt-1 ${formState.shipping_type === 'express' ? 'text-amber-700 font-semibold' : 'text-slate-500'}">
+              ${formState.shipping_type === 'express' ? '⚡ 빠른출고' : '📦 일반출고'}
+              ${expressFee > 0 ? ' · <span class="text-amber-700 font-bold">+' + formatMoney(expressFee) + '</span>' : ' · <span class="text-emerald-600 font-semibold">무료</span>'}
+            </p>
           </div>
 
-          <!-- Per-product info (스티커 선택) -->
-          ${(orderData?.products || []).length > 0 ? `
-          <div>
-            <div class="flex items-center justify-between mb-2 px-1">
-              <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">상품별 정보</h3>
-              ${_editBtn(2)}
-            </div>
-            ${productsHtml}
-          </div>
-          ` : ''}
-
-          <!-- Payment info -->
+          <!-- Payment info (Step 2 — 결제금액 있을 때만) -->
+          ${total > 0 ? `
           <div class="surface p-4">
             <div class="flex items-center justify-between mb-3">
               <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">결제정보</h3>
-              ${_editBtn(3)}
+              ${_editBtn(2)}
             </div>
             <div class="space-y-2">
               <div class="flex justify-between items-center text-sm">
                 <span class="text-slate-500">추가 결제금액</span>
-                <span class="font-bold ${total > 0 ? 'text-gradient-brand text-base' : 'text-emerald-600'}">${total > 0 ? formatMoney(total) : '없음'}</span>
+                <span class="font-bold text-gradient-brand text-base">${formatMoney(total)}</span>
               </div>
-              ${total > 0 ? `
               <div class="flex justify-between text-sm">
                 <span class="text-slate-500">입금 계좌</span>
                 <span class="text-slate-900 font-medium">${bankInfo.bank_name || ''} ${bankInfo.account_number || ''}</span>
@@ -1436,16 +1477,17 @@
                   <span class="text-slate-500">현금영수증</span>
                   <span class="text-slate-400">미신청</span>
                 </div>
-              `}` : ''}
+              `}
             </div>
           </div>
+          ` : ''}
 
-          <!-- Customer request -->
+          <!-- Customer request (Step 3) -->
           ${formState.customer_request ? `
             <div class="surface p-4">
               <div class="flex items-center justify-between mb-2">
                 <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">요청사항</h3>
-                ${_editBtn(4)}
+                ${_editBtn(3)}
               </div>
               <p class="text-sm text-slate-900 whitespace-pre-wrap leading-relaxed">${formState.customer_request}</p>
             </div>
@@ -1453,7 +1495,7 @@
             <div class="surface p-4">
               <div class="flex items-center justify-between">
                 <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">요청사항</h3>
-                <button class="pressable text-[11px] font-bold px-2.5 py-1 rounded-lg gradient-brand-soft" style="color:var(--brand-600)" data-action="goToStep" data-step="4">추가</button>
+                <button class="pressable text-[11px] font-bold px-2.5 py-1 rounded-lg gradient-brand-soft" style="color:var(--brand-600)" data-action="goToStep" data-step="3">추가</button>
               </div>
               <p class="text-sm text-slate-400 mt-2">요청사항 없음</p>
             </div>
@@ -1468,6 +1510,9 @@
     var max = getMaxDate();
     var notice = getNoticeText();
     var required = isDateRequired();
+    var expr = getExpressRange();
+    var norm = getNormalRange();
+    var expressFee = getExpressFee();
 
     if (!calendarViewMonth) {
       calendarViewMonth = (formState.desired_ship_date || min).substring(0, 7);
@@ -1495,18 +1540,27 @@
         row += '<td class="py-0.5"></td>';
       } else {
         var ds = yr + '-' + String(mo).padStart(2, '0') + '-' + String(dayNum).padStart(2, '0');
-        var isClosed = isDateClosed(ds) || ds < min || ds > max;
-        // 방어로직: 휴무/범위밖 날짜는 절대 선택 상태로 표시하지 않음 (관리자 설정 기준 강제)
+        // 존(zone) 기반 분류: 빠른출고 / 일반출고 / 선택불가
+        var zone = getDateZone(ds);
+        var isClosed = zone === 'closed';
+        var isExpressDay = zone === 'express';
+        // 방어로직: 휴무/범위밖 날짜는 절대 선택 상태로 표시하지 않음
         var isSel = formState.desired_ship_date === ds && !isClosed;
         var isToday = ds === todayStr();
         var isSun = col === 0, isSat = col === 6;
+        // 기본 클래스 — 원형 셀
         var cls = 'w-9 h-9 rounded-full mx-auto flex items-center justify-center text-[13px] leading-none select-none transition-all ';
-        if (isSel) cls += 'gradient-brand text-white font-bold shadow-lifted';
-        else if (isClosed) cls += 'text-slate-300';
-        else if (isSun) cls += 'text-rose-500 hover:bg-rose-50 cursor-pointer font-medium' + (isToday ? ' ring-1 ring-rose-200' : '');
-        else if (isSat) cls += 'cursor-pointer font-medium hover:bg-indigo-50' + (isToday ? ' ring-1 ring-indigo-200' : '');
+        if (isSel) {
+          // 선택된 날짜: 존에 따라 시각 스타일 구분
+          if (isExpressDay) cls += 'bg-amber-500 text-white font-bold shadow-lifted';
+          else cls += 'gradient-brand text-white font-bold shadow-lifted';
+        } else if (isClosed) cls += 'text-slate-300';
+        else if (isExpressDay) {
+          // 빠른출고 존: 앰버(amber) 배경 + 짙은 글자
+          cls += 'bg-amber-100 text-amber-800 hover:bg-amber-200 cursor-pointer font-semibold' + (isToday ? ' ring-1 ring-amber-400' : '');
+        } else if (isSun) cls += 'text-rose-500 hover:bg-rose-50 cursor-pointer font-medium' + (isToday ? ' ring-1 ring-rose-200' : '');
+        else if (isSat) cls += 'cursor-pointer font-medium hover:bg-indigo-50 text-indigo-500' + (isToday ? ' ring-1 ring-indigo-200' : '');
         else cls += 'text-slate-700 hover:bg-slate-100 cursor-pointer' + (isToday ? ' ring-1 ring-slate-300' : '');
-        if (isSat && !isSel && !isClosed) cls += ' text-indigo-500';
         if (isClosed) {
           row += '<td class="py-1 text-center"><span class="' + cls + '">' + dayNum + '</span></td>';
         } else {
@@ -1516,12 +1570,35 @@
     }
     if (row) rows += '<tr>' + row + '</tr>';
 
-    var selectedInfo = '';
-    if (formState.desired_ship_date && !isDateClosed(formState.desired_ship_date)) {
-      selectedInfo = '<div class="mt-3 pt-3 border-t border-slate-100">'
-        + '<p class="text-center text-sm font-bold text-gradient-brand">📅 ' + formatDate(formState.desired_ship_date) + '</p>'
-        + '<p class="text-center text-[11px] text-slate-500 mt-2 leading-relaxed">선택하신 출고일을 기준으로 1~2 영업일 내에 배송이 완료되며,<br>배송사 사정에 따라 일정이 지연될 수 있습니다.</p>'
+    // 범례 (빠른출고가 가능할 때만 표시)
+    var legend = '';
+    if (expr) {
+      legend = '<div class="flex items-center justify-center gap-3 mt-1 mb-2 text-[10px]">'
+        + '<span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-amber-100 border border-amber-400"></span><span class="text-amber-800 font-semibold">⚡ 빠른출고</span>' + (expressFee > 0 ? ' <span class="text-amber-700">(+' + formatMoney(expressFee) + ')</span>' : '') + '</span>'
+        + '<span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-slate-100 border border-slate-300"></span><span class="text-slate-700 font-semibold">📦 일반출고 <span class="text-emerald-600">(무료)</span></span></span>'
         + '</div>';
+    }
+
+    // 선택한 날짜 기반 동적 비용 안내
+    var selectedInfo = '';
+    var selectedDate = formState.desired_ship_date;
+    var selectedZone = getDateZone(selectedDate);
+    if (selectedDate && selectedZone !== 'closed') {
+      var dateLabel = formatDate(selectedDate);
+      if (selectedZone === 'express') {
+        var feeLabel = expressFee > 0 ? '<span class="text-amber-700 font-bold">+' + formatMoney(expressFee) + '</span>' : '<span class="text-emerald-600 font-bold">무료</span>';
+        selectedInfo = '<div class="mt-3 pt-3 border-t border-slate-100">'
+          + '<p class="text-center text-sm font-bold"><span class="text-amber-600">⚡</span> ' + dateLabel + ' · <span class="text-amber-600">빠른출고</span></p>'
+          + '<p class="text-center text-[11px] text-slate-600 mt-1.5">추가비용 ' + feeLabel + (expressFee > 0 ? ' <span class="text-slate-400">(다음 결제정보 스텝에서 안내)</span>' : '') + '</p>'
+          + '<p class="text-center text-[10.5px] text-slate-400 mt-2 leading-relaxed">선택하신 출고일을 기준으로 1~2 영업일 내에 배송됩니다.</p>'
+          + '</div>';
+      } else {
+        selectedInfo = '<div class="mt-3 pt-3 border-t border-slate-100">'
+          + '<p class="text-center text-sm font-bold text-slate-800"><span>📦</span> ' + dateLabel + ' · <span class="text-indigo-600">일반출고</span></p>'
+          + '<p class="text-center text-[11px] text-emerald-600 font-semibold mt-1.5">추가비용 없음 (무료)</p>'
+          + '<p class="text-center text-[10.5px] text-slate-400 mt-2 leading-relaxed">선택하신 출고일을 기준으로 1~2 영업일 내에 배송됩니다.</p>'
+          + '</div>';
+      }
     } else if (!required) {
       selectedInfo = '<p class="text-center text-[11px] text-slate-400 mt-3 pt-3 border-t border-slate-100">미선택 시 가장 빠른 출고일(' + formatDate(min) + ') 자동 적용</p>';
     } else {
@@ -1538,6 +1615,7 @@
       + '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/></svg>'
       + '</button>'
       + '</div>'
+      + legend
       + '<div class="px-2 py-2">'
       + '<table class="w-full border-collapse"><thead><tr>'
       + '<th class="text-[11px] font-semibold text-rose-400 pb-2">일</th>'
@@ -1622,7 +1700,7 @@
     return '<div id="sticker-input-wrap-' + idx + '">' + headerHtml + fieldsHtml + '</div>';
   }
 
-  const STEP_RENDERERS = [renderStep0, renderStep1, renderStep2, renderStep3, renderStep4, renderStep5];
+  const STEP_RENDERERS = [renderStep0, renderStep1, renderStep2, renderStep3, renderStep4];
 
   // ============================================
   // 스티커 라이트박스 모달
@@ -1851,11 +1929,12 @@
   // ============================================
   function handleAction(action, target) {
     switch (action) {
+      // 구 'selectShipping' 액션은 출고방식 스텝이 캘린더 존과 합쳐지면서 더 이상 사용되지 않음.
+      // 구버전 세션이 호출할 가능성에 대비해 유지만 함.
       case 'selectShipping': {
         const val = target.closest('[data-value]')?.dataset?.value;
         if (val) {
           formState.shipping_type = val;
-          // 출고방식 변경으로 min/max 범위가 바뀌면 기존 선택값이 무효해질 수 있음
           validateShipDate();
           renderCurrentStep();
         }
@@ -1994,8 +2073,17 @@
       case 'calDay': {
         var ds = target.closest('[data-date]') ? target.closest('[data-date]').dataset.date : target.dataset.date;
         if (!ds) break;
-        if (isDateClosed(ds) || ds < getMinDate() || ds > getMaxDate()) break;
+        var zone = getDateZone(ds);
+        if (zone === 'closed') break; // 선택 불가
+        // 존에 따라 shipping_type 자동 결정 + 날짜 저장
         formState.desired_ship_date = ds;
+        formState.shipping_type = zone; // 'express' or 'normal'
+        // 일반출고 전환시 현금영수증 state 초기화 (결제 금액 없어지면 무의미)
+        if (zone === 'normal' && formState.cash_receipt_yn) {
+          formState.cash_receipt_yn = false;
+          formState.receipt_type = null;
+          formState.receipt_number = '';
+        }
         saveFormState();
         updateNavButtons();
         patchCalendar();
@@ -2039,21 +2127,17 @@
     }
   });
 
-  // Navigation buttons
+  // Navigation buttons (visibleSteps 기반 — 조건부 스텝 자동 스킵)
   $btnBack.addEventListener('click', () => {
-    if (currentStep > 0) {
-      currentStep--;
-      renderCurrentStep();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+    goPrevStep();
   });
 
   $btnNext.addEventListener('click', async () => {
     if (!isStepValid(currentStep)) return;
-    if (currentStep < STEP_LABELS.length - 1) {
-      currentStep++;
-      renderCurrentStep();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+    const visible = getVisibleSteps();
+    const visIdx = getVisibleIndex();
+    if (visIdx < visible.length - 1) {
+      goNextStep();
     } else {
       // Submit
       await submitForm();
