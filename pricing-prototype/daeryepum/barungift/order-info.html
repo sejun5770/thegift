@@ -263,34 +263,60 @@
         </button>
       </div>
 
-      <!-- 검색 결과 -->
+      <!-- 검색 중 로딩 (조회 버튼 클릭 직후 짧게 표시) -->
       <div id="searchLoading" class="hidden text-center py-10">
         <div class="spinner mx-auto mb-3"></div>
         <p class="text-sm text-slate-500">검색 중...</p>
       </div>
+    </div>
+  </div>
+</div>
 
-      <div id="searchResults" class="hidden space-y-2">
+<!-- Order List Screen (검색/로그인 성공 후 주문 여러 개일 때 선택) -->
+<div id="orderListScreen" class="hidden min-h-screen pb-8">
+  <div class="max-w-lg mx-auto">
+    <header class="bg-white/80 backdrop-blur-md border-b border-[var(--line)] sticky top-0 z-30">
+      <div class="flex items-center gap-3 px-5 py-4">
+        <button onclick="goBackToSearch()" class="pressable w-9 h-9 rounded-xl hover:bg-slate-100 flex items-center justify-center" aria-label="뒤로">
+          <svg class="w-5 h-5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+        <div>
+          <h1 class="text-base font-bold text-slate-900 leading-tight">주문 선택</h1>
+          <p class="text-[11px] text-slate-400 font-medium tracking-wide" id="orderListSubtitle">조회된 주문을 선택해주세요</p>
+        </div>
+      </div>
+    </header>
+
+    <div class="px-5 pt-5">
+      <div class="space-y-2">
         <h3 class="text-sm font-bold text-slate-700 mb-3" id="searchResultCount"></h3>
         <div id="searchResultList"></div>
       </div>
 
-      <div id="searchEmpty" class="hidden">
-        <div class="surface p-8 text-center mt-4">
-          <div class="w-20 h-20 gradient-brand-soft rounded-full flex items-center justify-center mx-auto mb-5 pop-in">
-            <span class="text-4xl">🔍</span>
-          </div>
-          <h3 class="text-lg font-bold text-slate-900 mb-2">주문하신 상품이 없습니다</h3>
-          <p class="text-sm text-slate-500 mb-1">입력하신 정보로 조회된 주문이 없어요.</p>
-          <p class="text-[12px] text-slate-400 mb-6">주문자명과 전화번호를 다시 확인해주세요.</p>
-          <button onclick="goBackToSearch()" class="btn-primary w-full py-3.5 rounded-2xl text-sm">
-            되돌아가기
-          </button>
-          <div class="mt-5 text-xs text-slate-400 space-y-0.5">
-            <p>전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>
-            <p>카카오 <a href="https://open.kakao.com/o/s4RMIwni" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
-          </div>
-        </div>
+      <!-- 고객센터 안내 -->
+      <div class="mt-8 px-4 py-3 text-center text-[11px] text-slate-400 space-y-0.5">
+        <p>주문이 조회되지 않나요?</p>
+        <p>전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a> · 카카오 <a href="https://open.kakao.com/o/s4RMIwni" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅</a></p>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Empty Result Screen (조회 결과 0건) -->
+<div id="searchEmptyScreen" class="hidden flex items-center justify-center min-h-screen px-5">
+  <div class="surface p-8 max-w-sm w-full text-center">
+    <div class="w-20 h-20 gradient-brand-soft rounded-full flex items-center justify-center mx-auto mb-5 pop-in">
+      <span class="text-4xl">🔍</span>
+    </div>
+    <h3 class="text-lg font-bold text-slate-900 mb-2">주문하신 상품이 없습니다</h3>
+    <p class="text-sm text-slate-500 mb-1">입력하신 정보로 조회된 주문이 없어요.</p>
+    <p class="text-[12px] text-slate-400 mb-6">주문자명과 전화번호를 다시 확인해주세요.</p>
+    <button onclick="goBackToSearch()" class="btn-primary w-full py-3.5 rounded-2xl text-sm">
+      되돌아가기
+    </button>
+    <div class="mt-5 text-xs text-slate-400 space-y-0.5">
+      <p>전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>
+      <p>카카오 <a href="https://open.kakao.com/o/s4RMIwni" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
     </div>
   </div>
 </div>
@@ -327,6 +353,12 @@
     </div>
     <h2 class="text-xl font-bold text-slate-900 mb-2 tracking-tight">입력이 완료됐어요</h2>
     <p class="text-sm text-slate-500 mb-6 leading-relaxed">해당 주문의 정보 입력이 이미 완료됐습니다.<br>수정이 필요하시면 고객센터로 연락해주세요.</p>
+
+    <!-- 다른 답례품 주문 있으면 주문선택 화면으로 돌아가기 -->
+    <button id="completedBackToListBtn" onclick="goBackToOrderList()" class="hidden btn-primary pressable w-full py-3 rounded-2xl text-sm mb-3">
+      ← 다른 답례품 주문으로
+    </button>
+
     <div class="bg-slate-50 rounded-2xl p-4 text-sm text-slate-600">
       <p class="font-semibold mb-2 text-slate-700">고객센터 문의</p>
       <p class="text-xs">전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>
@@ -392,6 +424,12 @@
       <p class="text-[12px] font-semibold" style="color: var(--brand-600)">주문번호</p>
       <p id="successOrderNumber" class="text-xl font-bold text-gradient-brand mt-1"></p>
     </div>
+
+    <!-- 다른 답례품 주문 있으면 주문선택 화면으로 돌아가기 -->
+    <button id="successBackToListBtn" onclick="goBackToOrderList()" class="hidden btn-primary pressable w-full py-3 rounded-2xl text-sm mb-4">
+      ← 다른 답례품 주문으로
+    </button>
+
     <p class="text-sm text-slate-500 mb-1">기타 문의가 있을 시 고객센터로 문의해주세요.</p>
     <p class="text-sm font-bold text-slate-700">고객센터 1688-0708</p>
   </div>
@@ -918,9 +956,18 @@
   // ============================================
   // Screen transitions
   // ============================================
+  const ALL_SCREEN_IDS = [
+    'loadingScreen', 'errorScreen', 'completedScreen', 'paymentPendingScreen',
+    'successScreen', 'mainApp',
+    'searchScreen', 'orderListScreen', 'searchEmptyScreen',
+  ];
   function showScreen(id) {
-    [$loading, $error, $completed, $paymentPending, $success, $main].forEach(el => el.classList.add('hidden'));
-    document.getElementById(id).classList.remove('hidden');
+    ALL_SCREEN_IDS.forEach(sid => {
+      const el = document.getElementById(sid);
+      if (el) el.classList.add('hidden');
+    });
+    const target = document.getElementById(id);
+    if (target) target.classList.remove('hidden');
   }
 
   function showError(msg) {
@@ -2215,6 +2262,8 @@
 
       // Show success
       $successOrderNum.textContent = orderData.order_number || '';
+      // 다른 답례품 주문이 있으면 "다른 주문으로" 버튼 노출 (lastLoadedOrders 기준)
+      toggleBackToListButtons();
       showScreen('successScreen');
     } catch (err) {
       alert(err.message || '제출 중 오류가 발생했습니다. 다시 시도해주세요.');
@@ -2244,11 +2293,20 @@
     tabSearchEl.className = !isLogin ? activeCls : inactiveCls;
     tabLoginEl.style.color = isLogin ? 'var(--brand-600)' : '';
     tabSearchEl.style.color = !isLogin ? 'var(--brand-600)' : '';
-    // 결과 초기화
-    document.getElementById('searchResults').classList.add('hidden');
-    document.getElementById('searchEmpty').classList.add('hidden');
-    document.getElementById('loginError').classList.add('hidden');
+    // 로그인 에러 메시지만 초기화 (결과는 별도 화면이라 건드릴 필요 없음)
+    const loginErr = document.getElementById('loginError');
+    if (loginErr) loginErr.classList.add('hidden');
   };
+
+  /** 로그인/검색 후 결과에 따라 적절한 화면으로 전환 */
+  function handleOrdersResult(orders, { titleOverride } = {}) {
+    if (!orders || !orders.length) {
+      showScreen('searchEmptyScreen');
+      return;
+    }
+    renderOrderList(orders, titleOverride);
+    showScreen('orderListScreen');
+  }
 
   // ============================================
   // Barunson login
@@ -2264,8 +2322,6 @@
     document.getElementById('loginBtn').disabled = true;
     document.getElementById('loginBtn').textContent = '로그인 중...';
     document.getElementById('searchLoading').classList.remove('hidden');
-    document.getElementById('searchResults').classList.add('hidden');
-    document.getElementById('searchEmpty').classList.add('hidden');
 
     try {
       const resp = await fetch(API_BASE + '/api/bg/auth/login', {
@@ -2283,20 +2339,8 @@
       }
 
       const orders = data.orders || [];
-      if (!orders.length) {
-        document.getElementById('loginForm').classList.add('hidden');
-        document.getElementById('searchForm').classList.add('hidden');
-        document.querySelectorAll('#searchTabStrip').forEach(el => el.classList.add('hidden'));
-        document.getElementById('searchEmpty').classList.remove('hidden');
-        return;
-      }
-
-      // 로그인 폼 숨기고 결과 표시
-      document.getElementById('loginForm').classList.add('hidden');
-      document.getElementById('searchForm').classList.add('hidden');
-      document.querySelectorAll('#searchTabStrip').forEach(el => el.classList.add('hidden'));
-
-      renderOrderList(orders, data.user?.name ? data.user.name + '님의 주문' : null);
+      const title = data.user?.name ? data.user.name + '님의 주문' : null;
+      handleOrdersResult(orders, { titleOverride: title });
     } catch (err) {
       document.getElementById('searchLoading').classList.add('hidden');
       errEl.textContent = '네트워크 오류가 발생했습니다.';
@@ -2332,9 +2376,35 @@
   })();
 
   // ============================================
-  // Render order list (공통)
+  // Render order list (주문선택 화면에 렌더 — 공통)
   // ============================================
+  // 마지막 로드된 주문 리스트 — 완료 후 "다른 주문으로" 이동용.
+  // 페이지 리로드(?oid=... 이동)에도 유지되도록 sessionStorage 에 백업.
+  const LAST_ORDERS_KEY = 'bg_last_orders';
+  let lastLoadedOrders = (function() {
+    try {
+      const raw = sessionStorage.getItem(LAST_ORDERS_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed?.orders) ? parsed.orders : null;
+    } catch { return null; }
+  })();
+  let lastLoadedOrdersTitle = (function() {
+    try {
+      const raw = sessionStorage.getItem(LAST_ORDERS_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed?.title || null;
+    } catch { return null; }
+  })();
+
   function renderOrderList(orders, title) {
+    lastLoadedOrders = orders;
+    lastLoadedOrdersTitle = title || null;
+    // 세션에 백업 (selectOrder 리로드 후에도 복원)
+    try {
+      sessionStorage.setItem(LAST_ORDERS_KEY, JSON.stringify({ orders, title: title || null, ts: Date.now() }));
+    } catch (e) { /* quota exceeded 등 무시 */ }
     document.getElementById('searchResultCount').textContent = title || ('주문 ' + orders.length + '건');
     document.getElementById('searchResultList').innerHTML = orders.map(o => {
       const dateStr = o.order_date ? new Date(o.order_date).toLocaleDateString('ko-KR') : '';
@@ -2358,7 +2428,6 @@
           '<div class="flex justify-between items-center"><span class="text-slate-500 truncate mr-2">' + (o.product_name || '') + '</span><span class="font-bold text-slate-800">' + amount + '원</span></div>' +
         '</div></button>';
     }).join('');
-    document.getElementById('searchResults').classList.remove('hidden');
   }
 
   window.searchOrders = async function() {
@@ -2367,8 +2436,6 @@
     if (!phone || !name) { alert('주문자명과 전화번호를 모두 입력해주세요.'); return; }
 
     document.getElementById('searchLoading').classList.remove('hidden');
-    document.getElementById('searchResults').classList.add('hidden');
-    document.getElementById('searchEmpty').classList.add('hidden');
     document.getElementById('searchBtn').disabled = true;
 
     try {
@@ -2377,20 +2444,8 @@
       if (name) params.set('name', name);
       const resp = await fetch(API_BASE + '/api/bg/orders/search?' + params.toString());
       const data = await resp.json();
-      const orders = data.orders || [];
-
       document.getElementById('searchLoading').classList.add('hidden');
-
-      if (!orders.length) {
-        // 검색폼/탭 숨기고 빈 상태 카드만 표시
-        document.getElementById('loginForm').classList.add('hidden');
-        document.getElementById('searchForm').classList.add('hidden');
-        document.querySelectorAll('#searchTabStrip').forEach(el => el.classList.add('hidden'));
-        document.getElementById('searchEmpty').classList.remove('hidden');
-        return;
-      }
-
-      renderOrderList(orders);
+      handleOrdersResult(data.orders || []);
     } catch(err) {
       document.getElementById('searchLoading').classList.add('hidden');
       alert(err.message || '검색 중 오류가 발생했습니다.');
@@ -2399,15 +2454,55 @@
     }
   };
 
+  /** 검색 화면으로 복귀 (주문선택 / 빈결과 → 검색입력으로 돌아감) */
   window.goBackToSearch = function() {
-    document.getElementById('searchEmpty').classList.add('hidden');
-    document.getElementById('searchResults').classList.add('hidden');
+    showScreen('searchScreen');
+    // 검색 폼/탭 복원
     document.getElementById('loginForm').classList.remove('hidden');
     document.getElementById('searchForm').classList.remove('hidden');
-    // 탭 복원
     document.querySelectorAll('#searchTabStrip').forEach(el => el.classList.remove('hidden'));
     switchSearchTab('login');
   };
+
+  /** 주문선택 화면으로 돌아가기 (로드된 주문 리스트가 있을 때만 사용 가능) */
+  window.goBackToOrderList = function() {
+    if (lastLoadedOrders && lastLoadedOrders.length) {
+      // 리로드된 상태라면 리스트가 아직 렌더 안 됐을 수 있으니 복원
+      const resultCount = document.getElementById('searchResultCount');
+      if (!resultCount || !resultCount.textContent) {
+        renderOrderList(lastLoadedOrders, lastLoadedOrdersTitle);
+      }
+      // URL 에서 oid 제거 → 리프레시해도 완료 주문 화면으로 되돌아가지 않음
+      try {
+        const u = new URL(window.location);
+        u.searchParams.delete('oid');
+        window.history.replaceState({}, '', u.toString());
+      } catch (e) { /* 브라우저 비호환 무시 */ }
+      showScreen('orderListScreen');
+    } else {
+      goBackToSearch();
+    }
+  };
+
+  /**
+   * 완료/성공 화면의 "다른 답례품 주문으로" 버튼 토글.
+   * 조건: 검색/로그인으로 2건 이상 불러왔고, 그 중 현재 주문 말고도 입력 대기중인 주문이 있을 때 표시.
+   */
+  function toggleBackToListButtons() {
+    const currentOid = orderData?.order_id;
+    let showBtn = false;
+    if (lastLoadedOrders && lastLoadedOrders.length > 1) {
+      // 현재 주문을 제외하고 진행 가능한(취소 아님) 주문이 1개 이상 있으면 노출
+      const others = lastLoadedOrders.filter(function(o) {
+        return o.order_id !== currentOid && o.status_seq !== 3 && o.status_seq !== 5;
+      });
+      showBtn = others.length > 0;
+    }
+    ['completedBackToListBtn', 'successBackToListBtn'].forEach(function(id) {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('hidden', !showBtn);
+    });
+  }
 
   window.selectOrder = function(orderId) {
     // URL을 변경하여 해당 주문으로 이동
@@ -2476,6 +2571,7 @@
 
       // Already completed check
       if (orderData.info_status === 'completed') {
+        toggleBackToListButtons();
         showScreen('completedScreen');
         return;
       }
