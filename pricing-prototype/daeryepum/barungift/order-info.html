@@ -1028,9 +1028,10 @@
     return `
       <div class="fade-in">
         <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">희망 출고일 ${required ? '<span class="text-rose-500">*</span>' : ''}</h2>
-        <p class="text-sm text-slate-500 mb-5">
-          ${isToday ? '컷오프 시간 기준으로 출고일이 결정됩니다.' : '주문 전체에 적용될 출고일을 선택해주세요.'}
-        </p>
+        <div class="text-sm text-slate-500 mb-5 leading-relaxed">
+          <p>출고일을 선택해 주세요.</p>
+          <p class="text-[13px] text-slate-400">당일출고는 오전 11시에 마감됩니다.</p>
+        </div>
 
         <!-- 인라인 캘린더 -->
         ${renderCalendar()}
@@ -1397,7 +1398,10 @@
 
     var selectedInfo = '';
     if (formState.desired_ship_date && !isDateClosed(formState.desired_ship_date)) {
-      selectedInfo = '<p class="text-center text-sm font-bold text-gradient-brand mt-3 pt-3 border-t border-slate-100">📅 ' + formatDate(formState.desired_ship_date) + '</p>';
+      selectedInfo = '<div class="mt-3 pt-3 border-t border-slate-100">'
+        + '<p class="text-center text-sm font-bold text-gradient-brand">📅 ' + formatDate(formState.desired_ship_date) + '</p>'
+        + '<p class="text-center text-[11px] text-slate-500 mt-2 leading-relaxed">선택하신 출고일을 기준으로 1~2 영업일 내에 배송이 완료되며,<br>배송사 사정에 따라 일정이 지연될 수 있습니다.</p>'
+        + '</div>';
     } else if (!required) {
       selectedInfo = '<p class="text-center text-[11px] text-slate-400 mt-3 pt-3 border-t border-slate-100">미선택 시 가장 빠른 출고일(' + formatDate(min) + ') 자동 적용</p>';
     } else {
