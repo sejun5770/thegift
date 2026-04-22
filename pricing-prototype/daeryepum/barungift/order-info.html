@@ -1178,6 +1178,15 @@
     const total = getTotalAmount();
     const expressFee = formState.shipping_type === 'express' ? getExpressFee() : 0;
 
+    // 결제금액이 없으면 현금영수증 관련 state 자동 초기화
+    // (빠른출고 선택 후 일반출고로 변경한 경우 stale state 방지)
+    if (total <= 0 && formState.cash_receipt_yn) {
+      formState.cash_receipt_yn = false;
+      formState.receipt_type = null;
+      formState.receipt_number = '';
+      try { saveFormState(); } catch (e) { /* ignore */ }
+    }
+
     return `
       <div class="fade-in">
         <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">결제 정보</h2>
@@ -1238,15 +1247,17 @@
         </div>
         `}
 
-        <!-- Cash receipt -->
+        ${total > 0 ? `
+        <!-- Cash receipt (결제 금액이 있을 때만 노출) -->
         <div class="surface p-5">
-          <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center justify-between mb-1">
             <h3 class="text-[14px] font-bold text-slate-900">현금영수증 신청</h3>
             <label class="relative inline-flex items-center cursor-pointer">
               <input type="checkbox" class="sr-only peer" ${formState.cash_receipt_yn ? 'checked' : ''} data-action="toggleReceipt" />
               <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all after:shadow-sm peer-checked:bg-gradient-to-r peer-checked:from-indigo-500 peer-checked:to-violet-500"></div>
             </label>
           </div>
+          <p class="text-[11px] text-slate-400 mb-2">빠른출고 추가비용(${formatMoney(total)})에 대한 현금영수증 발급 신청입니다.</p>
 
           ${formState.cash_receipt_yn ? `
             <div class="space-y-3 mt-4">
@@ -1278,6 +1289,7 @@
             </div>
           ` : ''}
         </div>
+        ` : ''}
       </div>
     `;
   }
