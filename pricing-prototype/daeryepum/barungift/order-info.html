@@ -2095,8 +2095,9 @@
     try {
       orderData = await fetchOrder(orderId);
 
-      // 결제대기 상태 (status_seq === 1): 입금 안내 화면으로 직행
-      if (orderData.status_seq === 1) {
+      // 결제대기 상태: 입금 안내 화면으로 직행
+      // (서버에서 settle_status/settle_date 기반으로 계산한 payment_status 사용)
+      if (orderData.payment_status === 'pending') {
         fillPaymentPendingScreen();
         showScreen('paymentPendingScreen');
         return;

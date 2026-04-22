@@ -116,13 +116,13 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
       let result;
       if (isEtc) {
-        // 바른손몰 ETC 주문
+        // 바른손몰 ETC 주문 — ETC는 settle_status 컬럼이 없어 settle_date 유무로 결제 판단
         result = await pool.request()
           .input('orderSeq', sql.Int, seq)
           .query(`
             SELECT
               co.order_seq, co.order_date, co.settle_price AS order_total_price, co.settle_price AS last_total_price,
-              co.order_name, co.order_hphone, co.status_seq,
+              co.order_name, co.order_hphone, co.status_seq, co.settle_date,
               ei.seq AS item_id, ei.order_count AS item_count, ei.card_price AS item_price, ei.card_sale_price AS item_sale_price,
               c.Card_Code, c.Card_Name, c.Card_Price,
               co.recv_name AS delivery_name, co.recv_hphone AS delivery_hphone, co.recv_address AS delivery_addr
@@ -133,18 +133,18 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
               AND ${DAERYEPUM_WHERE}
           `);
       } else {
-        // 바른손카드 주문
+        // 바른손카드 주문 — settle_status 컬럼으로 결제 상태 판단 (2=완료, 1=대기, 0=전, 3·5=취소)
         result = await pool.request()
           .input('orderSeq', sql.Int, seq)
           .query(`
             SELECT
               co.order_seq, co.order_date, co.order_total_price, co.last_total_price,
-              co.order_name, co.order_hphone, co.status_seq,
+              co.order_name, co.order_hphone, co.status_seq, co.settle_status, co.settle_date,
               coi.id AS item_id, coi.item_count, coi.item_price, coi.item_sale_price,
               c.Card_Code, c.Card_Name, c.Card_Price,
               di.NAME AS delivery_name, di.HPHONE AS delivery_hphone, di.ADDR AS delivery_addr
             FROM custom_order co WITH (NOLOCK)
-            INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+            INNER JOIN custom_order_item coi WITH (NOLOCK) ON coi.order_seq = co.order_seq
             INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
             LEFT JOIN DELIVERY_INFO di WITH (NOLOCK) ON co.order_seq = di.ORDER_SEQ
             WHERE co.order_seq = @orderSeq
@@ -198,10 +198,23 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         ? allActiveStickers.filter(s => allMappedStickerIds.has(s.id))
         : allActiveStickers;
 
-      // 결제대기(status_seq === 1) 상태일 때만 toss_vaccount 조회
+      // payment_status 계산 — status_seq는 주문 처리 단계이고, 결제 상태는 별도 필드
+      //   CARD: settle_status === 2 면 결제완료, === 1 이면 결제대기
+      //   ETC : settle_status 컬럼이 없어 settle_date IS NOT NULL 기준
+      let paymentStatus;
+      if (isEtc) {
+        paymentStatus = row.settle_date ? 'paid' : 'pending';
+      } else {
+        if (row.settle_status === 2) paymentStatus = 'paid';
+        else if (row.settle_status === 1) paymentStatus = 'pending';
+        else if (row.settle_status === 3 || row.settle_status === 5) paymentStatus = 'cancelled';
+        else paymentStatus = 'unknown'; // 0 또는 알 수 없는 값 (대개 결제 전 임시 주문)
+      }
+
+      // 결제대기 상태일 때만 toss_vaccount 조회
       // toss_vaccount.order_type: 'C'=CARD, 'E'=ETC
       let virtualAccount = null;
-      if (row.status_seq === 1) {
+      if (paymentStatus === 'pending') {
         try {
           const vaRes = await pool.request()
             .input('seq', sql.Int, seq)
@@ -235,6 +248,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         total_amount: row.last_total_price || row.order_total_price || 0,
         status_seq: row.status_seq,
         status: row.status_seq >= 1 ? 'collected' : 'cancelled',
+        payment_status: paymentStatus, // 'paid' | 'pending' | 'cancelled' | 'unknown'
         info_status: existingInfo?.submitted_at ? 'completed' : 'pending',
         products,
         product_settings: productSettings,
