@@ -3,6 +3,7 @@
  */
 const url = require('url');
 const store = require('./store');
+const { logAccess, getRecentLogs } = require('./audit-log');
 
 // 답례품 필터 SQL 조건 (관리자 통합현황과 동일: S2_Card.Card_Div = 'D01')
 // custom_order_item + S2_Card JOIN 후 사용. c 에일리어스 사용.
@@ -153,6 +154,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       }
 
       if (!result.recordset.length) {
+        logAccess(req, 'not_found', orderId, { status_code: 404 });
         return json(res, { error: '주문을 찾을 수 없습니다.' }, 404);
       }
 
@@ -239,6 +241,16 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
           console.warn('[orders/:id] toss_vaccount 조회 실패:', e.message);
         }
       }
+
+      // 접근 로그: 주문 조회 성공
+      logAccess(req, 'view', orderId, {
+        status_code: 200,
+        metadata: {
+          payment_status: paymentStatus,
+          info_status: existingInfo?.submitted_at ? 'completed' : 'pending',
+          order_type: isEtc ? 'ETC' : 'CARD',
+        },
+      });
 
       return json(res, {
         order_id: orderId, // 원래 들어온 ID (ETC-prefix 유지)
