@@ -609,6 +609,32 @@
         }
       }
     } catch(e) { /* ignore */ }
+    // 복원된 출고일이 현재 관리자 설정 기준으로 유효한지 검증
+    validateShipDate();
+  }
+
+  /**
+   * 현재 desired_ship_date 가 현재 관리자 설정(min/max/휴무일) 기준으로 유효한지 검증.
+   * 무효하면 빈 값으로 초기화해 관리자 설정 기준을 강제한다.
+   * - 세션 복원 직후 (loadFormState)
+   * - 희망출고일 스텝 진입시 (renderStep1)
+   * - 출고방식 변경시 (selectShipping) — min/max 범위가 바뀜
+   * 기본값: 캘린더는 선택값이 비워져 있는 것이 기본 상태.
+   */
+  function validateShipDate() {
+    if (!formState || !formState.desired_ship_date) return;
+    try {
+      const d = formState.desired_ship_date;
+      const min = getMinDate();
+      const max = getMaxDate();
+      if (d < min || d > max || isDateClosed(d)) {
+        console.warn('[ship-date] 복원/이전 선택값이 현재 허용 범위를 벗어나 초기화합니다:', d, '(min:', min, 'max:', max, ')');
+        formState.desired_ship_date = '';
+        // 캘린더 뷰도 최신 min 기준 달로 리셋 (이전 월에 머물러 있지 않도록)
+        calendarViewMonth = null;
+        try { saveFormState(); } catch(e) { /* ignore */ }
+      }
+    } catch (e) { /* orderData 미로딩 등 예외 상황 — 무시 */ }
   }
 
   function formatDate(dateStr) {
@@ -988,6 +1014,9 @@
   }
 
   function renderStep1() {
+    // 진입시마다 이전 선택값을 관리자 최신 설정 기준으로 재검증 (무효하면 초기화)
+    validateShipDate();
+
     const products = orderData?.products || [];
     const minDate = getMinDate();
     const maxDate = getMaxDate();
@@ -1420,8 +1449,9 @@
         row += '<td class="py-0.5"></td>';
       } else {
         var ds = yr + '-' + String(mo).padStart(2, '0') + '-' + String(dayNum).padStart(2, '0');
-        var isSel = formState.desired_ship_date === ds;
         var isClosed = isDateClosed(ds) || ds < min || ds > max;
+        // 방어로직: 휴무/범위밖 날짜는 절대 선택 상태로 표시하지 않음 (관리자 설정 기준 강제)
+        var isSel = formState.desired_ship_date === ds && !isClosed;
         var isToday = ds === todayStr();
         var isSun = col === 0, isSat = col === 6;
         var cls = 'w-9 h-9 rounded-full mx-auto flex items-center justify-center text-[13px] leading-none select-none transition-all ';
@@ -1777,7 +1807,12 @@
     switch (action) {
       case 'selectShipping': {
         const val = target.closest('[data-value]')?.dataset?.value;
-        if (val) { formState.shipping_type = val; renderCurrentStep(); }
+        if (val) {
+          formState.shipping_type = val;
+          // 출고방식 변경으로 min/max 범위가 바뀌면 기존 선택값이 무효해질 수 있음
+          validateShipDate();
+          renderCurrentStep();
+        }
         break;
       }
       case 'productDate': {
