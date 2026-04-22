@@ -5679,7 +5679,8 @@ function copyBgUnified() {
   const selectedRows = checked.map(cb => bgUnifiedRows[parseInt(cb.dataset.idx)]);
 
   // 23열 구조: A='', B=택배, C=일반, D=주문번호, E=수령인, F=연락처, G='', H=배송지, I='',
-  //            J=상품명, K=상품코드, L='', M=스티커코드(수량), N~S='', T=주문수량,
+  //            J=상품명, K=상품코드, L='', M=스티커코드(수량), N='', O='',
+  //            P=스티커 문구(고객 입력), Q='', R='', S='', T=주문수량,
   //            U='', V=희망출고일(빠른출고시 짙은빨강), W=희망출고일
   const buildCells = ({ order, ci, sel, product_code, product_name, product_qty }) => {
     const cells = Array(23).fill('');
@@ -5695,6 +5696,16 @@ function copyBgUnified() {
     if (sel?.sticker_code) {
       const qty = sel.quantity ? `(${sel.quantity}개)` : '';
       cells[12] = `${sel.sticker_code}${qty}`;
+    }
+    // P열(index 15) = 고객이 입력한 스티커 문구 (custom_values)
+    //   - sticker_input='custom' 일 때만 값 존재. 'none'/'선택안함'이면 빈 문자열.
+    //   - 여러 필드가 있으면 ' / ' 구분자로 연결.
+    //   - TSV/HTML 브레이크 방지: 탭/개행은 공백으로 치환.
+    if (sel?.custom_values) {
+      const vals = Object.values(sel.custom_values)
+        .map(v => (v == null ? '' : String(v)).replace(/[\t\r\n]+/g, ' ').trim())
+        .filter(v => v);
+      if (vals.length) cells[15] = vals.join(' / ');
     }
     cells[19] = sel?.quantity || product_qty || '';  // T: 주문수량
     if (ci?.is_express) cells[21] = ci.desired_ship_date || '';
