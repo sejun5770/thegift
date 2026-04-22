@@ -42,6 +42,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const body = await parseBody(req);
       const { uid, password } = body;
       if (!uid || !password) {
+        logAccess(req, 'login_fail', null, { status_code: 400, metadata: { reason: 'missing_credentials' } });
         return json(res, { error: '아이디와 비밀번호를 입력해주세요.' }, 400);
       }
       const pool = await getPool();
@@ -56,6 +57,11 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         `);
 
       if (!result.recordset.length || !result.recordset[0].pwd_match) {
+        // 실패: 아이디 해시만 기록 (원문 비번/아이디 저장 금지)
+        logAccess(req, 'login_fail', null, {
+          status_code: 401,
+          metadata: { uid_len: String(uid).length, reason: 'invalid_credentials' },
+        });
         return json(res, { error: '아이디 또는 비밀번호가 올바르지 않습니다.' }, 401);
       }
 
@@ -70,6 +76,11 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         useLike: true,
       });
 
+      logAccess(req, 'login_success', null, {
+        status_code: 200,
+        metadata: { uid, phone_last4: phone.slice(-4), orders_found: orders.length },
+      });
+
       return json(res, {
         success: true,
         user: { uid: user.uid, name: user.uname, phone_last4: phone.slice(-4) },
@@ -77,6 +88,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       });
     } catch (err) {
       console.error('barungift auth error:', err.message);
+      logAccess(req, 'login_fail', null, { status_code: 500, metadata: { reason: 'server_error', error: err.message } });
       return json(res, { error: '로그인 처리 중 오류가 발생했습니다.' }, 500);
     }
   }
@@ -86,6 +98,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     const phone = (query.phone || '').replace(/\D/g, '');
     const name = (query.name || '').trim();
     if (!phone || !name) {
+      logAccess(req, 'search', null, { status_code: 400, metadata: { reason: 'missing_input' } });
       return json(res, { error: '전화번호와 주문자명을 모두 입력해주세요.' }, 400);
     }
     try {
@@ -96,6 +109,15 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         uname: name,
         useLike: false,
         maskCustomerName: true,
+      });
+
+      logAccess(req, 'search', null, {
+        status_code: 200,
+        metadata: {
+          phone_last4: phone.slice(-4),
+          name_len: name.length,
+          orders_found: orders.length,
+        },
       });
 
       return json(res, { orders });
@@ -308,16 +330,27 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
       // 유효성 기본 체크
       if (!body.desired_ship_date) {
+        logAccess(req, 'submit', orderId, { status_code: 400, metadata: { reason: 'missing_desired_ship_date' } });
         return json(res, { error: '희망출고일을 선택해주세요.' }, 400);
       }
 
       const saved = await store.saveCustomerInfo(orderId, body);
+      logAccess(req, 'submit', orderId, {
+        status_code: 201,
+        metadata: {
+          is_express: !!body.is_express,
+          sticker_count: (body.sticker_selections || []).length,
+          has_customer_request: !!body.customer_request,
+        },
+      });
       return json(res, saved, 201);
     } catch (err) {
       if (err.message === 'ALREADY_SUBMITTED') {
+        logAccess(req, 'submit', orderId, { status_code: 409, metadata: { reason: 'already_submitted' } });
         return json(res, { error: '이미 정보 입력이 완료된 주문입니다.' }, 409);
       }
       console.error('barungift customer-info error:', err.message);
+      logAccess(req, 'submit', orderId, { status_code: 500, metadata: { reason: 'server_error', error: err.message } });
       return json(res, { error: '서버 오류가 발생했습니다.' }, 500);
     }
   }
@@ -568,11 +601,26 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     const orderId = decodeURIComponent(customerInfoEditMatch[1]);
     try {
       await store.deleteCustomerInfo(orderId);
+      logAccess(req, 'reset', orderId, {
+        status_code: 200,
+        metadata: { actor: session?.email || 'admin' },
+      });
       return json(res, { ok: true });
     } catch (err) {
       console.error('barungift delete customer-info error:', err.message);
+      logAccess(req, 'reset', orderId, { status_code: 500, metadata: { error: err.message } });
       return json(res, { error: err.message }, 500);
     }
+  }
+
+  // GET /api/bg/audit/access-log?order_id=xxx&limit=100&since=ISO - 관리자 감사 로그 조회
+  if (pathname === '/api/bg/audit/access-log' && method === 'GET') {
+    const logs = await getRecentLogs({
+      orderId: query.order_id,
+      limit: parseInt(query.limit) || 100,
+      since: query.since,
+    });
+    return json(res, { logs });
   }
 
   // GET /api/bg/shipping-config - 공통 출고일 설정 조회

@@ -1366,6 +1366,14 @@ nav a:hover{color:var(--gray-900)}
         <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">고객 요청사항</label>
         <textarea id="bg-edit-request" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px;resize:vertical"></textarea>
       </div>
+
+      <!-- 고객 접근 로그 (감사용) -->
+      <details style="margin-top:16px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px;padding:8px 12px">
+        <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--gray-600);list-style:disclosure-closed">🔍 최근 고객 접근 이력 (로그)</summary>
+        <div id="bg-edit-audit-log" style="margin-top:8px;max-height:240px;overflow-y:auto;font-size:11px">
+          <div style="color:var(--gray-400);padding:12px;text-align:center">불러오는 중…</div>
+        </div>
+      </details>
     </div>
     <div style="display:flex;gap:8px;align-items:center;padding:12px 20px;border-top:1px solid var(--gray-200)">
       <button class="btn" onclick="resetBgOrderEdit()" style="color:var(--red);border-color:#fca5a5" title="고객 입력 데이터를 삭제해 고객이 재입력 할 수 있게 합니다">🔄 초기화</button>
@@ -5763,6 +5771,59 @@ function openBgOrderEdit(info) {
   // 수정 모달에 sticker_selections 원본 임시 저장
   document.getElementById('bg-order-edit-modal').__stickerSelections = sels;
   document.getElementById('bg-order-edit-modal').style.display = 'flex';
+
+  // 해당 주문의 최근 접근 로그 비동기 로드
+  loadBgEditAuditLog(info.order_id);
+}
+
+/** 수정 모달 하단 접근 로그 섹션 로드 */
+async function loadBgEditAuditLog(orderId) {
+  const $log = document.getElementById('bg-edit-audit-log');
+  if (!$log || !orderId) return;
+  $log.innerHTML = '<div style="color:var(--gray-400);padding:8px;text-align:center">불러오는 중…</div>';
+  try {
+    const res = await fetch(`${API}/api/bg/audit/access-log?order_id=${encodeURIComponent(orderId)}&limit=30`);
+    const data = await res.json();
+    const logs = data.logs || [];
+    if (!logs.length) {
+      $log.innerHTML = '<div style="color:var(--gray-400);padding:8px;text-align:center">접근 로그 없음</div>';
+      return;
+    }
+    const actionEmoji = {
+      view: '👁️', submit: '✏️', reset: '🔄', not_found: '❓',
+      search: '🔍', login_success: '🔑', login_fail: '🚫',
+    };
+    const actionLabel = {
+      view: '조회', submit: '제출', reset: '초기화', not_found: '찾을수없음',
+      search: '검색', login_success: '로그인성공', login_fail: '로그인실패',
+    };
+    $log.innerHTML = '<table style="width:100%;border-collapse:collapse">'
+      + '<thead><tr style="border-bottom:1px solid var(--gray-200);color:var(--gray-500);font-size:10px">'
+      + '<th style="text-align:left;padding:4px 6px">시각</th>'
+      + '<th style="text-align:left;padding:4px 6px">이벤트</th>'
+      + '<th style="text-align:left;padding:4px 6px">상태</th>'
+      + '<th style="text-align:left;padding:4px 6px">IP 해시</th>'
+      + '<th style="text-align:left;padding:4px 6px">메타</th>'
+      + '</tr></thead><tbody>'
+      + logs.map(l => {
+          const d = l.created_at ? new Date(l.created_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '-';
+          const emoji = actionEmoji[l.action] || '•';
+          const label = actionLabel[l.action] || l.action;
+          const statusColor = l.status_code >= 400 ? '#dc2626' : (l.status_code >= 200 ? '#16a34a' : 'var(--gray-500)');
+          const ipShort = (l.ip_hash || '').slice(0, 8);
+          const metaPretty = l.metadata ? Object.entries(l.metadata).filter(([,v])=>v!==null&&v!==undefined&&v!=='').map(([k,v])=>`${k}=${typeof v==='object'?JSON.stringify(v):v}`).join(', ') : '';
+          return `<tr style="border-bottom:1px solid var(--gray-100);font-size:10px">
+            <td style="padding:4px 6px;white-space:nowrap;color:var(--gray-600)">${d}</td>
+            <td style="padding:4px 6px">${emoji} ${label}</td>
+            <td style="padding:4px 6px;color:${statusColor};font-family:monospace">${l.status_code || '-'}</td>
+            <td style="padding:4px 6px;font-family:monospace;color:var(--gray-500)" title="${l.ip_hash || ''}">${ipShort}…</td>
+            <td style="padding:4px 6px;color:var(--gray-500);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${metaPretty}">${metaPretty}</td>
+          </tr>`;
+        }).join('')
+      + '</tbody></table>';
+  } catch (e) {
+    $log.innerHTML = `<div style="color:var(--red);padding:8px">조회 실패: ${e.message}</div>`;
+  }
 }
 
 function toggleBgReceiptEdit(checked) {
