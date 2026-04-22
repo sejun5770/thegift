@@ -71,6 +71,36 @@
     }
     .pop-in { animation: pop 0.5s cubic-bezier(0.34,1.56,0.64,1) both; }
 
+    /* 주의 환기용 CTA 하이라이트 — 부드러운 pulse + subtle scale */
+    @keyframes attentionPulse {
+      0%, 100% {
+        box-shadow: 0 6px 18px rgba(99,102,241,0.28), 0 0 0 0 rgba(99,102,241,0.45);
+        transform: scale(1);
+      }
+      50% {
+        box-shadow: 0 10px 28px rgba(99,102,241,0.42), 0 0 0 14px rgba(99,102,241,0);
+        transform: scale(1.015);
+      }
+    }
+    .attention-cta {
+      animation: attentionPulse 1.8s ease-in-out infinite;
+      position: relative;
+    }
+    /* 외곽 반짝임 링 (선택적) */
+    .attention-cta::after {
+      content: '';
+      position: absolute; inset: -4px;
+      border-radius: inherit;
+      border: 2px solid rgba(99,102,241,0.4);
+      opacity: 0;
+      animation: attentionRing 1.8s ease-in-out infinite;
+      pointer-events: none;
+    }
+    @keyframes attentionRing {
+      0%, 100% { opacity: 0; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.04); }
+    }
+
     /* Conic spinner */
     .spinner {
       width: 42px; height: 42px; border-radius: 50%;
@@ -282,14 +312,26 @@
         </button>
         <div>
           <h1 class="text-base font-bold text-slate-900 leading-tight">주문 선택</h1>
-          <p class="text-[11px] text-slate-400 font-medium tracking-wide" id="orderListSubtitle">조회된 주문을 선택해주세요</p>
         </div>
       </div>
     </header>
 
     <div class="px-5 pt-5">
+      <!-- 상단 안내 배너 — 입력 대기 주문에 대한 명시적 CTA -->
+      <div id="orderListBanner" class="rounded-2xl p-4 mb-4 gradient-brand-soft border border-indigo-100 flex items-start gap-3">
+        <div class="w-9 h-9 gradient-brand rounded-xl flex items-center justify-center flex-shrink-0 shadow-lifted">
+          <span class="text-white text-base">👇</span>
+        </div>
+        <div class="flex-1">
+          <p class="text-[13px] font-bold text-slate-900 leading-tight">입력할 주문을 선택해주세요</p>
+          <p class="text-[11.5px] text-slate-600 mt-1 leading-relaxed" id="orderListBannerSubtitle">
+            ⏳ <b>입력대기</b> 상태의 주문을 눌러 정보를 입력해주세요.
+          </p>
+        </div>
+      </div>
+
       <div class="space-y-2">
-        <h3 class="text-sm font-bold text-slate-700 mb-3" id="searchResultCount"></h3>
+        <h3 class="text-[12px] font-semibold text-slate-500 mb-2 px-1" id="searchResultCount"></h3>
         <div id="searchResultList"></div>
       </div>
 
@@ -355,8 +397,8 @@
     <p class="text-sm text-slate-500 mb-6 leading-relaxed">해당 주문의 정보 입력이 이미 완료됐습니다.<br>수정이 필요하시면 고객센터로 연락해주세요.</p>
 
     <!-- 다른 답례품 주문 있으면 주문선택 화면으로 돌아가기 -->
-    <button id="completedBackToListBtn" onclick="goBackToOrderList()" class="hidden btn-primary pressable w-full py-3 rounded-2xl text-sm mb-3">
-      ← 다른 답례품 주문으로
+    <button id="completedBackToListBtn" onclick="goBackToOrderList()" class="hidden btn-primary pressable w-full py-3.5 rounded-2xl text-sm font-bold mb-4 attention-cta">
+      🎁 다른 답례품 주문건도 입력하기
     </button>
 
     <div class="bg-slate-50 rounded-2xl p-4 text-sm text-slate-600">
@@ -426,8 +468,8 @@
     </div>
 
     <!-- 다른 답례품 주문 있으면 주문선택 화면으로 돌아가기 -->
-    <button id="successBackToListBtn" onclick="goBackToOrderList()" class="hidden btn-primary pressable w-full py-3 rounded-2xl text-sm mb-4">
-      ← 다른 답례품 주문으로
+    <button id="successBackToListBtn" onclick="goBackToOrderList()" class="hidden btn-primary pressable w-full py-3.5 rounded-2xl text-sm font-bold mb-5 attention-cta">
+      🎁 다른 답례품 주문건도 입력하기
     </button>
 
     <p class="text-sm text-slate-500 mb-1">기타 문의가 있을 시 고객센터로 문의해주세요.</p>
@@ -2134,6 +2176,8 @@
         saveFormState();
         updateNavButtons();
         patchCalendar();
+        // 프로그레스바 — 결제정보 스텝 노출 여부가 shipping_type 으로 바뀌므로 재렌더
+        renderStepIndicator();
         break;
       }
       case 'goToStep': {
@@ -2259,6 +2303,9 @@
 
       // Clear session storage
       try { sessionStorage.removeItem(storageKey(orderData.order_id)); } catch(e) {}
+
+      // 방금 제출한 주문의 info_status 를 lastLoadedOrders 에 즉시 반영 (주문선택 화면 재진입시 최신 상태)
+      markOrderCompletedInList(orderData.order_id);
 
       // Show success
       $successOrderNum.textContent = orderData.order_number || '';
@@ -2405,7 +2452,21 @@
     try {
       sessionStorage.setItem(LAST_ORDERS_KEY, JSON.stringify({ orders, title: title || null, ts: Date.now() }));
     } catch (e) { /* quota exceeded 등 무시 */ }
-    document.getElementById('searchResultCount').textContent = title || ('주문 ' + orders.length + '건');
+
+    // 상단 안내 배너 — 입력대기 건수 반영
+    const pendingCnt = orders.filter(o => o.status_seq !== 3 && o.status_seq !== 5 && o.info_status !== 'completed').length;
+    const banner = document.getElementById('orderListBannerSubtitle');
+    if (banner) {
+      if (pendingCnt > 0) {
+        banner.innerHTML = '⏳ 아직 <b class="text-indigo-700">' + pendingCnt + '건</b>이 <b>입력대기</b> 상태예요. 눌러서 정보를 입력해주세요.';
+      } else {
+        banner.innerHTML = '✅ 모든 주문의 입력이 완료됐습니다.';
+      }
+    }
+    // 카운트 헤더 — 제목이 있으면 제목 + 총 건수, 없으면 총 건수만
+    document.getElementById('searchResultCount').textContent = title
+      ? title + ' · 총 ' + orders.length + '건'
+      : '총 ' + orders.length + '건';
     document.getElementById('searchResultList').innerHTML = orders.map(o => {
       const dateStr = o.order_date ? new Date(o.order_date).toLocaleDateString('ko-KR') : '';
       const amount = (o.total_amount || 0).toLocaleString('ko-KR');
@@ -2485,22 +2546,60 @@
   };
 
   /**
+   * 방금 제출한 주문의 info_status 를 lastLoadedOrders 에 반영.
+   * 주문선택 화면 재진입시 해당 주문이 '입력완료' 로 보이도록 stale 상태 갱신.
+   */
+  function markOrderCompletedInList(orderId) {
+    if (!lastLoadedOrders || !orderId) return;
+    let changed = false;
+    lastLoadedOrders = lastLoadedOrders.map(o => {
+      if (o.order_id === orderId && o.info_status !== 'completed') {
+        changed = true;
+        return { ...o, info_status: 'completed' };
+      }
+      return o;
+    });
+    if (changed) {
+      try {
+        sessionStorage.setItem(LAST_ORDERS_KEY, JSON.stringify({
+          orders: lastLoadedOrders,
+          title: lastLoadedOrdersTitle,
+          ts: Date.now(),
+        }));
+      } catch (e) { /* quota 등 무시 */ }
+      // 리스트가 이미 렌더되어 있다면 다시 렌더
+      const list = document.getElementById('searchResultList');
+      if (list && list.children.length > 0) {
+        renderOrderList(lastLoadedOrders, lastLoadedOrdersTitle);
+      }
+    }
+  }
+
+  /**
    * 완료/성공 화면의 "다른 답례품 주문으로" 버튼 토글.
-   * 조건: 검색/로그인으로 2건 이상 불러왔고, 그 중 현재 주문 말고도 입력 대기중인 주문이 있을 때 표시.
+   * 조건: 검색/로그인으로 2건 이상 불러왔고, 그 중 현재 주문 말고도 아직 입력대기인
+   *       주문이 1건 이상 있을 때 표시. 버튼 텍스트에 남은 건수를 표시해 주의 환기.
    */
   function toggleBackToListButtons() {
     const currentOid = orderData?.order_id;
-    let showBtn = false;
+    let pendingOthers = [];
     if (lastLoadedOrders && lastLoadedOrders.length > 1) {
-      // 현재 주문을 제외하고 진행 가능한(취소 아님) 주문이 1개 이상 있으면 노출
-      const others = lastLoadedOrders.filter(function(o) {
-        return o.order_id !== currentOid && o.status_seq !== 3 && o.status_seq !== 5;
+      // 현재 주문 제외 + 취소 제외 + 아직 입력 안된 주문만 카운트
+      pendingOthers = lastLoadedOrders.filter(function(o) {
+        return o.order_id !== currentOid
+          && o.status_seq !== 3 && o.status_seq !== 5
+          && o.info_status !== 'completed';
       });
-      showBtn = others.length > 0;
     }
+    const showBtn = pendingOthers.length > 0;
+    const label = showBtn
+      ? '🎁 남은 답례품 주문 <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/90 text-indigo-600 font-black text-[11px] mx-1 align-middle">' + pendingOthers.length + '</span>건도 입력하기 →'
+      : '';
     ['completedBackToListBtn', 'successBackToListBtn'].forEach(function(id) {
       const el = document.getElementById(id);
-      if (el) el.classList.toggle('hidden', !showBtn);
+      if (!el) return;
+      el.classList.toggle('hidden', !showBtn);
+      if (showBtn) el.innerHTML = label;
     });
   }
 
