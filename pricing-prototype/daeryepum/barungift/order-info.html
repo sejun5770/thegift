@@ -985,9 +985,28 @@
   function ensureProductEntry(idx) {
     if (!formState.products[idx]) {
       // desired_ship_date는 주문 단위로 관리되므로 상품별에서 제거
-      formState.products[idx] = { sticker_type: null, sticker_input: 'none', sticker_fields: {} };
+      formState.products[idx] = makeDefaultProductEntry(idx);
     }
     return formState.products[idx];
+  }
+
+  /**
+   * 상품별 기본 state 생성 — 첫번째 매칭 스티커를 기본 선택값으로.
+   * (이전엔 sticker_type=null 로 '선택안함' 기본이었으나, 고객이 스티커 상품을
+   *  그냥 지나치지 않도록 첫번째 스티커를 pre-select + 직접입력 모드 기본.)
+   */
+  function makeDefaultProductEntry(idx) {
+    const i = Number(idx);
+    const product = (orderData?.products || [])[i];
+    const matching = product ? getStickersForProduct(product.product_code) : [];
+    const firstStickerId = (matching && matching.length > 0) ? matching[0].id : null;
+    return {
+      sticker_type: firstStickerId,
+      // 스티커가 있으면 'custom' (직접입력) 으로 기본 — 고객 참여 유도
+      // 스티커가 없으면 'none' (노출할 입력란 자체가 없음)
+      sticker_input: firstStickerId ? 'custom' : 'none',
+      sticker_fields: {},
+    };
   }
 
   function getTotalAmount() {
@@ -2678,12 +2697,12 @@
       // Restore saved form state
       loadFormState();
 
-      // Initialize per-product form state
+      // Initialize per-product form state — 기본값: 첫번째 매칭 스티커 선택 + 직접입력
       if (!formState.products) formState.products = {};
       (orderData.products || []).forEach(function(_, i) {
         const key = String(i);
         if (!formState.products[key]) {
-          formState.products[key] = { sticker_type: null, sticker_input: 'none', sticker_fields: {} };
+          formState.products[key] = makeDefaultProductEntry(i);
         }
       });
 
