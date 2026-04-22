@@ -303,7 +303,21 @@ async function saveCustomerInfo(orderId, data) {
     submitted_at: now(),
   };
 
-  if (USE_SUPABASE) return sbInsert('bg_order_customer_info', info);
+  if (USE_SUPABASE) {
+    // migration 미적용 환경 대응: 스키마에 없는 컬럼 오류(PGRST204) 발생 시
+    // 해당 컬럼을 제거하고 재시도. 데이터 일부 손실되지만 제출 자체는 성공
+    try {
+      return await sbInsert('bg_order_customer_info', info);
+    } catch (err) {
+      const m = err.message && err.message.match(/Could not find the '(\w+)' column/);
+      if (m) {
+        console.warn(`[saveCustomerInfo] 스키마에 '${m[1]}' 컬럼 없음 - 해당 필드 제거 후 재시도. migration 적용 필요.`);
+        const { [m[1]]: _, ...retry } = info;
+        return sbInsert('bg_order_customer_info', retry);
+      }
+      throw err;
+    }
+  }
 
   const infos = readJson(FILES.customerInfo, []);
   const local = { id: uuid(), ...info, created_at: now() };
