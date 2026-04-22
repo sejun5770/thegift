@@ -824,13 +824,16 @@
           if (ps.sticker_input === 'custom' && ps.sticker_type) {
             const matching = getStickersForProduct(products[i].product_code);
             const sticker = matching.find(s => s.id === ps.sticker_type);
-            if (sticker && Array.isArray(sticker.custom_fields)) {
-              for (const f of sticker.custom_fields) {
-                if (f.required) {
-                  const key = f.field_id || f.name || f.field_label;
-                  const val = (ps.sticker_fields || {})[key];
-                  if (!val || String(val).trim() === '') return false;
-                }
+            // custom_fields가 비어있으면 기본 fallback 필드(text)를 필수로 간주
+            // — buildStickerInputSection의 폴백 로직과 동일
+            const fieldsToCheck = (sticker && Array.isArray(sticker.custom_fields) && sticker.custom_fields.length > 0)
+              ? sticker.custom_fields
+              : [{ field_id: 'text', field_label: '스티커 문구', required: true }];
+            for (const f of fieldsToCheck) {
+              if (f.required) {
+                const key = f.field_id || f.name || f.field_label;
+                const val = (ps.sticker_fields || {})[key];
+                if (!val || String(val).trim() === '') return false;
               }
             }
           }
@@ -1454,9 +1457,11 @@
     if (!selStickerId || matching.length === 0) return '<div id="sticker-input-wrap-' + idx + '"></div>';
 
     var selSt = matching.find(function(st) { return st.id === selStickerId; });
+    // 기본 폴백 필드는 required=true — 스티커 선택 + 직접입력 모드면 반드시 문구 입력 필요
+    // (입력안함 체크 시는 isStepValid에서 sticker_input === 'custom' 조건 때문에 검증 skip됨)
     var customFields = (selSt && Array.isArray(selSt.custom_fields) && selSt.custom_fields.length > 0)
       ? selSt.custom_fields
-      : [{ field_id: 'text', field_label: '스티커 문구', field_type: 'text', max_length: 100, placeholder: '예) 김철수 ♥ 이영희', required: false }];
+      : [{ field_id: 'text', field_label: '스티커 문구', field_type: 'text', max_length: 100, placeholder: '예) 김철수 ♥ 이영희', required: true }];
 
     // 기본값: sticker_input이 명시적으로 'none'이 아닌 경우 입력 표시
     var isNone = stInput === 'none';
