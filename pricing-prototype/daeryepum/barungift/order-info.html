@@ -287,7 +287,7 @@
           </button>
           <div class="mt-5 text-xs text-slate-400 space-y-0.5">
             <p>전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>
-            <p>카카오 <a href="https://open.kakao.com/o/stUy4gji" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
+            <p>카카오 <a href="https://open.kakao.com/o/s4RMIwni" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
           </div>
         </div>
       </div>
@@ -314,7 +314,7 @@
     <div class="bg-slate-50 rounded-2xl p-4 text-sm text-slate-600">
       <p class="font-semibold mb-2 text-slate-700">고객센터 문의</p>
       <p class="text-xs">전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>
-      <p class="text-xs">카카오 <a href="https://open.kakao.com/o/stUy4gji" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
+      <p class="text-xs">카카오 <a href="https://open.kakao.com/o/s4RMIwni" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
     </div>
   </div>
 </div>
@@ -330,7 +330,7 @@
     <div class="bg-slate-50 rounded-2xl p-4 text-sm text-slate-600">
       <p class="font-semibold mb-2 text-slate-700">고객센터 문의</p>
       <p class="text-xs">전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>
-      <p class="text-xs">카카오 <a href="https://open.kakao.com/o/stUy4gji" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
+      <p class="text-xs">카카오 <a href="https://open.kakao.com/o/s4RMIwni" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
     </div>
   </div>
 </div>
@@ -375,7 +375,7 @@
 
     <div class="text-[11px] text-slate-400 space-y-0.5">
       <p>전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>
-      <p>카카오 <a href="https://open.kakao.com/o/stUy4gji" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
+      <p>카카오 <a href="https://open.kakao.com/o/s4RMIwni" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
     </div>
   </div>
 </div>
@@ -484,6 +484,33 @@
       </div>
     </div>
   </div>
+</div>
+
+<!-- 고객센터 플로팅 버튼 (모든 화면에서 접근 가능) -->
+<div id="helpFab" style="position:fixed;bottom:calc(env(safe-area-inset-bottom, 0px) + 92px);right:16px;z-index:40">
+  <!-- 펼쳐진 카드 (클릭 시 토글) -->
+  <div id="helpPanel" class="surface hidden" style="position:absolute;bottom:58px;right:0;width:240px;padding:14px;box-shadow:0 10px 30px rgba(15,23,42,0.18)">
+    <p class="text-[13px] font-bold text-slate-900 mb-2">📞 고객센터</p>
+    <p class="text-[11px] text-slate-500 mb-3 leading-relaxed">궁금하신 점이 있으시면<br>편하게 연락 주세요.</p>
+    <a href="tel:1644-0708" class="pressable flex items-center gap-2.5 p-2.5 rounded-xl mb-1.5" style="background:linear-gradient(135deg,rgba(99,102,241,0.08),rgba(139,92,246,0.08));text-decoration:none">
+      <span class="text-lg">📞</span>
+      <div class="flex-1 min-w-0">
+        <div class="text-[11px] text-slate-500">전화</div>
+        <div class="text-[13px] font-bold" style="color:var(--brand-700)">1644-0708</div>
+      </div>
+    </a>
+    <a href="https://open.kakao.com/o/s4RMIwni" target="_blank" rel="noopener" class="pressable flex items-center gap-2.5 p-2.5 rounded-xl" style="background:linear-gradient(135deg,rgba(253,230,138,0.25),rgba(245,158,11,0.08));text-decoration:none">
+      <span class="text-lg">💬</span>
+      <div class="flex-1 min-w-0">
+        <div class="text-[11px] text-slate-500">카카오톡</div>
+        <div class="text-[13px] font-bold" style="color:#92400e">오픈채팅 상담</div>
+      </div>
+    </a>
+  </div>
+  <!-- FAB 버튼 -->
+  <button id="helpFabBtn" type="button" class="pressable gradient-brand"
+    style="width:52px;height:52px;border-radius:50%;border:0;box-shadow:0 8px 20px rgba(99,102,241,0.35);cursor:pointer;display:flex;align-items:center;justify-content:center;color:white;font-size:22px"
+    aria-label="고객센터">💬</button>
 </div>
 
 <script>
@@ -2002,6 +2029,26 @@
   // Enter 키로 로그인
   document.getElementById('loginPwd')?.addEventListener('keydown', e => { if (e.key === 'Enter') loginBarunson(); });
   document.getElementById('loginUid')?.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('loginPwd').focus(); });
+
+  // 고객센터 플로팅 버튼 토글 + 외부 클릭 시 닫기
+  (function setupHelpFab() {
+    const $btn = document.getElementById('helpFabBtn');
+    const $panel = document.getElementById('helpPanel');
+    const $fab = document.getElementById('helpFab');
+    if (!$btn || !$panel) return;
+    $btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      $panel.classList.toggle('hidden');
+    });
+    // 바깥 클릭 시 닫기
+    document.addEventListener('click', (e) => {
+      if (!$fab.contains(e.target)) $panel.classList.add('hidden');
+    });
+    // Esc 키로 닫기
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') $panel.classList.add('hidden');
+    });
+  })();
 
   // ============================================
   // Render order list (공통)
