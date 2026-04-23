@@ -418,6 +418,63 @@ async function deleteCustomerInfo(orderId) {
 }
 
 // ============================================
+// 후공정 처리 상태 (processed_at / processed_by)
+// 관리자가 스프레드시트에 복사해 후공정 진행했음을 추적.
+// ============================================
+
+/**
+ * 특정 주문의 처리 상태 토글.
+ * @param {string} orderId
+ * @param {{processed: boolean, processed_by?: string}} data
+ *   processed=true  → processed_at = now(), processed_by 세팅
+ *   processed=false → processed_at = NULL, processed_by = NULL (되돌리기)
+ */
+async function setProcessed(orderId, data) {
+  const wantProcessed = !!data.processed;
+  const patch = wantProcessed
+    ? { processed_at: now(), processed_by: data.processed_by || null }
+    : { processed_at: null, processed_by: null };
+
+  if (USE_SUPABASE) {
+    const existing = await sbGet('bg_order_customer_info', `order_id=eq.${encodeURIComponent(orderId)}`);
+    if (!existing || !existing.length) throw new Error('NOT_FOUND');
+    try {
+      return await sbUpdate('bg_order_customer_info', `order_id=eq.${encodeURIComponent(orderId)}`, patch);
+    } catch (err) {
+      const m = err.message && err.message.match(/Could not find the '(\w+)' column/);
+      if (m) {
+        console.warn(`[setProcessed] 스키마에 '${m[1]}' 컬럼 없음 — migration 011 적용 필요`);
+        throw new Error('PROCESSED_COLUMN_MISSING');
+      }
+      throw err;
+    }
+  }
+  const infos = readJson(FILES.customerInfo, []);
+  const idx = infos.findIndex(i => i.order_id === orderId);
+  if (idx === -1) throw new Error('NOT_FOUND');
+  infos[idx] = { ...infos[idx], ...patch };
+  writeJson(FILES.customerInfo, infos);
+  return infos[idx];
+}
+
+/**
+ * 여러 주문 일괄 처리 마킹 (수집복사 버튼 연동용).
+ * @param {string[]} orderIds
+ * @param {{processed: boolean, processed_by?: string}} data
+ * @returns {{ok: number, fail: number, errors: Array<{order_id, error}>}}
+ */
+async function setProcessedBatch(orderIds, data) {
+  const unique = [...new Set(orderIds.filter(Boolean))];
+  let ok = 0, fail = 0;
+  const errors = [];
+  for (const oid of unique) {
+    try { await setProcessed(oid, data); ok++; }
+    catch (e) { fail++; errors.push({ order_id: oid, error: e.message }); }
+  }
+  return { ok, fail, errors };
+}
+
+// ============================================
 // 공통 출고일 설정 (shipping config)
 // ============================================
 
@@ -644,6 +701,8 @@ module.exports = {
   getAllCustomerInfos,
   updateCustomerInfo,
   deleteCustomerInfo,
+  setProcessed,
+  setProcessedBatch,
   getShippingConfig,
   saveShippingConfig,
   getShippingGroups,

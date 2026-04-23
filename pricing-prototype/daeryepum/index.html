@@ -1332,6 +1332,16 @@ nav a:hover{color:var(--gray-900)}
   </div>
   <!-- 현재 활성 탭 상태 (내부) -->
   <input type="hidden" id="uni-active-tab" value="unsubmitted">
+
+  <!-- 입력완료 탭 전용 서브필터 (후공정 처리 상태) — 탭 상태에 따라 표시/숨김 -->
+  <div id="uni-submitted-subfilter" style="display:none;padding:10px 12px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;margin-bottom:12px;align-items:center;gap:16px">
+    <span style="font-size:12px;color:#4338ca;font-weight:600">📋 후공정 처리 현황</span>
+    <span id="uni-processed-summary" style="font-size:12px;color:var(--gray-700)">-</span>
+    <label style="font-size:12px;cursor:pointer;margin-left:auto;display:flex;align-items:center;gap:4px">
+      <input type="checkbox" id="uni-hide-processed" checked onchange="renderBgUnified()"> 처리완료 숨기기
+    </label>
+  </div>
+
   <div id="uni-loading" style="text-align:center;padding:40px;color:var(--gray-400)">날짜를 선택하고 조회하세요.</div>
   <div id="uni-table-wrap" style="display:none">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
@@ -1350,6 +1360,7 @@ nav a:hover{color:var(--gray-900)}
             <th>주문번호</th>
             <th>주문일</th>
             <th style="white-space:nowrap">입력</th>
+            <th class="uni-col-processed" style="white-space:nowrap;display:none">후공정</th>
             <th>상품명</th>
             <th style="text-align:center">수량</th>
             <th>수령인</th>
@@ -5827,6 +5838,13 @@ function switchUniTab(tab) {
     btn.style.color = isActive ? 'var(--primary)' : 'var(--gray-500)';
     btn.style.fontWeight = isActive ? '600' : '500';
   });
+  // 입력완료 탭일 때만 후공정 서브필터 표시
+  const subFilter = document.getElementById('uni-submitted-subfilter');
+  if (subFilter) subFilter.style.display = (tab === 'submitted') ? 'flex' : 'none';
+  // 후공정 컬럼 헤더 show/hide
+  document.querySelectorAll('.uni-col-processed').forEach(el => {
+    el.style.display = (tab === 'submitted') ? '' : 'none';
+  });
   renderBgUnified();
 }
 
@@ -5851,13 +5869,34 @@ function renderBgUnified() {
   if (cntUnsubEl) cntUnsubEl.textContent = '(' + cntUnsubmitted + ')';
 
   // 필터링 — 활성 탭에 따라
+  const hideProcessed = document.getElementById('uni-hide-processed')?.checked;
   let filtered = visibleBase.filter(o => {
     const ciKey = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
     const ci = bgUnifiedCiMap.get(ciKey);
     if (activeTab === 'submitted' && !ci) return false;
     if (activeTab === 'unsubmitted' && ci) return false;
+    // 입력완료 탭에서 '처리완료 숨기기' 체크시 processed_at 있는 주문 제외
+    if (activeTab === 'submitted' && hideProcessed && ci?.processed_at) return false;
     return true;
   });
+
+  // 입력완료 탭 요약 카드 업데이트 (전체 ci 중 처리 대기/완료 카운트)
+  if (activeTab === 'submitted') {
+    const submittedAll = visibleBase.filter(o => {
+      const k = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
+      return !!bgUnifiedCiMap.get(k);
+    });
+    let processedCnt = 0, pendingCnt = 0;
+    submittedAll.forEach(o => {
+      const k = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
+      const c = bgUnifiedCiMap.get(k);
+      if (c?.processed_at) processedCnt++; else pendingCnt++;
+    });
+    const sum = document.getElementById('uni-processed-summary');
+    if (sum) {
+      sum.innerHTML = '⏳ 처리대기 <b style="color:#b45309">' + pendingCnt + '</b>건 · ✅ 처리완료 <b style="color:#059669">' + processedCnt + '</b>건';
+    }
+  }
 
   // 입력완료 탭은 submitted_at / updated_at 기준 최신순 정렬
   //   관리자 추가/수정으로 updated_at 이 최신이면 그것 기준, 아니면 submitted_at
@@ -6001,11 +6040,36 @@ function renderBgUnified() {
         ? ''
         : `<button class="btn btn-primary" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">+ 추가</button>`);
 
+    // 후공정 처리 셀 — 입력완료 탭에서만 렌더 (미입력엔 의미 없음)
+    const showProcessedCol = (activeTab === 'submitted');
+    const ciKeyForProc = order.order_type === 'ETC' ? `ETC-${order.order_seq}` : String(order.order_seq);
+    const processedAt = ci?.processed_at;
+    let processedCellHtml = '';
+    if (showProcessedCol) {
+      if (processedAt) {
+        const d = new Date(processedAt);
+        const pad = n => String(n).padStart(2, '0');
+        const fmt = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
+          + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+        processedCellHtml = `<td class="uni-col-processed" style="font-size:11px;white-space:nowrap">
+          <div style="color:#059669;font-weight:600">✅ ${fmt}</div>
+          <button class="btn" style="padding:2px 8px;font-size:10px;margin-top:3px" onclick="toggleProcessed('${esc(ciKeyForProc)}', false)" title="처리 되돌리기">↺ 되돌리기</button>
+        </td>`;
+      } else {
+        processedCellHtml = `<td class="uni-col-processed" style="font-size:11px;white-space:nowrap">
+          <button class="btn btn-primary" style="padding:3px 10px;font-size:11px" onclick="toggleProcessed('${esc(ciKeyForProc)}', true)">📋 처리완료</button>
+        </td>`;
+      }
+    } else {
+      processedCellHtml = `<td class="uni-col-processed" style="display:none"></td>`;
+    }
+
     html += `<tr class="${rowClass}" style="${borderStyle}">
       <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()"></td>
       <td style="font-weight:600;white-space:nowrap">${esc(order.order_seq)}</td>
       <td style="font-size:12px;color:var(--gray-500);white-space:nowrap">${orderDateFmt}</td>
       <td style="font-size:12px">${inputBadge}</td>
+      ${processedCellHtml}
       <td style="font-size:12px">${productName}</td>
       <td style="text-align:center;font-size:12px">${itemCount}</td>
       <td style="font-size:12px;white-space:nowrap">${recvName}</td>
@@ -6091,14 +6155,74 @@ function copyBgUnified() {
   const tableHtml = `<table><tbody>${htmlRows}</tbody></table>`;
   const tsv = selectedRows.map(row => buildCells(row).join('\t')).join('\n');
 
+  const onSuccess = () => {
+    showToast(`${selectedRows.length}건 클립보드 복사 완료`);
+    // 입력완료 탭에서 복사한 경우만 → 선택 주문들을 자동 '처리완료' 로 마킹
+    //   · 이미 처리된 주문도 포함해 재마킹 (PATCH idempotent)
+    //   · 미입력 행(ci 없음)은 제외
+    const activeTab = document.getElementById('uni-active-tab')?.value;
+    if (activeTab !== 'submitted') return;
+    const orderIds = [...new Set(
+      selectedRows
+        .filter(r => r.ci) // 입력된 주문만
+        .map(r => r.order.order_type === 'ETC' ? ('ETC-' + r.order.order_seq) : String(r.order.order_seq))
+    )];
+    if (!orderIds.length) return;
+    markOrdersProcessedBatch(orderIds, true);
+  };
+
   if (navigator.clipboard && window.ClipboardItem) {
     const htmlBlob = new Blob([tableHtml], { type: 'text/html' });
     const textBlob = new Blob([tsv], { type: 'text/plain' });
     navigator.clipboard.write([new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })])
-      .then(() => showToast(`${selectedRows.length}건 클립보드 복사 완료`))
-      .catch(() => navigator.clipboard.writeText(tsv).then(() => showToast(`${selectedRows.length}건 복사 완료`)));
+      .then(onSuccess)
+      .catch(() => navigator.clipboard.writeText(tsv).then(onSuccess));
   } else {
-    navigator.clipboard.writeText(tsv).then(() => showToast(`${selectedRows.length}건 복사 완료`));
+    navigator.clipboard.writeText(tsv).then(onSuccess);
+  }
+}
+
+/** 단일 주문 처리 상태 토글 (↺ 되돌리기 / 📋 처리완료 버튼 핸들러) */
+async function toggleProcessed(orderId, processed) {
+  if (!orderId) return;
+  try {
+    const r = await fetch(API + '/api/bg/orders/' + encodeURIComponent(orderId) + '/processed', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ processed: !!processed }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.error || '처리 실패');
+    }
+    showToast(processed ? '처리완료로 표시' : '처리 되돌리기 완료');
+    await loadBgUnified();
+  } catch (e) {
+    alert('처리 상태 변경 실패: ' + e.message);
+  }
+}
+
+/** 여러 주문 일괄 처리 마킹 (수집복사와 연동) */
+async function markOrdersProcessedBatch(orderIds, processed) {
+  if (!orderIds || !orderIds.length) return;
+  try {
+    const r = await fetch(API + '/api/bg/orders/processed-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ids: orderIds, processed: !!processed }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      console.warn('batch processed mark 실패:', data.error);
+      return;
+    }
+    if (data.fail > 0) {
+      console.warn('일부 주문 처리 실패:', data.errors);
+    }
+    // 리스트 새로고침 → 처리완료 반영
+    await loadBgUnified();
+  } catch (e) {
+    console.warn('markOrdersProcessedBatch error:', e.message);
   }
 }
 

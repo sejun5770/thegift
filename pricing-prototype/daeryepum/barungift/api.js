@@ -701,6 +701,54 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
   }
 
+  // PATCH /api/bg/orders/:orderId/processed - 후공정 처리 상태 토글
+  //   body: { processed: boolean }
+  const processedMatch = pathname.match(/^\/api\/bg\/orders\/([^/]+)\/processed$/);
+  if (processedMatch && method === 'PATCH') {
+    const orderId = decodeURIComponent(processedMatch[1]);
+    try {
+      const body = await parseBody(req);
+      const updated = await store.setProcessed(orderId, {
+        processed: !!body.processed,
+        processed_by: session?.email || null,
+      });
+      logAccess(req, body.processed ? 'mark_processed' : 'unmark_processed', orderId, {
+        status_code: 200,
+        metadata: { actor: session?.email || 'admin' },
+      });
+      return json(res, { ok: true, info: updated });
+    } catch (err) {
+      if (err.message === 'NOT_FOUND') return json(res, { error: '주문 정보를 찾을 수 없습니다.' }, 404);
+      if (err.message === 'PROCESSED_COLUMN_MISSING') {
+        return json(res, { error: 'DB 마이그레이션 011 적용이 필요합니다.' }, 500);
+      }
+      console.error('setProcessed error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
+  // POST /api/bg/orders/processed-batch - 여러 주문 일괄 처리 마킹
+  //   body: { order_ids: string[], processed: boolean }
+  if (pathname === '/api/bg/orders/processed-batch' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const orderIds = Array.isArray(body.order_ids) ? body.order_ids : [];
+      if (!orderIds.length) return json(res, { error: 'order_ids 가 필요합니다.' }, 400);
+      const result = await store.setProcessedBatch(orderIds, {
+        processed: !!body.processed,
+        processed_by: session?.email || null,
+      });
+      logAccess(req, body.processed ? 'mark_processed_batch' : 'unmark_processed_batch', null, {
+        status_code: 200,
+        metadata: { actor: session?.email || 'admin', count: orderIds.length, ok: result.ok, fail: result.fail },
+      });
+      return json(res, { ok: true, ...result });
+    } catch (err) {
+      console.error('setProcessedBatch error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
   // GET /api/bg/audit/access-log?order_id=xxx&limit=100&since=ISO - 관리자 감사 로그 조회
   if (pathname === '/api/bg/audit/access-log' && method === 'GET') {
     const logs = await getRecentLogs({
