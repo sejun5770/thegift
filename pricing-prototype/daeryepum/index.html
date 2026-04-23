@@ -1532,8 +1532,13 @@ const STATUS_MAP_CARD = {
   5:'주문취소', 6:'제작준비', 7:'인쇄대기', 8:'인쇄중',
   9:'제본중', 10:'포장중', 11:'배송준비', 12:'배송완료', 15:'발송완료'
 };
-// 수집 제외 상태 (1=결제대기, 3=결제취소, 5=주문취소)
-function isCancelled(r) { return r.status_seq === 1 || r.status_seq === 3 || r.status_seq === 5; }
+// 수집 제외 상태: 3=결제취소, 5=주문취소, 또는 status_seq=1 이면서 settle_date 없는 미결제 주문
+// status_seq=1 이어도 settle_date 가 있으면 실제로는 결제 완료된 것이므로 수집 대상에 포함
+function isCancelled(r) {
+  if (r.status_seq === 3 || r.status_seq === 5) return true;
+  if (r.status_seq === 1 && !r.settle_date) return true; // 미결제 주문만
+  return false;
+}
 
 // --- Auth ---
 function loadUserInfo() {
@@ -1686,8 +1691,9 @@ function getFilteredOrders() {
   return ordersData.filter(r => {
     // 취소주문 제외 (3=결제취소, 5=주문취소)
     if (excludeCancel && (r.status_seq === 3 || r.status_seq === 5)) return false;
-    // 결제대기 제외 (1=결제대기)
-    if (excludePending && r.status_seq === 1) return false;
+    // 결제대기 제외 — settle_date 가 없는 '실제 미결제' 주문 기준
+    // (status_seq=1 이어도 settle_date 있으면 결제 완료된 것)
+    if (excludePending && r.status_seq === 1 && !r.settle_date) return false;
     // 상품코드/명 검색
     if (q) {
       const code = (r.card_code || '').toLowerCase();
@@ -1712,7 +1718,9 @@ function renderOrderTable() {
     const key = String(r.order_seq);
     const isCollected = collected.has(key);
     const isCancelStatus = r.status_seq === 3 || r.status_seq === 5;
-    const isPendingStatus = r.status_seq === 1;
+    // 결제대기 하이라이트 — status_seq=1 이면서 settle_date 가 실제로 비어있는 주문만
+    //   CARD/ETC 모두 settle_date 채워지면 결제 완료된 것으로 판정
+    const isPendingStatus = r.status_seq === 1 && !r.settle_date;
     let cls = '';
     if (isCollected && isCancelStatus) cls = 'row-cancel-alert';
     else if (isCollected) cls = 'row-collected';
