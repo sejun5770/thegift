@@ -5929,7 +5929,13 @@ function renderBgUnified() {
     const stickerName = sel?.sticker_name || '<span style="color:var(--gray-300)">-</span>';
     const customVals = sel ? Object.entries(sel.custom_values || {}).filter(([, v]) => v) : [];
     const customText = customVals.length
-      ? customVals.map(([k, v]) => `<span style="color:var(--gray-500)">${k}:</span> ${v}`).join('<br>')
+      ? customVals.map(([k, v]) => {
+          // 기본 'text' 필드는 접두어 없이 값만 표시 (가독성).
+          // 다른 커스텀 키는 기존처럼 'key: value' 로 구분.
+          return k === 'text'
+            ? String(v)
+            : `<span style="color:var(--gray-500)">${k}:</span> ${v}`;
+        }).join('<br>')
       : '<span style="color:var(--gray-300)">-</span>';
     const shipDate = ci?.desired_ship_date || '<span style="color:var(--gray-300)">-</span>';
     const shipType = ci ? (ci.is_express
