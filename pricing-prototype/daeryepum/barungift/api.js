@@ -327,7 +327,9 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         info_status: existingInfo?.submitted_at ? 'completed' : 'pending',
         products,
         product_settings: productSettings,
-        shipping_config: await store.getShippingConfig(),
+        // 첫번째 상품의 shipping_group_id 기반으로 출고일 config 결정.
+        // 여러 상품이 다른 그룹에 속하는 경우는 현재 첫 상품 기준 (추후 확장 가능).
+        shipping_config: await store.getShippingConfig(productSettings?.shipping_group_id || null),
         available_stickers: availableStickers,
         stickers_by_product: stickersByProduct,
         box_options_by_product: boxOptionsByProduct, // { product_code: [{code,name,color,preview_image_url}] }
@@ -733,15 +735,44 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   }
 
   // GET /api/bg/shipping-config - 공통 출고일 설정 조회
+  //   ?id=<group_id> 있으면 해당 그룹. 없으면 기본 그룹(is_default=true).
   if (pathname === '/api/bg/shipping-config' && method === 'GET') {
-    return json(res, { config: await store.getShippingConfig() });
+    return json(res, { config: await store.getShippingConfig(query.id || null) });
   }
 
   // PUT /api/bg/shipping-config - 공통 출고일 설정 저장
+  //   ?id=<group_id> 있으면 해당 그룹 업데이트, 없으면 기본 그룹 업데이트.
   if (pathname === '/api/bg/shipping-config' && method === 'PUT') {
     const body = await parseBody(req);
-    const config = await store.saveShippingConfig(body);
+    const config = await store.saveShippingConfig(body, query.id || null);
     return json(res, config);
+  }
+
+  // GET /api/bg/shipping-groups - 전체 출고일 그룹 목록
+  if (pathname === '/api/bg/shipping-groups' && method === 'GET') {
+    return json(res, { groups: await store.getShippingGroups() });
+  }
+
+  // POST /api/bg/shipping-groups - 새 그룹 생성 (기본 그룹 외)
+  if (pathname === '/api/bg/shipping-groups' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const group = await store.createShippingGroup(body);
+      return json(res, group, 201);
+    } catch (err) {
+      return json(res, { error: err.message }, 400);
+    }
+  }
+
+  // DELETE /api/bg/shipping-groups/:id - 그룹 삭제 (기본 그룹 불가, 사용 중이면 불가)
+  const shippingGroupDelMatch = pathname.match(/^\/api\/bg\/shipping-groups\/([^/]+)$/);
+  if (shippingGroupDelMatch && method === 'DELETE') {
+    try {
+      await store.deleteShippingGroup(decodeURIComponent(shippingGroupDelMatch[1]));
+      return json(res, { ok: true });
+    } catch (err) {
+      return json(res, { error: err.message }, 400);
+    }
   }
 
   // ============================================

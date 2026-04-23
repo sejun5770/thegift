@@ -945,6 +945,16 @@ nav a:hover{color:var(--gray-900)}
     <!-- 바디 (스크롤 없음 — 내부 리스트만 스크롤) -->
     <div style="padding:16px 20px;display:flex;flex-direction:column;gap:12px;flex:1;min-height:0">
 
+      <!-- 출고일 그룹 선택 -->
+      <div>
+        <label style="display:block;font-size:13px;font-weight:600;color:var(--gray-700);margin-bottom:6px">📅 출고일 그룹</label>
+        <select id="bg-p-shipping-group" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px;background:#fff">
+          <option value="">기본 그룹</option>
+          <!-- 동적으로 주입 -->
+        </select>
+        <p style="font-size:11px;color:var(--gray-500);margin:4px 0 0">고객 화면에 적용될 출고일 정책. 미지정시 기본 그룹 사용.</p>
+      </div>
+
       <!-- 선택된 스티커 영역 -->
       <div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
@@ -997,10 +1007,24 @@ nav a:hover{color:var(--gray-900)}
 
 <!-- ========== 바른기프트: 출고일 설정 ========== -->
 <div id="page-bg-shipping" class="page">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
     <h2 style="margin:0">📅 출고일 설정</h2>
-    <button class="btn btn-primary" onclick="saveBgShipping()">설정 저장</button>
+    <div style="display:flex;gap:6px">
+      <button class="btn" onclick="addBgShippingGroup()">➕ 그룹 추가</button>
+      <button class="btn btn-primary" onclick="saveBgShipping()">현재 그룹 저장</button>
+    </div>
   </div>
+
+  <!-- 그룹 탭 -->
+  <div id="bg-sh-group-tabs" style="display:flex;gap:2px;border-bottom:2px solid var(--gray-200);margin-bottom:16px;flex-wrap:wrap;align-items:center">
+    <!-- 동적 렌더 -->
+    <div style="color:var(--gray-400);font-size:12px;padding:10px">불러오는 중…</div>
+  </div>
+  <!-- 현재 편집 중인 그룹 id (hidden) — '' 이면 기본 그룹 -->
+  <input type="hidden" id="bg-sh-current-group-id" value="">
+  <!-- 현재 그룹이 기본 그룹 여부 (삭제 버튼 제어) -->
+  <input type="hidden" id="bg-sh-current-is-default" value="true">
+
   <div style="display:grid;grid-template-columns:1fr 320px;gap:20px">
     <!-- 왼쪽: 설정 -->
     <div>
@@ -4709,12 +4733,14 @@ async function openBgProductForm(productId) {
   document.getElementById('bg-p-sticker-list').innerHTML = '<div style="padding:20px;text-align:center;color:var(--gray-400);font-size:13px">불러오는 중...</div>';
 
   try {
-    const [settingsRes, stickersRes] = await Promise.all([
+    const [settingsRes, stickersRes, groupsRes] = await Promise.all([
       fetch(API + '/api/bg/products/' + encodeURIComponent(productId) + '/settings'),
       fetch(API + '/api/bg/stickers?active_only=true'),
+      fetch(API + '/api/bg/shipping-groups'),
     ]);
     const s = (await settingsRes.json()).settings;
     _bgAllStickers = (await stickersRes.json()).stickers || [];
+    const groups = (await groupsRes.json()).groups || [];
     _bgSelectedStickerIds = new Set(s?.available_sticker_ids || []);
     // 박스 옵션 로드 (없으면 빈 배열)
     _bgBoxOptions = Array.isArray(s?.available_box_options)
@@ -4726,6 +4752,17 @@ async function openBgProductForm(productId) {
           sold_out: !!opt.sold_out,
         }))
       : [];
+    // 출고일 그룹 드롭다운 옵션 렌더
+    const groupSel = document.getElementById('bg-p-shipping-group');
+    if (groupSel) {
+      const options = ['<option value="">기본 그룹 (미지정)</option>']
+        .concat(groups.map(g => {
+          const label = (g.name || '그룹').replace(/</g, '&lt;') + (g.is_default ? ' (기본)' : '');
+          return '<option value="' + g.id + '">' + label + '</option>';
+        }));
+      groupSel.innerHTML = options.join('');
+      groupSel.value = s?.shipping_group_id || '';
+    }
     renderBgStickerModal();
     renderBgBoxOptions();
   } catch(e) { console.error('openBgProductForm:', e); }
@@ -4997,9 +5034,13 @@ async function saveBgProduct() {
     return;
   }
 
+  // 출고일 그룹 (빈 문자열이면 null — 기본 그룹 사용)
+  const shippingGroupId = (document.getElementById('bg-p-shipping-group')?.value || '').trim() || null;
+
   const body = {
     available_sticker_ids: stickerIds,
     available_box_options: boxOptions,
+    shipping_group_id: shippingGroupId,
   };
 
   try {
@@ -5032,11 +5073,105 @@ let bgShClosedReasonTarget = null;
 let bgShPreviewMonth = new Date();
 let bgShPreviewSelected = null;
 
+let _bgShGroups = [];
+
+/** 그룹 목록 로드 + 탭 렌더 + 현재 그룹 설정 로드 */
 async function loadBgShipping() {
   try {
-    const r = await fetch(API + '/api/bg/shipping-config');
+    // 1) 그룹 목록 조회
+    const gRes = await fetch(API + '/api/bg/shipping-groups');
+    const gData = await gRes.json();
+    _bgShGroups = Array.isArray(gData.groups) ? gData.groups : [];
+    renderBgShGroupTabs();
+    // 2) 현재 선택된 그룹 (없으면 기본 그룹 = _bgShGroups 의 is_default)
+    const curId = document.getElementById('bg-sh-current-group-id').value
+      || (_bgShGroups.find(g => g.is_default)?.id || '');
+    await loadBgShippingForGroup(curId);
+  } catch(e) { console.error('loadBgShipping:', e); }
+}
+
+/** 특정 그룹 설정을 폼에 로드 */
+async function loadBgShippingForGroup(groupId) {
+  document.getElementById('bg-sh-current-group-id').value = groupId || '';
+  const targetGroup = _bgShGroups.find(g => g.id === groupId)
+    || _bgShGroups.find(g => g.is_default)
+    || null;
+  document.getElementById('bg-sh-current-is-default').value = targetGroup?.is_default ? 'true' : 'false';
+
+  try {
+    const url = API + '/api/bg/shipping-config' + (groupId ? ('?id=' + encodeURIComponent(groupId)) : '');
+    const r = await fetch(url);
     const d = await r.json();
     const cfg = d.config || {};
+    _applyShippingConfigToForm(cfg);
+  } catch(e) { console.error('loadBgShippingForGroup:', e); }
+}
+
+/** 그룹 탭 렌더 */
+function renderBgShGroupTabs() {
+  const wrap = document.getElementById('bg-sh-group-tabs');
+  if (!wrap) return;
+  const curId = document.getElementById('bg-sh-current-group-id').value
+    || (_bgShGroups.find(g => g.is_default)?.id || '');
+  const tabs = _bgShGroups.map(g => {
+    const isActive = g.id === curId;
+    const nameHtml = (g.name || '그룹').replace(/</g, '&lt;');
+    const defaultBadge = g.is_default ? '<span style="font-size:10px;color:var(--primary);margin-left:4px">(기본)</span>' : '';
+    const deleteBtn = g.is_default ? '' :
+      '<button onclick="event.stopPropagation();deleteBgShippingGroup(\'' + g.id + '\', \'' + nameHtml + '\')" title="삭제" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:14px;margin-left:4px;padding:0;line-height:1">&times;</button>';
+    const activeStyle = isActive
+      ? 'border-bottom:3px solid var(--primary);color:var(--primary);font-weight:600'
+      : 'border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500';
+    return '<button class="bg-sh-group-tab" onclick="switchBgShippingGroup(\'' + g.id + '\')" style="padding:10px 16px;background:none;border:none;' + activeStyle + ';font-size:13px;cursor:pointer;margin-bottom:-2px;display:inline-flex;align-items:center">'
+      + nameHtml + defaultBadge + deleteBtn
+      + '</button>';
+  }).join('');
+  wrap.innerHTML = tabs || '<div style="color:var(--gray-400);font-size:12px;padding:10px">그룹 없음</div>';
+}
+
+/** 탭 전환 */
+async function switchBgShippingGroup(groupId) {
+  await loadBgShippingForGroup(groupId);
+  renderBgShGroupTabs();
+}
+
+/** 새 그룹 추가 (prompt 로 이름 입력) */
+async function addBgShippingGroup() {
+  const name = (prompt('새 출고일 그룹 이름을 입력하세요 (예: 롱리드타임 전용):', '') || '').trim();
+  if (!name) return;
+  try {
+    const r = await fetch(API + '/api/bg/shipping-groups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (!r.ok) throw new Error((await r.json()).error || '생성 실패');
+    const newGroup = await r.json();
+    showToast('그룹 "' + name + '" 생성됨');
+    // 새 그룹으로 전환
+    document.getElementById('bg-sh-current-group-id').value = newGroup.id;
+    await loadBgShipping();
+  } catch(e) { alert(e.message); }
+}
+
+/** 그룹 삭제 */
+async function deleteBgShippingGroup(id, name) {
+  if (!confirm('출고일 그룹 "' + name + '" 을 삭제합니다.\n\n이 그룹을 사용하는 상품이 있으면 삭제되지 않습니다.\n계속하시겠습니까?')) return;
+  try {
+    const r = await fetch(API + '/api/bg/shipping-groups/' + encodeURIComponent(id), { method: 'DELETE' });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.error || '삭제 실패');
+    }
+    showToast('그룹이 삭제되었습니다.');
+    // 기본 그룹으로 복귀
+    document.getElementById('bg-sh-current-group-id').value = '';
+    await loadBgShipping();
+  } catch(e) { alert(e.message); }
+}
+
+/** 폼에 config 값 적용 (그룹 전환 + 최초 로드 공용) */
+function _applyShippingConfigToForm(cfg) {
     document.getElementById('bg-sh-today-shipping').checked = cfg.shipping_type === 'today_shipping';
     document.getElementById('bg-sh-cutoff-on').checked = cfg.cutoff_enabled ?? false;
     document.getElementById('bg-sh-cutoff-h').value = cfg.cutoff_hour ?? 14;
@@ -5066,7 +5201,6 @@ async function loadBgShipping() {
     bgShPreviewMonth = new Date();
     bgShPreviewSelected = null;
     updateBgShPreview();
-  } catch(e) { console.error('loadBgShipping:', e); }
 }
 
 async function saveBgShipping() {
@@ -5087,12 +5221,17 @@ async function saveBgShipping() {
     notice_enabled: document.getElementById('bg-sh-notice-on').checked,
     notice_text: document.getElementById('bg-sh-notice-text').value,
   };
+  // 현재 그룹 id (없으면 기본 그룹으로 저장)
+  const curId = document.getElementById('bg-sh-current-group-id').value;
+  const url = API + '/api/bg/shipping-config' + (curId ? ('?id=' + encodeURIComponent(curId)) : '');
   try {
-    const r = await fetch(API + '/api/bg/shipping-config', {
+    const r = await fetch(url, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
     });
     if (!r.ok) throw new Error((await r.json()).error || '저장 실패');
     showToast('출고일 설정이 저장되었습니다.');
+    // 그룹 캐시 리로드 (name 등은 변경 안 되지만 updated_at 갱신)
+    await loadBgShipping();
   } catch(e) { alert(e.message); }
 }
 

@@ -234,6 +234,8 @@ async function upsertProductSettings(productId, data) {
     notice_enabled: data.notice_enabled ?? false,
     notice_text: data.notice_text ?? '',
     available_sticker_ids: data.available_sticker_ids ?? [],
+    available_box_options: data.available_box_options ?? [],
+    shipping_group_id: data.shipping_group_id ?? null,
     express_available: data.express_available ?? (data.shipping_type === 'today_shipping'),
     express_fee: data.express_fee ?? 0,
     express_cutoff_time: data.express_cutoff_time ?? `${String(data.cutoff_hour ?? 14).padStart(2,'0')}:${String(data.cutoff_minute ?? 0).padStart(2,'0')}`,
@@ -435,40 +437,129 @@ const DEFAULT_SHIPPING_CONFIG = {
   notice_text: '',
 };
 
-// 단일 row 식별 ID (bg_shipping_config 테이블)
+// 단일 row 식별 ID — '기본 그룹' 의 고정 UUID (레거시 호환)
 const SHIPPING_CONFIG_ID = '00000000-0000-0000-0000-000000000001';
 
-async function getShippingConfig() {
+/** 전체 그룹 목록 조회 (is_default=true 가 최상단) */
+async function getShippingGroups() {
   if (USE_SUPABASE) {
     try {
-      const rows = await sbGet('bg_shipping_config', `id=eq.${SHIPPING_CONFIG_ID}`);
-      if (rows && rows[0]) return { ...DEFAULT_SHIPPING_CONFIG, ...rows[0] };
+      const rows = await sbGet('bg_shipping_config', 'order=is_default.desc,created_at.asc');
+      if (Array.isArray(rows)) {
+        return rows.map(r => ({ ...DEFAULT_SHIPPING_CONFIG, ...r }));
+      }
+    } catch (e) {
+      console.warn('[store] bg_shipping_config list 실패:', e.message);
+    }
+  }
+  // JSON 폴백 — 단일 row 를 기본 그룹으로 취급
+  const single = readJson(FILES.shippingConfig, DEFAULT_SHIPPING_CONFIG);
+  return [{
+    id: SHIPPING_CONFIG_ID, name: '기본 그룹', is_default: true, ...single,
+  }];
+}
+
+/** 특정 그룹 조회 (id 또는 '기본'). 없으면 기본 그룹 fallback. */
+async function getShippingConfig(idOrNull) {
+  const wantId = idOrNull || null;
+  if (USE_SUPABASE) {
+    try {
+      // 명시 id 조회 → 실패시 default 조회
+      if (wantId) {
+        const rows = await sbGet('bg_shipping_config', `id=eq.${encodeURIComponent(wantId)}`);
+        if (rows && rows[0]) return { ...DEFAULT_SHIPPING_CONFIG, ...rows[0] };
+      }
+      const defRows = await sbGet('bg_shipping_config', 'is_default=eq.true&limit=1');
+      if (defRows && defRows[0]) return { ...DEFAULT_SHIPPING_CONFIG, ...defRows[0] };
+      // 폴백: 레거시 고정 ID
+      const legacy = await sbGet('bg_shipping_config', `id=eq.${SHIPPING_CONFIG_ID}`);
+      if (legacy && legacy[0]) return { ...DEFAULT_SHIPPING_CONFIG, ...legacy[0] };
       return DEFAULT_SHIPPING_CONFIG;
     } catch (e) {
-      console.warn('[store] bg_shipping_config Supabase fetch 실패, JSON 폴백:', e.message);
+      console.warn('[store] bg_shipping_config fetch 실패, JSON 폴백:', e.message);
     }
   }
   return readJson(FILES.shippingConfig, DEFAULT_SHIPPING_CONFIG);
 }
 
-async function saveShippingConfig(data) {
-  const current = await getShippingConfig();
+/**
+ * 그룹 저장 (업데이트 전용 — 기본 그룹 또는 특정 그룹).
+ * id 가 없으면 default 그룹을 업데이트. 기존 호환 경로.
+ */
+async function saveShippingConfig(data, idOrNull) {
+  const targetId = idOrNull || null;
+  const current = await getShippingConfig(targetId);
   const merged = { ...current, ...data, updated_at: now() };
+
   if (USE_SUPABASE) {
     try {
-      // 존재 여부 확인
-      const existing = await sbGet('bg_shipping_config', `id=eq.${SHIPPING_CONFIG_ID}`);
+      const filter = targetId
+        ? `id=eq.${encodeURIComponent(targetId)}`
+        : 'is_default=eq.true';
+      const existing = await sbGet('bg_shipping_config', filter);
       if (existing && existing.length) {
         const { id: _id, created_at, ...updateData } = merged;
-        return await sbUpdate('bg_shipping_config', `id=eq.${SHIPPING_CONFIG_ID}`, updateData);
+        return await sbUpdate('bg_shipping_config', filter, updateData);
       }
-      return await sbInsert('bg_shipping_config', { id: SHIPPING_CONFIG_ID, ...merged });
+      // 기본 그룹이 없으면 레거시 고정 ID 로 생성
+      return await sbInsert('bg_shipping_config', {
+        id: targetId || SHIPPING_CONFIG_ID,
+        name: merged.name || '기본 그룹',
+        is_default: !targetId,
+        ...merged,
+      });
     } catch (e) {
-      console.warn('[store] bg_shipping_config Supabase save 실패, JSON 폴백:', e.message);
+      console.warn('[store] bg_shipping_config save 실패, JSON 폴백:', e.message);
     }
   }
   writeJson(FILES.shippingConfig, merged);
   return merged;
+}
+
+/** 새 그룹 생성 (is_default 는 항상 false) */
+async function createShippingGroup(data) {
+  const name = (data.name || '').trim();
+  if (!name) throw new Error('그룹 이름이 필요합니다.');
+  const row = {
+    ...DEFAULT_SHIPPING_CONFIG,
+    ...data,
+    name,
+    is_default: false,
+    created_at: now(),
+    updated_at: now(),
+  };
+  if (USE_SUPABASE) {
+    try {
+      return await sbInsert('bg_shipping_config', row);
+    } catch (e) {
+      console.warn('[store] createShippingGroup 실패:', e.message);
+      throw e;
+    }
+  }
+  throw new Error('로컬 JSON 모드에서는 그룹 생성 미지원 — Supabase 환경변수 설정 필요');
+}
+
+/** 그룹 삭제 (기본 그룹은 삭제 불가). 삭제 전에 해당 그룹을 쓰는 상품이 있으면 에러. */
+async function deleteShippingGroup(id) {
+  if (!id) throw new Error('그룹 id 가 필요합니다.');
+  if (id === SHIPPING_CONFIG_ID) throw new Error('기본 그룹은 삭제할 수 없습니다.');
+  if (USE_SUPABASE) {
+    // is_default=true 는 삭제 금지
+    const target = await sbGet('bg_shipping_config', `id=eq.${encodeURIComponent(id)}`);
+    if (!target || !target[0]) throw new Error('존재하지 않는 그룹입니다.');
+    if (target[0].is_default) throw new Error('기본 그룹은 삭제할 수 없습니다.');
+
+    // 사용 중인 상품 확인
+    const usingProducts = await sbGet('bg_product_settings', `shipping_group_id=eq.${encodeURIComponent(id)}&select=product_id&limit=5`);
+    if (usingProducts && usingProducts.length) {
+      const codes = usingProducts.map(p => p.product_id).join(', ');
+      throw new Error(`이 그룹을 사용하는 상품이 있어 삭제할 수 없습니다: ${codes}`);
+    }
+
+    await sbDelete('bg_shipping_config', `id=eq.${encodeURIComponent(id)}`);
+    return;
+  }
+  throw new Error('로컬 JSON 모드에서는 그룹 삭제 미지원');
 }
 
 // ============================================
@@ -555,6 +646,9 @@ module.exports = {
   deleteCustomerInfo,
   getShippingConfig,
   saveShippingConfig,
+  getShippingGroups,
+  createShippingGroup,
+  deleteShippingGroup,
   logAlimtalkSend,
   getAlimtalkHistory,
 };
