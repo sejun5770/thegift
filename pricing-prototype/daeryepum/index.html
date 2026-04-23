@@ -79,7 +79,7 @@ nav a:hover{color:var(--gray-900)}
 .data-table tr.row-cancel-alert td{color:#dc2626;font-weight:600}
 .data-table tr.row-cancelled{background:#fff1f2}
 .data-table tr.row-cancelled:hover{background:#ffe4e6}
-.data-table tr.row-cancelled td{color:#be123c}
+.data-table tr.row-cancelled td{color:#be123c;text-decoration:line-through}
 .data-table tr.row-pending{background:#f0f9ff}
 .data-table tr.row-pending:hover{background:#e0f2fe}
 .data-table tr.row-pending td{color:#0369a1}
@@ -181,6 +181,7 @@ nav a:hover{color:var(--gray-900)}
   <span class="logo">💐 답례품 관리</span>
   <a href="#dashboard" class="active" onclick="showPage('dashboard')">대시보드</a>
   <a href="#orders" onclick="showPage('orders')">주문조회</a>
+  <a href="#bg-unified" onclick="showPage('bg-unified')">📋 정보입력현황</a>
   <a href="#sns" onclick="showPage('sns')">💡 SNS 인사이트</a>
   <a href="#worklog" onclick="showPage('worklog')">📝 일지</a>
   <a href="#bg-stickers" onclick="showPage('bg-stickers')">🏷️ 스티커</a>
@@ -200,6 +201,7 @@ nav a:hover{color:var(--gray-900)}
     <input type="date" id="dash-end" />
     <button class="btn btn-primary" onclick="loadDashboard()">조회</button>
   </div>
+
   <!-- Sales Data Toggle -->
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
     <span style="font-size:15px;font-weight:700">📋 기간 매출 현황</span>
@@ -356,6 +358,55 @@ nav a:hover{color:var(--gray-900)}
       <div class="leadtime-bars" id="lt-bars"></div>
       <div style="height:24px"></div>
       <div class="feedback" id="lt-feedback"></div>
+    </div>
+  </div>
+
+  <!-- ============================================
+       상품별 판매 통계 — 썸네일 선택 + 다상품 비교
+       ============================================ -->
+  <div class="section">
+    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span>📦 상품별 판매 통계 <span style="font-size:11px;font-weight:400;color:var(--gray-500);margin-left:4px">(최대 5개 비교)</span></span>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;font-weight:400">
+        <button class="btn btn-sm ps-preset" data-days="7" onclick="setPsPeriodPreset(7, this)">7일</button>
+        <button class="btn btn-sm ps-preset" data-days="30" onclick="setPsPeriodPreset(30, this)">30일</button>
+        <button class="btn btn-sm ps-preset btn-primary" data-days="90" onclick="setPsPeriodPreset(90, this)">90일</button>
+        <button class="btn btn-sm ps-preset" data-days="180" onclick="setPsPeriodPreset(180, this)">180일</button>
+        <span style="color:var(--gray-300);margin:0 4px">|</span>
+        <input type="date" id="ps-start" onchange="onPsCustomDate()" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:11px">
+        <span style="font-size:11px">~</span>
+        <input type="date" id="ps-end" onchange="onPsCustomDate()" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:11px">
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer;margin-left:6px">
+          <input type="checkbox" id="ps-compare-prev" onchange="loadProductStats()"> 전기 대비
+        </label>
+        <button class="btn btn-sm" onclick="downloadPsCsv()" title="선택된 상품들의 일별 데이터 CSV 다운로드">📥 CSV</button>
+      </div>
+    </div>
+    <div class="card" style="padding:16px">
+      <!-- 좌측: 상품 선택기  |  우측: 결과 -->
+      <div style="display:grid;grid-template-columns:320px 1fr;gap:16px;min-height:400px">
+
+        <!-- 상품 선택 패널 -->
+        <div style="border:1px solid var(--gray-200);border-radius:var(--radius);background:#fff;display:flex;flex-direction:column;max-height:600px">
+          <div style="padding:10px;border-bottom:1px solid var(--gray-100)">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+              <span style="font-size:12px;font-weight:600">상품 선택</span>
+              <span id="ps-selected-count" style="font-size:11px;color:var(--gray-500);margin-left:auto">0 / 5</span>
+              <button class="btn btn-sm" onclick="clearPsSelection()" style="padding:2px 6px;font-size:11px">전체해제</button>
+            </div>
+            <input type="text" id="ps-search" placeholder="🔍 이름/코드 검색" oninput="renderPsProductList()" style="width:100%;padding:6px 10px;border:1px solid var(--gray-200);border-radius:4px;font-size:12px">
+          </div>
+          <div id="ps-chips" style="padding:8px 10px;border-bottom:1px solid var(--gray-100);display:flex;flex-wrap:wrap;gap:4px;min-height:36px;background:#fafafa"></div>
+          <div id="ps-product-list" style="flex:1;overflow-y:auto;padding:4px"></div>
+        </div>
+
+        <!-- 결과 패널 -->
+        <div id="ps-result" style="display:flex;flex-direction:column;gap:12px">
+          <div id="ps-empty" style="padding:60px 20px;text-align:center;color:var(--gray-400);background:#fafafa;border-radius:var(--radius)">
+            왼쪽에서 비교할 상품을 선택해주세요
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -588,7 +639,8 @@ nav a:hover{color:var(--gray-900)}
     <button class="cat-tab" data-cat="deco" onclick="switchCategory('deco')">✨ 데코소품</button>
     <button class="cat-tab" data-cat="flower" onclick="switchCategory('flower')">💐 꽃다발</button>
   </div>
-  <div class="toolbar">
+  <!-- 필터바: 날짜/검색/조회 + 표시 필터 통합 -->
+  <div class="toolbar" style="gap:12px">
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex:1;min-width:0">
       <input type="date" id="ord-start" />
       <span>~</span>
@@ -596,31 +648,39 @@ nav a:hover{color:var(--gray-900)}
       <input type="text" id="ord-code-search" placeholder="상품코드 검색" style="width:160px;min-width:100px" oninput="renderOrderTable()" />
       <button class="btn btn-primary" onclick="loadOrders()">조회</button>
     </div>
-    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-      <button class="btn" onclick="markCollected()" style="background:#dcfce7;border-color:#86efac">✅ 수집완료</button>
-      <button class="btn" onclick="unmarkCollected()" style="background:#fef3c7;border-color:#fcd34d">↩️ 수집해제</button>
-      <button class="btn" onclick="copySelected()">📋 복사</button>
-      <button class="btn" onclick="downloadExcel()">📥 엑셀</button>
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
+        <input type="checkbox" id="exclude-cancel" onchange="renderOrderTable()"> 취소주문 제외
+      </label>
+      <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
+        <input type="checkbox" id="exclude-pending" onchange="renderOrderTable()"> 결제대기 제외
+      </label>
+      <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
+        <input type="checkbox" id="hide-collected" onchange="renderOrderTable()"> 수집완료 숨기기
+      </label>
     </div>
   </div>
   <div class="col-selector" id="col-selector"></div>
-  <div class="col-selector" id="status-filter" style="gap:8px;align-items:center">
-    <span style="font-weight:600;font-size:12px;color:var(--gray-700);white-space:nowrap">제외 필터</span>
-    <label style="border-color:#fca5a5;background:#fef2f2"><input type="checkbox" id="exclude-cancel" onchange="renderOrderTable()"><span>취소주문 제외</span></label>
-    <label style="border-color:#fdba74;background:#fff7ed"><input type="checkbox" id="exclude-pending" onchange="renderOrderTable()"><span>결제대기 제외</span></label>
+
+  <!-- 통합 액션바: 카운트 + 지능적 액션 버튼 -->
+  <div style="display:flex;align-items:center;gap:12px;margin:12px 0 8px;flex-wrap:wrap;font-size:12px;color:var(--gray-500)">
+    <span style="flex-shrink:0">총 <strong id="order-count" style="color:var(--gray-800)">0</strong>건</span>
+    <span style="flex-shrink:0">선택 <strong id="order-selected-count" style="color:var(--gray-800)">0</strong>건</span>
+    <span style="flex-shrink:0;color:#16a34a">수집완료 <strong id="order-collected-count">0</strong>건</span>
+    <span style="flex-shrink:0;color:#dc2626">취소주의 <strong id="order-cancel-count">0</strong>건</span>
+    <div style="flex:1"></div>
+    <!-- 액션 버튼 — 선택 상태에 따라 지능 표시 -->
+    <button class="btn" id="ord-btn-mark" onclick="markCollected()" style="display:none;background:#dcfce7;border-color:#86efac;padding:5px 12px;font-size:12px" title="선택된 주문을 수집완료로 표시">✅ <span id="ord-btn-mark-label">수집완료</span></button>
+    <button class="btn" id="ord-btn-unmark" onclick="unmarkCollected()" style="display:none;background:#fef3c7;border-color:#fcd34d;padding:5px 12px;font-size:12px" title="선택된 주문의 수집완료 상태를 해제">↩️ <span id="ord-btn-unmark-label">수집해제</span></button>
+    <button class="btn" onclick="copySelected()" style="padding:5px 12px;font-size:12px" title="선택된 주문 (없으면 전체) 을 클립보드로 복사">📋 복사</button>
+    <button class="btn" onclick="downloadExcel()" style="padding:5px 12px;font-size:12px" title="선택된 주문 (없으면 전체) 을 엑셀로 다운로드">📥 엑셀</button>
   </div>
+
   <div class="card" style="padding:0;overflow-x:auto">
     <table class="data-table">
       <thead><tr id="order-thead"></tr></thead>
       <tbody id="order-tbody"></tbody>
     </table>
-  </div>
-  <div style="margin-top:8px;font-size:12px;color:var(--gray-500);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-    <span>총 <strong id="order-count">0</strong>건</span>
-    <span>선택 <strong id="order-selected-count">0</strong>건</span>
-    <span style="color:#16a34a">수집완료 <strong id="order-collected-count">0</strong>건</span>
-    <span style="color:#dc2626">취소주의 <strong id="order-cancel-count">0</strong>건</span>
-    <label style="margin-left:auto;cursor:pointer;white-space:nowrap"><input type="checkbox" id="hide-collected" onchange="renderOrderTable()"> 수집완료 숨기기</label>
   </div>
 </div>
 </div>
@@ -765,22 +825,29 @@ nav a:hover{color:var(--gray-900)}
     <h2 style="margin:0">🏷️ 바른기프트 스티커 관리</h2>
     <button class="btn btn-primary" onclick="openBgStickerForm()">+ 스티커 생성</button>
   </div>
-  <div class="card">
-    <table class="data-table" id="bg-sticker-table">
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+    <input type="text" id="bg-sticker-search" placeholder="🔍 이름/코드/브랜드 검색" oninput="renderBgStickers()" style="flex:1;min-width:220px;padding:7px 12px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px">
+    <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
+      <input type="checkbox" id="bg-sticker-group" checked onchange="renderBgStickers()"> 상품군별 그룹핑
+    </label>
+    <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
+      <input type="checkbox" id="bg-sticker-inactive" onchange="renderBgStickers()"> 비활성 포함
+    </label>
+    <span id="bg-sticker-count" style="font-size:11px;color:var(--gray-500);margin-left:auto"></span>
+  </div>
+  <div class="card" style="padding:0">
+    <table class="data-table" id="bg-sticker-table" style="table-layout:auto">
       <thead><tr>
-        <th style="width:40px">미리보기</th>
-        <th>스티커코드</th>
-        <th>브랜드</th>
-        <th>스티커명</th>
-        <th>용도</th>
-        <th>매핑코드</th>
-        <th>상태</th>
-        <th style="width:70px">관리</th>
+        <th style="width:64px;padding:8px 10px">미리보기</th>
+        <th style="padding:8px 10px">스티커 정보</th>
+        <th style="padding:8px 10px">매핑 상품</th>
+        <th style="width:70px;padding:8px 10px;text-align:center">상태</th>
+        <th style="width:80px;padding:8px 10px;text-align:center">관리</th>
       </tr></thead>
       <tbody id="bg-sticker-tbody"></tbody>
     </table>
     <div id="bg-sticker-empty" class="hidden" style="text-align:center;padding:40px;color:var(--gray-500)">
-      등록된 스티커가 없습니다. <a href="#" onclick="openBgStickerForm();return false" style="color:var(--primary)">새 스티커 생성</a>
+      등록된 스티커가 없습니다. <a href="javascript:void(0)" onclick="openBgStickerForm();return false" style="color:var(--primary);cursor:pointer">새 스티커 생성</a>
     </div>
   </div>
 </div>
@@ -872,26 +939,75 @@ nav a:hover{color:var(--gray-900)}
   </div>
 </div>
 
-<!-- 상품 설정 모달 (v3 - 스티커 연결만) -->
+<!-- 상품 설정 모달 (v4 - 스티커 선택 UX 개선) -->
 <div id="bg-product-modal" onclick="if(event.target===this)closeBgProductForm()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
-  <div style="background:#fff;border-radius:12px;max-width:480px;width:95%;max-height:90vh;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200);position:sticky;top:0;background:#fff;z-index:10;border-radius:12px 12px 0 0">
-      <h3 id="bg-product-modal-title" style="margin:0;font-size:16px">상품 설정</h3>
-      <button onclick="closeBgProductForm()" style="border:none;background:none;font-size:20px;cursor:pointer;color:var(--gray-500)">&times;</button>
+  <div style="background:#fff;border-radius:12px;max-width:500px;width:95%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <!-- 헤더 -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200);border-radius:12px 12px 0 0;flex-shrink:0">
+      <div>
+        <h3 id="bg-product-modal-title" style="margin:0;font-size:16px">상품 설정</h3>
+        <input type="text" id="bg-p-code" readonly style="display:none">
+      </div>
+      <button onclick="closeBgProductForm()" style="border:none;background:none;font-size:20px;cursor:pointer;color:var(--gray-500);line-height:1">&times;</button>
     </div>
-    <div style="padding:20px" id="bg-p-body">
-      <div style="margin-bottom:12px">
-        <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">상품코드</label>
-        <input type="text" id="bg-p-code" readonly style="width:100%;padding:8px 12px;border:1px solid var(--gray-200);border-radius:var(--radius);font-size:13px;background:var(--gray-50)">
+
+    <!-- 바디 (스크롤 없음 — 내부 리스트만 스크롤) -->
+    <div style="padding:16px 20px;display:flex;flex-direction:column;gap:12px;flex:1;min-height:0">
+
+      <!-- 출고일 그룹 선택 -->
+      <div>
+        <label style="display:block;font-size:13px;font-weight:600;color:var(--gray-700);margin-bottom:6px">📅 출고일 그룹</label>
+        <select id="bg-p-shipping-group" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px;background:#fff">
+          <option value="">기본 그룹</option>
+          <!-- 동적으로 주입 -->
+        </select>
+        <p style="font-size:11px;color:var(--gray-500);margin:4px 0 0">고객 화면에 적용될 출고일 정책. 미지정시 기본 그룹 사용.</p>
       </div>
 
-      <!-- 스티커 연결 -->
-      <div style="border:1px solid var(--gray-200);border-radius:var(--radius);padding:16px">
-        <h4 style="margin:0 0 12px;font-size:14px;font-weight:600">스티커 연결</h4>
-        <div id="bg-p-sticker-checks" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      <!-- 선택된 스티커 영역 -->
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <span style="font-size:13px;font-weight:600;color:var(--gray-700)">선택됨 <span id="bg-p-sticker-count" style="color:var(--primary)">0</span>개</span>
+          <button onclick="bgStickerClearAll()" style="font-size:11px;padding:3px 10px;border:1px solid var(--gray-300);border-radius:20px;background:#fff;cursor:pointer;color:var(--gray-600)">전체 해제</button>
+        </div>
+        <div id="bg-p-sticker-chips" style="display:flex;flex-wrap:wrap;gap:6px;min-height:38px;padding:8px 10px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px"></div>
       </div>
+
+      <!-- 구분선 -->
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="flex:1;height:1px;background:var(--gray-200)"></div>
+        <span style="font-size:11px;color:var(--gray-400)">추가하기</span>
+        <div style="flex:1;height:1px;background:var(--gray-200)"></div>
+      </div>
+
+      <!-- 검색 -->
+      <input type="text" id="bg-p-sticker-search" placeholder="🔍 스티커 이름 또는 코드 검색 (예: TGJSD08)" oninput="renderBgStickerList()"
+        style="padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px;outline:none;width:100%;box-sizing:border-box">
+
+      <!-- 스티커 목록 (스크롤) -->
+      <div id="bg-p-sticker-list" style="flex:1;overflow-y:auto;border:1px solid var(--gray-200);border-radius:8px;min-height:0"></div>
+
+      <!-- 박스 패키지 옵션 (선택) — 비타민답례품, 이코복스 등 박스 컬러 선택 가능한 상품용 -->
+      <details style="border:1px solid var(--gray-200);border-radius:8px;background:#fafafa" id="bg-p-box-section">
+        <summary style="cursor:pointer;padding:10px 14px;font-size:13px;font-weight:600;color:var(--gray-700);list-style:disclosure-closed">
+          📦 박스 패키지 옵션 <span id="bg-p-box-count" style="color:var(--primary);font-weight:500">0</span>개
+          <span style="color:var(--gray-400);font-weight:400;font-size:11px;margin-left:6px">(박스 컬러 선택이 필요한 상품만)</span>
+        </summary>
+        <div style="padding:6px 14px 12px">
+          <p style="font-size:11px;color:var(--gray-500);margin:0 0 8px;line-height:1.5">
+            고객 화면의 스티커 선택 스텝에서 박스 패키지를 함께 선택할 수 있게 합니다.<br>
+            옵션이 없거나 비어 있으면 고객 화면에 박스 선택 UI 미노출.
+          </p>
+          <div id="bg-p-box-rows" style="display:flex;flex-direction:column;gap:6px"></div>
+          <button type="button" onclick="bgBoxAddRow()" class="btn" style="margin-top:8px;font-size:12px;padding:5px 12px;width:100%">
+            ➕ 박스 옵션 추가
+          </button>
+        </div>
+      </details>
     </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;padding:16px 20px;border-top:1px solid var(--gray-200);position:sticky;bottom:0;background:#fff;border-radius:0 0 12px 12px">
+
+    <!-- 푸터 -->
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:14px 20px;border-top:1px solid var(--gray-200);border-radius:0 0 12px 12px;flex-shrink:0">
       <button class="btn" onclick="closeBgProductForm()">취소</button>
       <button class="btn btn-primary" onclick="saveBgProduct()">저장</button>
     </div>
@@ -900,10 +1016,24 @@ nav a:hover{color:var(--gray-900)}
 
 <!-- ========== 바른기프트: 출고일 설정 ========== -->
 <div id="page-bg-shipping" class="page">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
     <h2 style="margin:0">📅 출고일 설정</h2>
-    <button class="btn btn-primary" onclick="saveBgShipping()">설정 저장</button>
+    <div style="display:flex;gap:6px">
+      <button class="btn" onclick="addBgShippingGroup()">➕ 그룹 추가</button>
+      <button class="btn btn-primary" onclick="saveBgShipping()">현재 그룹 저장</button>
+    </div>
   </div>
+
+  <!-- 그룹 탭 -->
+  <div id="bg-sh-group-tabs" style="display:flex;gap:2px;border-bottom:2px solid var(--gray-200);margin-bottom:16px;flex-wrap:wrap;align-items:center">
+    <!-- 동적 렌더 -->
+    <div style="color:var(--gray-400);font-size:12px;padding:10px">불러오는 중…</div>
+  </div>
+  <!-- 현재 편집 중인 그룹 id (hidden) — '' 이면 기본 그룹 -->
+  <input type="hidden" id="bg-sh-current-group-id" value="">
+  <!-- 현재 그룹이 기본 그룹 여부 (삭제 버튼 제어) -->
+  <input type="hidden" id="bg-sh-current-is-default" value="true">
+
   <div style="display:grid;grid-template-columns:1fr 320px;gap:20px">
     <!-- 왼쪽: 설정 -->
     <div>
@@ -935,6 +1065,11 @@ nav a:hover{color:var(--gray-900)}
             </div>
           </div>
           <p style="font-size:10px;color:var(--gray-500);margin-top:6px">컷오프 이전: 당일 접수 / 이후: 익영업일 접수</p>
+          <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--gray-300)">
+            <label style="font-size:12px;color:var(--gray-700);display:block;margin-bottom:4px;font-weight:600">⚡ 오늘출발 추가 요금 (원)</label>
+            <input type="number" id="bg-sh-express-fee" value="0" min="0" max="1000000" step="100" style="width:100%;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px" oninput="updateBgShPreview()">
+            <p style="font-size:10px;color:var(--gray-500);margin-top:2px">고객이 빠른출고 선택 시 표시되는 추가 요금 (0원 = 무료)</p>
+          </div>
         </div>
 
         <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:8px">
@@ -1041,6 +1176,7 @@ nav a:hover{color:var(--gray-900)}
             <div style="color:var(--red);font-weight:600">일</div><div style="font-weight:600">월</div><div style="font-weight:600">화</div><div style="font-weight:600">수</div><div style="font-weight:600">목</div><div style="font-weight:600">금</div><div style="color:var(--primary);font-weight:600">토</div>
           </div>
           <div id="bg-sh-preview-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center"></div>
+          <div id="bg-sh-preview-legend" style="margin-top:8px;display:none;gap:12px;flex-wrap:wrap"></div>
           <div id="bg-sh-preview-selected" style="margin-top:8px;font-size:11px;color:var(--primary);font-weight:500;display:none"></div>
           <div id="bg-sh-preview-notice" style="margin-top:8px;font-size:11px;color:var(--gray-500);white-space:pre-wrap;display:none"></div>
         </div>
@@ -1174,6 +1310,177 @@ nav a:hover{color:var(--gray-900)}
   </div>
 </div>
 
+<!-- ========== UNIFIED VIEW ========== -->
+<div id="page-bg-unified" class="page">
+  <!-- 헤더: 타이틀만 -->
+  <div style="margin-bottom:12px">
+    <h2 style="margin:0">📋 정보입력현황</h2>
+  </div>
+
+  <!-- 필터바: 날짜 + 필터 + 새로고침 (한 줄에 통합) -->
+  <div class="toolbar" style="margin-bottom:12px;gap:12px">
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex:1;min-width:0">
+      <input type="date" id="uni-start" />
+      <span>~</span>
+      <input type="date" id="uni-end" />
+      <button class="btn btn-primary" onclick="loadBgUnified()">조회</button>
+    </div>
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
+        <input type="checkbox" id="uni-hide-cancel" onchange="renderBgUnified()"> 취소 제외
+      </label>
+      <label id="uni-hide-processed-wrap" style="font-size:13px;cursor:pointer;display:none;align-items:center;gap:4px">
+        <input type="checkbox" id="uni-hide-processed" checked onchange="renderBgUnified()"> 수집완료 숨기기
+      </label>
+      <button class="btn" onclick="loadBgUnified()" title="목록 새로고침" style="padding:4px 10px;font-size:12px">🔄 새로고침</button>
+    </div>
+  </div>
+
+  <!-- 탭: 미입력 / 입력완료 (기본: 미입력) -->
+  <div id="uni-tab-strip" style="display:flex;gap:2px;border-bottom:2px solid var(--gray-200);margin-bottom:12px">
+    <button class="uni-tab" data-uni-tab="unsubmitted" onclick="switchUniTab('unsubmitted')"
+      style="padding:10px 18px;background:none;border:none;border-bottom:3px solid var(--primary);color:var(--primary);font-weight:600;font-size:14px;cursor:pointer;margin-bottom:-2px">
+      ⏳ 미입력 <span id="uni-count-unsubmitted" style="color:var(--gray-400);font-weight:500;font-size:12px;margin-left:3px">(0)</span>
+    </button>
+    <button class="uni-tab" data-uni-tab="submitted" onclick="switchUniTab('submitted')"
+      style="padding:10px 18px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:14px;cursor:pointer;margin-bottom:-2px">
+      ✅ 입력완료 <span id="uni-count-submitted" style="color:var(--gray-400);font-weight:500;font-size:12px;margin-left:3px">(0)</span>
+    </button>
+  </div>
+  <!-- 현재 활성 탭 상태 (내부) -->
+  <input type="hidden" id="uni-active-tab" value="unsubmitted">
+
+  <!-- 주문수집 현황 카드 (입력완료 탭 전용, 카운트만 — 액션 버튼은 통합 액션바로 이동) -->
+  <div id="uni-submitted-subfilter" style="display:none;padding:9px 12px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;margin-bottom:12px;align-items:center;gap:12px;flex-wrap:wrap">
+    <span style="font-size:12px;color:#4338ca;font-weight:600;cursor:help" title="정보수집이 완료되어 주문수집 스프레드시트로 등록이 완료된 주문건입니다.">📋 주문수집 현황 <span style="font-size:11px;color:var(--gray-500);font-weight:400">ⓘ</span></span>
+    <span id="uni-processed-summary" style="font-size:12px;color:var(--gray-700)">-</span>
+  </div>
+
+  <div id="uni-loading" style="text-align:center;padding:40px;color:var(--gray-400)">날짜를 선택하고 조회하세요.</div>
+  <div id="uni-table-wrap" style="display:none">
+    <!-- 통합 액션바: 선택 상태 + 모든 액션 버튼 한 곳에 -->
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;flex-shrink:0">
+        <input type="checkbox" id="uni-select-all" onchange="toggleBgUnifiedSelectAll(this)"> 전체선택
+      </label>
+      <span id="uni-selected-count" style="font-size:13px;color:var(--gray-500);flex-shrink:0">0건 선택</span>
+      <span id="uni-row-count" style="font-size:13px;color:var(--gray-500);flex-shrink:0"></span>
+      <div style="flex:1"></div>
+      <!-- 액션 버튼들 — 선택 상태에 따라 지능적으로 show/hide -->
+      <button class="btn" id="uni-btn-copy" onclick="copyBgUnified()" style="padding:6px 12px;font-size:12px;display:none">📋 수집복사</button>
+      <button class="btn btn-primary" id="uni-btn-mark-processed" onclick="bulkProcessedAction(true)" style="padding:6px 12px;font-size:12px;display:none" title="선택된 주문을 주문수집 완료로 처리 (복사 없이 마킹만)">📋 <span id="uni-btn-mark-processed-label">수집처리</span></button>
+      <button class="btn" id="uni-btn-unmark-processed" onclick="bulkProcessedAction(false)" style="padding:6px 12px;font-size:12px;display:none;border-color:#fbbf24;color:#92400e;background:#fef3c7" title="선택된 주문의 주문수집 상태를 되돌림">↺ <span id="uni-btn-unmark-processed-label">되돌리기</span></button>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="data-table" id="uni-table">
+        <thead>
+          <tr>
+            <th style="width:36px"></th>
+            <th>주문번호</th>
+            <th>주문일</th>
+            <th style="white-space:nowrap">입력일시</th>
+            <th class="uni-col-processed" style="white-space:nowrap;display:none" title="정보수집이 완료되어 주문수집 스프레드시트로 등록이 완료된 주문건입니다.">주문수집 <span style="font-size:10px;color:var(--gray-400);font-weight:400;cursor:help">ⓘ</span></th>
+            <th>상품명</th>
+            <th style="text-align:center">수량</th>
+            <th>수령인</th>
+            <th>연락처</th>
+            <th>배송지</th>
+            <th>박스선택</th>
+            <th>스티커코드</th>
+            <th>스티커명</th>
+            <th>문구</th>
+            <th>희망출고일</th>
+            <th>출고방식</th>
+            <th>현금영수증</th>
+            <th style="max-width:160px">요청사항</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="uni-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- 고객입력 수정 모달 -->
+<div id="bg-order-edit-modal" onclick="if(event.target===this)closeBgOrderEdit()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;max-width:560px;width:90%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
+      <h3 id="bg-edit-modal-title" style="margin:0;font-size:16px">고객 입력 수정</h3>
+      <button onclick="closeBgOrderEdit()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--gray-500)">&times;</button>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:16px">
+      <input type="hidden" id="bg-edit-order-id">
+
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">희망출고일</label>
+        <input type="date" id="bg-edit-ship-date" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px">
+      </div>
+
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">출고방식</label>
+        <select id="bg-edit-shipping-type" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px">
+          <option value="false">일반출고</option>
+          <option value="true">빠른출고</option>
+        </select>
+      </div>
+
+      <div id="bg-edit-stickers-wrap">
+        <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">스티커 문구</label>
+        <div id="bg-edit-stickers"></div>
+      </div>
+
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">현금영수증</label>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <input type="checkbox" id="bg-edit-receipt-yn" onchange="toggleBgReceiptEdit(this.checked)">
+          <label for="bg-edit-receipt-yn" style="font-size:13px">현금영수증 신청</label>
+        </div>
+        <div id="bg-edit-receipt-detail" style="display:none;padding:12px;background:var(--gray-50);border-radius:6px;display:flex;flex-direction:column;gap:8px">
+          <select id="bg-edit-receipt-type" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+            <option value="personal">소득공제용 (휴대폰번호)</option>
+            <option value="business">지출증빙용 (사업자번호)</option>
+          </select>
+          <input type="text" id="bg-edit-receipt-number" placeholder="번호 입력" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+        </div>
+      </div>
+
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">고객 요청사항</label>
+        <textarea id="bg-edit-request" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px;resize:vertical"></textarea>
+      </div>
+
+      <!-- 고객 화면 보안 링크 (HMAC 서명) -->
+      <details style="margin-top:16px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;padding:8px 12px">
+        <summary style="cursor:pointer;font-size:12px;font-weight:600;color:#4338ca;list-style:disclosure-closed">🔐 고객 화면 보안 링크 (HMAC 서명)</summary>
+        <div style="margin-top:8px;font-size:11px;color:var(--gray-600);line-height:1.5">
+          <p style="margin:0 0 6px">관리자가 발급한 <b>서명된 링크</b>는 위·변조나 주문번호 유추 접근을 차단합니다.</p>
+          <div id="bg-edit-signed-url-box" style="display:flex;gap:6px;align-items:center;margin-top:8px">
+            <input id="bg-edit-signed-url" type="text" readonly placeholder="발급 버튼을 눌러주세요" style="flex:1;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-family:monospace;font-size:11px;background:#fff" />
+            <button class="btn" onclick="generateBgSignedUrl()" style="font-size:11px;padding:5px 10px">발급</button>
+            <button class="btn" onclick="copyBgSignedUrl()" style="font-size:11px;padding:5px 10px">복사</button>
+          </div>
+          <div id="bg-edit-signed-url-meta" style="margin-top:6px;color:var(--gray-500);font-size:10px"></div>
+        </div>
+      </details>
+
+      <!-- 고객 접근 로그 (감사용) -->
+      <details style="margin-top:12px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px;padding:8px 12px">
+        <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--gray-600);list-style:disclosure-closed">🔍 최근 고객 접근 이력 (로그)</summary>
+        <div id="bg-edit-audit-log" style="margin-top:8px;max-height:240px;overflow-y:auto;font-size:11px">
+          <div style="color:var(--gray-400);padding:12px;text-align:center">불러오는 중…</div>
+        </div>
+      </details>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;padding:12px 20px;border-top:1px solid var(--gray-200)">
+      <button class="btn" onclick="resetBgOrderEdit()" style="color:var(--red);border-color:#fca5a5" title="고객 입력 데이터를 삭제해 고객이 재입력 할 수 있게 합니다">🔄 초기화</button>
+      <div style="flex:1"></div>
+      <button class="btn" onclick="closeBgOrderEdit()">취소</button>
+      <button class="btn btn-primary" onclick="saveBgOrderEdit()">저장</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <!-- 첨부파일 모달 -->
@@ -1190,6 +1497,18 @@ nav a:hover{color:var(--gray-900)}
 <script>
 // basePath 자동 감지: /c/barungift/ → '/c/barungift', localhost:3457/ → ''
 const API = window.location.pathname.replace(/\/+$/, '') || '';
+
+/**
+ * XSS 방지용 HTML escape. innerHTML/템플릿 리터럴 에 사용자 입력을 삽입할 때 사용.
+ * - 주문자명, 주소, 스티커 문구 등은 고객/외부 DB 에서 오는 값이라 XSS 위험.
+ */
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+const esc = escapeHtml;
 const ALL_COLS = [
   {key:'order_seq',label:'주문번호',default:true},
   {key:'member_id',label:'회원ID',default:true},
@@ -1233,13 +1552,20 @@ async function loadCollectedFromServer() {
   } catch(e) { console.warn('수집완료 로드 실패:', e); }
 }
 async function saveCollectedToServer(addSeqs, removeSeqs) {
-  try {
-    await fetch(API + '/api/collected', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ add: addSeqs || [], remove: removeSeqs || [] })
-    });
-  } catch(e) { console.warn('수집완료 저장 실패:', e); }
+  // category 를 query 로 전달 — 어느 탭에서 마킹했는지 추적용 (통계/필터링)
+  const cat = currentCategory || 'daeryepum';
+  const res = await fetch(API + '/api/collected?category=' + encodeURIComponent(cat), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ add: addSeqs || [], remove: removeSeqs || [] })
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    const msg = `[${res.status}] ${text}`;
+    console.error('수집완료 저장 실패:', msg);
+    throw new Error(msg);
+  }
+  return res.json();
 }
 // 주문상태 매핑 (bar_shop1 status_seq)
 // ETC (CUSTOM_ETC_ORDER) 상태
@@ -1255,8 +1581,13 @@ const STATUS_MAP_CARD = {
   5:'주문취소', 6:'제작준비', 7:'인쇄대기', 8:'인쇄중',
   9:'제본중', 10:'포장중', 11:'배송준비', 12:'배송완료', 15:'발송완료'
 };
-// 수집 제외 상태 (1=결제대기, 3=결제취소, 5=주문취소)
-function isCancelled(r) { return r.status_seq === 1 || r.status_seq === 3 || r.status_seq === 5; }
+// 수집 제외 상태: 3=결제취소, 5=주문취소, 또는 status_seq=1 이면서 settle_date 없는 미결제 주문
+// status_seq=1 이어도 settle_date 가 있으면 실제로는 결제 완료된 것이므로 수집 대상에 포함
+function isCancelled(r) {
+  if (r.status_seq === 3 || r.status_seq === 5) return true;
+  if (r.status_seq === 1 && !r.settle_date) return true; // 미결제 주문만
+  return false;
+}
 
 // --- Auth ---
 function loadUserInfo() {
@@ -1270,9 +1601,14 @@ function loadUserInfo() {
     return r.json();
   }).then(user => {
     if (!user) return;
-    const pic = user.picture ? `<img src="${user.picture}" alt="">` : '';
+    // XSS 방어: OAuth provider가 변조됐을 수 있으므로 escape 후 삽입
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    // picture URL은 https 스킴만 허용 (javascript:, data: 차단)
+    const safePicUrl = user.picture && /^https:\/\//.test(user.picture) ? user.picture : '';
+    const pic = safePicUrl ? `<img src="${esc(safePicUrl)}" alt="">` : '';
+    const name = esc(user.name || user.email || '');
     document.getElementById('user-area').innerHTML =
-      `${pic}<span>${user.name || user.email}</span><button onclick="logout()">로그아웃</button>`;
+      `${pic}<span>${name}</span><button onclick="logout()">로그아웃</button>`;
   }).catch(() => {
     document.getElementById('user-area').innerHTML =
       '<span style="color:var(--gray-500);font-size:11px">개발 모드</span>';
@@ -1295,6 +1631,13 @@ function init() {
   document.getElementById('dash-end').value = end;
   document.getElementById('chart-start').value = start30;
   document.getElementById('chart-end').value = end;
+  // 상품별 통계: 기본 기간 90일 preset + 판매 상품 리스트 로드
+  const ps90Start = fmt(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 89));
+  const psStart = document.getElementById('ps-start');
+  const psEnd = document.getElementById('ps-end');
+  if (psStart && psEnd) { psStart.value = ps90Start; psEnd.value = end; }
+  loadPsProductList();
+  renderPsChips();
   // 마케팅 분석 기본 기간 (90일)
   initMkDates(90);
 
@@ -1307,7 +1650,7 @@ function init() {
 
   // URL hash 기반 페이지 전환
   const hash = location.hash.replace('#', '') || 'dashboard';
-  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-alimtalk'].includes(hash)) showPage(hash);
+  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-alimtalk', 'bg-unified'].includes(hash)) showPage(hash);
 }
 
 function fmt(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -1321,12 +1664,16 @@ function showPage(name) {
   document.getElementById('page-' + name).classList.add('active');
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
   document.querySelector(`nav a[href="#${name}"]`).classList.add('active');
+  // 탭 전환 시마다 해당 탭 데이터 리로드 (딥링크/왕복 일관성 보장)
+  if (name === 'dashboard') loadDashboard();
+  if (name === 'orders') loadOrders();
   if (name === 'sns') loadSnsInsight();
   if (name === 'worklog') loadWorklog();
   if (name === 'bg-stickers') loadBgStickers();
   if (name === 'bg-products') loadBgProducts();
   if (name === 'bg-shipping') loadBgShipping();
   if (name === 'bg-alimtalk') loadBgAlimtalk();
+  if (name === 'bg-unified') loadBgUnified();
 }
 
 // --- Category Tabs ---
@@ -1368,7 +1715,7 @@ async function loadOrders() {
       r.order_type_label = r.order_type === 'ETC' ? '부가상품' : '청첩장+답례품';
       r.status_label = (r.order_type === 'CARD' ? STATUS_MAP_CARD : STATUS_MAP)[r.status_seq] || `상태${r.status_seq ?? '?'}`;
       r.file_count_fmt = r.file_count > 0
-        ? `<a href="#" onclick="showOrderFiles(${r.order_seq});return false" style="color:var(--primary);text-decoration:underline">📎 ${r.file_count}건</a>`
+        ? `<a href="javascript:void(0)" onclick="showOrderFiles(${r.order_seq});return false" style="color:var(--primary);text-decoration:underline;cursor:pointer">📎 ${r.file_count}건</a>`
         : '';
       const rawLead = r.wedding_date && r.order_date ? Math.round((new Date(r.wedding_date) - new Date(r.order_date)) / 86400000) : null;
       r.lead_days_raw = rawLead;
@@ -1393,8 +1740,9 @@ function getFilteredOrders() {
   return ordersData.filter(r => {
     // 취소주문 제외 (3=결제취소, 5=주문취소)
     if (excludeCancel && (r.status_seq === 3 || r.status_seq === 5)) return false;
-    // 결제대기 제외 (1=결제대기)
-    if (excludePending && r.status_seq === 1) return false;
+    // 결제대기 제외 — settle_date 가 없는 '실제 미결제' 주문 기준
+    // (status_seq=1 이어도 settle_date 있으면 결제 완료된 것)
+    if (excludePending && r.status_seq === 1 && !r.settle_date) return false;
     // 상품코드/명 검색
     if (q) {
       const code = (r.card_code || '').toLowerCase();
@@ -1419,7 +1767,9 @@ function renderOrderTable() {
     const key = String(r.order_seq);
     const isCollected = collected.has(key);
     const isCancelStatus = r.status_seq === 3 || r.status_seq === 5;
-    const isPendingStatus = r.status_seq === 1;
+    // 결제대기 하이라이트 — status_seq=1 이면서 settle_date 가 실제로 비어있는 주문만
+    //   CARD/ETC 모두 settle_date 채워지면 결제 완료된 것으로 판정
+    const isPendingStatus = r.status_seq === 1 && !r.settle_date;
     let cls = '';
     if (isCollected && isCancelStatus) cls = 'row-cancel-alert';
     else if (isCollected) cls = 'row-collected';
@@ -1451,8 +1801,53 @@ function toggleSelectAll(el) {
 }
 
 function updateSelectedCount() {
-  const checked = document.querySelectorAll('.row-check:checked').length;
-  document.getElementById('order-selected-count').textContent = checked;
+  const checkedBoxes = [...document.querySelectorAll('.row-check:checked')];
+  const cnt = checkedBoxes.length;
+  document.getElementById('order-selected-count').textContent = cnt;
+
+  // 선택된 행들의 수집 상태 분석 → 버튼 지능 표시
+  const btnMark = document.getElementById('ord-btn-mark');
+  const btnUnmark = document.getElementById('ord-btn-unmark');
+  const btnMarkLabel = document.getElementById('ord-btn-mark-label');
+  const btnUnmarkLabel = document.getElementById('ord-btn-unmark-label');
+
+  if (cnt === 0) {
+    if (btnMark) btnMark.style.display = 'none';
+    if (btnUnmark) btnUnmark.style.display = 'none';
+    return;
+  }
+
+  const collected = getCollectedSet();
+  const filtered = document.getElementById('hide-collected')?.checked
+    ? getFilteredOrders().filter(r => !collected.has(String(r.order_seq)))
+    : getFilteredOrders();
+  let pendingCnt = 0, collectedCnt = 0;
+  checkedBoxes.forEach(cb => {
+    const idx = parseInt(cb.dataset.idx);
+    const row = filtered[idx];
+    if (!row) return;
+    if (collected.has(String(row.order_seq))) collectedCnt++;
+    else pendingCnt++;
+  });
+
+  // 미수집 행이 있으면 '수집완료' 버튼, 건수는 실제 전환 대상만
+  if (btnMark) {
+    if (pendingCnt > 0) {
+      btnMark.style.display = '';
+      btnMarkLabel.textContent = `수집완료 (${pendingCnt}건)`;
+    } else {
+      btnMark.style.display = 'none';
+    }
+  }
+  // 수집완료 행이 있으면 '수집해제' 버튼
+  if (btnUnmark) {
+    if (collectedCnt > 0) {
+      btnUnmark.style.display = '';
+      btnUnmarkLabel.textContent = `수집해제 (${collectedCnt}건)`;
+    } else {
+      btnUnmark.style.display = 'none';
+    }
+  }
 }
 
 function getSelectedRows() {
@@ -1466,24 +1861,63 @@ function getSelectedRows() {
 }
 
 // --- 수집완료 마킹 ---
+//   이미 수집된 행은 건너뜀 (중복 저장 방지 + 정확한 건수 토스트)
+//   저장 실패시 낙관적 업데이트 롤백 + 에러 토스트
 async function markCollected() {
   const rows = getCheckedRows();
   if (!rows.length) { showToast('선택된 주문이 없습니다'); return; }
-  const seqs = rows.map(r => String(r.order_seq));
-  seqs.forEach(s => _collectedSet.add(s));
+  // 이미 수집완료인 행 제외 — 실제 상태 전환되는 것만 대상
+  // Set 으로 중복 제거 (같은 order_seq 가 여러 행에 걸리면 Supabase UPSERT 가 실패함)
+  const targetSeqs = [...new Set(
+    rows
+      .map(r => String(r.order_seq || '').trim())
+      .filter(s => s && !_collectedSet.has(s))
+  )];
+  if (!targetSeqs.length) { showToast('모두 이미 수집완료 상태입니다'); return; }
+  // 낙관적 업데이트
+  targetSeqs.forEach(s => _collectedSet.add(s));
   renderOrderTable();
-  await saveCollectedToServer(seqs, []);
-  showToast(`${rows.length}건 수집완료 처리`);
+  try {
+    const result = await saveCollectedToServer(targetSeqs, []);
+    // 서버 응답에서 최신 상태 동기화 (다른 관리자 마킹 반영)
+    if (result && Array.isArray(result.order_seqs)) {
+      _collectedSet = new Set(result.order_seqs.map(String));
+      renderOrderTable();
+    }
+    showToast(`${targetSeqs.length}건 수집완료 처리`);
+  } catch (e) {
+    // 롤백
+    targetSeqs.forEach(s => _collectedSet.delete(s));
+    renderOrderTable();
+    showToast('⚠️ 수집완료 저장 실패 — 새로고침 후 재시도 (콘솔 확인)');
+  }
 }
 
 async function unmarkCollected() {
   const rows = getCheckedRows();
   if (!rows.length) { showToast('선택된 주문이 없습니다'); return; }
-  const seqs = rows.map(r => String(r.order_seq));
-  seqs.forEach(s => _collectedSet.delete(s));
+  // 수집완료가 아닌 행 제외 — 실제 해제될 것만 대상
+  const targetSeqs = [...new Set(
+    rows
+      .map(r => String(r.order_seq || '').trim())
+      .filter(s => s && _collectedSet.has(s))
+  )];
+  if (!targetSeqs.length) { showToast('수집해제할 주문이 없습니다'); return; }
+  targetSeqs.forEach(s => _collectedSet.delete(s));
   renderOrderTable();
-  await saveCollectedToServer([], seqs);
-  showToast(`${rows.length}건 수집해제 처리`);
+  try {
+    const result = await saveCollectedToServer([], targetSeqs);
+    if (result && Array.isArray(result.order_seqs)) {
+      _collectedSet = new Set(result.order_seqs.map(String));
+      renderOrderTable();
+    }
+    showToast(`${targetSeqs.length}건 수집해제 처리`);
+  } catch (e) {
+    // 롤백
+    targetSeqs.forEach(s => _collectedSet.add(s));
+    renderOrderTable();
+    showToast('⚠️ 수집해제 저장 실패 — 새로고침 후 재시도 (콘솔 확인)');
+  }
 }
 
 function getCheckedRows() {
@@ -1518,6 +1952,372 @@ function downloadExcel() {
   a.download = `답례품_주문_${document.getElementById('ord-start').value}.tsv`;
   a.click();
   showToast(`${data.length}건 다운로드 완료`);
+}
+
+// ============================================
+// 상품별 판매 통계 (썸네일 선택 + 다상품 비교)
+// ============================================
+const PS_MAX_SELECTION = 5;
+const PS_CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+
+let _psAllProducts = [];          // 전체 판매 상품 리스트
+let _psSelected = new Set();      // 선택된 card_code
+let _psLastData = null;           // 가장 최근 조회 결과
+let _psChart = null;              // Chart.js 인스턴스
+let _psMode = 'preset';           // 'preset' | 'custom'
+
+/** 상품코드 해시 기반 pastel 색상 + 이니셜 썸네일 */
+function psThumbStyle(code) {
+  let h = 0;
+  for (const c of code) h = (h * 31 + c.charCodeAt(0)) & 0x7fffffff;
+  const hue = h % 360;
+  const bg = `hsl(${hue}, 65%, 85%)`;
+  const fg = `hsl(${hue}, 50%, 30%)`;
+  return { bg, fg };
+}
+
+function psInitial(name) {
+  if (!name) return '?';
+  // 대괄호 prefix 제거 후 첫 글자
+  const cleaned = name.replace(/^\[.*?\]\s*/, '');
+  return cleaned.slice(0, 1).toUpperCase();
+}
+
+function fmtNumK(n) { return (n || 0).toLocaleString('ko-KR'); }
+function fmtKRW(n) { return fmtNumK(n) + '원'; }
+
+/** 페이지 접속 시 상품 목록 최초 로드 */
+async function loadPsProductList() {
+  try {
+    const res = await fetch(`${API}/api/bg/products/sales-list?days=180`);
+    _psAllProducts = await res.json();
+  } catch (e) {
+    console.error('[loadPsProductList]', e);
+    _psAllProducts = [];
+  }
+  renderPsProductList();
+}
+
+/** 좌측 썸네일 리스트 렌더 */
+function renderPsProductList() {
+  const q = (document.getElementById('ps-search')?.value || '').trim().toLowerCase();
+  const $list = document.getElementById('ps-product-list');
+  if (!$list) return;
+  const items = _psAllProducts.filter(p => {
+    if (!q) return true;
+    return (p.card_name || '').toLowerCase().includes(q)
+        || (p.card_code || '').toLowerCase().includes(q);
+  });
+  if (!items.length) {
+    $list.innerHTML = `<div style="padding:20px;text-align:center;color:var(--gray-400);font-size:12px">${q ? '검색 결과 없음' : '판매 이력 없음'}</div>`;
+    return;
+  }
+  $list.innerHTML = items.map(p => {
+    const isSel = _psSelected.has(p.card_code);
+    const { bg, fg } = psThumbStyle(p.card_code);
+    const initial = psInitial(p.card_name);
+    const nameClean = (p.card_name || '').replace(/"/g,'&quot;');
+    return `<div class="ps-prod-item" data-code="${p.card_code}" onclick="togglePsSelection('${p.card_code}')"
+      style="display:flex;align-items:center;gap:10px;padding:7px 10px;cursor:pointer;border-radius:6px;margin:2px 0;transition:background .12s;${isSel ? 'background:#eff6ff;box-shadow:inset 0 0 0 2px var(--primary);' : ''}"
+      onmouseover="if(!this.classList.contains('sel'))this.style.background='#f8fafc'" onmouseout="if(!${isSel})this.style.background=''">
+      <div style="width:32px;height:32px;border-radius:6px;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0">${initial}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${nameClean}">${p.card_name || '-'}</div>
+        <div style="font-size:10px;color:var(--gray-500);font-family:monospace">${p.card_code}</div>
+      </div>
+      <div style="text-align:right;font-size:10px;color:var(--gray-500);flex-shrink:0">
+        ${fmtKRW(p.total_revenue)}<br><span style="color:var(--gray-400)">${fmtNumK(p.total_qty)}개</span>
+      </div>
+      ${isSel ? '<div style="color:var(--primary);font-size:16px;flex-shrink:0">✓</div>' : ''}
+    </div>`;
+  }).join('');
+}
+
+/** 선택된 chips 렌더 */
+function renderPsChips() {
+  const $c = document.getElementById('ps-chips');
+  const $count = document.getElementById('ps-selected-count');
+  if ($count) $count.textContent = `${_psSelected.size} / ${PS_MAX_SELECTION}`;
+  if (!$c) return;
+  if (_psSelected.size === 0) {
+    $c.innerHTML = '<span style="font-size:11px;color:var(--gray-400);line-height:2">선택 없음</span>';
+    return;
+  }
+  const codes = [..._psSelected];
+  $c.innerHTML = codes.map((code, i) => {
+    const p = _psAllProducts.find(x => x.card_code === code);
+    const name = p?.card_name || code;
+    const color = PS_CHART_COLORS[i % PS_CHART_COLORS.length];
+    return `<span style="display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid ${color};color:${color};border-radius:12px;padding:2px 6px 2px 8px;font-size:11px;font-weight:500">
+      <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color}"></span>
+      <span style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${name}">${name}</span>
+      <button onclick="togglePsSelection('${code}')" style="border:0;background:transparent;color:${color};cursor:pointer;font-size:12px;line-height:1;padding:0 2px">×</button>
+    </span>`;
+  }).join('');
+}
+
+/** 상품 선택/해제 */
+function togglePsSelection(code) {
+  if (_psSelected.has(code)) {
+    _psSelected.delete(code);
+  } else {
+    if (_psSelected.size >= PS_MAX_SELECTION) {
+      showToast(`최대 ${PS_MAX_SELECTION}개까지 선택 가능합니다`);
+      return;
+    }
+    _psSelected.add(code);
+  }
+  renderPsProductList();
+  renderPsChips();
+  if (_psSelected.size > 0) loadProductStats();
+  else showPsEmpty();
+}
+
+function clearPsSelection() {
+  _psSelected.clear();
+  renderPsProductList();
+  renderPsChips();
+  showPsEmpty();
+}
+
+function showPsEmpty() {
+  const $r = document.getElementById('ps-result');
+  if ($r) $r.innerHTML = '<div id="ps-empty" style="padding:60px 20px;text-align:center;color:var(--gray-400);background:#fafafa;border-radius:var(--radius)">왼쪽에서 비교할 상품을 선택해주세요</div>';
+  if (_psChart) { _psChart.destroy(); _psChart = null; }
+}
+
+/** 기간 프리셋 */
+function setPsPeriodPreset(days, btn) {
+  const end = fmt(new Date());
+  const start = fmt(new Date(Date.now() - (days - 1) * 86400000));
+  document.getElementById('ps-start').value = start;
+  document.getElementById('ps-end').value = end;
+  document.querySelectorAll('.ps-preset').forEach(b => {
+    b.classList.remove('btn-primary');
+    b.classList.add('btn-sm');
+  });
+  if (btn) btn.classList.add('btn-primary');
+  _psMode = 'preset';
+  if (_psSelected.size > 0) loadProductStats();
+}
+
+function onPsCustomDate() {
+  document.querySelectorAll('.ps-preset').forEach(b => b.classList.remove('btn-primary'));
+  _psMode = 'custom';
+  if (_psSelected.size > 0) loadProductStats();
+}
+
+/** 상품 판매 통계 조회 */
+async function loadProductStats() {
+  if (_psSelected.size === 0) return showPsEmpty();
+  const start = document.getElementById('ps-start').value;
+  const end = document.getElementById('ps-end').value;
+  const comparePrev = document.getElementById('ps-compare-prev').checked;
+  const $r = document.getElementById('ps-result');
+  if (!start || !end) {
+    $r.innerHTML = '<div style="padding:20px;color:var(--red)">시작일/종료일을 선택하세요.</div>';
+    return;
+  }
+
+  $r.innerHTML = '<div style="padding:60px;text-align:center;color:var(--gray-500)">불러오는 중...</div>';
+  try {
+    const codes = [..._psSelected].join(',');
+    const url = `${API}/api/product-stats?product_codes=${encodeURIComponent(codes)}&start_date=${start}&end_date=${end}${comparePrev ? '&compare_prev=1' : ''}`;
+    const data = await fetch(url).then(r => r.json());
+    if (data.error) { $r.innerHTML = `<div style="padding:20px;color:var(--red)">오류: ${data.error}</div>`; return; }
+    _psLastData = data;
+    renderPsResult(data);
+  } catch (e) {
+    console.error('[loadProductStats]', e);
+    $r.innerHTML = `<div style="padding:20px;color:var(--red)">조회 실패: ${e.message}</div>`;
+  }
+}
+
+/** 결과 렌더: KPI 카드 + 차트 + 비교 테이블 */
+function renderPsResult(data) {
+  const $r = document.getElementById('ps-result');
+  const products = data.products || [];
+  const totals = data.totals || { qty: 0, orders: 0, revenue: 0, avg_order_value: 0 };
+  const hasPrev = !!data.prev_period;
+
+  // 전기 대비 퍼센트 (전체 합계 기준)
+  let prevTotalRevenue = 0, prevTotalQty = 0, prevTotalOrders = 0;
+  if (hasPrev) {
+    products.forEach(p => {
+      if (p.prev_total) {
+        prevTotalRevenue += p.prev_total.revenue;
+        prevTotalQty += p.prev_total.qty;
+        prevTotalOrders += p.prev_total.orders;
+      }
+    });
+  }
+  const deltaRev = hasPrev && prevTotalRevenue > 0
+    ? Math.round((totals.revenue - prevTotalRevenue) / prevTotalRevenue * 1000) / 10
+    : null;
+  const deltaQty = hasPrev && prevTotalQty > 0
+    ? Math.round((totals.qty - prevTotalQty) / prevTotalQty * 1000) / 10
+    : null;
+  const deltaOrders = hasPrev && prevTotalOrders > 0
+    ? Math.round((totals.orders - prevTotalOrders) / prevTotalOrders * 1000) / 10
+    : null;
+
+  const deltaBadge = (v) => {
+    if (v === null) return '';
+    const color = v >= 0 ? '#16a34a' : '#dc2626';
+    const arrow = v >= 0 ? '▲' : '▼';
+    return `<span style="font-size:11px;color:${color};font-weight:600;margin-left:6px">${arrow}${Math.abs(v)}%</span>`;
+  };
+
+  // 선택된 상품 이름 요약
+  const productLabel = products.length === 1
+    ? `${products[0].product_name || products[0].product_code}`
+    : `${products.length}개 상품`;
+
+  // 일별 모든 날짜 수집 (차트 x축)
+  const allDates = new Set();
+  products.forEach(p => p.daily.forEach(d => allDates.add(d.date)));
+  const sortedDates = [...allDates].sort();
+
+  // HTML 구성 (차트는 이후 별도 JS로 채움)
+  $r.innerHTML = `
+    <!-- KPI 카드 -->
+    <div class="card-grid card-grid-4">
+      <div class="card">
+        <h3>총 매출 ${deltaBadge(deltaRev)}</h3>
+        <div class="value">${fmtKRW(totals.revenue)}</div>
+        ${hasPrev ? `<div class="sub">전기 ${fmtKRW(prevTotalRevenue)}</div>` : `<div class="sub">${productLabel}</div>`}
+      </div>
+      <div class="card">
+        <h3>총 판매수량 ${deltaBadge(deltaQty)}</h3>
+        <div class="value">${fmtNumK(totals.qty)}<span style="font-size:13px;font-weight:400">개</span></div>
+        ${hasPrev ? `<div class="sub">전기 ${fmtNumK(prevTotalQty)}개</div>` : ''}
+      </div>
+      <div class="card">
+        <h3>주문 건수 ${deltaBadge(deltaOrders)}</h3>
+        <div class="value">${fmtNumK(totals.orders)}<span style="font-size:13px;font-weight:400">건</span></div>
+        ${hasPrev ? `<div class="sub">전기 ${fmtNumK(prevTotalOrders)}건</div>` : ''}
+      </div>
+      <div class="card">
+        <h3>평균 주문가</h3>
+        <div class="value">${fmtKRW(totals.avg_order_value)}</div>
+        <div class="sub">총매출 ÷ 주문수</div>
+      </div>
+    </div>
+
+    <!-- 일별 추이 차트 -->
+    <div class="card" style="padding:16px">
+      <h3 style="margin:0 0 10px;font-size:13px">일별 매출 추이</h3>
+      <div style="height:260px;position:relative"><canvas id="ps-chart"></canvas></div>
+    </div>
+
+    <!-- 상품별 비교 테이블 -->
+    <div class="card" style="padding:0;overflow-x:auto">
+      <table class="data-table">
+        <thead><tr>
+          <th style="width:24px"></th>
+          <th>상품</th>
+          <th class="num">총매출</th>
+          <th class="num">수량</th>
+          <th class="num">주문수</th>
+          <th class="num">평균 주문가</th>
+          ${hasPrev ? '<th class="num">전기 대비</th>' : ''}
+          <th class="num" style="min-width:100px">🔺 최대일</th>
+          <th class="num" style="min-width:100px">🔻 최소일</th>
+        </tr></thead>
+        <tbody>
+          ${products.map((p, i) => {
+            const color = PS_CHART_COLORS[i % PS_CHART_COLORS.length];
+            let revDelta = '';
+            if (hasPrev && p.prev_total && p.prev_total.revenue > 0) {
+              const d = (p.total.revenue - p.prev_total.revenue) / p.prev_total.revenue * 100;
+              revDelta = deltaBadge(Math.round(d * 10) / 10);
+            }
+            return `<tr>
+              <td><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color}"></span></td>
+              <td>
+                <div style="font-size:12px;font-weight:500">${p.product_name || '-'}</div>
+                <div style="font-size:10px;color:var(--gray-500);font-family:monospace">${p.product_code}</div>
+              </td>
+              <td class="num" style="font-weight:600">${fmtKRW(p.total.revenue)}</td>
+              <td class="num">${fmtNumK(p.total.qty)}</td>
+              <td class="num">${fmtNumK(p.total.orders)}</td>
+              <td class="num">${fmtKRW(p.total.avg_order_value)}</td>
+              ${hasPrev ? `<td class="num">${hasPrev && p.prev_total ? fmtKRW(p.prev_total.revenue) + ' ' + revDelta : '-'}</td>` : ''}
+              <td class="num" style="font-size:11px">
+                ${p.max_day ? `<b>${p.max_day.date}</b><br><span style="color:var(--gray-500)">${fmtKRW(p.max_day.revenue)}</span>` : '-'}
+              </td>
+              <td class="num" style="font-size:11px">
+                ${p.min_day ? `<b>${p.min_day.date}</b><br><span style="color:var(--gray-500)">${fmtKRW(p.min_day.revenue)}</span>` : '-'}
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  // Chart.js 라인 차트
+  if (_psChart) { _psChart.destroy(); _psChart = null; }
+  const $canvas = document.getElementById('ps-chart');
+  if ($canvas && sortedDates.length > 0) {
+    const datasets = products.map((p, i) => {
+      const color = PS_CHART_COLORS[i % PS_CHART_COLORS.length];
+      const byDate = new Map(p.daily.map(d => [d.date, d.revenue]));
+      return {
+        label: p.product_name || p.product_code,
+        data: sortedDates.map(d => byDate.get(d) || 0),
+        borderColor: color,
+        backgroundColor: color + '22',
+        tension: 0.25,
+        fill: products.length === 1,
+        pointRadius: 2,
+        pointHoverRadius: 5,
+      };
+    });
+    _psChart = new Chart($canvas.getContext('2d'), {
+      type: 'line',
+      data: { labels: sortedDates, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: products.length > 1, position: 'top', labels: { font: { size: 11 }, usePointStyle: true } },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => `${ctx.dataset.label}: ${fmtKRW(ctx.parsed.y)}`,
+            },
+          },
+        },
+        scales: {
+          y: { ticks: { callback: v => fmtKRW(v), font: { size: 10 } }, beginAtZero: true },
+          x: { ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } },
+        },
+        interaction: { mode: 'index', intersect: false },
+      },
+    });
+  }
+}
+
+/** CSV 다운로드 */
+function downloadPsCsv() {
+  if (!_psLastData) { showToast('먼저 조회를 실행하세요'); return; }
+  const data = _psLastData;
+  const lines = ['상품코드,상품명,일자,판매수량,주문수,매출'];
+  data.products.forEach(p => {
+    p.daily.forEach(d => {
+      const nameEsc = '"' + (p.product_name || '').replace(/"/g, '""') + '"';
+      lines.push(`${p.product_code},${nameEsc},${d.date},${d.qty},${d.orders},${d.revenue}`);
+    });
+  });
+  const csv = '\uFEFF' + lines.join('\n');  // UTF-8 BOM (엑셀 한글)
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const codes = [..._psSelected].join('_');
+  a.href = url;
+  a.download = `product_stats_${codes}_${data.period.start}_${data.period.end}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('CSV 다운로드 시작');
 }
 
 // --- Dashboard ---
@@ -3806,31 +4606,113 @@ async function loadBgStickers() {
   } catch(e) { console.error('loadBgStickers:', e); }
 }
 
+/** 스티커 코드 prefix (상품군) — 예: TGJSD08S1 → TGJSD08 */
+function bgStickerPrefix(s) {
+  const c = s.sticker_code || '';
+  const m = c.match(/^(.+?)S\d+$/);
+  return m ? m[1] : (c || '_');
+}
+
 function renderBgStickers() {
   const tbody = document.getElementById('bg-sticker-tbody');
   const empty = document.getElementById('bg-sticker-empty');
-  if (!bgStickers.length) {
+  const q = (document.getElementById('bg-sticker-search')?.value || '').trim().toLowerCase();
+  const grouped = document.getElementById('bg-sticker-group')?.checked ?? true;
+  const includeInactive = document.getElementById('bg-sticker-inactive')?.checked ?? false;
+
+  // 필터링
+  let rows = bgStickers.filter(s => {
+    if (!includeInactive && !s.is_active) return false;
+    if (!q) return true;
+    const hay = [s.name, s.sticker_code, s.brand, s.usage, s.type].filter(Boolean).join(' ').toLowerCase();
+    return hay.includes(q);
+  });
+  document.getElementById('bg-sticker-count').textContent = `총 ${rows.length}건`;
+
+  if (!rows.length) {
     tbody.innerHTML = '';
     empty.classList.remove('hidden');
     return;
   }
   empty.classList.add('hidden');
-  tbody.innerHTML = bgStickers.map(s => `<tr>
-    <td><div style="width:28px;height:36px;border-radius:4px;border:1px solid var(--gray-200);background:${s.preview_image_url ? 'url(' + s.preview_image_url + ') center/cover' : s.preview_color || '#fff'}"></div></td>
-    <td style="font-family:monospace;font-size:11px">${s.sticker_code || '-'}</td>
-    <td style="font-size:12px">${s.brand || '-'}</td>
-    <td style="font-weight:500;font-size:12px">${s.name}</td>
-    <td style="font-size:11px;color:var(--gray-500)">${s.usage || '-'}</td>
-    <td style="font-size:10px;max-width:160px;overflow:hidden;text-overflow:ellipsis">${(s.product_codes||[]).map(pc => {
+
+  // 썸네일: 이미지 우선, 없으면 preview_color
+  const thumbHtml = s => {
+    const name = (s.name || '').replace(/"/g, '&quot;');
+    if (s.preview_image_url) {
+      return `<img src="${s.preview_image_url}" loading="lazy" alt="${name}" style="width:56px;height:56px;border-radius:6px;border:1px solid var(--gray-200);object-fit:contain;background:#fff;display:block;cursor:zoom-in" onclick="openBgStickerPreview('${s.preview_image_url}','${name}')">`;
+    }
+    return `<div style="width:56px;height:56px;border-radius:6px;border:1px solid var(--gray-200);background:${s.preview_color || '#fff'};display:flex;align-items:center;justify-content:center;color:var(--gray-400);font-size:10px">이미지 없음</div>`;
+  };
+
+  // 상품코드 매핑 배지 (상품명까지 툴팁으로)
+  const productHtml = (s) => {
+    const codes = s.product_codes || [];
+    if (!codes.length) return '<span style="color:var(--gray-300);font-size:11px">-</span>';
+    return codes.map(pc => {
       const ps = bgProductSettings.find(p => p.product_id === pc);
-      return '<span style="font-family:monospace">' + pc + '</span>' + (ps ? ' <span style="color:var(--gray-500)">(' + (ps.product_name||'') + ')</span>' : '');
-    }).join('<br>') || '-'}</td>
-    <td><span class="badge ${s.is_active ? 'badge-up' : 'badge-neutral'}">${s.is_active ? '활성' : '비활성'}</span></td>
-    <td>
+      const pName = ps?.product_name || '';
+      const tooltip = pName ? ` title="${pName.replace(/"/g,'&quot;')}"` : '';
+      return `<span style="display:inline-block;font-family:monospace;font-size:10px;background:var(--gray-50);border:1px solid var(--gray-200);color:var(--gray-700);padding:2px 6px;border-radius:3px;margin:1px 2px 1px 0;line-height:1.4"${tooltip}>${pc}${pName ? ' <span style="color:var(--gray-500);font-family:inherit">·</span> <span style="color:var(--gray-600);font-family:inherit">'+pName.slice(0, 14)+'</span>' : ''}</span>`;
+    }).join('');
+  };
+
+  const rowHtml = s => `<tr>
+    <td style="padding:6px 10px">${thumbHtml(s)}</td>
+    <td style="padding:6px 10px">
+      <div style="font-size:13px;font-weight:600;color:var(--gray-900);line-height:1.3">${s.name || '-'}</div>
+      <div style="font-size:11px;color:var(--gray-500);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <span style="font-family:monospace;background:var(--gray-100);padding:1px 5px;border-radius:3px">${s.sticker_code || '-'}</span>
+        ${s.brand ? '<span>' + s.brand + '</span>' : ''}
+        ${s.usage ? '<span style="color:var(--gray-400)">· ' + s.usage + '</span>' : ''}
+      </div>
+    </td>
+    <td style="padding:6px 10px;max-width:280px">${productHtml(s)}</td>
+    <td style="padding:6px 10px;text-align:center"><span class="badge ${s.is_active ? 'badge-up' : 'badge-neutral'}">${s.is_active ? '활성' : '비활성'}</span></td>
+    <td style="padding:6px 10px;text-align:center;white-space:nowrap">
       <button class="btn btn-sm" onclick="editBgSticker('${s.id}')" title="수정">✏️</button>
       <button class="btn btn-sm" onclick="deleteBgSticker('${s.id}')" title="비활성화" style="color:var(--red)">🗑️</button>
     </td>
-  </tr>`).join('');
+  </tr>`;
+
+  let html = '';
+  if (grouped) {
+    // prefix 기반 그룹핑 + 그룹 헤더
+    const groups = new Map();
+    rows.forEach(s => {
+      const p = bgStickerPrefix(s);
+      if (!groups.has(p)) groups.set(p, []);
+      groups.get(p).push(s);
+    });
+    const sortedPrefixes = [...groups.keys()].sort((a, b) => a.localeCompare(b));
+    sortedPrefixes.forEach(prefix => {
+      const items = groups.get(prefix).sort((a, b) => (a.sticker_code || '').localeCompare(b.sticker_code || ''));
+      const label = prefix === '_' ? '미분류' : prefix;
+      html += `<tr style="background:var(--gray-50)"><td colspan="5" style="padding:8px 12px;font-size:11px;font-weight:600;color:var(--gray-600);font-family:monospace;letter-spacing:.3px;border-top:2px solid var(--gray-200)">
+        ${label} <span style="color:var(--gray-400);font-weight:400">(${items.length}개)</span>
+      </td></tr>`;
+      items.forEach(s => { html += rowHtml(s); });
+    });
+  } else {
+    // 정렬: 코드순
+    rows.sort((a, b) => (a.sticker_code || '').localeCompare(b.sticker_code || ''));
+    rows.forEach(s => { html += rowHtml(s); });
+  }
+  tbody.innerHTML = html;
+}
+
+/** 썸네일 클릭 시 원본 확대 모달 (간단한 라이트박스) */
+function openBgStickerPreview(imgUrl, name) {
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out;padding:40px';
+  modal.onclick = () => modal.remove();
+  modal.innerHTML = `
+    <div style="max-width:90vw;max-height:90vh;background:#fff;padding:20px;border-radius:8px;text-align:center">
+      <img src="${imgUrl}" alt="${name}" style="max-width:100%;max-height:80vh;object-fit:contain;display:block;margin:0 auto">
+      <div style="margin-top:12px;font-size:13px;color:var(--gray-700)">${name}</div>
+    </div>
+  `;
+  document.body.appendChild(modal);
 }
 
 function openBgStickerForm(sticker) {
@@ -3976,30 +4858,231 @@ function renderBgProducts() {
   }).join('');
 }
 
+let _bgAllStickers = [];
+let _bgSelectedStickerIds = new Set();
+
+// 박스 옵션 편집용 임시 상태
+let _bgBoxOptions = []; // [{ code, name, color, preview_image_url }]
+
 async function openBgProductForm(productId) {
   if (!productId || !productId.trim()) { alert('상품코드를 입력해주세요.'); return; }
   productId = productId.trim();
   document.getElementById('bg-p-code').value = productId;
   document.getElementById('bg-product-modal-title').textContent = '상품 설정: ' + productId;
+  document.getElementById('bg-p-sticker-search').value = '';
+  document.getElementById('bg-p-sticker-chips').innerHTML = '';
+  document.getElementById('bg-p-sticker-list').innerHTML = '<div style="padding:20px;text-align:center;color:var(--gray-400);font-size:13px">불러오는 중...</div>';
 
   try {
-    const [settingsRes, stickersRes] = await Promise.all([
+    const [settingsRes, stickersRes, groupsRes] = await Promise.all([
       fetch(API + '/api/bg/products/' + encodeURIComponent(productId) + '/settings'),
       fetch(API + '/api/bg/stickers?active_only=true'),
+      fetch(API + '/api/bg/shipping-groups'),
     ]);
     const s = (await settingsRes.json()).settings;
-    const stickers = (await stickersRes.json()).stickers || [];
-
-    // 스티커 체크박스
-    const selectedSt = s?.available_sticker_ids || [];
-    document.getElementById('bg-p-sticker-checks').innerHTML = stickers.map(st =>
-      `<label style="display:flex;align-items:center;gap:4px;font-size:12px;padding:4px 8px;border:1px solid var(--gray-200);border-radius:4px;cursor:pointer;background:#fff">
-        <input type="checkbox" value="${st.id}" ${selectedSt.includes(st.id)?'checked':''}> ${st.name}
-      </label>`
-    ).join('') || '<span style="color:var(--gray-500);font-size:12px">등록된 스티커 없음</span>';
+    _bgAllStickers = (await stickersRes.json()).stickers || [];
+    const groups = (await groupsRes.json()).groups || [];
+    _bgSelectedStickerIds = new Set(s?.available_sticker_ids || []);
+    // 박스 옵션 로드 (없으면 빈 배열)
+    _bgBoxOptions = Array.isArray(s?.available_box_options)
+      ? s.available_box_options.map(opt => ({
+          code: opt.code || '',
+          name: opt.name || '',
+          color: opt.color || '#FFFFFF',
+          preview_image_url: opt.preview_image_url || '',
+          sold_out: !!opt.sold_out,
+        }))
+      : [];
+    // 출고일 그룹 드롭다운 옵션 렌더.
+    // 기본 그룹은 value="" (null) 로만 노출 — 관리자가 기본 그룹을 변경하더라도
+    // 기존 상품들이 '자동으로 기본' 을 따라가도록 하기 위함. 기본 그룹 row 자체는
+    // 목록에서 제외해 중복 표시 방지.
+    const groupSel = document.getElementById('bg-p-shipping-group');
+    if (groupSel) {
+      const defaultLabel = (groups.find(g => g.is_default)?.name || '기본 그룹').replace(/</g, '&lt;');
+      const options = ['<option value="">' + defaultLabel + '</option>']
+        .concat(groups
+          .filter(g => !g.is_default)
+          .map(g => {
+            const label = (g.name || '그룹').replace(/</g, '&lt;');
+            return '<option value="' + g.id + '">' + label + '</option>';
+          })
+        );
+      groupSel.innerHTML = options.join('');
+      // 저장된 값이 기본 그룹의 id 와 같으면 빈값(기본)으로 표시
+      const defId = groups.find(g => g.is_default)?.id;
+      const savedId = s?.shipping_group_id || '';
+      groupSel.value = (savedId === defId) ? '' : savedId;
+    }
+    renderBgStickerModal();
+    renderBgBoxOptions();
   } catch(e) { console.error('openBgProductForm:', e); }
 
   document.getElementById('bg-product-modal').style.display = 'flex';
+}
+
+/** 박스 옵션 리스트 렌더 (편집 가능한 각 행) */
+function renderBgBoxOptions() {
+  const wrap = document.getElementById('bg-p-box-rows');
+  const countEl = document.getElementById('bg-p-box-count');
+  const section = document.getElementById('bg-p-box-section');
+  if (!wrap) return;
+  countEl.textContent = _bgBoxOptions.length;
+  // 옵션이 1개 이상이면 자동으로 섹션 펼침
+  if (_bgBoxOptions.length > 0 && section && !section.open) section.open = true;
+
+  if (_bgBoxOptions.length === 0) {
+    wrap.innerHTML = '<div style="padding:10px;text-align:center;color:var(--gray-400);font-size:12px;background:#fff;border:1px dashed var(--gray-200);border-radius:6px">박스 옵션 없음</div>';
+    return;
+  }
+  // 각 옵션: 1) 메인 편집 행 (코드/이름/색/삭제) 2) 보조 행 (이미지 URL + 품절 체크)
+  wrap.innerHTML = _bgBoxOptions.map((opt, i) => {
+    const isSoldOut = !!opt.sold_out;
+    return `
+    <div style="background:#fff;padding:6px;border:1px solid var(--gray-200);border-radius:6px;${isSoldOut ? 'opacity:0.7' : ''}">
+      <div style="display:grid;grid-template-columns:110px 1fr 44px 28px;gap:6px;align-items:center">
+        <input type="text" data-bgbox-idx="${i}" data-bgbox-field="code" value="${(opt.code || '').replace(/"/g, '&quot;')}" placeholder="코드 (TGJSD04B1)"
+          oninput="bgBoxUpdate(${i}, 'code', this.value)"
+          style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;font-family:monospace">
+        <input type="text" data-bgbox-idx="${i}" data-bgbox-field="name" value="${(opt.name || '').replace(/"/g, '&quot;')}" placeholder="표시명 (예: 화이트 박스)"
+          oninput="bgBoxUpdate(${i}, 'name', this.value)"
+          style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+        <input type="color" value="${opt.color || '#FFFFFF'}" title="색상"
+          oninput="bgBoxUpdate(${i}, 'color', this.value)"
+          style="width:44px;height:28px;padding:0;border:1px solid var(--gray-300);border-radius:4px;cursor:pointer">
+        <button type="button" onclick="bgBoxRemove(${i})" title="삭제"
+          style="border:none;background:#fee;color:#dc2626;width:28px;height:28px;border-radius:4px;cursor:pointer;font-size:14px;line-height:1">&times;</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:5px;font-size:10.5px;color:var(--gray-500)">
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;padding:3px 8px;border-radius:4px;${isSoldOut ? 'background:#fee2e2;color:#b91c1c;font-weight:600' : 'background:#f3f4f6'};flex-shrink:0" title="품절로 표시하면 고객 화면에서 선택 불가">
+          <input type="checkbox" ${isSoldOut ? 'checked' : ''} onchange="bgBoxUpdate(${i}, 'sold_out', this.checked); renderBgBoxOptions()" style="margin:0;cursor:pointer">
+          ${isSoldOut ? '🚫 품절' : '품절 표시'}
+        </label>
+        <input type="text" value="${(opt.preview_image_url || '').replace(/"/g, '&quot;')}" placeholder="이미지 URL (선택)"
+          oninput="bgBoxUpdate(${i}, 'preview_image_url', this.value)"
+          style="flex:1;padding:3px 6px;border:1px solid var(--gray-200);border-radius:3px;font-size:10.5px;background:#fafafa">
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function bgBoxAddRow() {
+  _bgBoxOptions.push({ code: '', name: '', color: '#FFFFFF', preview_image_url: '' });
+  renderBgBoxOptions();
+}
+
+function bgBoxRemove(i) {
+  _bgBoxOptions.splice(i, 1);
+  renderBgBoxOptions();
+}
+
+function bgBoxUpdate(i, field, value) {
+  if (!_bgBoxOptions[i]) return;
+  _bgBoxOptions[i][field] = value;
+  // 입력 중엔 re-render 하면 커서 튐 → DOM 업데이트만
+  if (field === 'color') {
+    // 컬러는 즉시 시각 피드백 필요 없음 (값만 저장)
+  }
+}
+
+/** 스티커 코드에서 상품 prefix 추출 (S1~S99 접미사 제거) */
+function _stickerPrefix(s) {
+  const code = s.sticker_code || '';
+  const m = code.match(/^(.+?)S\d+$/);
+  return m ? m[1] : (code || '_');
+}
+
+function renderBgStickerModal() {
+  // 선택된 chips (prefix별 그룹 정렬 → 스티커 코드 순)
+  const selected = _bgAllStickers
+    .filter(s => _bgSelectedStickerIds.has(s.id))
+    .sort((a, b) => {
+      const pa = _stickerPrefix(a), pb = _stickerPrefix(b);
+      if (pa !== pb) return pa.localeCompare(pb);
+      return (a.sticker_code || '').localeCompare(b.sticker_code || '');
+    });
+  const chipsEl = document.getElementById('bg-p-sticker-chips');
+  document.getElementById('bg-p-sticker-count').textContent = selected.length;
+  if (selected.length === 0) {
+    chipsEl.innerHTML = '<span style="color:var(--gray-400);font-size:12px;line-height:2">선택된 스티커 없음</span>';
+  } else {
+    chipsEl.innerHTML = selected.map(s => {
+      const code = s.sticker_code || '';
+      return `<span style="display:inline-flex;align-items:center;gap:4px;background:#dbeafe;color:#1e40af;border-radius:20px;padding:4px 6px 4px 12px;font-size:12px;font-weight:500;line-height:1.4">
+        ${s.name}${code ? ` <span style="font-family:monospace;font-size:11px;opacity:.7">[${code}]</span>` : ''}
+        <button onclick="bgStickerRemove('${s.id}')" style="border:none;background:rgba(30,64,175,.15);cursor:pointer;color:#1e40af;width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:13px;padding:0;line-height:1">&times;</button>
+      </span>`;
+    }).join('');
+  }
+  // 미선택 목록
+  renderBgStickerList();
+}
+
+function renderBgStickerList() {
+  const q = (document.getElementById('bg-p-sticker-search').value || '').trim().toLowerCase();
+  // 검색은 name + sticker_code 모두 대상
+  const unselected = _bgAllStickers.filter(s => {
+    if (_bgSelectedStickerIds.has(s.id)) return false;
+    if (!q) return true;
+    const name = (s.name || '').toLowerCase();
+    const code = (s.sticker_code || '').toLowerCase();
+    return name.includes(q) || code.includes(q);
+  });
+
+  const el = document.getElementById('bg-p-sticker-list');
+  if (unselected.length === 0) {
+    el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--gray-400);font-size:12px">${q ? '검색 결과 없음' : '추가할 스티커 없음'}</div>`;
+    return;
+  }
+
+  // prefix로 그룹핑 + 정렬
+  const groups = new Map();
+  unselected.forEach(s => {
+    const p = _stickerPrefix(s);
+    if (!groups.has(p)) groups.set(p, []);
+    groups.get(p).push(s);
+  });
+  const sortedPrefixes = [...groups.keys()].sort((a, b) => a.localeCompare(b));
+
+  let html = '';
+  sortedPrefixes.forEach(prefix => {
+    const items = groups.get(prefix).sort((a, b) =>
+      (a.sticker_code || '').localeCompare(b.sticker_code || '')
+    );
+    // 그룹 헤더
+    const label = prefix === '_' ? '미분류' : prefix;
+    html += `<div style="padding:6px 14px;background:var(--gray-50);border-top:1px solid var(--gray-100);border-bottom:1px solid var(--gray-100);font-size:11px;font-weight:600;color:var(--gray-500);font-family:monospace;letter-spacing:.5px">
+      ${label} <span style="color:var(--gray-400);font-weight:400">(${items.length})</span>
+    </div>`;
+    // 스티커 행
+    items.forEach(s => {
+      const code = s.sticker_code || '';
+      const codeHtml = code
+        ? `<span style="font-family:monospace;font-size:11px;color:var(--gray-500);margin-left:auto;padding-left:8px">${code}</span>`
+        : '';
+      html += `<label style="display:flex;align-items:center;gap:10px;padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--gray-100);transition:background .1s" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">
+        <input type="checkbox" onchange="bgStickerAdd('${s.id}', this)" style="width:15px;height:15px;cursor:pointer;accent-color:var(--primary);flex-shrink:0">
+        <span style="font-size:13px">${s.name}</span>
+        ${codeHtml}
+      </label>`;
+    });
+  });
+  el.innerHTML = html;
+}
+
+function bgStickerAdd(id) {
+  _bgSelectedStickerIds.add(id);
+  renderBgStickerModal();
+}
+
+function bgStickerRemove(id) {
+  _bgSelectedStickerIds.delete(id);
+  renderBgStickerModal();
+}
+
+function bgStickerClearAll() {
+  _bgSelectedStickerIds.clear();
+  renderBgStickerModal();
 }
 
 function closeBgProductForm() { document.getElementById('bg-product-modal').style.display = 'none'; }
@@ -4078,13 +5161,37 @@ function calcMinDate(cfg) {
   return getNextBizDay(earliest, closedWeekdays, closedDateList);
 }
 
-// 저장 (스티커 연결만)
+// 저장 (스티커 연결 + 박스 옵션)
 async function saveBgProduct() {
   const productId = document.getElementById('bg-p-code').value;
-  const stickerIds = [...document.querySelectorAll('#bg-p-sticker-checks input:checked')].map(c => c.value);
+  const stickerIds = [..._bgSelectedStickerIds];
+
+  // 박스 옵션 검증 — code 는 필수, 빈 code 는 무시
+  const boxOptions = (_bgBoxOptions || [])
+    .map(opt => ({
+      code: (opt.code || '').trim(),
+      name: (opt.name || '').trim(),
+      color: opt.color || '#FFFFFF',
+      preview_image_url: (opt.preview_image_url || '').trim() || null,
+      sold_out: !!opt.sold_out,
+    }))
+    .filter(opt => opt.code); // 코드 없는 행은 제외
+
+  // 중복 코드 체크
+  const codes = boxOptions.map(o => o.code);
+  const dups = codes.filter((c, i) => codes.indexOf(c) !== i);
+  if (dups.length) {
+    alert('박스 옵션 코드가 중복됩니다: ' + [...new Set(dups)].join(', '));
+    return;
+  }
+
+  // 출고일 그룹 (빈 문자열이면 null — 기본 그룹 사용)
+  const shippingGroupId = (document.getElementById('bg-p-shipping-group')?.value || '').trim() || null;
 
   const body = {
     available_sticker_ids: stickerIds,
+    available_box_options: boxOptions,
+    shipping_group_id: shippingGroupId,
   };
 
   try {
@@ -4117,11 +5224,105 @@ let bgShClosedReasonTarget = null;
 let bgShPreviewMonth = new Date();
 let bgShPreviewSelected = null;
 
+let _bgShGroups = [];
+
+/** 그룹 목록 로드 + 탭 렌더 + 현재 그룹 설정 로드 */
 async function loadBgShipping() {
   try {
-    const r = await fetch(API + '/api/bg/shipping-config');
+    // 1) 그룹 목록 조회
+    const gRes = await fetch(API + '/api/bg/shipping-groups');
+    const gData = await gRes.json();
+    _bgShGroups = Array.isArray(gData.groups) ? gData.groups : [];
+    renderBgShGroupTabs();
+    // 2) 현재 선택된 그룹 (없으면 기본 그룹 = _bgShGroups 의 is_default)
+    const curId = document.getElementById('bg-sh-current-group-id').value
+      || (_bgShGroups.find(g => g.is_default)?.id || '');
+    await loadBgShippingForGroup(curId);
+  } catch(e) { console.error('loadBgShipping:', e); }
+}
+
+/** 특정 그룹 설정을 폼에 로드 */
+async function loadBgShippingForGroup(groupId) {
+  document.getElementById('bg-sh-current-group-id').value = groupId || '';
+  const targetGroup = _bgShGroups.find(g => g.id === groupId)
+    || _bgShGroups.find(g => g.is_default)
+    || null;
+  document.getElementById('bg-sh-current-is-default').value = targetGroup?.is_default ? 'true' : 'false';
+
+  try {
+    const url = API + '/api/bg/shipping-config' + (groupId ? ('?id=' + encodeURIComponent(groupId)) : '');
+    const r = await fetch(url);
     const d = await r.json();
     const cfg = d.config || {};
+    _applyShippingConfigToForm(cfg);
+  } catch(e) { console.error('loadBgShippingForGroup:', e); }
+}
+
+/** 그룹 탭 렌더 */
+function renderBgShGroupTabs() {
+  const wrap = document.getElementById('bg-sh-group-tabs');
+  if (!wrap) return;
+  const curId = document.getElementById('bg-sh-current-group-id').value
+    || (_bgShGroups.find(g => g.is_default)?.id || '');
+  const tabs = _bgShGroups.map(g => {
+    const isActive = g.id === curId;
+    const nameHtml = (g.name || '그룹').replace(/</g, '&lt;');
+    const defaultBadge = g.is_default ? '<span style="font-size:10px;color:var(--primary);margin-left:4px">(기본)</span>' : '';
+    const deleteBtn = g.is_default ? '' :
+      '<button onclick="event.stopPropagation();deleteBgShippingGroup(\'' + g.id + '\', \'' + nameHtml + '\')" title="삭제" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:14px;margin-left:4px;padding:0;line-height:1">&times;</button>';
+    const activeStyle = isActive
+      ? 'border-bottom:3px solid var(--primary);color:var(--primary);font-weight:600'
+      : 'border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500';
+    return '<button class="bg-sh-group-tab" onclick="switchBgShippingGroup(\'' + g.id + '\')" style="padding:10px 16px;background:none;border:none;' + activeStyle + ';font-size:13px;cursor:pointer;margin-bottom:-2px;display:inline-flex;align-items:center">'
+      + nameHtml + defaultBadge + deleteBtn
+      + '</button>';
+  }).join('');
+  wrap.innerHTML = tabs || '<div style="color:var(--gray-400);font-size:12px;padding:10px">그룹 없음</div>';
+}
+
+/** 탭 전환 */
+async function switchBgShippingGroup(groupId) {
+  await loadBgShippingForGroup(groupId);
+  renderBgShGroupTabs();
+}
+
+/** 새 그룹 추가 (prompt 로 이름 입력) */
+async function addBgShippingGroup() {
+  const name = (prompt('새 출고일 그룹 이름을 입력하세요 (예: 롱리드타임 전용):', '') || '').trim();
+  if (!name) return;
+  try {
+    const r = await fetch(API + '/api/bg/shipping-groups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (!r.ok) throw new Error((await r.json()).error || '생성 실패');
+    const newGroup = await r.json();
+    showToast('그룹 "' + name + '" 생성됨');
+    // 새 그룹으로 전환
+    document.getElementById('bg-sh-current-group-id').value = newGroup.id;
+    await loadBgShipping();
+  } catch(e) { alert(e.message); }
+}
+
+/** 그룹 삭제 */
+async function deleteBgShippingGroup(id, name) {
+  if (!confirm('출고일 그룹 "' + name + '" 을 삭제합니다.\n\n이 그룹을 사용하는 상품이 있으면 삭제되지 않습니다.\n계속하시겠습니까?')) return;
+  try {
+    const r = await fetch(API + '/api/bg/shipping-groups/' + encodeURIComponent(id), { method: 'DELETE' });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.error || '삭제 실패');
+    }
+    showToast('그룹이 삭제되었습니다.');
+    // 기본 그룹으로 복귀
+    document.getElementById('bg-sh-current-group-id').value = '';
+    await loadBgShipping();
+  } catch(e) { alert(e.message); }
+}
+
+/** 폼에 config 값 적용 (그룹 전환 + 최초 로드 공용) */
+function _applyShippingConfigToForm(cfg) {
     document.getElementById('bg-sh-today-shipping').checked = cfg.shipping_type === 'today_shipping';
     document.getElementById('bg-sh-cutoff-on').checked = cfg.cutoff_enabled ?? false;
     document.getElementById('bg-sh-cutoff-h').value = cfg.cutoff_hour ?? 14;
@@ -4129,6 +5330,7 @@ async function loadBgShipping() {
     document.getElementById('bg-sh-leadtime').value = cfg.lead_time_days ?? 2;
     document.getElementById('bg-sh-mindays').value = cfg.min_select_days ?? 3;
     document.getElementById('bg-sh-maxdays').value = cfg.max_select_days ?? 60;
+    document.getElementById('bg-sh-express-fee').value = cfg.express_fee ?? 0;
     // weekdays
     const closedW = cfg.closed_weekdays || [0, 6];
     document.querySelectorAll('#bg-sh-weekdays input').forEach(cb => {
@@ -4150,7 +5352,6 @@ async function loadBgShipping() {
     bgShPreviewMonth = new Date();
     bgShPreviewSelected = null;
     updateBgShPreview();
-  } catch(e) { console.error('loadBgShipping:', e); }
 }
 
 async function saveBgShipping() {
@@ -4164,25 +5365,44 @@ async function saveBgShipping() {
     lead_time_days: parseInt(document.getElementById('bg-sh-leadtime').value) || 0,
     min_select_days: parseInt(document.getElementById('bg-sh-mindays').value) || 0,
     max_select_days: parseInt(document.getElementById('bg-sh-maxdays').value) || 60,
+    express_fee: parseInt(document.getElementById('bg-sh-express-fee').value) || 0,
     closed_weekdays: closedWeekdays,
     closed_dates: bgShClosedDates,
     date_required: document.querySelector('input[name="bg-sh-datereq"]:checked')?.value === 'required',
     notice_enabled: document.getElementById('bg-sh-notice-on').checked,
     notice_text: document.getElementById('bg-sh-notice-text').value,
   };
+  // 현재 그룹 id (없으면 기본 그룹으로 저장)
+  const curId = document.getElementById('bg-sh-current-group-id').value;
+  const url = API + '/api/bg/shipping-config' + (curId ? ('?id=' + encodeURIComponent(curId)) : '');
   try {
-    const r = await fetch(API + '/api/bg/shipping-config', {
+    const r = await fetch(url, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
     });
     if (!r.ok) throw new Error((await r.json()).error || '저장 실패');
     showToast('출고일 설정이 저장되었습니다.');
+    // 그룹 캐시 리로드 (name 등은 변경 안 되지만 updated_at 갱신)
+    await loadBgShipping();
   } catch(e) { alert(e.message); }
 }
 
 function onBgShShipTypeChange() {
   const isToday = document.getElementById('bg-sh-today-shipping').checked;
+  // 컷오프 섹션: 오늘출발 활성화 시에만 표시
   document.getElementById('bg-sh-cutoff-section').style.display = isToday ? 'block' : 'none';
-  document.getElementById('bg-sh-range-section').style.display = isToday ? 'none' : 'grid';
+  // 선택 가능일 min/max: 항상 활성 (일반출고 범위 설정용)
+  const rangeSection = document.getElementById('bg-sh-range-section');
+  rangeSection.style.display = 'grid';
+  rangeSection.style.opacity = '1';
+  const minInput = document.getElementById('bg-sh-mindays');
+  const maxInput = document.getElementById('bg-sh-maxdays');
+  [minInput, maxInput].forEach(el => {
+    if (!el) return;
+    el.disabled = false;
+    el.style.background = '';
+    el.style.color = '';
+    el.style.cursor = '';
+  });
   updateBgShPreview();
 }
 
@@ -4342,28 +5562,102 @@ function renderBgShPreviewCalendar(cfg, minDate, maxDate) {
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const grid = document.getElementById('bg-sh-preview-grid');
+  const today0 = new Date(); today0.setHours(0,0,0,0);
+  const todayStr = fmt(today0);
+  const isTodayShipping = cfg.shipType === 'today_shipping';
+
+  // ── 오늘출발 모드: 빠른출고 선택가능 범위 계산 (receipt ~ receipt + leadtime)
+  let expressStart = null, expressEnd = null;
+  if (isTodayShipping) {
+    // 접수일(receipt) 계산: 컷오프/영업일 고려
+    const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+    const cutMin = cfg.cutoffH * 60 + cfg.cutoffM;
+    const todayIsBiz = !(cfg.closedWeekdays.includes(today0.getDay()) || cfg.closedDateList.includes(todayStr));
+    let receipt;
+    if (cfg.cutoffOn) {
+      if (todayIsBiz && nowMin < cutMin) receipt = new Date(today0);
+      else {
+        const nxt = new Date(today0); nxt.setDate(nxt.getDate() + 1);
+        receipt = getNextBizDay(nxt, cfg.closedWeekdays, cfg.closedDateList);
+      }
+    } else {
+      if (todayIsBiz) receipt = new Date(today0);
+      else {
+        const nxt = new Date(today0); nxt.setDate(nxt.getDate() + 1);
+        receipt = getNextBizDay(nxt, cfg.closedWeekdays, cfg.closedDateList);
+      }
+    }
+    expressStart = receipt;
+    // 도착 범위: receipt ~ receipt + leadtime 영업일
+    if ((cfg.leadTime || 0) > 0) {
+      expressEnd = addBizDays(receipt, cfg.leadTime, cfg.closedWeekdays, cfg.closedDateList);
+    } else {
+      expressEnd = receipt; // 당일출고
+    }
+  }
+
+  // ── 일반출고 선택가능 범위: today + minDays ~ today + maxDays
+  const normalStart = new Date(today0); normalStart.setDate(normalStart.getDate() + (cfg.minDays || 0));
+  const normalEnd = new Date(today0); normalEnd.setDate(normalEnd.getDate() + (cfg.maxDays || 60));
+
   let html = '';
   for (let i = 0; i < firstDay; i++) html += '<div style="height:28px"></div>';
   for (let d = 1; d <= daysInMonth; d++) {
-    const date = new Date(year, month, d);
+    const date = new Date(year, month, d); date.setHours(0,0,0,0);
     const ds = fmt(date);
     const isClosed = cfg.closedWeekdays.includes(date.getDay()) || cfg.closedDateList.includes(ds);
-    const isBeforeMin = date < minDate;
-    const isAfterMax = date > maxDate;
-    const disabled = isClosed || isBeforeMin || isAfterMax;
-    const isToday = ds === fmt(new Date());
+    const isToday = ds === todayStr;
     const isSelected = ds === bgShPreviewSelected;
-    let style = 'height:28px;line-height:28px;border-radius:4px;font-size:12px;cursor:pointer;';
-    if (disabled) style += 'color:var(--gray-300);cursor:default;';
-    else if (isSelected) style += 'background:var(--primary);color:#fff;font-weight:600;';
-    else if (isToday) style += 'background:var(--primary-light);color:var(--primary);font-weight:600;';
-    else style += 'color:var(--gray-700);';
-    if (date.getDay() === 0 && !disabled) style += 'color:var(--red);';
-    if (date.getDay() === 6 && !disabled && !isSelected) style += 'color:var(--primary);';
+
+    // 범위 판별
+    const inExpressRange = isTodayShipping && expressStart && expressEnd
+      && date >= expressStart && date <= expressEnd;
+    const inNormalRange = date >= normalStart && date <= normalEnd;
+    const disabled = isClosed || (!inExpressRange && !inNormalRange);
+
+    let style = 'height:28px;line-height:28px;border-radius:4px;font-size:12px;cursor:pointer;border:1px solid transparent;';
+    if (disabled) {
+      style += 'color:var(--gray-300);cursor:default;';
+    } else if (isSelected) {
+      style += 'background:var(--primary);color:#fff;font-weight:600;';
+    } else if (inExpressRange && inNormalRange) {
+      // 두 범위 겹침: 초록 배경 + 파란 테두리 (duo-indicator)
+      style += 'background:#D1FAE5;color:#065F46;font-weight:600;border:1px solid var(--primary);';
+    } else if (inExpressRange) {
+      // 빠른출고 전용
+      style += 'background:#D1FAE5;color:#065F46;font-weight:600;';
+    } else if (isToday) {
+      style += 'background:var(--primary-light);color:var(--primary);font-weight:600;';
+    } else {
+      // 일반출고 범위
+      style += 'color:var(--gray-700);';
+    }
+    if (date.getDay() === 0 && !disabled && !isSelected && !inExpressRange) style += 'color:var(--red);';
+    if (date.getDay() === 6 && !disabled && !isSelected && !inExpressRange) style += 'color:var(--primary);';
     const clickAttr = disabled ? '' : ' onclick="bgShPreviewSelectDate(\'' + ds + '\')"';
     html += '<div style="' + style + '"' + clickAttr + '>' + d + '</div>';
   }
   grid.innerHTML = html;
+
+  // ── 범례 (legend): 오늘출발 모드일 때만 표시
+  const legendEl = document.getElementById('bg-sh-preview-legend');
+  if (legendEl) {
+    if (isTodayShipping) {
+      legendEl.style.display = 'flex';
+      legendEl.innerHTML = ''
+        + '<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--gray-600)">'
+        +   '<span style="display:inline-block;width:12px;height:12px;background:#D1FAE5;border-radius:2px"></span> ⚡ 빠른출고'
+        + '</span>'
+        + '<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--gray-600)">'
+        +   '<span style="display:inline-block;width:12px;height:12px;background:#fff;border:1px solid var(--gray-300);border-radius:2px"></span> 일반출고'
+        + '</span>'
+        + '<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--gray-600)">'
+        +   '<span style="display:inline-block;width:12px;height:12px;background:#D1FAE5;border:1px solid var(--primary);border-radius:2px"></span> 겹침'
+        + '</span>';
+    } else {
+      legendEl.style.display = 'none';
+    }
+  }
 }
 
 function bgShPreviewSelectDate(ds) { bgShPreviewSelected = ds; updateBgShPreview(); }
@@ -4529,6 +5823,1043 @@ async function bgAlimtalkSend() {
 
 function closeBgAtResult() {
   document.getElementById('bg-at-result-modal').style.display = 'none';
+}
+
+// ============================================
+// 통합현황 (구 고객입력현황은 통합현황으로 대체됨)
+// ============================================
+
+// ============================================
+// 통합현황
+// ============================================
+let bgUnifiedOrders = [];   // MSSQL 주문 데이터 (중복 제거)
+let bgUnifiedProductMap = new Map(); // order_seq → Map(card_code → card_name)
+let bgUnifiedCiMap = new Map(); // order_id → customer_info
+let bgUnifiedRows = [];     // 평탄화된 렌더 행
+
+// 통합현황 최대 조회 범위 (일)
+const BG_UNIFIED_MAX_RANGE_DAYS = 90;
+
+async function loadBgUnified() {
+  const $loading = document.getElementById('uni-loading');
+  $loading.style.display = 'block';
+  $loading.textContent = '불러오는 중...';
+  document.getElementById('uni-table-wrap').style.display = 'none';
+
+  // 날짜 기본값 초기화 (최초 1회)
+  if (!document.getElementById('uni-start').value) {
+    const today = fmt(new Date());
+    const weekAgo = fmt(new Date(Date.now() - 7 * 86400000));
+    document.getElementById('uni-start').value = weekAgo;
+    document.getElementById('uni-end').value = today;
+  }
+
+  const start = document.getElementById('uni-start').value;
+  const end = document.getElementById('uni-end').value;
+
+  // 날짜 유효성 + 최대 범위 가드
+  if (!start || !end) {
+    $loading.textContent = '시작일과 종료일을 선택하세요.';
+    return;
+  }
+  if (start > end) {
+    $loading.textContent = '시작일이 종료일보다 늦을 수 없습니다.';
+    return;
+  }
+  const rangeDays = Math.ceil((new Date(end) - new Date(start)) / 86400000);
+  if (rangeDays > BG_UNIFIED_MAX_RANGE_DAYS) {
+    $loading.innerHTML = `조회 범위가 너무 큽니다 (<b>${rangeDays}일</b>). 최대 ${BG_UNIFIED_MAX_RANGE_DAYS}일 이내로 설정해주세요.`;
+    return;
+  }
+
+  const endPlus = fmt(new Date(new Date(end).getTime() + 86400000));
+
+  // 각 API 응답을 개별적으로 포착하여 어느 쪽이 실패했는지 진단 가능
+  try {
+    const [ordersRes, ciRes] = await Promise.allSettled([
+      fetch(`${API}/api/orders?start_date=${start}&end_date=${endPlus}&category=daeryepum`).then(r => {
+        if (!r.ok) throw new Error(`orders API ${r.status}`);
+        return r.json();
+      }),
+      fetch(`${API}/api/bg/customer-infos`).then(r => {
+        if (!r.ok) throw new Error(`customer-infos API ${r.status}`);
+        return r.json();
+      }),
+    ]);
+
+    if (ordersRes.status === 'rejected') {
+      console.error('[loadBgUnified] orders 실패:', ordersRes.reason);
+      $loading.textContent = '주문 데이터 조회 실패: ' + (ordersRes.reason?.message || '알 수 없는 오류');
+      return;
+    }
+    if (ciRes.status === 'rejected') {
+      console.error('[loadBgUnified] customer-infos 실패:', ciRes.reason);
+      $loading.textContent = '고객입력 조회 실패: ' + (ciRes.reason?.message || '알 수 없는 오류');
+      return;
+    }
+
+    const rawOrders = Array.isArray(ordersRes.value) ? ordersRes.value : [];
+    // order_seq 기준 중복 제거 + 상품(card_code)별 상품명/수량 보존
+    // productMap 구조: Map(order_seq → Map(card_code → {card_name, item_count}))
+    const orderMap = new Map();
+    const productMap = new Map();
+    rawOrders.forEach(r => {
+      r.order_date_fmt = r.order_date ? r.order_date.replace('T', ' ').slice(0, 10) : '';
+      if (!orderMap.has(r.order_seq)) orderMap.set(r.order_seq, r);
+      // 상품 상세 (동일 card_code 중복 행이면 수량 합산)
+      if (r.card_code && r.card_name) {
+        if (!productMap.has(r.order_seq)) productMap.set(r.order_seq, new Map());
+        const pm = productMap.get(r.order_seq);
+        if (!pm.has(r.card_code)) {
+          pm.set(r.card_code, { card_name: r.card_name, item_count: 0 });
+        }
+        pm.get(r.card_code).item_count += (r.item_count || 0);
+      }
+    });
+    bgUnifiedOrders = [...orderMap.values()];
+    bgUnifiedProductMap = productMap;
+
+    const ciList = ciRes.value.infos || [];
+    // 중복 order_id 감지 (동일 order에 CI row가 여러 개인 비정상 케이스 로그)
+    const ciMap = new Map();
+    ciList.forEach(ci => {
+      const key = String(ci.order_id);
+      if (ciMap.has(key)) {
+        console.warn('[loadBgUnified] 중복 customer_info:', key, '— 이전 값이 덮어쓰기됨');
+      }
+      ciMap.set(key, ci);
+    });
+    bgUnifiedCiMap = ciMap;
+
+    renderBgUnified();
+  } catch (e) {
+    console.error('[loadBgUnified] 예상치 못한 오류:', e);
+    $loading.textContent = '불러오기 실패: ' + e.message;
+  }
+}
+
+/** 정보입력현황 탭 전환 (submitted / unsubmitted) */
+function switchUniTab(tab) {
+  document.getElementById('uni-active-tab').value = tab;
+  // 탭 시각 스타일 업데이트
+  document.querySelectorAll('#uni-tab-strip .uni-tab').forEach(btn => {
+    const isActive = btn.dataset.uniTab === tab;
+    btn.style.borderBottomColor = isActive ? 'var(--primary)' : 'transparent';
+    btn.style.color = isActive ? 'var(--primary)' : 'var(--gray-500)';
+    btn.style.fontWeight = isActive ? '600' : '500';
+  });
+  // 입력완료 탭일 때만 주문수집 서브필터(현황 카드) 표시
+  const subFilter = document.getElementById('uni-submitted-subfilter');
+  if (subFilter) subFilter.style.display = (tab === 'submitted') ? 'flex' : 'none';
+  // 입력완료 탭일 때만 '수집완료 숨기기' 체크박스 표시
+  const hideProcessedWrap = document.getElementById('uni-hide-processed-wrap');
+  if (hideProcessedWrap) hideProcessedWrap.style.display = (tab === 'submitted') ? 'flex' : 'none';
+  // 주문수집 컬럼 헤더 show/hide
+  document.querySelectorAll('.uni-col-processed').forEach(el => {
+    el.style.display = (tab === 'submitted') ? '' : 'none';
+  });
+  renderBgUnified();
+}
+
+function renderBgUnified() {
+  const hideCancel = document.getElementById('uni-hide-cancel')?.checked;
+  // 탭 상태 = 필터 소스 (submitted / unsubmitted). 기존 '전체' 옵션은 제거됨.
+  const activeTab = document.getElementById('uni-active-tab')?.value || 'unsubmitted';
+
+  const receiptLabel = { personal: '소득공제', business: '지출증빙' };
+
+  // 탭별 카운트 미리 계산 (취소 제외 적용 후)
+  const isCancelled = o => o.status_seq === 3 || o.status_seq === 5;
+  const visibleBase = bgUnifiedOrders.filter(o => !hideCancel || !isCancelled(o));
+  let cntSubmitted = 0, cntUnsubmitted = 0;
+  visibleBase.forEach(o => {
+    const ciKey = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
+    if (bgUnifiedCiMap.get(ciKey)) cntSubmitted++; else cntUnsubmitted++;
+  });
+  const cntSubEl = document.getElementById('uni-count-submitted');
+  const cntUnsubEl = document.getElementById('uni-count-unsubmitted');
+  if (cntSubEl) cntSubEl.textContent = '(' + cntSubmitted + ')';
+  if (cntUnsubEl) cntUnsubEl.textContent = '(' + cntUnsubmitted + ')';
+
+  // 필터링 — 활성 탭에 따라
+  const hideProcessed = document.getElementById('uni-hide-processed')?.checked;
+  let filtered = visibleBase.filter(o => {
+    const ciKey = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
+    const ci = bgUnifiedCiMap.get(ciKey);
+    if (activeTab === 'submitted' && !ci) return false;
+    if (activeTab === 'unsubmitted' && ci) return false;
+    // 입력완료 탭에서 '처리완료 숨기기' 체크시 processed_at 있는 주문 제외
+    if (activeTab === 'submitted' && hideProcessed && ci?.processed_at) return false;
+    return true;
+  });
+
+  // 입력완료 탭 요약 카드 업데이트 (전체 ci 중 처리 대기/완료 카운트)
+  if (activeTab === 'submitted') {
+    const submittedAll = visibleBase.filter(o => {
+      const k = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
+      return !!bgUnifiedCiMap.get(k);
+    });
+    let processedCnt = 0, pendingCnt = 0;
+    submittedAll.forEach(o => {
+      const k = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
+      const c = bgUnifiedCiMap.get(k);
+      if (c?.processed_at) processedCnt++; else pendingCnt++;
+    });
+    const sum = document.getElementById('uni-processed-summary');
+    if (sum) {
+      sum.innerHTML = '⏳ 처리대기 <b style="color:#b45309">' + pendingCnt + '</b>건 · ✅ 처리완료 <b style="color:#059669">' + processedCnt + '</b>건';
+    }
+  }
+
+  // 입력완료 탭은 submitted_at / updated_at 기준 최신순 정렬
+  //   관리자 추가/수정으로 updated_at 이 최신이면 그것 기준, 아니면 submitted_at
+  if (activeTab === 'submitted') {
+    filtered.sort((a, b) => {
+      const ciKeyA = a.order_type === 'ETC' ? `ETC-${a.order_seq}` : String(a.order_seq);
+      const ciKeyB = b.order_type === 'ETC' ? `ETC-${b.order_seq}` : String(b.order_seq);
+      const ciA = bgUnifiedCiMap.get(ciKeyA);
+      const ciB = bgUnifiedCiMap.get(ciKeyB);
+      const tA = Math.max(Date.parse(ciA?.updated_at || 0) || 0, Date.parse(ciA?.submitted_at || 0) || 0);
+      const tB = Math.max(Date.parse(ciB?.updated_at || 0) || 0, Date.parse(ciB?.submitted_at || 0) || 0);
+      return tB - tA; // DESC (최신순)
+    });
+  }
+
+  // 평탄화: 한 주문에 여러 상품이 있으면 상품별로 각각 1행씩 생성
+  // - 미입력 상태(sels=[]): 주문의 모든 상품에 대해 각각 sel=null 행 생성
+  // - 입력완료: 각 상품마다 매칭되는 sticker_selection을 찾아 붙이고, 없으면 null
+  bgUnifiedRows = [];
+  filtered.forEach(order => {
+    const ciKey = order.order_type === 'ETC' ? `ETC-${order.order_seq}` : String(order.order_seq);
+    const ci = bgUnifiedCiMap.get(ciKey) || null;
+    const sels = ci?.sticker_selections || [];
+    const pm = bgUnifiedProductMap.get(order.order_seq);
+
+    if (pm && pm.size > 0) {
+      // 주문의 각 상품에 대해 1행씩
+      for (const [productCode, productInfo] of pm) {
+        // 이 상품과 매칭되는 sticker_selection 찾기 (없으면 null)
+        const sel = sels.find(s => s.product_code === productCode) || null;
+        bgUnifiedRows.push({
+          order, ci, sel,
+          product_code: productCode,
+          product_name: productInfo.card_name,
+          product_qty: productInfo.item_count,
+        });
+      }
+      // 상품코드가 없는 sticker_selection이 있으면 별도 행 추가
+      // (비정상 데이터지만 누락 방지)
+      sels.forEach(sel => {
+        if (sel.product_code && !pm.has(sel.product_code)) {
+          bgUnifiedRows.push({
+            order, ci, sel,
+            product_code: sel.product_code,
+            product_name: sel.product_name || sel.product_code,
+            product_qty: sel.quantity || 0,
+          });
+        }
+      });
+    } else {
+      // productMap이 비어있는 경우 (비정상): 주문 1건을 단일 행으로
+      bgUnifiedRows.push({
+        order, ci, sel: null,
+        product_code: null,
+        product_name: order.card_name || '-',
+        product_qty: order.item_count || 1,
+      });
+    }
+  });
+
+  if (!bgUnifiedRows.length) {
+    document.getElementById('uni-loading').style.display = 'block';
+    document.getElementById('uni-loading').textContent = '조회된 데이터가 없습니다.';
+    document.getElementById('uni-table-wrap').style.display = 'none';
+    return;
+  }
+
+  document.getElementById('uni-loading').style.display = 'none';
+  document.getElementById('uni-table-wrap').style.display = 'block';
+  document.getElementById('uni-row-count').textContent = `총 ${filtered.length}건 / ${bgUnifiedRows.length}행`;
+
+  // isCancelled 는 함수 상단 (카운트 계산) 에서 이미 선언됨 — 재선언 금지
+  let html = '';
+
+  bgUnifiedRows.forEach(({ order, ci, sel, product_code, product_name, product_qty }, rowIdx) => {
+    const isFirstOfOrder = rowIdx === 0 || bgUnifiedRows[rowIdx - 1].order.order_seq !== order.order_seq;
+    const borderStyle = isFirstOfOrder ? 'border-top:2px solid var(--gray-200)' : '';
+    const rowClass = isCancelled(order) ? 'row-cancelled' : '';
+
+    const orderDateFmt = esc(order.order_date_fmt || '-');
+    const recvName = esc(order.display_name || '-');
+    const recvPhone = esc(order.recv_hphone || '-');
+    const recvAddr = esc(order.recv_address || '-');
+    const itemCount = Number(product_qty) || 1;
+
+    // 입력 셀 — 완료시 제출(또는 관리자 저장) 일시 표시, 미입력시 '미입력' 뱃지
+    const submittedAt = ci?.updated_at || ci?.submitted_at;
+    const fmtSubmittedAt = (() => {
+      if (!submittedAt) return '';
+      try {
+        const d = new Date(submittedAt);
+        const pad = (n) => String(n).padStart(2, '0');
+        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+          + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+      } catch { return ''; }
+    })();
+    const hasInput = !!ci;
+    const inputBadge = hasInput
+      ? '<span style="color:#16a34a;font-size:11px;font-weight:600;white-space:nowrap">' + (fmtSubmittedAt || '✅ 완료') + '</span>'
+      : '<span style="color:var(--gray-300);font-size:11px">미입력</span>';
+
+    // 박스선택 — 아이콘/수량 제거, 코드만 표시 (스티커코드 컬럼과 일관)
+    // XSS: 스티커/박스 코드는 sticker_code/box_code DB 에서 옴 → escape 적용
+    const boxCell = sel?.box_code
+      ? `<span style="font-family:monospace;font-size:12px">${esc(sel.box_code)}</span>`
+      : '<span style="color:var(--gray-300)">-</span>';
+    const stickerCode = sel?.sticker_code
+      ? `<span style="font-family:monospace;font-size:12px">${esc(sel.sticker_code)}</span>`
+      : '<span style="color:var(--gray-300)">-</span>';
+    const stickerName = sel?.sticker_name ? esc(sel.sticker_name) : '<span style="color:var(--gray-300)">-</span>';
+    const customVals = sel ? Object.entries(sel.custom_values || {}).filter(([, v]) => v) : [];
+    const customText = customVals.length
+      ? customVals.map(([k, v]) => {
+          // 기본 'text' 필드는 접두어 없이 값만 표시 (가독성).
+          // 다른 커스텀 키는 기존처럼 'key: value' 로 구분.
+          // XSS: k, v 모두 고객 입력 → escape 필수
+          return k === 'text'
+            ? esc(v)
+            : `<span style="color:var(--gray-500)">${esc(k)}:</span> ${esc(v)}`;
+        }).join('<br>')
+      : '<span style="color:var(--gray-300)">-</span>';
+    const shipDate = ci?.desired_ship_date ? esc(ci.desired_ship_date) : '<span style="color:var(--gray-300)">-</span>';
+    const shipType = ci ? (ci.is_express
+      ? '<span style="color:#dc2626;font-weight:600">⚡ 빠른출고</span>'
+      : '일반') : '<span style="color:var(--gray-300)">-</span>';
+    const receiptText = ci ? (ci.cash_receipt_yn
+      ? esc((receiptLabel[ci.receipt_type] || '') + ' ' + (ci.receipt_number || ''))
+      : '미신청') : '<span style="color:var(--gray-300)">-</span>';
+    const requestText = ci?.customer_request || '';
+
+    // 상품명: 행 단위로 이미 product_name 제공. sel.product_name이 있으면 우선 사용 (사용자 저장값).
+    // XSS: 상품명은 MSSQL S2_Card 에서 옴 → escape 적용
+    const productName = esc(sel?.product_name || product_name || '-');
+    // 수정/추가 버튼 — 같은 위치에 노출
+    //  · ci 있음 → '수정' (기존)
+    //  · ci 없고 취소 아님 → '추가' (관리자가 고객 대신 수동 입력)
+    //  · 취소 → 버튼 없음
+    const editBtn = ci
+      ? `<button class="btn" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">수정</button>`
+      : (isCancelled(order)
+        ? ''
+        : `<button class="btn btn-primary" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">+ 추가</button>`);
+
+    // 주문수집 셀 — 입력완료 탭에서만 렌더 (미입력엔 의미 없음)
+    const showProcessedCol = (activeTab === 'submitted');
+    const ciKeyForProc = order.order_type === 'ETC' ? `ETC-${order.order_seq}` : String(order.order_seq);
+    const processedAt = ci?.processed_at;
+    let processedCellHtml = '';
+    if (showProcessedCol) {
+      if (processedAt) {
+        const d = new Date(processedAt);
+        const pad = n => String(n).padStart(2, '0');
+        const fmt = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
+          + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+        processedCellHtml = `<td class="uni-col-processed" style="font-size:11px;white-space:nowrap">
+          <div style="color:#059669;font-weight:600" title="정보수집이 완료되어 주문수집 스프레드시트로 등록이 완료된 주문건입니다.">✅ ${fmt}</div>
+          <button class="btn" style="padding:2px 8px;font-size:10px;margin-top:3px" onclick="toggleProcessed('${esc(ciKeyForProc)}', false)" title="주문수집 상태 되돌리기">↺ 되돌리기</button>
+        </td>`;
+      } else {
+        processedCellHtml = `<td class="uni-col-processed" style="font-size:11px;white-space:nowrap">
+          <button class="btn btn-primary" style="padding:3px 10px;font-size:11px" onclick="toggleProcessed('${esc(ciKeyForProc)}', true)" title="주문수집 스프레드시트로 등록 완료 표시">📋 수집처리</button>
+        </td>`;
+      }
+    } else {
+      processedCellHtml = `<td class="uni-col-processed" style="display:none"></td>`;
+    }
+
+    html += `<tr class="${rowClass}" style="${borderStyle}">
+      <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()"></td>
+      <td style="font-weight:600;white-space:nowrap">${esc(order.order_seq)}</td>
+      <td style="font-size:12px;color:var(--gray-500);white-space:nowrap">${orderDateFmt}</td>
+      <td style="font-size:12px">${inputBadge}</td>
+      ${processedCellHtml}
+      <td style="font-size:12px">${productName}</td>
+      <td style="text-align:center;font-size:12px">${itemCount}</td>
+      <td style="font-size:12px;white-space:nowrap">${recvName}</td>
+      <td style="font-size:12px;white-space:nowrap">${recvPhone}</td>
+      <td style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${recvAddr}">${recvAddr}</td>
+      <td style="font-size:12px">${boxCell}</td>
+      <td style="font-size:12px">${stickerCode}</td>
+      <td style="font-size:12px">${stickerName}</td>
+      <td style="font-size:12px;line-height:1.6">${customText}</td>
+      <td style="font-size:12px;white-space:nowrap">${shipDate}</td>
+      <td style="font-size:12px">${shipType}</td>
+      <td style="font-size:12px">${receiptText}</td>
+      <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray-500)" title="${esc(requestText)}">${requestText ? esc(requestText) : '<span style="color:var(--gray-300)">-</span>'}</td>
+      <td>${editBtn}</td>
+    </tr>`;
+  });
+
+  document.getElementById('uni-tbody').innerHTML = html;
+  updateBgUnifiedSelectedCount();
+}
+
+function toggleBgUnifiedSelectAll(el) {
+  document.querySelectorAll('.uni-row-check').forEach(cb => { cb.checked = el.checked; });
+  updateBgUnifiedSelectedCount();
+}
+
+function updateBgUnifiedSelectedCount() {
+  const checked = [...document.querySelectorAll('.uni-row-check:checked')];
+  const cnt = checked.length;
+  document.getElementById('uni-selected-count').textContent = cnt + '건 선택';
+
+  const activeTab = document.getElementById('uni-active-tab')?.value;
+  const btnCopy = document.getElementById('uni-btn-copy');
+  const btnMark = document.getElementById('uni-btn-mark-processed');
+  const btnUnmark = document.getElementById('uni-btn-unmark-processed');
+  const btnMarkLabel = document.getElementById('uni-btn-mark-processed-label');
+  const btnUnmarkLabel = document.getElementById('uni-btn-unmark-processed-label');
+
+  // 선택 0 → 모두 숨김
+  if (cnt === 0) {
+    if (btnCopy) btnCopy.style.display = 'none';
+    if (btnMark) btnMark.style.display = 'none';
+    if (btnUnmark) btnUnmark.style.display = 'none';
+    return;
+  }
+
+  // 선택된 행들의 처리 상태 분석
+  let pendingCnt = 0;    // 미처리 (ci 있고 processed_at 없음)
+  let processedCnt = 0;  // 처리완료
+  let unsubmittedCnt = 0;// 미입력 (ci 없음 — 처리 대상 아님)
+  checked.forEach(cb => {
+    const row = bgUnifiedRows[parseInt(cb.dataset.idx)];
+    if (!row) return;
+    if (!row.ci) { unsubmittedCnt++; return; }
+    if (row.ci.processed_at) processedCnt++; else pendingCnt++;
+  });
+
+  // 수집복사: 항상 표시 (선택된 모든 행 대상)
+  if (btnCopy) btnCopy.style.display = '';
+
+  if (activeTab === 'submitted') {
+    // 처리 버튼: 미처리 건이 있을 때만 표시 (이미 처리된건 제외)
+    if (pendingCnt > 0) {
+      btnMark.style.display = '';
+      btnMarkLabel.textContent = `수집처리 (${pendingCnt}건)`;
+    } else {
+      btnMark.style.display = 'none';
+    }
+    // 되돌리기 버튼: 처리된 건이 있을 때만 표시
+    if (processedCnt > 0) {
+      btnUnmark.style.display = '';
+      btnUnmarkLabel.textContent = `되돌리기 (${processedCnt}건)`;
+    } else {
+      btnUnmark.style.display = 'none';
+    }
+  } else {
+    // 미입력 탭에선 수집처리 관련 버튼 표시 안 함
+    btnMark.style.display = 'none';
+    btnUnmark.style.display = 'none';
+  }
+}
+
+/**
+ * 선택된 행들을 일괄로 주문수집 처리/되돌리기.
+ *   - processed=true  : 미처리 행만 대상 → processed_at = now 세팅
+ *   - processed=false : 처리된 행만 대상 → processed_at = NULL (되돌림)
+ * 미입력(ci 없음) / 상태 무관(이미 원하는 상태) 주문은 대상에서 자동 제외.
+ */
+async function bulkProcessedAction(processed) {
+  const checked = [...document.querySelectorAll('.uni-row-check:checked')];
+  if (!checked.length) { showToast('대상 주문을 선택해주세요'); return; }
+
+  // 입력된 주문 중 '상태 전환이 필요한' 것만 필터
+  //   processed=true  → processed_at 이 현재 비어있는 (미처리) 행
+  //   processed=false → processed_at 이 현재 있는 (처리완료) 행
+  const seen = new Set();
+  const orderIds = [];
+  checked.forEach(cb => {
+    const row = bgUnifiedRows[parseInt(cb.dataset.idx)];
+    if (!row || !row.ci) return;
+    const isCurrentlyProcessed = !!row.ci.processed_at;
+    if (processed && isCurrentlyProcessed) return;   // 이미 처리됨 → 건너뜀
+    if (!processed && !isCurrentlyProcessed) return; // 이미 미처리 → 건너뜀
+    const id = row.order.order_type === 'ETC' ? ('ETC-' + row.order.order_seq) : String(row.order.order_seq);
+    if (!seen.has(id)) { seen.add(id); orderIds.push(id); }
+  });
+  if (!orderIds.length) {
+    showToast(processed ? '처리할 주문이 없습니다 (모두 이미 처리됨)' : '되돌릴 주문이 없습니다 (모두 미처리 상태)');
+    return;
+  }
+
+  const actionLabel = processed ? '주문수집 처리' : '주문수집 되돌리기';
+  if (!confirm(`선택한 ${orderIds.length}건을 "${actionLabel}" 하시겠습니까?`)) return;
+
+  try {
+    const r = await fetch(API + '/api/bg/orders/processed-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ids: orderIds, processed: !!processed }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || '처리 실패');
+    if (data.fail > 0) {
+      showToast(`${data.ok}건 완료 · ${data.fail}건 실패 (콘솔 확인)`);
+      console.warn('일괄 처리 부분 실패:', data.errors);
+    } else {
+      showToast(`${data.ok}건 ${actionLabel} 완료`);
+    }
+    await loadBgUnified();
+  } catch (e) {
+    alert('일괄 처리 실패: ' + e.message);
+  }
+}
+
+function copyBgUnified() {
+  const checked = [...document.querySelectorAll('.uni-row-check:checked')];
+  if (!checked.length) { showToast('복사할 행을 선택해주세요'); return; }
+
+  const selectedRows = checked.map(cb => bgUnifiedRows[parseInt(cb.dataset.idx)]);
+
+  // 23열 구조: A='', B=택배, C=일반, D=주문번호, E=수령인, F=연락처, G='', H=배송지, I='',
+  //            J=상품명, K=상품코드, L=박스코드, M=스티커코드(수량), N='', O='',
+  //            P=스티커 문구(고객 입력), Q='', R='', S='', T=주문수량,
+  //            U='', V=희망출고일(빠른출고시 짙은빨강), W=희망출고일
+  const buildCells = ({ order, ci, sel, product_code, product_name, product_qty }) => {
+    const cells = Array(23).fill('');
+    cells[1] = '택배';
+    cells[2] = '일반';
+    cells[3] = String(order.order_seq).replace(/^ETC-/, '');
+    cells[4] = order.display_name || '';
+    cells[5] = order.recv_hphone || '';
+    cells[7] = order.recv_address || '';
+    // 상품명/코드/수량: 행 단위로 이미 제공됨 (상품별 분리)
+    cells[9] = sel?.product_name || product_name || '';
+    cells[10] = sel?.product_code || product_code || '';
+    // L열(index 11) = 박스 코드 (수량 미포함)
+    if (sel?.box_code) cells[11] = sel.box_code;
+    if (sel?.sticker_code) {
+      const qty = sel.quantity ? `(${sel.quantity}개)` : '';
+      cells[12] = `${sel.sticker_code}${qty}`;
+    }
+    // P열(index 15) = 고객이 입력한 스티커 문구 (custom_values)
+    //   - sticker_input='custom' 일 때만 값 존재. 'none'/'선택안함'이면 빈 문자열.
+    //   - 여러 필드가 있으면 ' / ' 구분자로 연결.
+    //   - TSV/HTML 브레이크 방지: 탭/개행은 공백으로 치환.
+    if (sel?.custom_values) {
+      const vals = Object.values(sel.custom_values)
+        .map(v => (v == null ? '' : String(v)).replace(/[\t\r\n]+/g, ' ').trim())
+        .filter(v => v);
+      if (vals.length) cells[15] = vals.join(' / ');
+    }
+    cells[19] = sel?.quantity || product_qty || '';  // T: 주문수량
+    if (ci?.is_express) cells[21] = ci.desired_ship_date || '';
+    cells[22] = ci?.desired_ship_date || '';
+    return cells;
+  };
+
+  const htmlRows = selectedRows.map(row => {
+    const cells = buildCells(row);
+    return '<tr>' + cells.map((val, ci) => {
+      const style = (ci === 21 && row.ci?.is_express) ? ' style="color:#8B0000;font-weight:bold"' : '';
+      return `<td${style}>${val}</td>`;
+    }).join('') + '</tr>';
+  }).join('');
+
+  const tableHtml = `<table><tbody>${htmlRows}</tbody></table>`;
+  const tsv = selectedRows.map(row => buildCells(row).join('\t')).join('\n');
+
+  const onSuccess = () => {
+    showToast(`${selectedRows.length}건 클립보드 복사 완료`);
+    // 입력완료 탭에서 복사한 경우만 → 선택 주문들을 자동 '처리완료' 로 마킹
+    //   · 이미 처리된 주문도 포함해 재마킹 (PATCH idempotent)
+    //   · 미입력 행(ci 없음)은 제외
+    const activeTab = document.getElementById('uni-active-tab')?.value;
+    if (activeTab !== 'submitted') return;
+    const orderIds = [...new Set(
+      selectedRows
+        .filter(r => r.ci) // 입력된 주문만
+        .map(r => r.order.order_type === 'ETC' ? ('ETC-' + r.order.order_seq) : String(r.order.order_seq))
+    )];
+    if (!orderIds.length) return;
+    markOrdersProcessedBatch(orderIds, true);
+  };
+
+  if (navigator.clipboard && window.ClipboardItem) {
+    const htmlBlob = new Blob([tableHtml], { type: 'text/html' });
+    const textBlob = new Blob([tsv], { type: 'text/plain' });
+    navigator.clipboard.write([new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })])
+      .then(onSuccess)
+      .catch(() => navigator.clipboard.writeText(tsv).then(onSuccess));
+  } else {
+    navigator.clipboard.writeText(tsv).then(onSuccess);
+  }
+}
+
+/** 단일 주문 처리 상태 토글 (↺ 되돌리기 / 📋 처리완료 버튼 핸들러) */
+async function toggleProcessed(orderId, processed) {
+  if (!orderId) return;
+  try {
+    const r = await fetch(API + '/api/bg/orders/' + encodeURIComponent(orderId) + '/processed', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ processed: !!processed }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.error || '처리 실패');
+    }
+    showToast(processed ? '처리완료로 표시' : '처리 되돌리기 완료');
+    await loadBgUnified();
+  } catch (e) {
+    alert('처리 상태 변경 실패: ' + e.message);
+  }
+}
+
+/** 여러 주문 일괄 처리 마킹 (수집복사와 연동) */
+async function markOrdersProcessedBatch(orderIds, processed) {
+  if (!orderIds || !orderIds.length) return;
+  try {
+    const r = await fetch(API + '/api/bg/orders/processed-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ids: orderIds, processed: !!processed }),
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      console.warn('batch processed mark 실패:', data.error);
+      return;
+    }
+    if (data.fail > 0) {
+      console.warn('일부 주문 처리 실패:', data.errors);
+    }
+    // 리스트 새로고침 → 처리완료 반영
+    await loadBgUnified();
+  } catch (e) {
+    console.warn('markOrdersProcessedBatch error:', e.message);
+  }
+}
+
+// rowIdx로 bgUnifiedRows에서 info를 재구성 후 수정 모달 오픈 (XSS 안전)
+function openBgOrderEditByIdx(idx) {
+  const row = bgUnifiedRows[parseInt(idx)];
+  if (!row) { console.warn('openBgOrderEditByIdx: row not found', idx); return; }
+  const { order, ci } = row;
+  const _pm = bgUnifiedProductMap.get(order.order_seq);
+  // productMap 값은 {card_name, item_count} 객체. 모달에 넘길 때는 {code: name} 딕셔너리로 변환
+  const _productNames = _pm
+    ? Object.fromEntries([..._pm.entries()].map(([code, info]) => [code, info.card_name]))
+    : {};
+
+  if (ci) {
+    // 기존: 수정
+    openBgOrderEdit({ ...ci, _order_seq: order.order_seq, _productNames });
+    return;
+  }
+
+  // ci 없음: '추가' 경로 — 주문의 상품 목록을 기반으로 빈 sticker_selections 초기화해 오픈
+  //   각 상품에 대해 product_code/product_name 만 채운 placeholder row 생성 →
+  //   관리자가 모달에서 박스/스티커 타입을 직접 선택 가능
+  const order_id = order.order_type === 'ETC' ? `ETC-${order.order_seq}` : String(order.order_seq);
+  const sticker_selections = _pm
+    ? [..._pm.entries()].map(([code, info]) => ({
+        product_code: code,
+        product_name: info.card_name || '',
+        quantity: info.item_count || 1,
+        sticker_id: null,
+        sticker_code: null,
+        sticker_name: null,
+        custom_values: {},
+        box_code: null,
+        box_name: null,
+      }))
+    : [];
+  const blank = {
+    order_id,
+    desired_ship_date: '',
+    is_express: false,
+    cash_receipt_yn: false,
+    receipt_type: 'personal',
+    receipt_number: '',
+    customer_request: '',
+    sticker_selections,
+    _order_seq: order.order_seq,
+    _productNames,
+    _isCreate: true, // 모달 타이틀/버튼 텍스트 분기용
+  };
+  openBgOrderEdit(blank);
+}
+
+// 수정 모달 전역 캐시 (불필요한 재조회 방지)
+let _bgEditAllStickers = null;            // [{id, sticker_code, name, custom_fields, ...}]
+const _bgEditProductSettingsCache = new Map(); // productCode → { available_sticker_ids, available_box_options }
+
+async function _loadBgEditStickersAndSettings(productCodes) {
+  // 전체 스티커 한번만 로드
+  if (!_bgEditAllStickers) {
+    try {
+      const r = await fetch(API + '/api/bg/stickers?active_only=true');
+      _bgEditAllStickers = (await r.json()).stickers || [];
+    } catch(e) { console.warn('sticker fetch fail', e); _bgEditAllStickers = []; }
+  }
+  // 상품별 설정 로드 (캐시 활용)
+  const pending = productCodes.filter(c => c && !_bgEditProductSettingsCache.has(c));
+  await Promise.all(pending.map(async code => {
+    try {
+      const r = await fetch(API + '/api/bg/products/' + encodeURIComponent(code) + '/settings');
+      const s = (await r.json()).settings || {};
+      _bgEditProductSettingsCache.set(code, {
+        available_sticker_ids: s.available_sticker_ids || [],
+        available_box_options: Array.isArray(s.available_box_options) ? s.available_box_options : [],
+      });
+    } catch(e) {
+      console.warn('settings fetch fail', code, e);
+      _bgEditProductSettingsCache.set(code, { available_sticker_ids: [], available_box_options: [] });
+    }
+  }));
+}
+
+async function openBgOrderEdit(info) {
+  document.getElementById('bg-edit-order-id').value = info.order_id;
+  const titleLabel = info._isCreate ? '고객 정보 추가 (관리자 대행 입력)' : '고객 입력 수정';
+  document.getElementById('bg-edit-modal-title').textContent = titleLabel + ' — ' + info.order_id;
+  document.getElementById('bg-edit-ship-date').value = info.desired_ship_date || '';
+  document.getElementById('bg-edit-shipping-type').value = info.is_express ? 'true' : 'false';
+  document.getElementById('bg-edit-receipt-yn').checked = !!info.cash_receipt_yn;
+  document.getElementById('bg-edit-receipt-type').value = info.receipt_type || 'personal';
+  document.getElementById('bg-edit-receipt-number').value = info.receipt_number || '';
+  document.getElementById('bg-edit-request').value = info.customer_request || '';
+  toggleBgReceiptEdit(!!info.cash_receipt_yn);
+
+  const stickerWrap = document.getElementById('bg-edit-stickers');
+  const sels = info.sticker_selections || [];
+  stickerWrap.innerHTML = '<p style="color:var(--gray-400);font-size:13px">불러오는 중…</p>';
+
+  // 모달 표시는 먼저 (비동기 로드 중에도 UI 보이게)
+  document.getElementById('bg-order-edit-modal').__stickerSelections = sels;
+  document.getElementById('bg-order-edit-modal').__info = info;
+  document.getElementById('bg-order-edit-modal').style.display = 'flex';
+  loadBgEditAuditLog(info.order_id);
+
+  // 스티커/박스 옵션 데이터 로드
+  const productCodes = [...new Set(sels.map(s => s.product_code).filter(Boolean))];
+  await _loadBgEditStickersAndSettings(productCodes);
+  renderBgEditStickers();
+}
+
+/** 수정 모달 스티커/박스 섹션 렌더 (드롭다운 + 입력란) */
+function renderBgEditStickers() {
+  const modal = document.getElementById('bg-order-edit-modal');
+  const sels = modal.__stickerSelections || [];
+  const info = modal.__info || {};
+  const stickerWrap = document.getElementById('bg-edit-stickers');
+
+  const _productNames = info._productNames || {};
+  const _editOrderSeq = info._order_seq
+    || (info.order_id && String(info.order_id).startsWith('ETC-')
+      ? parseInt(String(info.order_id).replace('ETC-', ''))
+      : parseInt(info.order_id));
+  const _editPm = bgUnifiedProductMap.get(_editOrderSeq);
+
+  if (!sels.length) {
+    stickerWrap.innerHTML = '<p style="color:var(--gray-400);font-size:13px">스티커 선택 없음</p>';
+    return;
+  }
+
+  const stickerById = new Map((_bgEditAllStickers || []).map(s => [s.id, s]));
+
+  stickerWrap.innerHTML = sels.map((s, idx) => {
+    const productCode = s.product_code || '';
+    const productName = s.product_name
+      || (productCode && _productNames[productCode])
+      || (_editPm && productCode ? (_editPm.get(productCode)?.card_name) : null)
+      || '';
+    const productLabel = (productName || productCode)
+      ? `<div style="font-size:11px;color:var(--gray-500);margin-bottom:8px">📦 ${productName}${productCode ? ' <span style="font-family:monospace">(' + productCode + ')</span>' : ''}</div>`
+      : '';
+
+    const settings = _bgEditProductSettingsCache.get(productCode) || { available_sticker_ids: [], available_box_options: [] };
+
+    // 박스 드롭다운 (옵션 있을 때만)
+    let boxBlock = '';
+    if (settings.available_box_options.length > 0) {
+      const boxOpts = settings.available_box_options.map(opt => {
+        const sel = s.box_code === opt.code ? 'selected' : '';
+        const soldOut = opt.sold_out ? ' [🚫 품절]' : '';
+        return '<option value="' + (opt.code || '').replace(/"/g,'&quot;') + '"' + sel + (opt.sold_out ? ' disabled' : '') + '>' + (opt.name || opt.code) + soldOut + '</option>';
+      }).join('');
+      boxBlock = `<div style="margin-bottom:8px">
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">박스 패키지</label>
+        <select data-edit-sticker-idx="${idx}" data-edit-field="box_code" onchange="onBgEditStickerChange(this)" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px">
+          <option value="">선택안함</option>
+          ${boxOpts}
+        </select>
+      </div>`;
+    }
+
+    // 스티커 드롭다운 — 해당 상품에 매핑된 스티커만
+    const availableStickers = (settings.available_sticker_ids || [])
+      .map(sid => stickerById.get(sid))
+      .filter(Boolean);
+    let stickerBlock = '';
+    if (availableStickers.length > 0) {
+      const stOpts = availableStickers.map(st => {
+        const sel = s.sticker_id === st.id ? 'selected' : '';
+        const code = st.sticker_code ? ' [' + st.sticker_code + ']' : '';
+        return '<option value="' + st.id + '"' + sel + '>' + (st.name || '스티커') + code + '</option>';
+      }).join('');
+      stickerBlock = `<div style="margin-bottom:6px">
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">스티커 타입</label>
+        <select data-edit-sticker-idx="${idx}" data-edit-field="sticker_id" onchange="onBgEditStickerChange(this)" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px">
+          <option value="">선택안함</option>
+          ${stOpts}
+        </select>
+      </div>`;
+    } else if (s.sticker_code) {
+      // 매핑된 스티커 목록을 못 받은 경우 (설정 누락 등) — 현재값만 표시
+      stickerBlock = `<div style="font-size:13px;font-weight:600;margin-bottom:6px">🏷️ ${s.sticker_name || '스티커'}${s.sticker_code ? ' <span style="font-family:monospace;font-size:11px;color:var(--gray-500);font-weight:400">[' + s.sticker_code + ']</span>' : ''}</div>`;
+    }
+
+    // 커스텀 필드 입력 — 현재 선택된 스티커 기준
+    const selectedSticker = s.sticker_id ? stickerById.get(s.sticker_id) : null;
+    let fieldInputsHtml = '';
+    if (selectedSticker) {
+      // 스티커의 custom_fields 정의 우선, 없으면 기존 저장된 custom_values 키 기반 fallback
+      const definedFields = Array.isArray(selectedSticker.custom_fields) && selectedSticker.custom_fields.length
+        ? selectedSticker.custom_fields.map(f => ({ key: f.field_id || f.name || f.field_label, label: f.field_label || f.label || f.field_id || f.name }))
+        : Object.keys(s.custom_values || {}).map(k => ({ key: k, label: k }));
+      // 기본 fallback: custom_fields 정의도 없고 저장값도 없으면 'text' 필드 하나
+      const fields = definedFields.length ? definedFields : [{ key: 'text', label: '스티커 문구' }];
+      fieldInputsHtml = fields.map(f => {
+        const v = (s.custom_values || {})[f.key] || '';
+        return `<div style="margin-top:6px"><label style="font-size:11px;color:var(--gray-500)">${f.label}</label>
+          <input type="text" data-sticker-idx="${idx}" data-field="${f.key}" value="${String(v).replace(/"/g,'&quot;')}"
+            style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px;margin-top:2px"></div>`;
+      }).join('');
+    }
+
+    return `<div data-edit-row="${idx}" style="padding:10px;background:var(--gray-50);border-radius:6px;margin-bottom:8px;border-left:3px solid var(--primary)">
+      ${productLabel}
+      ${boxBlock}
+      ${stickerBlock}
+      ${fieldInputsHtml}
+    </div>`;
+  }).join('');
+}
+
+/** 드롭다운 변경시 — 선택값을 __stickerSelections 에 반영 후 재렌더 (custom_fields 변경 대응) */
+function onBgEditStickerChange(el) {
+  const modal = document.getElementById('bg-order-edit-modal');
+  const sels = modal.__stickerSelections || [];
+  const idx = parseInt(el.dataset.editStickerIdx);
+  const field = el.dataset.editField;
+  if (!sels[idx]) return;
+
+  if (field === 'box_code') {
+    sels[idx].box_code = el.value || null;
+    // 박스명 자동 동기화
+    const productCode = sels[idx].product_code || '';
+    const settings = _bgEditProductSettingsCache.get(productCode);
+    const opt = settings && settings.available_box_options.find(o => o.code === el.value);
+    sels[idx].box_name = opt ? (opt.name || opt.code) : null;
+  } else if (field === 'sticker_id') {
+    const stickerId = el.value || null;
+    sels[idx].sticker_id = stickerId;
+    // 스티커 코드/이름 자동 동기화
+    const st = stickerId && (_bgEditAllStickers || []).find(x => x.id === stickerId);
+    sels[idx].sticker_code = st ? (st.sticker_code || null) : null;
+    sels[idx].sticker_name = st ? (st.name || null) : null;
+    // 스티커 변경시 기존 입력값은 유지하되, 새 스티커의 필드 구조로 재렌더
+  }
+  // 먼저 현재 필드 입력값을 읽어 보존
+  _readBgEditFieldInputsInto(sels);
+  renderBgEditStickers();
+}
+
+/** 현재 DOM 의 텍스트 입력값을 __stickerSelections.custom_values 에 수집 */
+function _readBgEditFieldInputsInto(sels) {
+  const modal = document.getElementById('bg-order-edit-modal');
+  modal.querySelectorAll('input[data-sticker-idx][data-field]').forEach(inp => {
+    const idx = parseInt(inp.dataset.stickerIdx);
+    const field = inp.dataset.field;
+    if (sels[idx]) {
+      if (!sels[idx].custom_values) sels[idx].custom_values = {};
+      sels[idx].custom_values[field] = inp.value;
+    }
+  });
+}
+
+/** 수정 모달 — HMAC 서명 URL 발급 (관리자 → 고객에게 안전한 접근 링크 전달용) */
+async function generateBgSignedUrl() {
+  const orderId = document.getElementById('bg-edit-order-id').value;
+  const $input = document.getElementById('bg-edit-signed-url');
+  const $meta = document.getElementById('bg-edit-signed-url-meta');
+  if (!orderId) { alert('주문번호가 없습니다.'); return; }
+  $meta.textContent = '발급 중…';
+  try {
+    const res = await fetch(`${API}/api/bg/audit/sign-url?oid=${encodeURIComponent(orderId)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '발급 실패');
+    $input.value = data.url;
+    const expires = data.expires_at ? new Date(data.expires_at).toLocaleString('ko-KR') : '-';
+    const strictTag = data.strict_mode ? '<span style="color:#dc2626">STRICT</span>' : '<span style="color:#6b7280">WARN</span>';
+    $meta.innerHTML = `유효기간: ~${expires} · 모드: ${strictTag} · 이 링크를 고객에게 전달하면 서명 검증된 접근만 허용됩니다.`;
+  } catch (e) {
+    $meta.textContent = '실패: ' + e.message;
+  }
+}
+
+/** 수정 모달 — 서명 URL 클립보드 복사 */
+function copyBgSignedUrl() {
+  const $input = document.getElementById('bg-edit-signed-url');
+  const url = $input.value;
+  if (!url) { alert('먼저 발급 버튼을 눌러주세요.'); return; }
+  $input.select();
+  try {
+    navigator.clipboard.writeText(url).then(() => {
+      showToast && showToast('✅ 링크가 복사되었습니다');
+    }).catch(() => {
+      document.execCommand && document.execCommand('copy');
+      showToast && showToast('✅ 링크가 복사되었습니다');
+    });
+  } catch {
+    document.execCommand && document.execCommand('copy');
+  }
+}
+
+/** 수정 모달 하단 접근 로그 섹션 로드 */
+async function loadBgEditAuditLog(orderId) {
+  const $log = document.getElementById('bg-edit-audit-log');
+  if (!$log || !orderId) return;
+  $log.innerHTML = '<div style="color:var(--gray-400);padding:8px;text-align:center">불러오는 중…</div>';
+  try {
+    const res = await fetch(`${API}/api/bg/audit/access-log?order_id=${encodeURIComponent(orderId)}&limit=30`);
+    const data = await res.json();
+    const logs = data.logs || [];
+    if (!logs.length) {
+      $log.innerHTML = '<div style="color:var(--gray-400);padding:8px;text-align:center">접근 로그 없음</div>';
+      return;
+    }
+    const actionEmoji = {
+      view: '👁️', submit: '✏️', reset: '🔄', not_found: '❓',
+      search: '🔍', login_success: '🔑', login_fail: '🚫',
+      rate_limited: '🚦', invalid_signature: '⚠️',
+    };
+    const actionLabel = {
+      view: '조회', submit: '제출', reset: '초기화', not_found: '찾을수없음',
+      search: '검색', login_success: '로그인성공', login_fail: '로그인실패',
+      rate_limited: '요청제한초과', invalid_signature: '서명오류',
+    };
+    $log.innerHTML = '<table style="width:100%;border-collapse:collapse">'
+      + '<thead><tr style="border-bottom:1px solid var(--gray-200);color:var(--gray-500);font-size:10px">'
+      + '<th style="text-align:left;padding:4px 6px">시각</th>'
+      + '<th style="text-align:left;padding:4px 6px">이벤트</th>'
+      + '<th style="text-align:left;padding:4px 6px">상태</th>'
+      + '<th style="text-align:left;padding:4px 6px">IP 해시</th>'
+      + '<th style="text-align:left;padding:4px 6px">메타</th>'
+      + '</tr></thead><tbody>'
+      + logs.map(l => {
+          const d = l.created_at ? new Date(l.created_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '-';
+          const emoji = actionEmoji[l.action] || '•';
+          const label = actionLabel[l.action] || l.action;
+          const statusColor = l.status_code >= 400 ? '#dc2626' : (l.status_code >= 200 ? '#16a34a' : 'var(--gray-500)');
+          const ipShort = (l.ip_hash || '').slice(0, 8);
+          const metaPretty = l.metadata ? Object.entries(l.metadata).filter(([,v])=>v!==null&&v!==undefined&&v!=='').map(([k,v])=>`${k}=${typeof v==='object'?JSON.stringify(v):v}`).join(', ') : '';
+          return `<tr style="border-bottom:1px solid var(--gray-100);font-size:10px">
+            <td style="padding:4px 6px;white-space:nowrap;color:var(--gray-600)">${d}</td>
+            <td style="padding:4px 6px">${emoji} ${label}</td>
+            <td style="padding:4px 6px;color:${statusColor};font-family:monospace">${l.status_code || '-'}</td>
+            <td style="padding:4px 6px;font-family:monospace;color:var(--gray-500)" title="${l.ip_hash || ''}">${ipShort}…</td>
+            <td style="padding:4px 6px;color:var(--gray-500);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${metaPretty}">${metaPretty}</td>
+          </tr>`;
+        }).join('')
+      + '</tbody></table>';
+  } catch (e) {
+    $log.innerHTML = `<div style="color:var(--red);padding:8px">조회 실패: ${e.message}</div>`;
+  }
+}
+
+function toggleBgReceiptEdit(checked) {
+  document.getElementById('bg-edit-receipt-detail').style.display = checked ? 'flex' : 'none';
+}
+
+function closeBgOrderEdit() {
+  document.getElementById('bg-order-edit-modal').style.display = 'none';
+}
+
+/**
+ * 고객 입력 초기화 — 해당 주문의 customer_info를 삭제해 고객이 재입력 할 수 있게 함.
+ * 삭제 후 통합현황에서는 '미입력' 상태로 표시됨.
+ */
+async function resetBgOrderEdit() {
+  const orderId = document.getElementById('bg-edit-order-id').value;
+  if (!orderId) return;
+  const ok = confirm(
+    `⚠️ 고객 입력 초기화\n\n` +
+    `주문번호 ${orderId}의 고객 입력 정보를 모두 삭제합니다.\n` +
+    `삭제 후 고객이 order-info URL로 다시 접속하면 새로 입력할 수 있습니다.\n\n` +
+    `이 작업은 되돌릴 수 없습니다. 계속하시겠습니까?`
+  );
+  if (!ok) return;
+
+  try {
+    const res = await fetch(API + '/api/bg/orders/' + encodeURIComponent(orderId) + '/customer-info', {
+      method: 'DELETE',
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '초기화 실패');
+    showToast('고객 입력이 초기화되었습니다. 고객이 재입력 가능합니다.');
+    closeBgOrderEdit();
+    loadBgUnified();
+  } catch (e) {
+    alert('초기화 실패: ' + e.message);
+  }
+}
+
+async function saveBgOrderEdit() {
+  const orderId = document.getElementById('bg-edit-order-id').value;
+  const modal = document.getElementById('bg-order-edit-modal');
+  const stickerSelections = modal.__stickerSelections || [];
+
+  // 스티커 custom_values 수정값 수집 — 스티커 타입 변경으로 필드가 바뀌었을 수 있으므로
+  // 각 row 의 custom_values 를 현재 DOM 입력값만으로 완전히 재구성 (stale 키 제거)
+  const collected = {}; // idx → { field: value }
+  modal.querySelectorAll('input[data-sticker-idx]').forEach(inp => {
+    const idx = parseInt(inp.dataset.stickerIdx);
+    const field = inp.dataset.field;
+    if (!collected[idx]) collected[idx] = {};
+    collected[idx][field] = inp.value;
+  });
+  stickerSelections.forEach((sel, idx) => {
+    sel.custom_values = collected[idx] || {};
+  });
+
+  const payload = {
+    desired_ship_date: document.getElementById('bg-edit-ship-date').value,
+    is_express: document.getElementById('bg-edit-shipping-type').value === 'true',
+    sticker_selections: stickerSelections,
+    cash_receipt_yn: document.getElementById('bg-edit-receipt-yn').checked,
+    receipt_type: document.getElementById('bg-edit-receipt-type').value,
+    receipt_number: document.getElementById('bg-edit-receipt-number').value,
+    customer_request: document.getElementById('bg-edit-request').value,
+  };
+
+  try {
+    const res = await fetch(API + '/api/bg/orders/' + encodeURIComponent(orderId) + '/customer-info', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '저장 실패');
+    showToast('저장되었습니다.');
+    closeBgOrderEdit();
+    loadBgUnified();
+  } catch(e) {
+    alert('저장 실패: ' + e.message);
+  }
 }
 
 init();

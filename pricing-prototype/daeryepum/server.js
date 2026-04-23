@@ -221,14 +221,78 @@ function saveWorklog(data) {
   fs.writeFileSync(WORKLOG_PATH, JSON.stringify(data, null, 2), 'utf8');
 }
 
-// --- 수집완료 상태 (공유 저장소) ---
+// --- 수집완료 상태 (Supabase 영속화 + 로컬 파일 폴백) ---
+// 1순위: Supabase `bg_order_collected` 테이블 (migration 012)
+// 2순위: 로컬 /app/data/collected.json — Supabase 미설정/오류 시 폴백 (호환성)
 const COLLECTED_PATH = path.join(DATA_DIR, 'collected.json');
-function readCollected() {
+const _bgStore = require('./barungift/store');
+const _USE_SUPABASE_COLLECTED = !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY);
+
+function readCollectedFile() {
   try { return JSON.parse(fs.readFileSync(COLLECTED_PATH, 'utf8')); }
   catch { return { order_seqs: [], updated_by: '', updated_at: '' }; }
 }
-function saveCollected(data) {
-  fs.writeFileSync(COLLECTED_PATH, JSON.stringify(data, null, 2), 'utf8');
+function saveCollectedFile(data) {
+  try { fs.writeFileSync(COLLECTED_PATH, JSON.stringify(data, null, 2), 'utf8'); }
+  catch (e) { console.warn('[collected] file save 실패:', e.message); }
+}
+
+async function readCollected() {
+  if (_USE_SUPABASE_COLLECTED) {
+    try {
+      const seqs = await _bgStore.getCollectedOrderSeqs();
+      return { order_seqs: seqs, source: 'supabase' };
+    } catch (e) {
+      console.warn('[collected] Supabase 읽기 실패 → 파일 폴백:', e.message);
+    }
+  }
+  return { ...readCollectedFile(), source: 'file' };
+}
+
+/**
+ * 수집 상태 반영 — body.add / body.remove 배열.
+ *
+ * 쓰기 정책:
+ *   - Supabase 설정됐으면 Supabase 로만 저장. 실패 시 500 에러 throw (클라이언트 가시화).
+ *     → 파일로 조용히 폴백하면 "저장 성공" 토스트가 뜨지만 새로고침시 날아간 것처럼 보임 (고아 데이터)
+ *   - Supabase 미설정 (레거시/개발 모드) 만 파일로 저장.
+ *
+ * 읽기 정책 (readCollected): Supabase 오류시엔 파일 폴백 유지 (서비스 중단 방지)
+ *
+ * @returns {order_seqs, added, removed, source}
+ */
+async function applyCollectedChanges(body, session, category) {
+  const addSeqs = (body.add || []).map(String);
+  const removeSeqs = (body.remove || []).map(String);
+  const email = session?.email || 'unknown';
+
+  if (_USE_SUPABASE_COLLECTED) {
+    // Supabase 가 설정된 경우 — 실패 시 throw 하여 클라이언트에 에러 노출
+    if (addSeqs.length) {
+      await _bgStore.addCollectedOrderSeqs(addSeqs, { collectedBy: email, category: category || null });
+    }
+    if (removeSeqs.length) {
+      await _bgStore.removeCollectedOrderSeqs(removeSeqs);
+    }
+    const all = await _bgStore.getCollectedOrderSeqs();
+    return {
+      order_seqs: all,
+      added: addSeqs.length,
+      removed: removeSeqs.length,
+      source: 'supabase',
+    };
+  }
+
+  // 레거시/개발 모드 — 파일 저장
+  const col = readCollectedFile();
+  const set = new Set(col.order_seqs);
+  addSeqs.forEach(s => set.add(s));
+  removeSeqs.forEach(s => set.delete(s));
+  col.order_seqs = [...set];
+  col.updated_by = email;
+  col.updated_at = new Date().toISOString();
+  saveCollectedFile(col);
+  return { ...col, added: addSeqs.length, removed: removeSeqs.length, source: 'file' };
 }
 
 // 일별 메트릭 스냅샷 (해당 날짜의 주요 지표 캡처)
@@ -470,6 +534,188 @@ const ETC_AMOUNT_EXPR = `
     THEN CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1) - ISNULL(o.coupon_price, 0)
     ELSE CAST(oi.card_sale_price AS float) - ISNULL(o.coupon_price, 0)
   END`;
+
+/**
+ * 상품별 판매 통계 — 단일/다중 상품 + 기간 + (선택)전기대비
+ * GET /api/product-stats?product_codes=TGJSD08D1,TGIBK01D1&start_date=2026-03-21&end_date=2026-04-20&compare_prev=1
+ * (구버전 호환: product_code=XXX 단일도 지원)
+ *
+ * 반환:
+ *   { period: {start, end, days},
+ *     prev_period: {start, end, days} | null,
+ *     products: [
+ *       { product_code, product_name,
+ *         total: {qty, orders, revenue, avg_order_value},
+ *         max_day: {...} | null, min_day: {...} | null,
+ *         daily: [{date, qty, orders, revenue}, ...],
+ *         prev_total: {...} | null  (compare_prev=true일 때)
+ *       }, ...
+ *     ],
+ *     totals: { qty, orders, revenue, avg_order_value }  (선택 전체 합계)
+ *   }
+ */
+async function apiProductStats(query) {
+  // product_codes (콤마) 또는 product_code (단일) 모두 지원
+  const rawCodes = (query.product_codes || query.product_code || '').trim();
+  const productCodes = rawCodes.split(',').map(s => s.trim()).filter(Boolean);
+  const startStr = query.start_date;
+  const endStr = query.end_date;
+  const comparePrev = query.compare_prev === '1' || query.compare_prev === 'true';
+
+  if (!productCodes.length) return { error: 'product_code(s) required' };
+  if (!startStr || !endStr) return { error: 'start_date and end_date required' };
+  if (productCodes.length > 10) return { error: '최대 10개까지 조회 가능' };
+
+  const p = await getPool();
+
+  // 기간 계산 helper
+  const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
+  const daysInRange = daysBetween(startStr, endStr) + 1;
+  const endPlus = fmtDate(addDays(new Date(startStr + 'T00:00:00'), daysInRange));
+
+  // 전기 대비 기간 (동일 길이, 바로 이전)
+  let prevStart = null, prevEnd = null, prevEndPlus = null;
+  if (comparePrev) {
+    prevEnd = fmtDate(addDays(new Date(startStr + 'T00:00:00'), -1));
+    prevStart = fmtDate(addDays(new Date(prevEnd + 'T00:00:00'), -(daysInRange - 1)));
+    prevEndPlus = fmtDate(addDays(new Date(prevEnd + 'T00:00:00'), 1));
+  }
+
+  /** 공통 쿼리 (기간, 상품코드 리스트 → 일별 집계 rows) */
+  async function queryRange(codes, s, e) {
+    // IN 절 (code1, code2 ...) 파라미터화
+    const req = p.request().input('s', sql.VarChar, s).input('e', sql.VarChar, e);
+    const placeholders = codes.map((c, i) => {
+      req.input('pc' + i, sql.VarChar, c);
+      return '@pc' + i;
+    }).join(',');
+
+    const card = await req.query(`
+      SELECT c.Card_Code AS card_code, MAX(c.Card_Name) AS card_name,
+             CAST(co.order_date AS DATE) AS d, co.order_seq,
+             SUM(coi.item_count) AS qty,
+             SUM(
+               CASE WHEN si.SiteName IS NULL
+                    THEN CAST(coi.item_sale_price AS float) * coi.item_count
+                         / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                    ELSE CAST(coi.item_sale_price AS float)
+               END
+             ) AS amount
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+      WHERE c.Card_Code IN (${placeholders})
+        AND co.order_date >= @s AND co.order_date < @e
+        AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+      GROUP BY c.Card_Code, CAST(co.order_date AS DATE), co.order_seq
+    `);
+
+    const req2 = p.request().input('s', sql.VarChar, s).input('e', sql.VarChar, e);
+    codes.forEach((c, i) => req2.input('pc' + i, sql.VarChar, c));
+    const etc = await req2.query(`
+      SELECT c.Card_Code AS card_code, MAX(c.Card_Name) AS card_name,
+             CAST(o.order_date AS DATE) AS d, o.order_seq,
+             SUM(ei.order_count) AS qty,
+             SUM(
+               CASE WHEN si.SiteName IS NULL
+                    THEN CAST(ei.card_sale_price AS float) * ei.order_count
+                         / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                         - ISNULL(o.coupon_price, 0)
+                    ELSE CAST(ei.card_sale_price AS float) - ISNULL(o.coupon_price, 0)
+               END
+             ) AS amount
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON o.order_seq = ei.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+      WHERE c.Card_Code IN (${placeholders})
+        AND o.order_date >= @s AND o.order_date < @e
+        AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+      GROUP BY c.Card_Code, CAST(o.order_date AS DATE), o.order_seq
+    `);
+
+    return [...card.recordset, ...etc.recordset];
+  }
+
+  /** rows → 상품별 {name, daily[], total{}} */
+  function aggregate(rows, codes) {
+    const byProduct = new Map();
+    codes.forEach(c => byProduct.set(c, {
+      product_code: c, product_name: null,
+      dayMap: new Map(), allOrders: new Set(),
+    }));
+    for (const r of rows) {
+      const key = r.card_code;
+      if (!byProduct.has(key)) continue;
+      const bucket = byProduct.get(key);
+      if (!bucket.product_name && r.card_name) bucket.product_name = r.card_name;
+      const dKey = r.d instanceof Date ? fmtDate(r.d) : String(r.d).slice(0, 10);
+      if (!bucket.dayMap.has(dKey)) bucket.dayMap.set(dKey, { qty: 0, orders: new Set(), revenue: 0 });
+      const d = bucket.dayMap.get(dKey);
+      d.qty += (r.qty || 0);
+      d.revenue += (r.amount || 0);
+      d.orders.add(r.order_seq);
+      bucket.allOrders.add(r.order_seq);
+    }
+    // 최종 형태로 변환
+    const products = codes.map(c => {
+      const b = byProduct.get(c);
+      const daily = [...b.dayMap.entries()]
+        .sort((x, y) => x[0].localeCompare(y[0]))
+        .map(([date, v]) => ({
+          date, qty: v.qty, orders: v.orders.size, revenue: Math.round(v.revenue),
+        }));
+      const totalQty = daily.reduce((s, d) => s + d.qty, 0);
+      const totalRevenue = daily.reduce((s, d) => s + d.revenue, 0);
+      const totalOrders = b.allOrders.size;
+      const withSales = daily.filter(d => d.revenue > 0);
+      return {
+        product_code: c,
+        product_name: b.product_name,
+        total: {
+          qty: totalQty,
+          orders: totalOrders,
+          revenue: totalRevenue,
+          avg_order_value: totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0,
+        },
+        max_day: withSales.length ? withSales.reduce((a, b) => b.revenue > a.revenue ? b : a) : null,
+        min_day: withSales.length ? withSales.reduce((a, b) => b.revenue < a.revenue ? b : a) : null,
+        daily,
+      };
+    });
+    return products;
+  }
+
+  // 현재 기간 조회
+  const curRows = await queryRange(productCodes, startStr, endPlus);
+  const products = aggregate(curRows, productCodes);
+
+  // 전기 대비 (선택)
+  if (comparePrev) {
+    const prevRows = await queryRange(productCodes, prevStart, prevEndPlus);
+    const prevProducts = aggregate(prevRows, productCodes);
+    const prevMap = new Map(prevProducts.map(p => [p.product_code, p.total]));
+    products.forEach(p => { p.prev_total = prevMap.get(p.product_code) || null; });
+  }
+
+  // 전체 합계 (선택된 상품들의 sum)
+  const allOrdersSet = new Set();
+  curRows.forEach(r => allOrdersSet.add(r.order_seq));  // 주문번호 중복 제거
+  const totals = {
+    qty: products.reduce((s, p) => s + p.total.qty, 0),
+    orders: allOrdersSet.size,
+    revenue: products.reduce((s, p) => s + p.total.revenue, 0),
+  };
+  totals.avg_order_value = totals.orders > 0 ? Math.round(totals.revenue / totals.orders) : 0;
+
+  return {
+    period: { start: startStr, end: endStr, days: daysInRange },
+    prev_period: comparePrev ? { start: prevStart, end: prevEnd, days: daysInRange } : null,
+    products,
+    totals,
+  };
+}
 
 async function apiDashboardComparison() {
   const p = await getPool();
@@ -1598,6 +1844,7 @@ async function apiMarketing(query = {}) {
 
 // --- HTTP Server ---
 const server = http.createServer(async (req, res) => {
+  try {
   const parsed = url.parse(req.url, true);
   // BASE_PATH 접두어 제거 (docker-manager 프록시가 /c/barungift/... 형태로 전달)
   let pathname = parsed.pathname;
@@ -1769,6 +2016,8 @@ const server = http.createServer(async (req, res) => {
         } else { data = { error: 'order_seq required' }; }
       } else if (pathname === '/api/order-files') {
         data = await apiOrderFiles(parsed.query);
+      } else if (pathname === '/api/product-stats') {
+        data = await apiProductStats(parsed.query);
       } else if (pathname === '/api/categories') {
         data = Object.entries(CATEGORY_FILTERS).map(([key, val]) => ({ key, label: val.label }));
       } else if (pathname === '/api/worklog') {
@@ -1823,22 +2072,15 @@ const server = http.createServer(async (req, res) => {
         }
       } else if (pathname === '/api/collected') {
         if (req.method === 'GET') {
-          data = readCollected();
+          data = await readCollected();
         } else if (req.method === 'POST') {
           const body = await new Promise((resolve) => {
             let raw = '';
             req.on('data', c => raw += c);
             req.on('end', () => resolve(JSON.parse(raw)));
           });
-          const col = readCollected();
-          const set = new Set(col.order_seqs);
-          (body.add || []).forEach(seq => set.add(String(seq)));
-          (body.remove || []).forEach(seq => set.delete(String(seq)));
-          col.order_seqs = [...set];
-          col.updated_by = session?.email || 'unknown';
-          col.updated_at = new Date().toISOString();
-          saveCollected(col);
-          data = col;
+          // category 는 query 에서 옵션으로 받음 (예: ?category=daeryepum)
+          data = await applyCollectedChanges(body, session, parsed.query.category);
         }
       } else if (pathname === '/api/worklog/metrics') {
         const dateStr = parsed.query.date;
@@ -1874,8 +2116,23 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(404);
     res.end('Not found');
   }
+  } catch (globalErr) {
+    console.error('[HTTP handler error]', req.method, req.url, globalErr.message);
+    if (!res.headersSent) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: '서버 내부 오류' }));
+    }
+  }
 });
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`답례품 관리 서버: http://localhost:${PORT}${BASE_PATH || ''}`);
+});
+
+// 서버 크래시 방지
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err.message, err.stack);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
 });

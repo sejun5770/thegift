@@ -5,121 +5,360 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>바른손더기프트 - 주문정보 입력</title>
   <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
-    body { font-family: 'Noto Sans KR', sans-serif; }
+    /* ==================================================
+       Design Tokens — 바른손더기프트 프리미엄 gift UI
+       ================================================== */
+    :root {
+      --brand-50:  #EEF2FF;
+      --brand-100: #E0E7FF;
+      --brand-500: #6366F1;  /* indigo-500 */
+      --brand-600: #4F46E5;  /* indigo-600 */
+      --brand-700: #4338CA;
+      --accent:    #F59E0B;  /* amber-500 — celebratory touch */
+      --surface:   #FFFFFF;
+      --bg:        #FAFAFC;
+      --ink-900:   #0F172A;
+      --ink-500:   #64748B;
+      --ink-300:   #CBD5E1;
+      --line:      #EEF0F4;
+    }
+
+    html, body { background: var(--bg); }
+    body {
+      font-family: 'Pretendard Variable', 'Pretendard', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      letter-spacing: -0.015em;
+      color: var(--ink-900);
+    }
+
     input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
-    .step-line { height: 2px; }
-    .fade-in { animation: fadeIn 0.25s ease-in; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-    .spinner { border: 3px solid #E5E7EB; border-top-color: #3B82F6; border-radius: 50%; width: 40px; height: 40px; animation: spin 0.7s linear infinite; }
+
+    /* ==================================================
+       Shadows (soft, multi-layered — Toss style)
+       ================================================== */
+    .shadow-soft { box-shadow: 0 1px 2px rgba(15,23,42,0.04), 0 2px 6px rgba(15,23,42,0.04); }
+    .shadow-card { box-shadow: 0 2px 8px rgba(15,23,42,0.05), 0 1px 2px rgba(15,23,42,0.04); }
+    .shadow-lifted { box-shadow: 0 10px 30px rgba(99,102,241,0.18), 0 2px 6px rgba(15,23,42,0.05); }
+
+    /* ==================================================
+       Gradients
+       ================================================== */
+    .gradient-brand { background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%); }
+    .gradient-brand-soft { background: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(139,92,246,0.08) 100%); }
+    .gradient-celebrate { background: linear-gradient(135deg, #FDE68A 0%, #F59E0B 100%); }
+    .gradient-success { background: linear-gradient(135deg, #6EE7B7 0%, #10B981 100%); }
+    .gradient-error { background: linear-gradient(135deg, #FCA5A5 0%, #EF4444 100%); }
+    .text-gradient-brand {
+      background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+
+    /* ==================================================
+       Animations
+       ================================================== */
+    .fade-in { animation: fadeSlideIn 0.35s cubic-bezier(0.16,1,0.3,1) both; }
+    @keyframes fadeSlideIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pop {
+      0% { transform: scale(0.8); opacity: 0; }
+      60% { transform: scale(1.1); opacity: 1; }
+      100% { transform: scale(1); }
+    }
+    .pop-in { animation: pop 0.5s cubic-bezier(0.34,1.56,0.64,1) both; }
+
+    /* 주의 환기용 CTA 하이라이트 — 부드러운 pulse + subtle scale */
+    @keyframes attentionPulse {
+      0%, 100% {
+        box-shadow: 0 6px 18px rgba(99,102,241,0.28), 0 0 0 0 rgba(99,102,241,0.45);
+        transform: scale(1);
+      }
+      50% {
+        box-shadow: 0 10px 28px rgba(99,102,241,0.42), 0 0 0 14px rgba(99,102,241,0);
+        transform: scale(1.015);
+      }
+    }
+    .attention-cta {
+      animation: attentionPulse 1.8s ease-in-out infinite;
+      position: relative;
+    }
+    /* 외곽 반짝임 링 (선택적) */
+    .attention-cta::after {
+      content: '';
+      position: absolute; inset: -4px;
+      border-radius: inherit;
+      border: 2px solid rgba(99,102,241,0.4);
+      opacity: 0;
+      animation: attentionRing 1.8s ease-in-out infinite;
+      pointer-events: none;
+    }
+    @keyframes attentionRing {
+      0%, 100% { opacity: 0; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.04); }
+    }
+
+    /* Conic spinner */
+    .spinner {
+      width: 42px; height: 42px; border-radius: 50%;
+      background: conic-gradient(from 0deg, transparent 0%, #6366F1 100%);
+      -webkit-mask: radial-gradient(circle, transparent 55%, black 56%);
+              mask: radial-gradient(circle, transparent 55%, black 56%);
+      animation: spin 0.9s linear infinite;
+    }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .card-select { transition: all 0.15s ease; }
-    .card-select:hover { border-color: #93C5FD; }
-    .card-select.selected { border-color: #3B82F6; background-color: #EFF6FF; box-shadow: 0 0 0 2px #3B82F6; }
+
+    /* ==================================================
+       Pressable / interactive
+       ================================================== */
+    .pressable { transition: transform 0.12s cubic-bezier(0.16,1,0.3,1); }
+    .pressable:active { transform: scale(0.97); }
+
+    /* ==================================================
+       Card selection (출고방식 / 현금영수증 등)
+       ================================================== */
+    .card-select {
+      transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
+      border-radius: 16px;
+    }
+    .card-select:hover {
+      border-color: #C7D2FE;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(99,102,241,0.1);
+    }
+    .card-select.selected {
+      border-color: #6366F1;
+      background: linear-gradient(135deg, rgba(99,102,241,0.06) 0%, rgba(139,92,246,0.06) 100%);
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.15), 0 8px 20px rgba(99,102,241,0.15);
+    }
     .card-select.disabled { opacity: 0.45; pointer-events: none; }
+
+    /* ==================================================
+       Buttons
+       ================================================== */
+    .btn-primary {
+      background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%);
+      color: white; font-weight: 600;
+      box-shadow: 0 4px 14px rgba(99,102,241,0.35);
+      transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
+    }
+    .btn-primary:hover:not(:disabled) {
+      box-shadow: 0 8px 20px rgba(99,102,241,0.45);
+      transform: translateY(-1px);
+    }
+    .btn-primary:active:not(:disabled) { transform: translateY(0) scale(0.98); }
+    .btn-primary:disabled {
+      background: #E2E8F0; color: #94A3B8; box-shadow: none; cursor: not-allowed;
+    }
+    .btn-submit {
+      background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+      color: white; font-weight: 600;
+      box-shadow: 0 4px 14px rgba(16,185,129,0.35);
+      transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
+    }
+    .btn-submit:hover:not(:disabled) {
+      box-shadow: 0 8px 20px rgba(16,185,129,0.45);
+      transform: translateY(-1px);
+    }
+    .btn-submit:active:not(:disabled) { transform: translateY(0) scale(0.98); }
+    .btn-submit:disabled {
+      background: #E2E8F0; color: #94A3B8; box-shadow: none; cursor: not-allowed;
+    }
+    .btn-ghost {
+      background: white; color: #475569; font-weight: 500;
+      border: 1px solid #E2E8F0;
+      transition: all 0.15s ease;
+    }
+    .btn-ghost:hover { background: #F8FAFC; border-color: #CBD5E1; }
+
+    /* ==================================================
+       Step progress — modern gauge bar
+       ================================================== */
+    .step-track {
+      position: relative; height: 6px; background: #EEF0F4;
+      border-radius: 999px; overflow: hidden;
+    }
+    .step-fill {
+      position: absolute; inset: 0 auto 0 0;
+      background: linear-gradient(90deg, #6366F1 0%, #8B5CF6 100%);
+      border-radius: 999px;
+      transition: width 0.5s cubic-bezier(0.16,1,0.3,1);
+    }
+
+    /* ==================================================
+       Surface helper (cards)
+       ================================================== */
+    .surface {
+      background: var(--surface);
+      border-radius: 20px;
+      box-shadow: 0 2px 8px rgba(15,23,42,0.04), 0 1px 2px rgba(15,23,42,0.03);
+    }
+    .surface-flat {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+    }
+
+    /* ==================================================
+       Inputs — softer modern look
+       ================================================== */
+    .input-mod {
+      background: white; border: 1.5px solid #E2E8F0;
+      border-radius: 12px; padding: 12px 14px;
+      font-size: 14px; transition: all 0.15s ease;
+      width: 100%;
+    }
+    .input-mod:focus {
+      outline: none; border-color: #6366F1;
+      box-shadow: 0 0 0 4px rgba(99,102,241,0.12);
+    }
+
+    /* Legacy step line (for backward compat) */
+    .step-line { height: 2px; }
+
+    /* Collapsible FAQ 화살표 */
+    details > summary > svg { transition: transform 0.2s ease; }
+    details:not([open]) > summary > svg { transform: rotate(0deg) !important; }
+    details[open] > summary > svg { transform: rotate(180deg) !important; }
+    summary::-webkit-details-marker { display: none; }
+    summary::marker { content: ''; }
   </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
+<body class="min-h-screen">
 
 <!-- Order Search Screen (oid 없을 때) -->
-<div id="searchScreen" class="hidden min-h-screen bg-gray-50 pb-8">
+<div id="searchScreen" class="hidden min-h-screen pb-8">
   <div class="max-w-lg mx-auto">
     <!-- Header -->
-    <header class="bg-white border-b border-gray-200 sticky top-0 z-30">
-      <div class="flex items-center gap-3 px-4 py-3">
-        <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
-          <span class="text-white font-bold text-xs">G</span>
+    <header class="bg-white/80 backdrop-blur-md border-b border-[var(--line)] sticky top-0 z-30">
+      <div class="flex items-center gap-3 px-5 py-4">
+        <div class="w-10 h-10 gradient-brand rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lifted">
+          <span class="text-white font-bold text-base">🎁</span>
         </div>
         <div>
-          <h1 class="text-sm font-semibold text-gray-900 leading-tight">바른손더기프트</h1>
-          <p class="text-xs text-gray-400">주문정보 입력</p>
+          <h1 class="text-base font-bold text-slate-900 leading-tight">바른손더기프트</h1>
+          <p class="text-[11px] text-slate-400 font-medium tracking-wide">PREMIUM GIFT SERVICE</p>
         </div>
       </div>
     </header>
 
-    <div class="px-4 pt-6">
-      <h2 class="text-lg font-bold text-gray-900 mb-1">주문 내역 조회</h2>
-      <p class="text-sm text-gray-500 mb-4">로그인하시면 주문 내역을 확인할 수 있습니다.</p>
+    <div class="px-5 pt-8">
+      <h2 class="text-2xl font-bold text-slate-900 mb-1.5 tracking-tight">주문 내역 조회</h2>
+      <p class="text-sm text-slate-500 mb-6">로그인하시면 주문 내역을 확인할 수 있어요 ✨</p>
 
       <!-- 탭 -->
-      <div class="flex border-b border-gray-200 mb-4">
-        <button id="tabLogin" onclick="switchSearchTab('login')" class="flex-1 py-2.5 text-sm font-semibold text-blue-600 border-b-2 border-blue-500">바른손카드 로그인</button>
-        <button id="tabSearch" onclick="switchSearchTab('search')" class="flex-1 py-2.5 text-sm font-medium text-gray-400 border-b-2 border-transparent">전화번호/이름 검색</button>
+      <div id="searchTabStrip" class="flex gap-1 p-1 bg-slate-100 rounded-2xl mb-5">
+        <button id="tabLogin" onclick="switchSearchTab('login')" class="pressable flex-1 py-2.5 text-[13px] font-semibold bg-white rounded-xl shadow-soft transition-all" style="color: var(--brand-600)">바른손카드 로그인</button>
+        <button id="tabSearch" onclick="switchSearchTab('search')" class="pressable flex-1 py-2.5 text-[13px] font-medium text-slate-500 rounded-xl transition-all">전화번호/이름 검색</button>
       </div>
 
       <!-- 로그인 폼 -->
-      <div id="loginForm" class="bg-white rounded-xl border border-gray-200 p-4 mb-4 shadow-sm">
-        <p class="text-xs text-gray-400 mb-3">바른손카드 통합 회원 계정으로 로그인합니다.</p>
+      <div id="loginForm" class="surface p-5 mb-4">
+        <p class="text-[12px] text-slate-400 mb-4 leading-relaxed">바른손카드 통합 회원 계정으로 로그인합니다.</p>
         <div class="space-y-3">
           <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">아이디</label>
-            <input type="text" id="loginUid" placeholder="바른손카드 아이디" autocomplete="username"
-              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+            <label class="block text-[12px] font-semibold text-slate-700 mb-1.5">아이디</label>
+            <input type="text" id="loginUid" placeholder="바른손카드 아이디" autocomplete="username" class="input-mod">
           </div>
           <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">비밀번호</label>
-            <input type="password" id="loginPwd" placeholder="비밀번호" autocomplete="current-password"
-              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+            <label class="block text-[12px] font-semibold text-slate-700 mb-1.5">비밀번호</label>
+            <input type="password" id="loginPwd" placeholder="비밀번호" autocomplete="current-password" class="input-mod">
           </div>
         </div>
-        <div id="loginError" class="hidden mt-3 text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2"></div>
-        <button id="loginBtn" onclick="loginBarunson()"
-          class="w-full mt-4 py-2.5 bg-blue-500 text-white text-sm font-semibold rounded-lg hover:bg-blue-600 transition disabled:opacity-50 disabled:cursor-not-allowed">
+        <div id="loginError" class="hidden mt-3 text-xs text-red-600 bg-red-50 rounded-xl px-3 py-2.5"></div>
+        <button id="loginBtn" onclick="loginBarunson()" class="btn-primary w-full mt-5 py-3.5 rounded-2xl text-sm">
           로그인
         </button>
       </div>
 
       <!-- 검색 폼 (숨김 상태) -->
-      <div id="searchForm" class="hidden bg-white rounded-xl border border-gray-200 p-4 mb-4 shadow-sm">
-        <p class="text-xs text-gray-400 mb-3">주문 시 입력한 이름과 전화번호를 모두 입력해주세요.</p>
+      <div id="searchForm" class="hidden surface p-5 mb-4">
+        <p class="text-[12px] text-slate-400 mb-4 leading-relaxed">주문 시 입력한 이름과 전화번호를 모두 입력해주세요.</p>
         <div class="space-y-3">
           <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">주문자명 <span class="text-red-400">*</span></label>
-            <input type="text" id="searchName" placeholder="홍길동"
-              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+            <label class="block text-[12px] font-semibold text-slate-700 mb-1.5">주문자명 <span class="text-rose-500">*</span></label>
+            <input type="text" id="searchName" placeholder="홍길동" class="input-mod">
           </div>
           <div>
-            <label class="block text-xs font-medium text-gray-600 mb-1">휴대폰번호 <span class="text-red-400">*</span></label>
-            <input type="tel" id="searchPhone" inputmode="numeric" placeholder="01012345678"
-              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            <label class="block text-[12px] font-semibold text-slate-700 mb-1.5">휴대폰번호 <span class="text-rose-500">*</span></label>
+            <input type="tel" id="searchPhone" inputmode="numeric" placeholder="01012345678" class="input-mod"
               oninput="this.value=this.value.replace(/\D/g,'')">
           </div>
         </div>
-        <button id="searchBtn" onclick="searchOrders()"
-          class="w-full mt-4 py-2.5 bg-blue-500 text-white text-sm font-semibold rounded-lg hover:bg-blue-600 transition disabled:opacity-50 disabled:cursor-not-allowed">
+        <button id="searchBtn" onclick="searchOrders()" class="btn-primary w-full mt-5 py-3.5 rounded-2xl text-sm">
           주문 조회
         </button>
       </div>
 
-      <!-- 검색 결과 -->
-      <div id="searchLoading" class="hidden text-center py-8">
+      <!-- 검색 중 로딩 (조회 버튼 클릭 직후 짧게 표시) -->
+      <div id="searchLoading" class="hidden text-center py-10">
         <div class="spinner mx-auto mb-3"></div>
-        <p class="text-sm text-gray-500">검색 중...</p>
+        <p class="text-sm text-slate-500">검색 중...</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Order List Screen (검색/로그인 성공 후 주문 여러 개일 때 선택) -->
+<div id="orderListScreen" class="hidden min-h-screen pb-8">
+  <div class="max-w-lg mx-auto">
+    <header class="bg-white/80 backdrop-blur-md border-b border-[var(--line)] sticky top-0 z-30">
+      <div class="flex items-center gap-3 px-5 py-4">
+        <button onclick="goBackToSearch()" class="pressable w-9 h-9 rounded-xl hover:bg-slate-100 flex items-center justify-center" aria-label="뒤로">
+          <svg class="w-5 h-5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+        <div>
+          <h1 class="text-base font-bold text-slate-900 leading-tight">주문 선택</h1>
+        </div>
+      </div>
+    </header>
+
+    <div class="px-5 pt-5">
+      <!-- 상단 안내 배너 — 입력 대기 주문에 대한 명시적 CTA -->
+      <div id="orderListBanner" class="rounded-2xl p-4 mb-4 gradient-brand-soft border border-indigo-100 flex items-start gap-3">
+        <div class="w-9 h-9 gradient-brand rounded-xl flex items-center justify-center flex-shrink-0 shadow-lifted">
+          <span class="text-white text-base">👇</span>
+        </div>
+        <div class="flex-1">
+          <p class="text-[13px] font-bold text-slate-900 leading-tight">입력할 주문을 선택해주세요</p>
+          <p class="text-[11.5px] text-slate-600 mt-1 leading-relaxed" id="orderListBannerSubtitle">
+            ⏳ <b>입력대기</b> 상태의 주문을 눌러 정보를 입력해주세요.
+          </p>
+        </div>
       </div>
 
-      <div id="searchResults" class="hidden space-y-2">
-        <h3 class="text-sm font-semibold text-gray-700 mb-2" id="searchResultCount"></h3>
+      <div class="space-y-2">
+        <h3 class="text-[12px] font-semibold text-slate-500 mb-2 px-1" id="searchResultCount"></h3>
         <div id="searchResultList"></div>
       </div>
 
-      <div id="searchEmpty" class="hidden">
-        <div class="bg-white rounded-2xl border border-gray-200 p-8 text-center shadow-sm mt-4">
-          <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-2.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/></svg>
-          </div>
-          <h3 class="text-lg font-bold text-gray-900 mb-2">주문하신 상품이 없습니다.</h3>
-          <p class="text-sm text-gray-500 mb-1">입력하신 정보로 조회된 답례품/꽃다발 주문이 없습니다.</p>
-          <p class="text-xs text-gray-400 mb-6">주문자명과 전화번호를 다시 확인해주세요.</p>
-          <button onclick="goBackToSearch()" class="w-full py-2.5 bg-blue-500 text-white text-sm font-semibold rounded-lg hover:bg-blue-600 transition">
-            되돌아가기
-          </button>
-          <div class="mt-4 text-xs text-gray-400">
-            <p>전화: <a href="tel:1644-0708" class="text-blue-500">1644-0708</a></p>
-            <p>카카오 상담: <a href="https://open.kakao.com/o/stUy4gji" target="_blank" class="text-blue-500">오픈채팅 문의</a></p>
-          </div>
-        </div>
+      <!-- 고객센터 안내 -->
+      <div class="mt-8 px-4 py-3 text-center text-[11px] text-slate-400 space-y-0.5">
+        <p>주문이 조회되지 않나요?</p>
+        <p>전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a> · 카카오 <a href="https://open.kakao.com/o/s4RMIwni" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅</a></p>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Empty Result Screen (조회 결과 0건) -->
+<div id="searchEmptyScreen" class="hidden flex items-center justify-center min-h-screen px-5">
+  <div class="surface p-8 max-w-sm w-full text-center">
+    <div class="w-20 h-20 gradient-brand-soft rounded-full flex items-center justify-center mx-auto mb-5 pop-in">
+      <span class="text-4xl">🔍</span>
+    </div>
+    <h3 class="text-lg font-bold text-slate-900 mb-2">주문하신 상품이 없습니다</h3>
+    <p class="text-sm text-slate-500 mb-1">입력하신 정보로 조회된 주문이 없어요.</p>
+    <p class="text-[12px] text-slate-400 mb-6">주문자명과 전화번호를 다시 확인해주세요.</p>
+    <button onclick="goBackToSearch()" class="btn-primary w-full py-3.5 rounded-2xl text-sm">
+      되돌아가기
+    </button>
+    <div class="mt-5 text-xs text-slate-400 space-y-0.5">
+      <p>전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>
+      <p>카카오 <a href="https://open.kakao.com/o/s4RMIwni" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
     </div>
   </div>
 </div>
@@ -128,55 +367,156 @@
 <div id="loadingScreen" class="flex items-center justify-center min-h-screen">
   <div class="text-center">
     <div class="spinner mx-auto mb-4"></div>
-    <p class="text-gray-500 text-sm">주문 정보를 불러오는 중...</p>
+    <p class="text-slate-500 text-sm">주문 정보를 불러오는 중...</p>
   </div>
 </div>
 
 <!-- Error Screen -->
-<div id="errorScreen" class="hidden flex items-center justify-center min-h-screen px-4">
-  <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 max-w-sm w-full text-center">
-    <div class="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-      <svg class="w-7 h-7 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+<div id="errorScreen" class="hidden flex items-center justify-center min-h-screen px-5">
+  <div class="surface p-8 max-w-sm w-full text-center">
+    <div class="w-16 h-16 gradient-error rounded-full flex items-center justify-center mx-auto mb-5 pop-in shadow-lifted" style="box-shadow:0 10px 30px rgba(239,68,68,0.25)">
+      <span class="text-3xl">⚠️</span>
     </div>
-    <h2 class="text-lg font-semibold text-gray-900 mb-2">오류가 발생했습니다</h2>
-    <p id="errorMessage" class="text-sm text-gray-500 mb-6"></p>
-    <div class="bg-gray-50 rounded-lg p-3 text-sm text-gray-600">
-      <p class="font-medium mb-1">고객센터 문의</p>
-      <p>전화: <a href="tel:1644-0708" class="font-medium text-blue-600">1644-0708</a></p>
-      <p>카카오 상담: <a href="https://open.kakao.com/o/stUy4gji" target="_blank" class="font-medium text-blue-600">오픈채팅 문의</a></p>
+    <h2 class="text-xl font-bold text-slate-900 mb-2 tracking-tight">오류가 발생했습니다</h2>
+    <p id="errorMessage" class="text-sm text-slate-500 mb-6 leading-relaxed"></p>
+    <div class="bg-slate-50 rounded-2xl p-4 text-sm text-slate-600">
+      <p class="font-semibold mb-2 text-slate-700">고객센터 문의</p>
+      <p class="text-xs">전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>
+      <p class="text-xs">카카오 <a href="https://open.kakao.com/o/s4RMIwni" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
     </div>
   </div>
 </div>
 
 <!-- Already Completed Screen -->
-<div id="completedScreen" class="hidden flex items-center justify-center min-h-screen px-4">
-  <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 max-w-sm w-full text-center">
-    <div class="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-      <svg class="w-7 h-7 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+<div id="completedScreen" class="hidden flex items-center justify-center min-h-screen px-5">
+  <div class="surface p-8 max-w-sm w-full text-center">
+    <div class="w-16 h-16 gradient-success rounded-full flex items-center justify-center mx-auto mb-5 pop-in" style="box-shadow:0 10px 30px rgba(16,185,129,0.25)">
+      <span class="text-3xl">✓</span>
     </div>
-    <h2 class="text-lg font-semibold text-gray-900 mb-2">이미 입력이 완료되었습니다</h2>
-    <p class="text-sm text-gray-500 mb-4">해당 주문의 정보 입력이 이미 완료되었습니다.<br>수정이 필요하시면 고객센터로 연락해주세요.</p>
-    <div class="bg-gray-50 rounded-lg p-3 text-sm text-gray-600">
-      <p class="font-medium mb-1">고객센터 문의</p>
-      <p>전화: <a href="tel:1644-0708" class="font-medium text-blue-600">1644-0708</a></p>
-      <p>카카오 상담: <a href="https://open.kakao.com/o/stUy4gji" target="_blank" class="font-medium text-blue-600">오픈채팅 문의</a></p>
+    <h2 class="text-xl font-bold text-slate-900 mb-2 tracking-tight">입력이 완료됐어요</h2>
+    <p class="text-sm text-slate-500 mb-6 leading-relaxed">해당 주문의 정보 입력이 이미 완료됐습니다.<br>수정이 필요하시면 고객센터로 연락해주세요.</p>
+
+    <!-- 입력 내용 확인 버튼 — 고객/관리자가 저장한 요약 보기 -->
+    <button onclick="viewSubmittedInfo()" class="btn pressable w-full py-3 rounded-2xl text-sm font-semibold mb-2" style="border:1px solid var(--brand-600);color:var(--brand-600);background:#fff">
+      📋 입력한 정보 확인하기
+    </button>
+
+    <!-- 주문 선택 화면으로 (로드된 주문 목록이 있을 때만 표시) -->
+    <button id="completedGoListBtn" onclick="goBackToOrderList()" class="hidden btn pressable w-full py-3 rounded-2xl text-sm font-semibold mb-3" style="border:1px solid var(--gray-300);color:var(--gray-700);background:#fff">
+      📋 주문 선택 화면으로
+    </button>
+
+    <!-- 다른 답례품 주문(입력 대기중) 있을 때만 노출 — 주의 환기용 CTA -->
+    <button id="completedBackToListBtn" onclick="goBackToOrderList()" class="hidden btn-primary pressable w-full py-3.5 rounded-2xl text-sm font-bold mb-4 attention-cta">
+      🎁 다른 답례품 주문건도 입력하기
+    </button>
+
+    <div class="bg-slate-50 rounded-2xl p-4 text-sm text-slate-600">
+      <p class="font-semibold mb-2 text-slate-700">고객센터 문의</p>
+      <p class="text-xs">전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>
+      <p class="text-xs">카카오 <a href="https://open.kakao.com/o/s4RMIwni" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
+    </div>
+  </div>
+</div>
+
+<!-- Submitted Summary Screen — 이미 제출된 주문의 입력 내용 요약 -->
+<div id="submittedSummaryScreen" class="hidden min-h-screen pb-8">
+  <div class="max-w-lg mx-auto">
+    <header class="bg-white/80 backdrop-blur-md border-b border-[var(--line)] sticky top-0 z-30">
+      <div class="flex items-center gap-3 px-5 py-4">
+        <button onclick="backFromSummary()" class="pressable w-9 h-9 rounded-xl hover:bg-slate-100 flex items-center justify-center" aria-label="뒤로">
+          <svg class="w-5 h-5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+        <div>
+          <h1 class="text-base font-bold text-slate-900 leading-tight">입력한 정보</h1>
+          <p class="text-[11px] text-slate-400 font-medium tracking-wide" id="summaryHeaderOrderNum"></p>
+        </div>
+      </div>
+    </header>
+    <div id="submittedSummaryContent" class="px-5 pt-5"><!-- 동적 렌더 --></div>
+  </div>
+</div>
+
+<!-- Payment Pending Screen (status_seq = 1) -->
+<div id="paymentPendingScreen" class="hidden flex items-center justify-center min-h-screen px-5">
+  <div class="surface p-8 max-w-sm w-full text-center">
+    <div class="w-16 h-16 gradient-celebrate rounded-full flex items-center justify-center mx-auto mb-5 pop-in" style="box-shadow:0 10px 30px rgba(245,158,11,0.25)">
+      <span class="text-3xl">💳</span>
+    </div>
+    <h2 class="text-xl font-bold text-slate-900 mb-2 tracking-tight">입금을 기다리고 있어요</h2>
+    <p class="text-sm text-slate-500 mb-5 leading-relaxed">결제가 완료된 후 스티커·출고일 정보를<br>입력하실 수 있습니다.</p>
+
+    <!-- Order amount -->
+    <div id="paymentPendingAmount" class="gradient-brand-soft rounded-2xl p-4 mb-4 hidden">
+      <p class="text-[12px] font-semibold" style="color: var(--brand-600)">주문 결제 금액</p>
+      <p id="paymentPendingAmountValue" class="text-xl font-bold text-gradient-brand mt-1"></p>
+    </div>
+
+    <!-- Bank info -->
+    <div class="bg-slate-50 rounded-2xl p-4 text-left mb-4">
+      <p class="text-[12px] font-bold text-slate-700 mb-2">입금 계좌 안내</p>
+      <div class="space-y-1.5 text-sm">
+        <div class="flex justify-between"><span class="text-slate-500">은행</span><span id="paymentPendingBank" class="font-medium text-slate-900">-</span></div>
+        <div class="flex justify-between items-center">
+          <span class="text-slate-500">계좌번호</span>
+          <div class="flex items-center gap-2">
+            <span id="paymentPendingAccount" class="font-mono font-medium text-slate-900">-</span>
+            <button class="pressable text-xs font-bold px-2 py-1 rounded-lg gradient-brand-soft" style="color:var(--brand-600)" data-action="copyAccountPending">복사</button>
+          </div>
+        </div>
+        <div class="flex justify-between"><span class="text-slate-500">예금주</span><span id="paymentPendingHolder" class="font-medium text-slate-900">-</span></div>
+      </div>
+      <p id="paymentPendingDueDate" class="hidden mt-3 pt-3 border-t border-slate-200 text-[12px] text-center font-semibold text-amber-700"></p>
+    </div>
+
+    <p class="text-[12px] text-slate-500 mb-3">입금 확인 후 별도 안내를 드립니다.</p>
+
+    <button onclick="window.location.reload()" class="btn-primary pressable w-full py-3 rounded-2xl text-sm mb-2">
+      🔄 결제 상태 새로고침
+    </button>
+
+    <!-- 주문 선택 화면으로 (로드된 주문 목록이 있을 때만) -->
+    <button id="paymentPendingGoListBtn" onclick="goBackToOrderList()" class="hidden btn pressable w-full py-3 rounded-2xl text-sm font-semibold mb-3" style="border:1px solid var(--gray-300);color:var(--gray-700);background:#fff">
+      📋 주문 선택 화면으로
+    </button>
+
+    <div class="text-[11px] text-slate-400 space-y-0.5">
+      <p>전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>
+      <p>카카오 <a href="https://open.kakao.com/o/s4RMIwni" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅 문의</a></p>
     </div>
   </div>
 </div>
 
 <!-- Success Screen -->
-<div id="successScreen" class="hidden flex items-center justify-center min-h-screen px-4">
-  <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 max-w-sm w-full text-center">
-    <div class="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-      <svg class="w-7 h-7 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+<div id="successScreen" class="hidden flex items-center justify-center min-h-screen px-5">
+  <div class="surface p-8 max-w-sm w-full text-center">
+    <div class="w-20 h-20 gradient-brand rounded-full flex items-center justify-center mx-auto mb-5 pop-in shadow-lifted">
+      <span class="text-4xl">🎉</span>
     </div>
-    <h2 class="text-lg font-semibold text-gray-900 mb-2">입력이 완료되었습니다!</h2>
-    <p class="text-sm text-gray-500 mb-2">주문 정보가 정상적으로 접수되었습니다.</p>
-    <p class="text-sm text-gray-500 mb-6">출고일이 확정되면 카카오톡으로 안내드리겠습니다.</p>
-    <div class="bg-blue-50 rounded-lg p-4 text-sm text-blue-700">
-      <p class="font-medium">주문번호</p>
-      <p id="successOrderNumber" class="text-lg font-bold mt-1"></p>
+    <h2 class="text-xl font-bold text-slate-900 mb-2 tracking-tight">제출이 완료됐어요!</h2>
+    <p class="text-sm text-slate-500 mb-5 leading-relaxed">주문 정보가 정상적으로 접수됐습니다.</p>
+    <div class="gradient-brand-soft rounded-2xl p-5 text-sm mb-5">
+      <p class="text-[12px] font-semibold" style="color: var(--brand-600)">주문번호</p>
+      <p id="successOrderNumber" class="text-xl font-bold text-gradient-brand mt-1"></p>
     </div>
+
+    <!-- 입력 내용 확인 버튼 — 방금 제출한 요약 보기 (completedScreen 과 동일) -->
+    <button onclick="viewSubmittedInfo()" class="btn pressable w-full py-3 rounded-2xl text-sm font-semibold mb-2" style="border:1px solid var(--brand-600);color:var(--brand-600);background:#fff">
+      📋 입력한 정보 확인하기
+    </button>
+
+    <!-- 주문 선택 화면으로 (로드된 주문 목록이 있을 때만) -->
+    <button id="successGoListBtn" onclick="goBackToOrderList()" class="hidden btn pressable w-full py-3 rounded-2xl text-sm font-semibold mb-2" style="border:1px solid var(--gray-300);color:var(--gray-700);background:#fff">
+      📋 주문 선택 화면으로
+    </button>
+
+    <!-- 다른 답례품 주문(입력 대기중) 있을 때만 — 주의 환기용 CTA -->
+    <button id="successBackToListBtn" onclick="goBackToOrderList()" class="hidden btn-primary pressable w-full py-3.5 rounded-2xl text-sm font-bold mb-5 attention-cta">
+      🎁 다른 답례품 주문건도 입력하기
+    </button>
+
+    <p class="text-sm text-slate-500 mb-1">기타 문의가 있을 시 고객센터로 문의해주세요.</p>
+    <p class="text-sm font-bold text-slate-700">고객센터 1688-0708</p>
   </div>
 </div>
 
@@ -184,38 +524,130 @@
 <div id="mainApp" class="hidden max-w-lg mx-auto pb-32">
 
   <!-- Header -->
-  <header class="bg-white border-b border-gray-200 sticky top-0 z-30">
-    <div class="flex items-center gap-3 px-4 py-3">
-      <div class="w-9 h-9 bg-blue-500 rounded-xl flex items-center justify-center flex-shrink-0">
-        <span class="text-white font-bold text-lg">G</span>
+  <header class="bg-white/80 backdrop-blur-md border-b border-[var(--line)] sticky top-0 z-30">
+    <div class="flex items-center gap-3 px-5 py-3.5">
+      <div class="w-10 h-10 gradient-brand rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lifted">
+        <span class="text-white font-bold text-base">🎁</span>
       </div>
-      <div>
-        <h1 class="text-sm font-semibold text-gray-900 leading-tight">바른손더기프트</h1>
-        <p class="text-xs text-gray-400" id="headerOrderNumber"></p>
+      <div class="flex-1 min-w-0">
+        <h1 class="text-[15px] font-bold text-slate-900 leading-tight">바른손더기프트</h1>
+        <p class="text-[11px] text-slate-400 font-medium truncate" id="headerOrderNumber"></p>
       </div>
     </div>
 
-    <!-- Step Indicator -->
-    <div class="px-4 pb-3">
-      <div class="flex items-center justify-between" id="stepIndicator"></div>
+    <!-- Step Indicator (gauge bar + label) -->
+    <div class="px-5 pb-4">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-[11px] font-semibold tracking-wide text-slate-400" id="stepCounter"></span>
+        <span class="text-[13px] font-bold text-gradient-brand" id="stepCurrentLabel"></span>
+      </div>
+      <div class="step-track">
+        <div class="step-fill" id="stepFill" style="width:0%"></div>
+      </div>
+      <!-- 전체 단계 라벨 (마이크로) -->
+      <div class="flex items-center justify-between mt-2 text-[10px] font-medium" id="stepIndicator"></div>
     </div>
   </header>
 
   <!-- Step Content Area -->
-  <main class="px-4 pt-4" id="stepContent"></main>
+  <main class="px-5 pt-5" id="stepContent"></main>
 
   <!-- Navigation Buttons -->
-  <div class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 z-30">
+  <div class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t border-[var(--line)] p-4 z-30">
     <div class="max-w-lg mx-auto flex gap-3">
-      <button id="btnBack" class="hidden flex-1 py-3.5 rounded-xl border border-gray-300 text-gray-700 font-medium text-sm hover:bg-gray-50 transition-colors">
+      <button id="btnBack" class="hidden pressable flex-1 py-3.5 rounded-2xl btn-ghost text-sm">
         이전
       </button>
-      <button id="btnNext" class="flex-1 py-3.5 rounded-xl bg-blue-500 text-white font-medium text-sm hover:bg-blue-600 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed" disabled>
+      <button id="btnNext" class="pressable flex-1 py-3.5 rounded-2xl btn-primary text-sm" disabled>
         다음
       </button>
     </div>
   </div>
 
+</div>
+
+<!-- ======= 스티커 라이트박스 모달 ======= -->
+<div id="stickerModal" class="fixed inset-0 z-[100]" style="display:none">
+  <!-- 배경 딤 -->
+  <div class="absolute inset-0 bg-black bg-opacity-80" data-action="closeStickerModal"></div>
+
+  <!-- 콘텐츠 -->
+  <div class="relative h-full flex flex-col pointer-events-none">
+    <!-- 상단: 닫기 -->
+    <div class="flex justify-between items-center p-4 pointer-events-auto">
+      <span id="stickerModalCounter" class="text-white text-sm opacity-75">1 / 1</span>
+      <button type="button" data-action="closeStickerModal" class="text-white text-3xl w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition">
+        ✕
+      </button>
+    </div>
+
+    <!-- 중앙: 이미지 + 좌우 버튼 -->
+    <div id="stickerModalSwipeArea" class="flex-1 flex items-center justify-center relative px-2 pointer-events-auto">
+      <button type="button" data-action="stickerModalPrev" id="stickerModalPrev" class="absolute left-2 text-white text-4xl w-12 h-12 flex items-center justify-center rounded-full bg-black/30 hover:bg-black/50 transition z-10">
+        ‹
+      </button>
+      <div class="max-w-full max-h-full flex items-center justify-center">
+        <img id="stickerModalImg" alt="" class="max-h-[65vh] max-w-[90vw] object-contain select-none pointer-events-none" draggable="false" />
+      </div>
+      <button type="button" data-action="stickerModalNext" id="stickerModalNext" class="absolute right-2 text-white text-4xl w-12 h-12 flex items-center justify-center rounded-full bg-black/30 hover:bg-black/50 transition z-10">
+        ›
+      </button>
+    </div>
+
+    <!-- 하단: 이름 + 입력 + 선택 버튼 -->
+    <div class="pt-6 bg-gradient-to-t from-black/95 via-black/80 to-transparent pointer-events-auto">
+      <div class="max-w-lg mx-auto px-4 pb-4">
+        <div id="stickerModalName" class="text-white text-center text-base font-semibold mb-3"></div>
+
+        <!-- 입력 영역 (스티커 문구 직접 입력) -->
+        <div id="stickerModalInputs" class="mb-3 space-y-2">
+          <!-- 동적 렌더링 -->
+        </div>
+
+        <!-- 입력안함 토글 -->
+        <label class="flex items-center justify-center gap-2 cursor-pointer select-none mb-3 text-[12px] text-white/85">
+          <input type="checkbox" id="stickerModalNoInput" class="w-4 h-4 accent-indigo-500 cursor-pointer">
+          <span>입력안함 (샘플 문구로 출력, 이름 미표시)</span>
+        </label>
+
+        <div class="flex gap-3">
+          <button type="button" data-action="closeStickerModal" class="flex-1 py-3 rounded-2xl border border-white/40 text-white font-medium text-sm hover:bg-white/10 transition">
+            닫기
+          </button>
+          <button type="button" data-action="selectStickerFromModal" id="stickerModalSelectBtn" class="pressable btn-primary flex-1 py-3 rounded-2xl text-sm">
+            선택
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 고객센터 플로팅 버튼 (모든 화면에서 접근 가능) -->
+<div id="helpFab" style="position:fixed;bottom:calc(env(safe-area-inset-bottom, 0px) + 92px);right:16px;z-index:40">
+  <!-- 펼쳐진 카드 (클릭 시 토글) -->
+  <div id="helpPanel" class="surface hidden" style="position:absolute;bottom:58px;right:0;width:240px;padding:14px;box-shadow:0 10px 30px rgba(15,23,42,0.18)">
+    <p class="text-[13px] font-bold text-slate-900 mb-2">📞 고객센터</p>
+    <p class="text-[11px] text-slate-500 mb-3 leading-relaxed">궁금하신 점이 있으시면<br>편하게 연락 주세요.</p>
+    <a href="tel:1644-0708" class="pressable flex items-center gap-2.5 p-2.5 rounded-xl mb-1.5" style="background:linear-gradient(135deg,rgba(99,102,241,0.08),rgba(139,92,246,0.08));text-decoration:none">
+      <span class="text-lg">📞</span>
+      <div class="flex-1 min-w-0">
+        <div class="text-[11px] text-slate-500">전화</div>
+        <div class="text-[13px] font-bold" style="color:var(--brand-700)">1644-0708</div>
+      </div>
+    </a>
+    <a href="https://open.kakao.com/o/s4RMIwni" target="_blank" rel="noopener" class="pressable flex items-center gap-2.5 p-2.5 rounded-xl" style="background:linear-gradient(135deg,rgba(253,230,138,0.25),rgba(245,158,11,0.08));text-decoration:none">
+      <span class="text-lg">💬</span>
+      <div class="flex-1 min-w-0">
+        <div class="text-[11px] text-slate-500">카카오톡</div>
+        <div class="text-[13px] font-bold" style="color:#92400e">오픈채팅 상담</div>
+      </div>
+    </a>
+  </div>
+  <!-- FAB 버튼 -->
+  <button id="helpFabBtn" type="button" class="pressable gradient-brand"
+    style="width:52px;height:52px;border-radius:50%;border:0;box-shadow:0 8px 20px rgba(99,102,241,0.35);cursor:pointer;display:flex;align-items:center;justify-content:center;color:white;font-size:22px"
+    aria-label="고객센터">💬</button>
 </div>
 
 <script>
@@ -225,7 +657,10 @@
   // ============================================
   // Constants
   // ============================================
-  const STEP_LABELS = ['출고 방식', '희망출고일', '스티커 선택', '결제정보', '최종 확인'];
+  // 스텝 순서: 스티커(상품 개인화) → 희망출고일(+자동 출고방식) → 결제정보(조건부) → 최종 확인
+  // 결제정보는 getTotalAmount() === 0 일 때 네비게이션에서 자동 스킵 (getVisibleSteps)
+  // '요청사항' 은 고객 플로우에서 제거되었고 관리자 통합현황/수정 모달에서만 입력 가능.
+  const STEP_LABELS = ['스티커 선택', '희망출고일', '결제정보', '최종 확인'];
   const RECEIPT_TYPES = { personal: '소득공제용 (휴대폰번호)', business: '지출증빙용 (사업자번호)' };
   const HOLIDAYS_2026 = ['2026-01-01','2026-02-16','2026-02-17','2026-02-18','2026-03-01','2026-05-05','2026-05-24','2026-06-06','2026-08-15','2026-09-24','2026-09-25','2026-09-26','2026-10-03','2026-10-09','2026-12-25'];
   // BASE_PATH 자동 감지: /c/barungift/order-info → '/c/barungift'
@@ -241,9 +676,11 @@
   // ============================================
   let orderData = null;
   let currentStep = 0;
+  let calendarViewMonth = null;  // 'YYYY-MM' — 캘린더에 표시 중인 달
   let formState = {
     shipping_type: null,        // 'normal' | 'express'
-    products: {},               // { "0": { desired_ship_date, sticker_type, sticker_input, sticker_fields }, ... }
+    desired_ship_date: '',      // 주문 단위 단일 출고일
+    products: {},               // { "0": { sticker_type, sticker_input, sticker_fields }, ... }
     cash_receipt_yn: false,
     receipt_type: null,         // 'personal' | 'business'
     receipt_number: '',
@@ -257,6 +694,7 @@
   const $error = document.getElementById('errorScreen');
   const $errorMsg = document.getElementById('errorMessage');
   const $completed = document.getElementById('completedScreen');
+  const $paymentPending = document.getElementById('paymentPendingScreen');
   const $success = document.getElementById('successScreen');
   const $successOrderNum = document.getElementById('successOrderNumber');
   const $main = document.getElementById('mainApp');
@@ -274,6 +712,40 @@
     return params.get('oid') || null;
   }
 
+  /**
+   * URL 의 서명 파라미터(t, sig) 를 추출해 서버 API 호출에 전달하기 위한 쿼리 문자열 생성.
+   * 관리자가 발급한 서명 링크로 접속한 경우 모든 주문 관련 API 호출에 서명을 실어보내
+   * 서버측 HMAC 검증이 실제로 동작하도록 한다 (STRICT 모드 대비).
+   * @returns '' | '?t=...&sig=...' 형태
+   */
+  function signedQueryString() {
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get('t');
+    const sig = params.get('sig');
+    if (!t || !sig) return '';
+    const q = new URLSearchParams();
+    q.set('t', t);
+    q.set('sig', sig);
+    return '?' + q.toString();
+  }
+
+  /** URL 뒤에 서명 쿼리 이어붙이기 (기존 ? 존재 여부 자동 처리) */
+  function withSignature(urlStr) {
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get('t');
+    const sig = params.get('sig');
+    if (!t || !sig) return urlStr;
+    const sep = urlStr.includes('?') ? '&' : '?';
+    return urlStr + sep + 't=' + encodeURIComponent(t) + '&sig=' + encodeURIComponent(sig);
+  }
+
+  // 스텝 구조가 바뀔 때마다 증가시켜 구버전 세션 데이터를 무시하게 함.
+  // v1: 원본 5스텝 ('출고방식','희망출고일','결제정보','요청사항','최종확인')
+  // v2: 6스텝 ('출고방식','희망출고일','스티커선택','결제정보','요청사항','최종확인')
+  // v3: 5스텝 재구성 — 스티커 맨앞으로, 출고방식 스텝 제거, 결제 조건부
+  // v4: 4스텝 — 요청사항 스텝 제거 (관리자 수정 모달에서만 입력)
+  const FORM_STATE_VERSION = 4;
+
   function storageKey(orderId) {
     return 'bg_form_' + orderId;
   }
@@ -281,7 +753,11 @@
   function saveFormState() {
     if (!orderData) return;
     try {
-      sessionStorage.setItem(storageKey(orderData.order_id), JSON.stringify({ currentStep, formState }));
+      sessionStorage.setItem(storageKey(orderData.order_id), JSON.stringify({
+        v: FORM_STATE_VERSION,
+        currentStep,
+        formState,
+      }));
     } catch(e) { /* ignore */ }
   }
 
@@ -291,13 +767,58 @@
       const raw = sessionStorage.getItem(storageKey(orderData.order_id));
       if (raw) {
         const saved = JSON.parse(raw);
-        if (saved.formState) formState = { ...formState, ...saved.formState };
-        if (typeof saved.currentStep === 'number' && saved.currentStep >= 0 && saved.currentStep < STEP_LABELS.length) {
-          currentStep = saved.currentStep;
+        // 구버전 저장값은 무시 (스텝 인덱스 의미가 달라짐)
+        if (saved.v !== FORM_STATE_VERSION) {
+          console.info('[form-state] 구버전 세션 감지 — 무시:', saved.v, '→', FORM_STATE_VERSION);
+          sessionStorage.removeItem(storageKey(orderData.order_id));
+        } else {
+          if (saved.formState) formState = { ...formState, ...saved.formState };
+          if (typeof saved.currentStep === 'number' && saved.currentStep >= 0 && saved.currentStep < STEP_LABELS.length) {
+            currentStep = saved.currentStep;
+          }
         }
       }
     } catch(e) { /* ignore */ }
+    // 복원된 출고일이 현재 관리자 설정 기준으로 유효한지 검증
+    validateShipDate();
   }
+
+  /**
+   * 현재 desired_ship_date 가 현재 관리자 설정(min/max/휴무일) 기준으로 유효한지 검증.
+   * 무효하면 빈 값으로 초기화해 관리자 설정 기준을 강제한다.
+   * - 세션 복원 직후 (loadFormState)
+   * - 희망출고일 스텝 진입시 (renderStep1)
+   * - 출고방식 변경시 (selectShipping) — min/max 범위가 바뀜
+   * 기본값: 캘린더는 선택값이 비워져 있는 것이 기본 상태.
+   */
+  function validateShipDate() {
+    if (!formState || !formState.desired_ship_date) return;
+    try {
+      const d = formState.desired_ship_date;
+      const min = getMinDate();
+      const max = getMaxDate();
+      if (d < min || d > max || isDateClosed(d)) {
+        console.warn('[ship-date] 복원/이전 선택값이 현재 허용 범위를 벗어나 초기화합니다:', d, '(min:', min, 'max:', max, ')');
+        formState.desired_ship_date = '';
+        // 캘린더 뷰도 최신 min 기준 달로 리셋 (이전 월에 머물러 있지 않도록)
+        calendarViewMonth = null;
+        try { saveFormState(); } catch(e) { /* ignore */ }
+      }
+    } catch (e) { /* orderData 미로딩 등 예외 상황 — 무시 */ }
+  }
+
+  /**
+   * HTML-escape 사용자 입력값. innerHTML/템플릿 리터럴 에 사용자 문자열을 삽입할 때
+   * XSS 방지를 위해 필수. 숫자/boolean/null/undefined 도 안전하게 문자열화.
+   */
+  function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+  }
+  // 짧은 alias (인라인 템플릿에서 빈번 사용)
+  const esc = escapeHtml;
 
   function formatDate(dateStr) {
     if (!dateStr) return '';
@@ -336,7 +857,13 @@
   }
 
   function getSettings() {
-    return orderData?.product_settings || {};
+    // 공통 shipping_config (관리자 출고일 설정) + 상품별 product_settings 병합
+    // 출고 관련 설정은 글로벌 shipping_config 우선 (admin 설정이 실시간 반영)
+    // product_settings는 sticker 등 상품별 데이터만 실질적 의미
+    const product = orderData?.product_settings || {};
+    const shc = orderData?.shipping_config || {};
+    // product first, shipping_config last → shipping_config overrides
+    return { ...product, ...shc };
   }
 
   /** 해당 날짜가 휴무일(출고불가)인지 확인 */
@@ -384,12 +911,16 @@
     return cur;
   }
 
-  /** 접수일 계산 (컷오프/영업일 기준, 고객 출고방식 선택 반영) */
-  function getReceiptDate() {
+  /**
+   * 접수일 계산 (컷오프/영업일 기준)
+   * @param {'express'|'normal'} [mode] — 지정 없으면 formState.shipping_type 사용 (구 호환)
+   */
+  function getReceiptDate(mode) {
     const s = getSettings();
     const today = todayStr();
     const isTodayBiz = !isDateClosed(today);
-    const isExpress = formState.shipping_type === 'express';
+    const effectiveMode = mode || (formState.shipping_type === 'express' ? 'express' : 'normal');
+    const isExpress = effectiveMode === 'express';
 
     // 빠른출고(오늘출발) + 컷오프 설정 시
     if (isExpress && s.shipping_type === 'today_shipping' && s.cutoff_enabled) {
@@ -409,51 +940,86 @@
     return today;
   }
 
-  /** 최소 선택 가능일 계산 */
-  function getMinDate() {
+  /**
+   * 빠른출고(오늘출발) 가능 날짜 범위.
+   * 빠른출고가 불가능한 설정이면 null 반환.
+   * @returns {{min:string, max:string}|null}
+   */
+  function getExpressRange() {
     const s = getSettings();
-    const today = todayStr();
+    if (!isExpressAvailable()) return null;
+    // express 는 shipping_type === 'today_shipping' 일 때만 당일 범위 의미가 있음
+    if (s.shipping_type !== 'today_shipping') return null;
+    const receipt = getReceiptDate('express');
     const leadTime = s.lead_time_days ?? 2;
-    const isExpress = formState.shipping_type === 'express';
-
-    if (isExpress && s.shipping_type === 'today_shipping') {
-      // 빠른출고(오늘출발): 컷오프 기준으로 접수일 결정 → 리드타임 적용
-      const receipt = getReceiptDate();
-      if (leadTime === 0) {
-        if (s.cutoff_enabled) return receipt; // 컷오프 전=당일, 후=익영업일
-        return nextBizDay(addDays(today, 1)); // 컷오프 OFF → 익영업일
-      }
-      return addBizDays(receipt, leadTime);
-    }
-
-    // 일반출고(희망출고): max(주문일+최소선택가능일, 접수일+리드타임영업일)
-    const minSelectDays = s.min_select_days ?? 3;
-    const calendarMin = addDays(today, minSelectDays);
-    const receipt = getReceiptDate();
-    const bizMin = addBizDays(receipt, leadTime);
-    const later = calendarMin > bizMin ? calendarMin : bizMin;
-    return nextBizDay(later);
+    const max = leadTime > 0 ? addBizDays(receipt, leadTime) : receipt;
+    return { min: receipt, max };
   }
 
-  function getMaxDate() {
+  /**
+   * 일반출고(희망출고) 가능 날짜 범위.
+   * @returns {{min:string, max:string}}
+   */
+  function getNormalRange() {
     const s = getSettings();
-    const isExpress = formState.shipping_type === 'express';
-
-    if (isExpress && s.shipping_type === 'today_shipping') {
-      // 빠른출고(오늘출발): 접수일 + 리드타임 영업일이 최대 (리드타임 범위 내만 선택)
-      const leadTime = s.lead_time_days ?? 2;
-      const receipt = getReceiptDate();
-      if (leadTime === 0) return nextBizDay(receipt);
-      return addBizDays(receipt, leadTime);
-    }
-
-    // 일반출고: 최대 선택가능일
+    const today = todayStr();
+    const minSelectDays = s.min_select_days ?? 3;
+    const leadTime = s.lead_time_days ?? 2;
+    const receipt = getReceiptDate('normal');
+    const calendarMin = addDays(today, minSelectDays);
+    const bizMin = addBizDays(receipt, leadTime);
+    const later = calendarMin > bizMin ? calendarMin : bizMin;
+    const min = nextBizDay(later);
     const maxDays = s.max_select_days || 60;
-    return addDays(todayStr(), maxDays);
+    const max = addDays(today, maxDays);
+    return { min, max };
+  }
+
+  /**
+   * 특정 날짜가 속한 존(zone) 판정
+   * @returns {'closed'|'express'|'normal'} closed=선택불가, express=빠른출고존, normal=일반출고존
+   * 빠른/일반 존이 겹치는 경우엔 빠른출고(고객 유리하지 않은쪽)보다 express 우선 표기.
+   * 실제 클릭시 존에 따라 shipping_type 이 결정됨.
+   */
+  function getDateZone(dateStr) {
+    if (!dateStr) return 'closed';
+    if (isDateClosed(dateStr)) return 'closed';
+    const expr = getExpressRange();
+    const norm = getNormalRange();
+    const inExpr = expr && dateStr >= expr.min && dateStr <= expr.max;
+    const inNorm = norm && dateStr >= norm.min && dateStr <= norm.max;
+    if (inExpr) return 'express';
+    if (inNorm) return 'normal';
+    return 'closed';
+  }
+
+  /** 통합 최소 선택 가능일 (빠른·일반 중 더 이른 쪽) */
+  function getMinDate() {
+    const expr = getExpressRange();
+    const norm = getNormalRange();
+    const candidates = [];
+    if (expr) candidates.push(expr.min);
+    if (norm) candidates.push(norm.min);
+    if (!candidates.length) return norm ? norm.min : todayStr();
+    return candidates.reduce((a, b) => a < b ? a : b);
+  }
+
+  /** 통합 최대 선택 가능일 (빠른·일반 중 더 늦은 쪽) */
+  function getMaxDate() {
+    const expr = getExpressRange();
+    const norm = getNormalRange();
+    const candidates = [];
+    if (expr) candidates.push(expr.max);
+    if (norm) candidates.push(norm.max);
+    if (!candidates.length) return norm ? norm.max : addDays(todayStr(), 60);
+    return candidates.reduce((a, b) => a > b ? a : b);
   }
 
   function getExpressFee() {
-    return orderData?.product_settings?.express_fee || 0;
+    // 공통 shipping_config 우선, 없으면 상품별 product_settings 폴백
+    return orderData?.shipping_config?.express_fee
+      ?? orderData?.product_settings?.express_fee
+      ?? 0;
   }
 
   function isExpressAvailable() {
@@ -476,23 +1042,54 @@
 
   function ensureProductEntry(idx) {
     if (!formState.products[idx]) {
-      formState.products[idx] = { desired_ship_date: null, sticker_type: null, sticker_input: 'none', sticker_fields: {} };
+      // desired_ship_date는 주문 단위로 관리되므로 상품별에서 제거
+      formState.products[idx] = makeDefaultProductEntry(idx);
     }
     return formState.products[idx];
   }
 
+  /**
+   * 상품별 기본 state 생성 — 첫번째 매칭 스티커 + 첫번째 '선택 가능한' 박스 옵션.
+   * 품절(sold_out) 옵션은 기본 선택에서 제외.
+   */
+  function makeDefaultProductEntry(idx) {
+    const i = Number(idx);
+    const product = (orderData?.products || [])[i];
+    const productCode = product?.product_code || '';
+    const matching = getStickersForProduct(productCode);
+    const firstStickerId = (matching && matching.length > 0) ? matching[0].id : null;
+    const boxOptions = getBoxOptionsForProduct(productCode);
+    // 품절 아닌 첫 옵션을 기본값으로. 모든 옵션이 품절이면 null → 고객이 수동 선택 필요
+    const firstAvailableBox = (boxOptions || []).find(o => !o.sold_out);
+    return {
+      sticker_type: firstStickerId,
+      sticker_input: firstStickerId ? 'custom' : 'none',
+      sticker_fields: {},
+      box_code: firstAvailableBox ? firstAvailableBox.code : null,
+    };
+  }
+
   function getTotalAmount() {
-    const base = orderData?.total_amount || 0;
-    const express = formState.shipping_type === 'express' ? getExpressFee() : 0;
-    return base + express;
+    // 추가비용(빠른출고)만 반환. 주문 원금은 포함하지 않음.
+    return formState.shipping_type === 'express' ? getExpressFee() : 0;
   }
 
   // ============================================
   // Screen transitions
   // ============================================
+  const ALL_SCREEN_IDS = [
+    'loadingScreen', 'errorScreen', 'completedScreen', 'paymentPendingScreen',
+    'successScreen', 'mainApp',
+    'searchScreen', 'orderListScreen', 'searchEmptyScreen',
+    'submittedSummaryScreen',
+  ];
   function showScreen(id) {
-    [$loading, $error, $completed, $success, $main].forEach(el => el.classList.add('hidden'));
-    document.getElementById(id).classList.remove('hidden');
+    ALL_SCREEN_IDS.forEach(sid => {
+      const el = document.getElementById(sid);
+      if (el) el.classList.add('hidden');
+    });
+    const target = document.getElementById(id);
+    if (target) target.classList.remove('hidden');
   }
 
   function showError(msg) {
@@ -501,42 +1098,55 @@
   }
 
   // ============================================
-  // Step indicator
+  // Step indicator / Visible steps
   // ============================================
-  function renderStepIndicator() {
-    $stepIndicator.innerHTML = '';
-    STEP_LABELS.forEach((label, i) => {
-      // Circle
-      const isActive = i === currentStep;
-      const isDone = i < currentStep;
-      const circle = document.createElement('div');
-      circle.className = 'flex flex-col items-center flex-shrink-0 relative z-10';
-      const dot = document.createElement('div');
-      dot.className = 'w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold transition-colors ';
-      if (isDone) {
-        dot.className += 'bg-blue-500 text-white';
-        dot.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>';
-      } else if (isActive) {
-        dot.className += 'bg-blue-500 text-white';
-        dot.textContent = i + 1;
-      } else {
-        dot.className += 'bg-gray-200 text-gray-400';
-        dot.textContent = i + 1;
-      }
-      const labelEl = document.createElement('span');
-      labelEl.className = 'text-[10px] mt-1 whitespace-nowrap ' + (isActive ? 'text-blue-600 font-medium' : 'text-gray-400');
-      labelEl.textContent = label;
-      circle.appendChild(dot);
-      circle.appendChild(labelEl);
-      $stepIndicator.appendChild(circle);
 
-      // Line
-      if (i < STEP_LABELS.length - 1) {
-        const line = document.createElement('div');
-        line.className = 'step-line flex-1 mx-1 mt-1 self-start ' + (i < currentStep ? 'bg-blue-500' : 'bg-gray-200');
-        line.style.marginTop = '13px';
-        $stepIndicator.appendChild(line);
-      }
+  /**
+   * 현재 formState 기준으로 실제 노출되는 스텝 인덱스 배열.
+   * - 결제정보(index 2) 는 getTotalAmount() === 0 이면 건너뜀 (일반출고 또는 무료 빠른출고)
+   * @returns {number[]} 예: [0,1,2,3,4] (결제 있음) / [0,1,3,4] (결제 없음)
+   */
+  function getVisibleSteps() {
+    const steps = [];
+    for (let i = 0; i < STEP_LABELS.length; i++) {
+      if (i === 2 && getTotalAmount() <= 0) continue; // 결제정보 스킵
+      steps.push(i);
+    }
+    return steps;
+  }
+
+  /** visibleSteps 배열에서 currentStep 의 position (0-based) */
+  function getVisibleIndex() {
+    const vis = getVisibleSteps();
+    const idx = vis.indexOf(currentStep);
+    return idx < 0 ? 0 : idx;
+  }
+
+  function renderStepIndicator() {
+    // 게이지 바 + 카운터 + 현재 라벨 + 마이크로 단계 라벨
+    const visible = getVisibleSteps();
+    const total = visible.length;
+    const visIdx = getVisibleIndex();
+    const pct = Math.round(((visIdx + 1) / total) * 100);
+    const fill = document.getElementById('stepFill');
+    const counter = document.getElementById('stepCounter');
+    const currentLabel = document.getElementById('stepCurrentLabel');
+    if (fill) fill.style.width = pct + '%';
+    if (counter) counter.textContent = `STEP ${visIdx + 1} / ${total}`;
+    if (currentLabel) currentLabel.textContent = STEP_LABELS[currentStep] || '';
+
+    // 마이크로 라벨 — 숨겨진 스텝은 미노출
+    $stepIndicator.innerHTML = '';
+    visible.forEach((i) => {
+      const label = STEP_LABELS[i];
+      const span = document.createElement('span');
+      const isDone = visible.indexOf(i) < visIdx;
+      const isActive = i === currentStep;
+      span.className = 'transition-colors ' +
+        (isActive ? 'text-slate-700 font-semibold' :
+         isDone ? 'text-slate-400' : 'text-slate-300');
+      span.textContent = label;
+      $stepIndicator.appendChild(span);
     });
   }
 
@@ -545,57 +1155,95 @@
   // ============================================
   function isStepValid(step) {
     switch (step) {
-      case 0: return !!formState.shipping_type;
-      case 1: {
-        // 상품별 정보: 각 상품의 출고일(필수) + 스티커 직접입력 시 필수 필드
+      case 0: {
+        // 스티커/박스 선택 — 직접입력 모드 스티커는 필수 필드 검증, 박스 옵션이 있으면 선택 필수
         const products = orderData?.products || [];
-        const required = isDateRequired();
         for (let i = 0; i < products.length; i++) {
           const ps = formState.products[String(i)] || {};
-          if (required) {
-            if (!ps.desired_ship_date || isDateClosed(ps.desired_ship_date)) return false;
+          const productCode = products[i].product_code;
+
+          // 박스 옵션이 노출되는 상품은 박스 선택 필수 (품절 옵션은 invalid)
+          const boxOptions = getBoxOptionsForProduct(productCode);
+          if (boxOptions.length > 0) {
+            const picked = boxOptions.find(o => o.code === ps.box_code);
+            if (!picked || picked.sold_out) return false;
           }
+
           if (ps.sticker_input === 'custom' && ps.sticker_type) {
-            const matching = getStickersForProduct(products[i].product_code);
+            const matching = getStickersForProduct(productCode);
             const sticker = matching.find(s => s.id === ps.sticker_type);
-            if (sticker && Array.isArray(sticker.custom_fields)) {
-              for (const f of sticker.custom_fields) {
-                if (f.required) {
-                  const key = f.field_id || f.name || f.field_label;
-                  const val = (ps.sticker_fields || {})[key];
-                  if (!val || String(val).trim() === '') return false;
-                }
+            // custom_fields 비어있으면 기본 fallback 필드(text)를 필수로 간주
+            const fieldsToCheck = (sticker && Array.isArray(sticker.custom_fields) && sticker.custom_fields.length > 0)
+              ? sticker.custom_fields
+              : [{ field_id: 'text', field_label: '스티커 문구', required: true }];
+            for (const f of fieldsToCheck) {
+              if (f.required) {
+                const key = f.field_id || f.name || f.field_label;
+                const val = (ps.sticker_fields || {})[key];
+                if (!val || String(val).trim() === '') return false;
               }
             }
           }
         }
         return true;
       }
+      case 1: {
+        // 희망출고일 — 날짜 + shipping_type 둘 다 확정 필요
+        const required = isDateRequired();
+        if (required) {
+          if (!formState.desired_ship_date || isDateClosed(formState.desired_ship_date)) return false;
+        }
+        if (!formState.shipping_type) return false;
+        return true;
+      }
       case 2: {
-        // 결제정보
+        // 결제정보 — 현금영수증 신청시 타입/번호 필수
         if (formState.cash_receipt_yn) {
           if (!formState.receipt_type) return false;
           if (!formState.receipt_number || formState.receipt_number.trim() === '') return false;
         }
         return true;
       }
-      case 3: return true; // 요청사항 (선택)
-      case 4: return true; // 최종확인
+      case 3: return true; // 최종확인
       default: return false;
     }
   }
 
   function updateNavButtons() {
-    $btnBack.classList.toggle('hidden', currentStep === 0);
-    const isLast = currentStep === STEP_LABELS.length - 1;
-    $btnNext.textContent = isLast ? '제출하기' : '다음';
+    // visibleSteps 배열 기준으로 현재 위치 / last 판단
+    const visible = getVisibleSteps();
+    const visIdx = getVisibleIndex();
+    const isFirst = visIdx === 0;
+    const isLast = visIdx === visible.length - 1;
+    $btnBack.classList.toggle('hidden', isFirst);
+    $btnNext.textContent = isLast ? '제출하기 🎉' : '다음';
     $btnNext.disabled = !isStepValid(currentStep);
     if (isLast) {
-      $btnNext.classList.remove('bg-blue-500', 'hover:bg-blue-600', 'disabled:bg-gray-300');
-      $btnNext.classList.add('bg-green-500', 'hover:bg-green-600', 'disabled:bg-gray-300');
+      $btnNext.classList.remove('btn-primary');
+      $btnNext.classList.add('btn-submit');
     } else {
-      $btnNext.classList.remove('bg-green-500', 'hover:bg-green-600');
-      $btnNext.classList.add('bg-blue-500', 'hover:bg-blue-600', 'disabled:bg-gray-300');
+      $btnNext.classList.remove('btn-submit');
+      $btnNext.classList.add('btn-primary');
+    }
+  }
+
+  /** visibleSteps 배열 기준으로 다음/이전 스텝 이동 */
+  function goNextStep() {
+    const visible = getVisibleSteps();
+    const visIdx = getVisibleIndex();
+    if (visIdx < visible.length - 1) {
+      currentStep = visible[visIdx + 1];
+      renderCurrentStep();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }
+  function goPrevStep() {
+    const visible = getVisibleSteps();
+    const visIdx = getVisibleIndex();
+    if (visIdx > 0) {
+      currentStep = visible[visIdx - 1];
+      renderCurrentStep();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }
 
@@ -603,66 +1251,15 @@
   // Step renderers
   // ============================================
 
-  function renderStep0() {
-    const expressAvail = isExpressAvailable();
-    const expressFee = getExpressFee();
-    const isNormal = formState.shipping_type === 'normal';
-    const isExpress = formState.shipping_type === 'express';
-
-    return `
-      <div class="fade-in">
-        <h2 class="text-lg font-semibold text-gray-900 mb-1">출고 방식을 선택해주세요</h2>
-        <p class="text-sm text-gray-500 mb-5">주문하신 상품의 출고 방식을 선택합니다.</p>
-
-        <div class="space-y-3">
-          <div class="card-select cursor-pointer rounded-xl border-2 p-4 bg-white ${isNormal ? 'selected' : 'border-gray-200'}" data-action="selectShipping" data-value="normal">
-            <div class="flex items-start gap-3">
-              <div class="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0 mt-0.5">
-                <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
-              </div>
-              <div class="flex-1">
-                <div class="flex items-center justify-between">
-                  <h3 class="font-semibold text-gray-900">일반출고</h3>
-                  <span class="text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">무료</span>
-                </div>
-                <p class="text-sm text-gray-500 mt-1">일반 제작 일정에 따라 출고됩니다.</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="card-select ${!expressAvail ? 'disabled' : 'cursor-pointer'} rounded-xl border-2 p-4 bg-white ${isExpress ? 'selected' : 'border-gray-200'}" data-action="${expressAvail ? 'selectShipping' : ''}" data-value="express">
-            <div class="flex items-start gap-3">
-              <div class="w-10 h-10 rounded-lg ${expressAvail ? 'bg-orange-50' : 'bg-gray-100'} flex items-center justify-center flex-shrink-0 mt-0.5">
-                <svg class="w-5 h-5 ${expressAvail ? 'text-orange-500' : 'text-gray-400'}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-              </div>
-              <div class="flex-1">
-                <div class="flex items-center justify-between">
-                  <h3 class="font-semibold ${expressAvail ? 'text-gray-900' : 'text-gray-400'}">빠른출고</h3>
-                  ${expressFee > 0
-                    ? '<span class="text-xs font-medium text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">+' + formatMoney(expressFee) + '</span>'
-                    : '<span class="text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">무료</span>'}
-                </div>
-                <p class="text-sm ${expressAvail ? 'text-gray-500' : 'text-gray-400'} mt-1">
-                  ${expressAvail ? '빠른 일정으로 우선 제작 후 출고됩니다.' : '이 상품은 빠른출고가 불가합니다.'}
-                </p>
-                ${expressAvail && expressFee > 0 ? `
-                  <div class="mt-2 p-2 bg-orange-50 rounded-lg">
-                    <p class="text-xs text-orange-700">
-                      💰 빠른출고 추가 비용: <span class="font-bold">${formatMoney(expressFee)}</span>
-                    </p>
-                    <p class="text-[10px] text-orange-500 mt-0.5">추가금액이 발생합니다.</p>
-                  </div>
-                ` : ''}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
   /** 상품에 매핑된 스티커 목록 */
   function getStickersForProduct(productCode) {
+    // 1순위: 서버에서 내려준 상품별 스티커 매핑 (bg_product_settings.available_sticker_ids 기준)
+    //        이 매핑이 있으면 정확한 양방향 매핑이 보장됨
+    const map = orderData?.stickers_by_product;
+    if (productCode && map && Array.isArray(map[productCode])) {
+      return map[productCode];
+    }
+    // 2순위(구버전 호환): sticker.product_codes 배열로 필터
     const stickers = orderData?.available_stickers || [];
     if (!productCode) return stickers;
     const matched = stickers.filter(function(s) {
@@ -671,194 +1268,339 @@
     return matched.length > 0 ? matched : [];
   }
 
+  /**
+   * 상품에 매핑된 박스 패키지 옵션 목록.
+   * @returns {Array<{code,name,color,preview_image_url}>}
+   *   서버(bg_product_settings.available_box_options)에서 내려온 옵션.
+   *   해당 상품이 박스 선택 기능을 쓰지 않으면 빈 배열.
+   */
+  function getBoxOptionsForProduct(productCode) {
+    const map = orderData?.box_options_by_product;
+    if (productCode && map && Array.isArray(map[productCode])) {
+      return map[productCode];
+    }
+    return [];
+  }
+
   function renderStep1() {
-    const products = orderData?.products || [];
+    // 진입시마다 이전 선택값을 관리자 최신 설정 기준으로 재검증 (무효하면 초기화)
+    validateShipDate();
+
     const minDate = getMinDate();
-    const maxDate = getMaxDate();
     const required = isDateRequired();
-    const notice = getNoticeText();
-    const isToday = formState.shipping_type === 'express' && getSettings().shipping_type === 'today_shipping';
+
+    // calendarViewMonth 초기화 (날짜 선택된 달 or minDate 달)
+    if (!calendarViewMonth) {
+      calendarViewMonth = (formState.desired_ship_date || minDate).substring(0, 7);
+    }
+
+    return `
+      <div class="fade-in">
+        <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">희망 출고일 ${required ? '<span class="text-rose-500">*</span>' : ''}</h2>
+        <div class="text-sm text-slate-500 mb-5 leading-relaxed">
+          <p>출고일을 선택해 주세요.</p>
+          <p class="text-[13px] text-slate-400">당일출고는 오전 11시에 마감됩니다.</p>
+        </div>
+
+        <!-- 인라인 캘린더 -->
+        ${renderCalendar()}
+      </div>
+    `;
+  }
+
+  /**
+   * 각 상품의 선택된 box_code 유효성 재검증.
+   * - 품절로 변경된 옵션: 품절 아닌 첫 옵션으로 자동 전환 (없으면 null)
+   * - 목록에서 제거된 옵션: 마찬가지
+   * (관리자가 옵션을 변경한 뒤 고객이 다시 들어왔을 때 stale 선택 복원 방지)
+   */
+  function validateBoxSelections() {
+    const products = orderData?.products || [];
+    let changed = false;
+    for (let i = 0; i < products.length; i++) {
+      const productCode = products[i].product_code;
+      const boxOptions = getBoxOptionsForProduct(productCode);
+      if (!boxOptions.length) continue;
+      const ps = formState.products[String(i)];
+      if (!ps) continue;
+      const picked = boxOptions.find(o => o.code === ps.box_code);
+      if (!picked || picked.sold_out) {
+        const fallback = boxOptions.find(o => !o.sold_out);
+        ps.box_code = fallback ? fallback.code : null;
+        changed = true;
+      }
+    }
+    if (changed) {
+      try { saveFormState(); } catch (e) { /* ignore */ }
+    }
+  }
+
+  /** 스티커 선택 (Step 0) — 상품 개인화를 먼저 받아 고객 몰입도 확보 */
+  function renderStep0() {
+    validateBoxSelections(); // 진입시마다 품절/삭제된 옵션 정리
+    const products = orderData?.products || [];
 
     var cardsHtml = products.map(function(p, i) {
       var idx = String(i);
       var ps = formState.products[idx] || {};
-      var selectedDate = ps.desired_ship_date || '';
       var productCode = p.product_code || '';
       var matching = getStickersForProduct(productCode);
       var selStickerId = ps.sticker_type || '';
-      var stInput = ps.sticker_input || 'none';
+
+      // 박스 패키지 옵션 — 있을 때만 상단에 선택 UI 노출
+      var boxOptions = getBoxOptionsForProduct(productCode);
+      var selBoxCode = ps.box_code || '';
+      var boxHtml = '';
+      if (boxOptions.length > 0) {
+        var boxCards = boxOptions.map(function(opt) {
+          var isSel = selBoxCode === opt.code;
+          var isSoldOut = !!opt.sold_out;
+          // 품절: 선택 불가 + 비활성화 스타일 + 오버레이 배지
+          var cardCls = isSoldOut
+            ? 'ring-1 ring-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
+            : (isSel
+                ? 'ring-2 ring-indigo-500 gradient-brand-soft'
+                : 'ring-1 ring-slate-200 bg-white hover:ring-indigo-300');
+          var safeName = esc(opt.name || opt.code || '박스');
+          var safeCode = esc(opt.code || '');
+          var safeImgUrl = esc(opt.preview_image_url || '');
+          var safeColor = esc(opt.color || '#F3F4F6');
+          var thumb = opt.preview_image_url
+            ? '<img src="' + safeImgUrl + '" alt="' + safeName + '" class="w-full aspect-square object-contain bg-white pointer-events-none' + (isSoldOut ? ' grayscale' : '') + '" loading="lazy" />'
+            : '<div class="w-full aspect-square pointer-events-none' + (isSoldOut ? ' grayscale' : '') + '" style="background:' + safeColor + '"></div>';
+          // 품절은 버튼이 아닌 div 로 렌더 (클릭 이벤트 비활성) + 대각선 빗금 오버레이
+          var tag = isSoldOut ? 'div' : 'button';
+          var actionAttrs = isSoldOut ? '' : ' data-action="productBoxSelect" data-idx="' + idx + '" data-value="' + safeCode + '"';
+          var soldOutOverlay = isSoldOut
+            ? '<div class="absolute inset-0 flex items-center justify-center pointer-events-none">'
+              + '<span class="bg-rose-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-lifted" style="letter-spacing:0.5px">🚫 품절</span>'
+              + '</div>'
+            : '';
+          return ''
+            + '<' + tag + ' type="button"' + actionAttrs
+            +   (isSoldOut ? '' : ' type="button"')
+            +   ' class="' + (isSoldOut ? '' : 'pressable ') + cardCls + ' rounded-xl overflow-hidden text-left w-full transition touch-manipulation relative">'
+            +   (isSel && !isSoldOut ? '<span class="absolute top-1.5 right-1.5 z-10 gradient-brand text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-lifted">✓</span>' : '')
+            +   thumb
+            +   soldOutOverlay
+            +   '<div class="px-2 py-1.5 text-xs">'
+            +     '<div class="font-semibold truncate ' + (isSoldOut ? 'text-slate-400' : 'text-slate-800') + '">' + esc(opt.name || opt.code) + '</div>'
+            +   '</div>'
+            + '</' + tag + '>';
+        }).join('');
+        boxHtml = ''
+          + '<div class="mt-4">'
+          +   '<label class="block text-[12px] font-semibold text-slate-700 mb-2">📦 박스 패키지 선택 <span class="text-rose-500">*</span></label>'
+          +   '<div class="grid grid-cols-3 sm:grid-cols-4 gap-2">' + boxCards + '</div>'
+          + '</div>';
+      }
 
       var stTypeHtml = '';
       if (matching.length === 0) {
-        stTypeHtml = '<div class="mt-3 text-xs text-gray-400">이 상품에 적용 가능한 스티커가 없습니다.</div>';
+        stTypeHtml = '<div class="mt-3 text-xs text-slate-400">이 상품에 적용 가능한 스티커가 없습니다.</div>';
       } else {
-        var opts = '<option value="">선택안함</option>';
-        matching.forEach(function(st) {
-          opts += '<option value="' + st.id + '"' + (selStickerId === st.id ? ' selected' : '') + '>' + (st.name || '스티커') + '</option>';
-        });
-        stTypeHtml = '<div class="mt-3"><label class="block text-xs font-medium text-gray-600 mb-1">스티커타입</label>' +
-          '<select class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white" data-action="productStickerType" data-idx="' + idx + '">' + opts + '</select></div>';
+        // "선택안함" 카드 (즉시 선택, 모달 없이)
+        var noneSelected = !selStickerId;
+        var noneCardCls = noneSelected
+          ? 'ring-2 ring-indigo-500 gradient-brand-soft'
+          : 'ring-1 ring-slate-200 bg-white hover:ring-indigo-300';
+        var noneCard = ''
+          + '<button type="button" data-action="productStickerType" data-idx="' + idx + '" data-value="" '
+          +   'class="sticker-card pressable ' + noneCardCls + ' rounded-xl overflow-hidden text-left w-full transition touch-manipulation">'
+          +   '<div class="w-full aspect-square flex items-center justify-center bg-slate-50 text-slate-400 text-3xl">✕</div>'
+          +   '<div class="px-2 py-1.5 text-xs">'
+          +     '<div class="font-semibold text-slate-700">선택안함</div>'
+          +   '</div>'
+          + '</button>';
+
+        // 스티커 카드: 클릭 시 라이트박스 모달 오픈
+        var cards = matching.map(function(st) {
+          var isSelected = selStickerId === st.id;
+          var cardCls = isSelected
+            ? 'ring-2 ring-indigo-500 gradient-brand-soft'
+            : 'ring-1 ring-slate-200 bg-white hover:ring-indigo-300';
+          var safeName = esc(st.name || '스티커');
+          var thumb = st.preview_image_url
+            ? '<img src="' + esc(st.preview_image_url) + '" alt="' + safeName + '" class="w-full aspect-square object-contain bg-white pointer-events-none" loading="lazy" />'
+            : '<div class="w-full aspect-square flex items-center justify-center text-slate-400 text-xs pointer-events-none" style="background:' + esc(st.preview_color || '#F9FAFB') + '">이미지 없음</div>';
+          return ''
+            + '<button type="button" data-action="openStickerModal" data-idx="' + idx + '" data-value="' + esc(st.id) + '" '
+            +   'class="sticker-card pressable ' + cardCls + ' rounded-xl overflow-hidden text-left w-full transition touch-manipulation relative">'
+            +   (isSelected ? '<span class="absolute top-1.5 right-1.5 z-10 gradient-brand text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-lifted">✓</span>' : '')
+            +   thumb
+            +   '<div class="px-2 py-1.5 text-xs">'
+            +     '<div class="font-semibold text-slate-800 truncate">' + esc(st.name || '스티커') + '</div>'
+            +   '</div>'
+            + '</button>';
+        }).join('');
+
+        stTypeHtml = ''
+          + '<div class="mt-4 sticker-picker" data-product-idx="' + idx + '">'
+          +   '<label class="block text-[12px] font-semibold text-slate-700 mb-2">스티커타입 <span class="text-slate-400 font-normal">(탭하여 크게 보기)</span></label>'
+          +   '<div class="grid grid-cols-3 sm:grid-cols-4 gap-2">'
+          +     noneCard + cards
+          +   '</div>'
+          + '</div>';
       }
 
-      var stInputHtml = '';
-      if (selStickerId && matching.length > 0) {
-        stInputHtml = '<div class="mt-3"><label class="block text-xs font-medium text-gray-600 mb-1">스티커정보</label>' +
-          '<select class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white" data-action="productStickerInput" data-idx="' + idx + '">' +
-          '<option value="none"' + (stInput === 'none' ? ' selected' : '') + '>선택안함</option>' +
-          '<option value="custom"' + (stInput === 'custom' ? ' selected' : '') + '>직접입력</option>' +
-          '</select></div>';
-
-        if (stInput === 'custom') {
-          var selSt = matching.find(function(st) { return st.id === selStickerId; });
-          if (selSt && Array.isArray(selSt.custom_fields) && selSt.custom_fields.length > 0) {
-            var fieldInputs = selSt.custom_fields.map(function(f) {
-              var fieldKey = f.field_id || f.name || f.field_label;
-              var val = (ps.sticker_fields || {})[fieldKey] || '';
-              var reqMark = f.required ? '<span class="text-red-500">*</span>' : '';
-              var inputHtml = '';
-              if (f.field_type === 'select' && Array.isArray(f.options)) {
-                var optHtml = '<option value="">선택</option>' + f.options.map(function(o) {
-                  return '<option value="' + o + '"' + (val === o ? ' selected' : '') + '>' + o + '</option>';
-                }).join('');
-                inputHtml = '<select class="w-full px-2 py-1.5 border border-gray-300 rounded text-sm" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '">' + optHtml + '</select>';
-              } else if (f.field_type === 'date') {
-                inputHtml = '<input type="date" value="' + val + '" class="w-full px-2 py-1.5 border border-gray-300 rounded text-sm" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '" />';
-              } else {
-                inputHtml = '<input type="text" value="' + val + '" placeholder="' + (f.placeholder || '') + '" maxlength="' + (f.max_length || 100) + '" class="w-full px-2 py-1.5 border border-gray-300 rounded text-sm" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '" />';
-              }
-              return '<div><label class="block text-xs text-gray-600 mb-0.5">' + (f.field_label || f.label || fieldKey) + ' ' + reqMark + '</label>' + inputHtml + '</div>';
-            }).join('');
-            stInputHtml += '<div class="mt-3 p-3 bg-gray-50 rounded-lg space-y-2">' + fieldInputs + '</div>';
-          }
-        }
-      }
+      var stInputHtml = buildStickerInputSection(idx);
 
       return (
-        '<div class="bg-white rounded-xl border border-gray-200 p-4 mb-3" data-product-idx="' + idx + '">' +
-          '<h3 class="text-sm font-semibold text-gray-900 mb-1">' + (p.product_name || '상품') + '</h3>' +
-          '<p class="text-xs text-gray-400 mb-3">수량: ' + (p.quantity || 1) + '개 / ' + productCode + '</p>' +
-          '<div>' +
-            '<label class="block text-xs font-medium text-gray-600 mb-1">희망출고일 ' + (required ? '<span class="text-red-500">*</span>' : '') + '</label>' +
-            '<input type="date" value="' + selectedDate + '" min="' + minDate + '" max="' + maxDate + '" class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" data-action="productDate" data-idx="' + idx + '" />' +
-            (selectedDate && !isDateClosed(selectedDate) ? '<p class="text-xs text-blue-600 mt-1">' + formatDate(selectedDate) + '</p>' : '') +
-            (selectedDate && isDateClosed(selectedDate) ? '<p class="text-xs text-red-500 mt-1">* 해당 날짜는 출고 불가일입니다.</p>' : '') +
-          '</div>' +
-          stTypeHtml +
-          stInputHtml +
+        '<div class="surface p-5 mb-3" data-product-idx="' + idx + '">' +
+          '<h3 class="text-[15px] font-bold text-slate-900 mb-1">' + esc(p.product_name || '상품') + '</h3>' +
+          '<p class="text-[12px] text-slate-400">수량 ' + (Number(p.quantity) || 1) + '개 · <span class="font-mono">' + esc(productCode) + '</span></p>' +
+          boxHtml +       // 박스 패키지 선택 (해당 상품만)
+          stTypeHtml +    // 스티커 선택
+          stInputHtml +   // 스티커 직접입력
         '</div>'
       );
     }).join('');
 
     return `
       <div class="fade-in">
-        <h2 class="text-lg font-semibold text-gray-900 mb-1">상품별 정보를 입력해주세요 ${required ? '<span class="text-red-500">*</span>' : ''}</h2>
-        <p class="text-sm text-gray-500 mb-5">
-          ${isToday ? '컷오프 시간 기준으로 출고일이 결정됩니다.' : '각 상품의 출고일과 스티커를 설정합니다.'}
-        </p>
+        <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">스티커 선택</h2>
+        <p class="text-sm text-slate-500 mb-5">각 상품의 스티커를 선택해주세요.</p>
 
-        ${cardsHtml || '<p class="text-sm text-gray-400">상품 정보가 없습니다.</p>'}
-
-        <div class="bg-white rounded-xl border border-gray-200 p-4 mt-3">
-          <div class="text-xs text-gray-400 space-y-1">
-            <p>* 휴무일(출고 불가 요일/날짜)은 선택할 수 없습니다.</p>
-            <p>* 선택 가능 기간: ${formatDate(minDate)} ~ ${formatDate(maxDate)}</p>
-            ${!required ? '<p class="text-blue-500">* 미선택 시 가장 빠른 출고일(' + formatDate(minDate) + ')이 자동 적용됩니다.</p>' : ''}
-          </div>
-          ${notice ? '<div class="mt-3 p-3 bg-amber-50 rounded-lg text-xs text-amber-700 whitespace-pre-wrap">' + notice + '</div>' : ''}
-        </div>
+        ${products.length > 0 ? `
+          <!-- 스티커 안내 FAQ (접기/펼치기, 기본 펼침) -->
+          <details class="rounded-2xl mb-4 overflow-hidden" style="background:linear-gradient(135deg,rgba(99,102,241,0.06),rgba(139,92,246,0.06));border:1px solid rgba(99,102,241,0.15)" open>
+            <summary class="flex items-center gap-2.5 p-4 cursor-pointer select-none list-none" style="list-style:none">
+              <span class="text-lg flex-shrink-0" style="line-height:1.3">💡</span>
+              <p class="text-[13px] font-bold text-slate-800 leading-tight flex-1">스티커 안내</p>
+              <svg class="w-4 h-4 text-slate-500 transition-transform flex-shrink-0" style="transform:rotate(180deg)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </summary>
+            <div class="space-y-3 text-[12.5px] leading-relaxed px-4 pb-4">
+              <div>
+                <p class="font-semibold" style="color:var(--brand-700)">Q. 스티커는 부착돼서 배송되나요?</p>
+                <p class="text-slate-700 mt-0.5">A. 주문 수량 만큼 스티커를 출력해 부착해서 보내드려요.</p>
+              </div>
+              <div>
+                <p class="font-semibold" style="color:var(--brand-700)">Q. 원하시는 문구가 따로 있으신가요?</p>
+                <p class="text-slate-700 mt-0.5">A. 스티커 문구도 자유롭게 수정할 수 있어요.<br>성함과 함께 원하시는 문구를 입력란에 남겨주세요.</p>
+              </div>
+              <div>
+                <p class="font-semibold" style="color:var(--brand-700)">Q. 제가 제작한 스티커를 붙이고 싶습니다.</p>
+                <p class="text-slate-700 mt-0.5">A. 스티커를 <b>선택안함</b>으로 체크하시면 스티커가 미부착되어 발송됩니다.</p>
+              </div>
+              <div>
+                <p class="font-semibold" style="color:var(--brand-700)">Q. 스티커만 선택하고 문구는 입력하고 싶지 않습니다.</p>
+                <p class="text-slate-700 mt-0.5">A. 스티커 문구를 <b>'입력안함'</b> 선택하시면 스티커의 샘플 문구만 표시되며 이름 영역은 공란으로 제작됩니다.</p>
+              </div>
+            </div>
+          </details>
+        ` : ''}
+        ${cardsHtml || '<p class="text-sm text-slate-400">상품 정보가 없습니다.</p>'}
       </div>
     `;
   }
 
+  /** 결제정보 (Step 2) — 빠른출고 + 추가비용 있을 때만 진입 (getVisibleSteps 에서 필터) */
   function renderStep2() {
     const bankInfo = orderData?.bank_info || { bank_name: '신한은행', account_number: '100-013-801261', account_holder: '바른컴퍼니' };
     const total = getTotalAmount();
-    const baseAmount = orderData?.total_amount || 0;
     const expressFee = formState.shipping_type === 'express' ? getExpressFee() : 0;
+
+    // 결제금액이 없으면 현금영수증 관련 state 자동 초기화
+    // (빠른출고 선택 후 일반출고로 변경한 경우 stale state 방지)
+    if (total <= 0 && formState.cash_receipt_yn) {
+      formState.cash_receipt_yn = false;
+      formState.receipt_type = null;
+      formState.receipt_number = '';
+      try { saveFormState(); } catch (e) { /* ignore */ }
+    }
 
     return `
       <div class="fade-in">
-        <h2 class="text-lg font-semibold text-gray-900 mb-1">결제 정보</h2>
-        <p class="text-sm text-gray-500 mb-5">아래 계좌로 입금해주세요.</p>
+        <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">결제 정보</h2>
+        <p class="text-sm text-slate-500 mb-6">${total > 0 ? '아래 계좌로 입금해주세요.' : '추가 결제 금액이 없습니다.'}</p>
 
+        ${total > 0 ? `
         <!-- Bank info card -->
-        <div class="bg-white rounded-xl border border-gray-200 p-4 mb-4">
-          <div class="flex items-center gap-2 mb-3">
-            <div class="w-8 h-8 bg-yellow-100 rounded-lg flex items-center justify-center">
-              <svg class="w-4 h-4 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>
+        <div class="surface p-5 mb-3">
+          <div class="flex items-center gap-2.5 mb-3.5">
+            <div class="w-9 h-9 gradient-celebrate rounded-xl flex items-center justify-center">
+              <span class="text-lg">💳</span>
             </div>
-            <h3 class="text-sm font-semibold text-gray-900">입금 계좌 안내</h3>
+            <h3 class="text-[14px] font-bold text-slate-900">입금 계좌 안내</h3>
           </div>
-          <div class="bg-gray-50 rounded-lg p-3 space-y-2">
+          <div class="bg-slate-50 rounded-xl p-4 space-y-2.5">
             <div class="flex justify-between text-sm">
-              <span class="text-gray-500">은행</span>
-              <span class="font-medium text-gray-900">${bankInfo.bank_name}</span>
+              <span class="text-slate-500">은행</span>
+              <span class="font-semibold text-slate-900">${bankInfo.bank_name}</span>
             </div>
             <div class="flex justify-between items-center text-sm">
-              <span class="text-gray-500">계좌번호</span>
+              <span class="text-slate-500">계좌번호</span>
               <div class="flex items-center gap-2">
-                <span class="font-medium text-gray-900 font-mono">${bankInfo.account_number}</span>
-                <button class="text-xs text-blue-500 font-medium px-2 py-1 bg-blue-50 rounded hover:bg-blue-100 transition-colors" data-action="copyAccount">복사</button>
+                <span class="font-semibold text-slate-900 font-mono">${bankInfo.account_number}</span>
+                <button class="pressable text-xs font-bold px-2.5 py-1 rounded-lg gradient-brand-soft transition-colors" style="color:var(--brand-600)" data-action="copyAccount">복사</button>
               </div>
             </div>
             <div class="flex justify-between text-sm">
-              <span class="text-gray-500">예금주</span>
-              <span class="font-medium text-gray-900">${bankInfo.account_holder}</span>
+              <span class="text-slate-500">예금주</span>
+              <span class="font-semibold text-slate-900">${bankInfo.account_holder}</span>
             </div>
           </div>
         </div>
 
         <!-- Amount card -->
-        <div class="bg-white rounded-xl border border-gray-200 p-4 mb-4">
-          <h3 class="text-sm font-semibold text-gray-900 mb-3">결제 금액</h3>
+        <div class="surface p-5 mb-3">
+          <h3 class="text-[14px] font-bold text-slate-900 mb-3">결제 금액</h3>
           <div class="space-y-2">
             <div class="flex justify-between text-sm">
-              <span class="text-gray-500">상품 금액</span>
-              <span class="text-gray-900">${formatMoney(baseAmount)}</span>
+              <span class="text-slate-500">빠른출고 추가비용</span>
+              <span class="font-semibold text-amber-600">+${formatMoney(expressFee)}</span>
             </div>
-            ${expressFee > 0 ? `
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-500">빠른출고 추가비용</span>
-                <span class="text-orange-600">+${formatMoney(expressFee)}</span>
-              </div>
-            ` : ''}
-            <div class="border-t border-gray-200 pt-2 flex justify-between">
-              <span class="font-semibold text-gray-900">총 결제금액</span>
-              <span class="font-bold text-blue-600 text-lg">${formatMoney(total)}</span>
+            <div class="border-t border-slate-100 pt-3 flex justify-between items-center">
+              <span class="font-bold text-slate-900">총 결제금액</span>
+              <span class="font-bold text-gradient-brand text-xl">${formatMoney(total)}</span>
             </div>
           </div>
         </div>
+        ` : `
+        <!-- No additional payment -->
+        <div class="rounded-2xl p-5 mb-3 flex items-center gap-3.5" style="background:linear-gradient(135deg,rgba(110,231,183,0.15),rgba(16,185,129,0.1));border:1px solid rgba(16,185,129,0.2)">
+          <div class="w-11 h-11 gradient-success rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lifted" style="box-shadow:0 6px 16px rgba(16,185,129,0.25)">
+            <span class="text-xl text-white font-bold">✓</span>
+          </div>
+          <div>
+            <p class="text-[14px] font-bold text-emerald-800">추가 결제 없음</p>
+            <p class="text-[12px] text-emerald-700 mt-0.5">일반 출고는 추가 비용이 없습니다.</p>
+          </div>
+        </div>
+        `}
 
-        <!-- Cash receipt -->
-        <div class="bg-white rounded-xl border border-gray-200 p-4">
-          <div class="flex items-center justify-between mb-3">
-            <h3 class="text-sm font-semibold text-gray-900">현금영수증 신청</h3>
+        ${total > 0 ? `
+        <!-- Cash receipt (결제 금액이 있을 때만 노출) -->
+        <div class="surface p-5">
+          <div class="flex items-center justify-between mb-1">
+            <h3 class="text-[14px] font-bold text-slate-900">현금영수증 신청</h3>
             <label class="relative inline-flex items-center cursor-pointer">
               <input type="checkbox" class="sr-only peer" ${formState.cash_receipt_yn ? 'checked' : ''} data-action="toggleReceipt" />
-              <div class="w-10 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-500"></div>
+              <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all after:shadow-sm peer-checked:bg-gradient-to-r peer-checked:from-indigo-500 peer-checked:to-violet-500"></div>
             </label>
           </div>
+          <p class="text-[11px] text-slate-400 mb-2">빠른출고 추가비용(${formatMoney(total)})에 대한 현금영수증 발급 신청입니다.</p>
 
           ${formState.cash_receipt_yn ? `
-            <div class="space-y-3">
+            <div class="space-y-3 mt-4">
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-2">발급 용도</label>
+                <label class="block text-[12px] font-semibold text-slate-700 mb-2">발급 용도</label>
                 <div class="grid grid-cols-2 gap-2">
-                  <div class="card-select cursor-pointer rounded-lg border-2 p-3 text-center text-sm ${formState.receipt_type === 'personal' ? 'selected' : 'border-gray-200'}" data-action="selectReceiptType" data-value="personal">
+                  <div class="card-select cursor-pointer border-2 p-3 text-center text-sm font-medium ${formState.receipt_type === 'personal' ? 'selected' : 'border-slate-200'}" data-action="selectReceiptType" data-value="personal">
                     소득공제용
                   </div>
-                  <div class="card-select cursor-pointer rounded-lg border-2 p-3 text-center text-sm ${formState.receipt_type === 'business' ? 'selected' : 'border-gray-200'}" data-action="selectReceiptType" data-value="business">
+                  <div class="card-select cursor-pointer border-2 p-3 text-center text-sm font-medium ${formState.receipt_type === 'business' ? 'selected' : 'border-slate-200'}" data-action="selectReceiptType" data-value="business">
                     지출증빙용
                   </div>
                 </div>
               </div>
               ${formState.receipt_type ? `
                 <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-1">
+                  <label class="block text-[12px] font-semibold text-slate-700 mb-1.5">
                     ${formState.receipt_type === 'personal' ? '휴대폰 번호' : '사업자 등록번호'}
                   </label>
                   <input type="text"
-                    class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    class="input-mod"
                     placeholder="${formState.receipt_type === 'personal' ? '01012345678' : '1234567890'}"
                     value="${formState.receipt_number || ''}"
                     data-action="receiptNumber"
@@ -869,27 +1611,13 @@
             </div>
           ` : ''}
         </div>
+        ` : ''}
       </div>
     `;
   }
 
+  /** 최종 확인 (Step 3) */
   function renderStep3() {
-    return `
-      <div class="fade-in">
-        <h2 class="text-lg font-semibold text-gray-900 mb-1">요청사항</h2>
-        <p class="text-sm text-gray-500 mb-5">추가 요청사항이 있으시면 입력해주세요. <span class="text-gray-400">(선택)</span></p>
-        <div class="bg-white rounded-xl border border-gray-200 p-4">
-          <textarea rows="5" placeholder="예: 포장을 꼼꼼하게 해주세요, 리본 추가 부탁드립니다."
-            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
-            maxlength="500"
-            data-action="customerRequest">${formState.customer_request || ''}</textarea>
-          <p class="text-xs text-gray-400 mt-2">최대 500자까지 입력 가능합니다.</p>
-        </div>
-      </div>
-    `;
-  }
-
-  function renderStep4() {
     const products = orderData?.products || [];
     const total = getTotalAmount();
     const bankInfo = orderData?.bank_info || {};
@@ -900,122 +1628,546 @@
       var ps = formState.products[idx] || {};
       var matching = getStickersForProduct(p.product_code);
       var sticker = ps.sticker_type ? matching.find(function(s){ return s.id === ps.sticker_type; }) : null;
+      // 박스 옵션 선택
+      var boxOptions = getBoxOptionsForProduct(p.product_code);
+      var box = (boxOptions.length && ps.box_code) ? boxOptions.find(function(o){ return o.code === ps.box_code; }) : null;
       var fieldHtml = '';
       if (sticker && ps.sticker_input === 'custom' && Array.isArray(sticker.custom_fields)) {
         fieldHtml = sticker.custom_fields.map(function(f){
           var key = f.field_id || f.name || f.field_label;
           var val = (ps.sticker_fields || {})[key] || '-';
-          return '<div class="flex justify-between text-xs"><span class="text-gray-500">' + (f.field_label || f.label || key) + '</span><span class="text-gray-900">' + val + '</span></div>';
+          return '<div class="flex justify-between text-xs"><span class="text-slate-500">' + esc(f.field_label || f.label || key) + '</span><span class="text-slate-900 font-medium">' + esc(val) + '</span></div>';
         }).join('');
-        if (fieldHtml) fieldHtml = '<div class="mt-2 p-2 bg-gray-50 rounded space-y-1">' + fieldHtml + '</div>';
+        if (fieldHtml) fieldHtml = '<div class="mt-2 p-3 bg-slate-50 rounded-xl space-y-1.5">' + fieldHtml + '</div>';
       }
-      var stickerLabel = sticker ? sticker.name : (matching.length === 0 ? '스티커 없음' : '선택안함');
+      var stickerLabel = sticker ? esc(sticker.name) : (matching.length === 0 ? '스티커 없음' : '선택안함');
       var inputLabel = ps.sticker_input === 'custom' ? '직접입력' : '선택안함';
+      var stickerThumb = '';
+      if (sticker && sticker.preview_image_url) {
+        var safeName = esc(sticker.name || '');
+        stickerThumb = '<img src="' + esc(sticker.preview_image_url) + '" alt="' + safeName + '" class="inline-block w-10 h-10 object-contain rounded-lg border border-slate-200 mr-2 align-middle" />';
+      } else if (sticker) {
+        stickerThumb = '<span class="inline-block w-10 h-10 rounded-lg border border-slate-200 mr-2 align-middle" style="background:' + esc(sticker.preview_color || '#F3F4F6') + '"></span>';
+      }
+      // 박스 표시 thumbnail + label
+      var boxRowHtml = '';
+      if (boxOptions.length > 0) {
+        var boxThumb = '';
+        if (box && box.preview_image_url) {
+          boxThumb = '<img src="' + esc(box.preview_image_url) + '" alt="box" class="inline-block w-10 h-10 object-contain rounded-lg border border-slate-200 mr-2 align-middle" />';
+        } else {
+          boxThumb = '<span class="inline-block w-10 h-10 rounded-lg border border-slate-200 mr-2 align-middle" style="background:' + esc((box && box.color) || '#F3F4F6') + '"></span>';
+        }
+        var boxLabel = box ? esc(box.name || box.code) : '<span class="text-rose-500">미선택</span>';
+        boxRowHtml = '<div class="flex justify-between items-center"><span class="text-slate-500">박스 패키지</span><span class="text-slate-900 font-medium flex items-center">' + boxThumb + boxLabel + '</span></div>';
+      }
       return (
-        '<div class="bg-white rounded-xl border border-gray-200 p-4 mb-2">' +
+        '<div class="surface p-4 mb-2">' +
           '<div class="flex items-center justify-between mb-2">' +
-            '<h4 class="text-sm font-semibold text-gray-900">' + (p.product_name || '상품') + ' <span class="text-xs text-gray-400">(수량: ' + (p.quantity || 1) + ')</span></h4>' +
+            '<h4 class="text-[14px] font-bold text-slate-900">' + esc(p.product_name || '상품') + ' <span class="text-[11px] font-medium text-slate-400">(수량 ' + (Number(p.quantity) || 1) + ')</span></h4>' +
           '</div>' +
-          '<div class="space-y-1 text-sm">' +
-            '<div class="flex justify-between"><span class="text-gray-500">출고일</span><span class="text-gray-900">' + (ps.desired_ship_date ? formatDate(ps.desired_ship_date) : '-') + '</span></div>' +
-            '<div class="flex justify-between"><span class="text-gray-500">스티커</span><span class="text-gray-900">' + stickerLabel + '</span></div>' +
-            (sticker ? '<div class="flex justify-between"><span class="text-gray-500">스티커정보</span><span class="text-gray-900">' + inputLabel + '</span></div>' : '') +
+          '<div class="space-y-1.5 text-sm">' +
+            boxRowHtml +
+            '<div class="flex justify-between items-center"><span class="text-slate-500">스티커</span><span class="text-slate-900 font-medium flex items-center">' + stickerThumb + stickerLabel + '</span></div>' +
+            (sticker ? '<div class="flex justify-between"><span class="text-slate-500">스티커정보</span><span class="text-slate-900 font-medium">' + inputLabel + '</span></div>' : '') +
           '</div>' +
           fieldHtml +
         '</div>'
       );
     }).join('');
 
+    // 공통 "수정" 버튼 헬퍼
+    var _editBtn = function(step){ return '<button class="pressable text-[11px] font-bold px-2.5 py-1 rounded-lg gradient-brand-soft" style="color:var(--brand-600)" data-action="goToStep" data-step="' + step + '">수정</button>'; };
+
     return `
       <div class="fade-in">
-        <h2 class="text-lg font-semibold text-gray-900 mb-1">입력 내용을 확인해주세요</h2>
-        <p class="text-sm text-gray-500 mb-5">아래 내용이 맞는지 확인 후 제출해주세요.</p>
+        <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">입력 내용을 확인해주세요</h2>
+        <p class="text-sm text-slate-500 mb-6">아래 내용이 맞는지 확인 후 제출해주세요.</p>
 
         <div class="space-y-3">
-          <!-- Shipping type -->
-          <div class="bg-white rounded-xl border border-gray-200 p-4">
-            <div class="flex items-center justify-between mb-2">
-              <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">출고 방식</h3>
-              <button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="0">수정</button>
-            </div>
-            <p class="text-sm font-medium text-gray-900">
-              ${formState.shipping_type === 'express' ? '빠른출고' : '일반출고'}
-              ${expressFee > 0 ? ' <span class="text-orange-600">(+' + formatMoney(expressFee) + ')</span>' : ''}
-            </p>
-          </div>
-
-          <!-- Per-product info -->
+          <!-- Per-product info (스티커 선택) — Step 0 -->
+          ${(orderData?.products || []).length > 0 ? `
           <div>
-            <div class="flex items-center justify-between mb-2">
-              <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">상품별 정보</h3>
-              <button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="1">수정</button>
+            <div class="flex items-center justify-between mb-2 px-1">
+              <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">상품별 정보</h3>
+              ${_editBtn(0)}
             </div>
             ${productsHtml}
           </div>
+          ` : ''}
 
-          <!-- Payment info -->
-          <div class="bg-white rounded-xl border border-gray-200 p-4">
+          <!-- 희망 출고일 + 출고방식 (Step 1 — 통합됨) -->
+          <div class="surface p-4">
             <div class="flex items-center justify-between mb-2">
-              <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">결제정보</h3>
-              <button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="2">수정</button>
+              <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">희망 출고일</h3>
+              ${_editBtn(1)}
             </div>
-            <div class="space-y-1.5">
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-500">총 결제금액</span>
-                <span class="font-bold text-blue-600">${formatMoney(total)}</span>
+            <p class="text-[14px] font-semibold text-slate-900">
+              ${formState.desired_ship_date ? '📅 ' + formatDate(formState.desired_ship_date) : '<span class="text-slate-400 font-normal">미선택 (가장 빠른 출고일 자동 적용)</span>'}
+            </p>
+            <p class="text-[12px] mt-1 ${formState.shipping_type === 'express' ? 'text-amber-700 font-semibold' : 'text-slate-500'}">
+              ${formState.shipping_type === 'express' ? '⚡ 빠른출고' : '📦 일반출고'}
+              ${expressFee > 0 ? ' · <span class="text-amber-700 font-bold">+' + formatMoney(expressFee) + '</span>' : ' · <span class="text-emerald-600 font-semibold">무료</span>'}
+            </p>
+          </div>
+
+          <!-- Payment info (Step 2 — 결제금액 있을 때만) -->
+          ${total > 0 ? `
+          <div class="surface p-4">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">결제정보</h3>
+              ${_editBtn(2)}
+            </div>
+            <div class="space-y-2">
+              <div class="flex justify-between items-center text-sm">
+                <span class="text-slate-500">추가 결제금액</span>
+                <span class="font-bold text-gradient-brand text-base">${formatMoney(total)}</span>
               </div>
               <div class="flex justify-between text-sm">
-                <span class="text-gray-500">입금 계좌</span>
-                <span class="text-gray-900">${bankInfo.bank_name || ''} ${bankInfo.account_number || ''}</span>
+                <span class="text-slate-500">입금 계좌</span>
+                <span class="text-slate-900 font-medium">${bankInfo.bank_name || ''} ${bankInfo.account_number || ''}</span>
               </div>
               ${formState.cash_receipt_yn ? `
                 <div class="flex justify-between text-sm">
-                  <span class="text-gray-500">현금영수증</span>
-                  <span class="text-gray-900">${RECEIPT_TYPES[formState.receipt_type] || '-'}</span>
+                  <span class="text-slate-500">현금영수증</span>
+                  <span class="text-slate-900 font-medium">${RECEIPT_TYPES[formState.receipt_type] || '-'}</span>
                 </div>
                 <div class="flex justify-between text-sm">
-                  <span class="text-gray-500">발급번호</span>
-                  <span class="text-gray-900">${formState.receipt_number || '-'}</span>
+                  <span class="text-slate-500">발급번호</span>
+                  <span class="text-slate-900 font-medium">${formState.receipt_number || '-'}</span>
                 </div>
               ` : `
                 <div class="flex justify-between text-sm">
-                  <span class="text-gray-500">현금영수증</span>
-                  <span class="text-gray-400">미신청</span>
+                  <span class="text-slate-500">현금영수증</span>
+                  <span class="text-slate-400">미신청</span>
                 </div>
               `}
             </div>
           </div>
+          ` : ''}
 
-          <!-- Customer request -->
-          ${formState.customer_request ? `
-            <div class="bg-white rounded-xl border border-gray-200 p-4">
-              <div class="flex items-center justify-between mb-2">
-                <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">요청사항</h3>
-                <button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="3">수정</button>
-              </div>
-              <p class="text-sm text-gray-900 whitespace-pre-wrap">${formState.customer_request}</p>
-            </div>
-          ` : `
-            <div class="bg-white rounded-xl border border-gray-200 p-4">
-              <div class="flex items-center justify-between">
-                <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">요청사항</h3>
-                <button class="text-xs text-blue-500 font-medium" data-action="goToStep" data-step="3">추가</button>
-              </div>
-              <p class="text-sm text-gray-400 mt-1">요청사항 없음</p>
-            </div>
-          `}
         </div>
       </div>
     `;
   }
 
-  const STEP_RENDERERS = [renderStep0, renderStep1, renderStep2, renderStep3, renderStep4];
+  function renderCalendar() {
+    var min = getMinDate();
+    var max = getMaxDate();
+    var notice = getNoticeText();
+    var required = isDateRequired();
+    var expr = getExpressRange();
+    var norm = getNormalRange();
+    var expressFee = getExpressFee();
+
+    if (!calendarViewMonth) {
+      calendarViewMonth = (formState.desired_ship_date || min).substring(0, 7);
+    }
+
+    var parts = calendarViewMonth.split('-');
+    var yr = parseInt(parts[0]);
+    var mo = parseInt(parts[1]);
+
+    var firstDow = new Date(yr, mo - 1, 1).getDay(); // 0=일
+    var daysInMonth = new Date(yr, mo, 0).getDate();
+    var minMonth = min.substring(0, 7);
+    var maxMonth = max.substring(0, 7);
+    var canPrev = calendarViewMonth > minMonth;
+    var canNext = calendarViewMonth < maxMonth;
+
+    var totalCells = Math.ceil((firstDow + daysInMonth) / 7) * 7;
+    var rows = '';
+    var row = '';
+    for (var i = 0; i < totalCells; i++) {
+      var col = i % 7;
+      if (col === 0 && i > 0) { rows += '<tr>' + row + '</tr>'; row = ''; }
+      var dayNum = i - firstDow + 1;
+      if (dayNum < 1 || dayNum > daysInMonth) {
+        row += '<td class="py-0.5"></td>';
+      } else {
+        var ds = yr + '-' + String(mo).padStart(2, '0') + '-' + String(dayNum).padStart(2, '0');
+        // 존(zone) 기반 분류: 빠른출고 / 일반출고 / 선택불가
+        var zone = getDateZone(ds);
+        var isClosed = zone === 'closed';
+        var isExpressDay = zone === 'express';
+        // 방어로직: 휴무/범위밖 날짜는 절대 선택 상태로 표시하지 않음
+        var isSel = formState.desired_ship_date === ds && !isClosed;
+        var isToday = ds === todayStr();
+        var isSun = col === 0, isSat = col === 6;
+        // 기본 클래스 — 원형 셀
+        var cls = 'w-9 h-9 rounded-full mx-auto flex items-center justify-center text-[13px] leading-none select-none transition-all ';
+        if (isSel) {
+          // 선택된 날짜: 존에 따라 시각 스타일 구분
+          if (isExpressDay) cls += 'bg-amber-500 text-white font-bold shadow-lifted';
+          else cls += 'gradient-brand text-white font-bold shadow-lifted';
+        } else if (isClosed) cls += 'text-slate-300';
+        else if (isExpressDay) {
+          // 빠른출고 존: 앰버(amber) 배경 + 짙은 글자
+          cls += 'bg-amber-100 text-amber-800 hover:bg-amber-200 cursor-pointer font-semibold' + (isToday ? ' ring-1 ring-amber-400' : '');
+        } else if (isSun) cls += 'text-rose-500 hover:bg-rose-50 cursor-pointer font-medium' + (isToday ? ' ring-1 ring-rose-200' : '');
+        else if (isSat) cls += 'cursor-pointer font-medium hover:bg-indigo-50 text-indigo-500' + (isToday ? ' ring-1 ring-indigo-200' : '');
+        else cls += 'text-slate-700 hover:bg-slate-100 cursor-pointer' + (isToday ? ' ring-1 ring-slate-300' : '');
+        if (isClosed) {
+          row += '<td class="py-1 text-center"><span class="' + cls + '">' + dayNum + '</span></td>';
+        } else {
+          row += '<td class="py-1 text-center"><button type="button" data-action="calDay" data-date="' + ds + '" class="pressable w-full flex justify-center"><span class="' + cls + '">' + dayNum + '</span></button></td>';
+        }
+      }
+    }
+    if (row) rows += '<tr>' + row + '</tr>';
+
+    // 범례 (빠른출고가 가능할 때만 표시)
+    var legend = '';
+    if (expr) {
+      legend = '<div class="flex items-center justify-center gap-3 mt-1 mb-2 text-[10px]">'
+        + '<span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-amber-100 border border-amber-400"></span><span class="text-amber-800 font-semibold">⚡ 빠른출고</span>' + (expressFee > 0 ? ' <span class="text-amber-700">(+' + formatMoney(expressFee) + ')</span>' : '') + '</span>'
+        + '<span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-slate-100 border border-slate-300"></span><span class="text-slate-700 font-semibold">📦 일반출고 <span class="text-emerald-600">(무료)</span></span></span>'
+        + '</div>';
+    }
+
+    // 선택한 날짜 기반 동적 비용 안내
+    var selectedInfo = '';
+    var selectedDate = formState.desired_ship_date;
+    var selectedZone = getDateZone(selectedDate);
+    if (selectedDate && selectedZone !== 'closed') {
+      var dateLabel = formatDate(selectedDate);
+      if (selectedZone === 'express') {
+        var feeLabel = expressFee > 0 ? '<span class="text-amber-700 font-bold">+' + formatMoney(expressFee) + '</span>' : '<span class="text-emerald-600 font-bold">무료</span>';
+        selectedInfo = '<div class="mt-3 pt-3 border-t border-slate-100">'
+          + '<p class="text-center text-sm font-bold"><span class="text-amber-600">⚡</span> ' + dateLabel + ' · <span class="text-amber-600">빠른출고</span></p>'
+          + '<p class="text-center text-[11px] text-slate-600 mt-1.5">추가비용 ' + feeLabel + (expressFee > 0 ? ' <span class="text-slate-400">(다음 결제정보 스텝에서 안내)</span>' : '') + '</p>'
+          + '<p class="text-center text-[10.5px] text-slate-400 mt-2 leading-relaxed">선택하신 출고일을 기준으로 1~2 영업일 내에 배송됩니다.</p>'
+          + '</div>';
+      } else {
+        selectedInfo = '<div class="mt-3 pt-3 border-t border-slate-100">'
+          + '<p class="text-center text-sm font-bold text-slate-800"><span>📦</span> ' + dateLabel + ' · <span class="text-indigo-600">일반출고</span></p>'
+          + '<p class="text-center text-[11px] text-emerald-600 font-semibold mt-1.5">추가비용 없음 (무료)</p>'
+          + '<p class="text-center text-[10.5px] text-slate-400 mt-2 leading-relaxed">선택하신 출고일을 기준으로 1~2 영업일 내에 배송됩니다.</p>'
+          + '</div>';
+      }
+    } else if (!required) {
+      selectedInfo = '<p class="text-center text-[11px] text-slate-400 mt-3 pt-3 border-t border-slate-100">미선택 시 가장 빠른 출고일(' + formatDate(min) + ') 자동 적용</p>';
+    } else {
+      selectedInfo = '<p class="text-center text-[11px] text-slate-400 mt-3 pt-3 border-t border-slate-100">출고일을 선택해주세요</p>';
+    }
+
+    return '<div class="surface overflow-hidden mb-4" id="calendarWidget">'
+      + '<div class="flex items-center justify-between px-4 py-3.5 border-b border-slate-100">'
+      + '<button type="button" data-action="calNav" data-dir="-1" class="pressable p-2 rounded-xl ' + (canPrev ? 'hover:bg-slate-100 text-slate-700' : 'text-slate-200 pointer-events-none') + '">'
+      + '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>'
+      + '</button>'
+      + '<span class="text-[15px] font-bold text-slate-900">' + yr + '년 ' + mo + '월</span>'
+      + '<button type="button" data-action="calNav" data-dir="1" class="pressable p-2 rounded-xl ' + (canNext ? 'hover:bg-slate-100 text-slate-700' : 'text-slate-200 pointer-events-none') + '">'
+      + '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/></svg>'
+      + '</button>'
+      + '</div>'
+      + legend
+      + '<div class="px-2 py-2">'
+      + '<table class="w-full border-collapse"><thead><tr>'
+      + '<th class="text-[11px] font-semibold text-rose-400 pb-2">일</th>'
+      + '<th class="text-[11px] font-semibold text-slate-400 pb-2">월</th>'
+      + '<th class="text-[11px] font-semibold text-slate-400 pb-2">화</th>'
+      + '<th class="text-[11px] font-semibold text-slate-400 pb-2">수</th>'
+      + '<th class="text-[11px] font-semibold text-slate-400 pb-2">목</th>'
+      + '<th class="text-[11px] font-semibold text-slate-400 pb-2">금</th>'
+      + '<th class="text-[11px] font-semibold text-indigo-400 pb-2">토</th>'
+      + '</tr></thead><tbody>' + rows + '</tbody></table>'
+      + '</div>'
+      + '<div class="px-4 pb-3">' + selectedInfo + '</div>'
+      + (notice ? '<div class="mx-3 mb-3 p-3.5 rounded-xl gradient-celebrate bg-opacity-30 text-[12px] text-amber-900 whitespace-pre-wrap font-medium" style="background:linear-gradient(135deg,rgba(253,230,138,0.4),rgba(245,158,11,0.15))">' + notice + '</div>' : '')
+      + '</div>';
+  }
+
+  function patchCalendar() {
+    var calEl = document.getElementById('calendarWidget');
+    if (!calEl) return;
+    var t = document.createElement('div');
+    t.innerHTML = renderCalendar();
+    calEl.replaceWith(t.firstElementChild);
+  }
+
+  function buildStickerInputSection(idx) {
+    var ps = formState.products[String(idx)] || {};
+    var products = orderData?.products || [];
+    var p = products[Number(idx)];
+    var productCode = p ? (p.product_code || '') : '';
+    var matching = getStickersForProduct(productCode);
+    var selStickerId = ps.sticker_type || '';
+    var stInput = ps.sticker_input || 'custom';
+
+    if (!selStickerId || matching.length === 0) return '<div id="sticker-input-wrap-' + idx + '"></div>';
+
+    var selSt = matching.find(function(st) { return st.id === selStickerId; });
+    // 기본 폴백 필드는 required=true — 스티커 선택 + 직접입력 모드면 반드시 문구 입력 필요
+    // (입력안함 체크 시는 isStepValid에서 sticker_input === 'custom' 조건 때문에 검증 skip됨)
+    var customFields = (selSt && Array.isArray(selSt.custom_fields) && selSt.custom_fields.length > 0)
+      ? selSt.custom_fields
+      : [{ field_id: 'text', field_label: '스티커 문구', field_type: 'text', max_length: 100, placeholder: '예) 김철수 ♥ 이영희', required: true }];
+
+    // 기본값: sticker_input이 명시적으로 'none'이 아닌 경우 입력 표시
+    var isNone = stInput === 'none';
+
+    var headerHtml = '<div class="mt-4">'
+      + (isNone ? '<p class="text-[12px] text-amber-800 rounded-xl px-3.5 py-2.5 mb-3 font-medium" style="background:linear-gradient(135deg,rgba(253,230,138,0.4),rgba(245,158,11,0.12));border:1px solid rgba(245,158,11,0.2)">⚠️ 문구는 샘플이미지로 출력되며 이름은 출력되지 않습니다.</p>' : '')
+      + '<div class="flex items-center justify-between mb-2">'
+      + '<label class="text-[12px] font-semibold text-slate-700">스티커 문구 입력</label>'
+      + '<label class="flex items-center gap-1.5 cursor-pointer">'
+      + '<input type="checkbox" class="w-4 h-4 accent-indigo-500" ' + (isNone ? 'checked' : '') + ' data-action="productStickerInputNone" data-idx="' + idx + '" />'
+      + '<span class="text-[12px] text-slate-600 font-medium">입력안함</span>'
+      + '</label>'
+      + '</div>'
+      + '</div>';
+
+    var fieldsHtml = '';
+    if (!isNone) {
+      var fieldInputs = customFields.map(function(f) {
+        var fieldKey = f.field_id || f.name || f.field_label;
+        var val = (ps.sticker_fields || {})[fieldKey] || '';
+        var reqMark = f.required ? '<span class="text-rose-500">*</span>' : '';
+        var safeVal = String(val).replace(/"/g, '&quot;');
+        var inputHtml = '';
+        if (f.field_type === 'select' && Array.isArray(f.options)) {
+          var optHtml = '<option value="">선택</option>' + f.options.map(function(o) {
+            return '<option value="' + o + '"' + (val === o ? ' selected' : '') + '>' + o + '</option>';
+          }).join('');
+          inputHtml = '<select class="input-mod" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '">' + optHtml + '</select>';
+        } else if (f.field_type === 'date') {
+          inputHtml = '<input type="date" value="' + safeVal + '" class="input-mod" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '" />';
+        } else if (f.field_type === 'textarea') {
+          inputHtml = '<textarea rows="2" placeholder="' + (f.placeholder || '') + '" maxlength="' + (f.max_length || 200) + '" class="input-mod resize-none" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '">' + safeVal + '</textarea>';
+        } else {
+          inputHtml = '<input type="text" value="' + safeVal + '" placeholder="' + (f.placeholder || '') + '" maxlength="' + (f.max_length || 100) + '" class="input-mod" data-action="productStickerField" data-idx="' + idx + '" data-field="' + fieldKey + '" />';
+        }
+        return '<div><label class="block text-[11px] font-medium text-slate-600 mb-1.5">' + (f.field_label || fieldKey) + ' ' + reqMark + '</label>' + inputHtml + '</div>';
+      }).join('');
+      fieldsHtml = '<div class="p-4 rounded-xl gradient-brand-soft space-y-3">' + fieldInputs + '</div>';
+    }
+
+    return '<div id="sticker-input-wrap-' + idx + '">' + headerHtml + fieldsHtml + '</div>';
+  }
+
+  const STEP_RENDERERS = [renderStep0, renderStep1, renderStep2, renderStep3];
+
+  // ============================================
+  // 스티커 라이트박스 모달
+  // ============================================
+  let stickerModalState = {
+    productIdx: null,
+    stickers: [],
+    currentIndex: 0,
+    // 스티커별 입력 pending 상태 (prev/next 네비게이션 시 보존)
+    // perSticker[stickerId] = { fields: {fieldKey: value}, mode: 'custom' | 'none' }
+    perSticker: {},
+  };
+
+  /** 스티커별 사용자 정의 필드 목록 (폴백 포함) */
+  function getStickerCustomFields(st) {
+    return (st && Array.isArray(st.custom_fields) && st.custom_fields.length > 0)
+      ? st.custom_fields
+      : [{ field_id: 'text', field_label: '스티커 문구', field_type: 'text', max_length: 100, placeholder: '예) 김철수 ♥ 이영희', required: true }];
+  }
+
+  /** 현재 모달에 표시 중인 스티커의 pending 값을 얻어옴 (초기화 포함) */
+  function getStickerPending(stickerId) {
+    if (!stickerModalState.perSticker[stickerId]) {
+      // formState에서 초기값 로드: 이미 선택된 스티커면 기존 값 유지
+      const ps = stickerModalState.productIdx != null
+        ? (formState.products[String(stickerModalState.productIdx)] || {})
+        : {};
+      const isCurrent = ps.sticker_type === stickerId;
+      stickerModalState.perSticker[stickerId] = {
+        fields: isCurrent ? { ...(ps.sticker_fields || {}) } : {},
+        mode: isCurrent ? (ps.sticker_input || 'custom') : 'custom',
+      };
+    }
+    return stickerModalState.perSticker[stickerId];
+  }
+
+  /** 현재 스티커의 입력 필드 UI 렌더 */
+  function renderStickerModalInputs() {
+    const { stickers, currentIndex } = stickerModalState;
+    const st = stickers[currentIndex];
+    const wrap = document.getElementById('stickerModalInputs');
+    const noInputCb = document.getElementById('stickerModalNoInput');
+    if (!st || !wrap) return;
+    const pending = getStickerPending(st.id);
+    const isNone = pending.mode === 'none';
+    noInputCb.checked = isNone;
+
+    const fields = getStickerCustomFields(st);
+    wrap.innerHTML = fields.map(function(f) {
+      const key = f.field_id || f.name || f.field_label;
+      const val = (pending.fields || {})[key] || '';
+      const safeVal = String(val).replace(/"/g, '&quot;');
+      const req = f.required ? '<span class="text-rose-400">*</span>' : '';
+      const disabledAttr = isNone ? 'disabled' : '';
+      const disabledStyle = isNone ? 'opacity:0.45;' : '';
+      let input;
+      if (f.field_type === 'textarea') {
+        input = '<textarea rows="2" data-field="' + key + '" placeholder="' + (f.placeholder || '') + '" maxlength="' + (f.max_length || 200) + '" ' + disabledAttr
+          + ' class="w-full px-3 py-2 rounded-lg bg-white/10 border border-white/30 text-white placeholder-white/50 text-[13px] focus:bg-white/15 focus:border-white/60 outline-none resize-none" style="' + disabledStyle + '">' + safeVal + '</textarea>';
+      } else {
+        input = '<input type="text" data-field="' + key + '" value="' + safeVal + '" placeholder="' + (f.placeholder || '') + '" maxlength="' + (f.max_length || 100) + '" ' + disabledAttr
+          + ' class="w-full px-3 py-2 rounded-lg bg-white/10 border border-white/30 text-white placeholder-white/50 text-[13px] focus:bg-white/15 focus:border-white/60 outline-none" style="' + disabledStyle + '">';
+      }
+      return '<label class="block text-[11px] text-white/70 font-medium">'
+        + (f.field_label || key) + ' ' + req
+        + '<div class="mt-1">' + input + '</div>'
+        + '</label>';
+    }).join('');
+  }
+
+  function renderStickerModalContent() {
+    const { stickers, currentIndex } = stickerModalState;
+    const st = stickers[currentIndex];
+    if (!st) return;
+    const imgEl = document.getElementById('stickerModalImg');
+    const nameEl = document.getElementById('stickerModalName');
+    const counterEl = document.getElementById('stickerModalCounter');
+    const prevBtn = document.getElementById('stickerModalPrev');
+    const nextBtn = document.getElementById('stickerModalNext');
+
+    if (st.preview_image_url) {
+      imgEl.src = st.preview_image_url;
+      imgEl.style.display = '';
+    } else {
+      imgEl.removeAttribute('src');
+      imgEl.style.display = 'none';
+    }
+    nameEl.textContent = st.name || '스티커';
+    counterEl.textContent = (currentIndex + 1) + ' / ' + stickers.length;
+    prevBtn.style.visibility = currentIndex > 0 ? 'visible' : 'hidden';
+    nextBtn.style.visibility = currentIndex < stickers.length - 1 ? 'visible' : 'hidden';
+
+    renderStickerModalInputs();
+  }
+
+  function openStickerModalFor(productIdx, stickerId) {
+    const products = orderData?.products || [];
+    const p = products[Number(productIdx)];
+    if (!p) return;
+    const matching = getStickersForProduct(p.product_code || '');
+    if (!matching.length) return;
+    const idx = matching.findIndex(function(s){ return s.id === stickerId; });
+    stickerModalState = {
+      productIdx: String(productIdx),
+      stickers: matching,
+      currentIndex: idx >= 0 ? idx : 0,
+      perSticker: {},
+    };
+    renderStickerModalContent();
+    document.getElementById('stickerModal').style.display = 'block';
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeStickerModal() {
+    document.getElementById('stickerModal').style.display = 'none';
+    document.body.style.overflow = '';
+  }
+
+  /** 현재 DOM의 input 값을 pending에 수집 (네비게이션/선택 직전) */
+  function collectStickerModalInputs() {
+    const { stickers, currentIndex } = stickerModalState;
+    const st = stickers[currentIndex];
+    if (!st) return;
+    const pending = getStickerPending(st.id);
+    const wrap = document.getElementById('stickerModalInputs');
+    if (!wrap) return;
+    wrap.querySelectorAll('input[data-field], textarea[data-field]').forEach(function(el) {
+      pending.fields[el.dataset.field] = el.value;
+    });
+    pending.mode = document.getElementById('stickerModalNoInput').checked ? 'none' : 'custom';
+  }
+
+  function stickerModalNav(dir) {
+    collectStickerModalInputs();  // 현재 입력값 저장
+    const len = stickerModalState.stickers.length;
+    if (!len) return;
+    stickerModalState.currentIndex = Math.max(0, Math.min(len - 1, stickerModalState.currentIndex + dir));
+    renderStickerModalContent();
+  }
+
+  function selectStickerFromModal() {
+    collectStickerModalInputs();
+    const { productIdx, stickers, currentIndex } = stickerModalState;
+    const st = stickers[currentIndex];
+    if (!st || productIdx == null) return;
+    const pending = getStickerPending(st.id);
+    const ps = ensureProductEntry(productIdx);
+    ps.sticker_type = st.id;
+    ps.sticker_input = pending.mode || 'custom';
+    ps.sticker_fields = pending.mode === 'none' ? {} : { ...(pending.fields || {}) };
+    closeStickerModal();
+    renderCurrentStep();
+  }
+
+  // 모달 내부 버튼 이벤트 바인딩 (한 번만)
+  document.getElementById('stickerModal').addEventListener('click', function(e) {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    const a = el.dataset.action;
+    if (a === 'closeStickerModal') closeStickerModal();
+    else if (a === 'stickerModalPrev') stickerModalNav(-1);
+    else if (a === 'stickerModalNext') stickerModalNav(+1);
+    else if (a === 'selectStickerFromModal') selectStickerFromModal();
+  });
+
+  // 입력 영역: input/textarea 값 변경 시 pending 업데이트
+  document.getElementById('stickerModalInputs').addEventListener('input', function(e) {
+    const el = e.target.closest('[data-field]');
+    if (!el) return;
+    const st = stickerModalState.stickers[stickerModalState.currentIndex];
+    if (!st) return;
+    getStickerPending(st.id).fields[el.dataset.field] = el.value;
+  });
+
+  // 입력안함 토글
+  document.getElementById('stickerModalNoInput').addEventListener('change', function(e) {
+    const st = stickerModalState.stickers[stickerModalState.currentIndex];
+    if (!st) return;
+    getStickerPending(st.id).mode = e.target.checked ? 'none' : 'custom';
+    // 입력 필드 disable 상태 반영 위해 재렌더
+    renderStickerModalInputs();
+  });
+
+  // 키보드 네비게이션
+  document.addEventListener('keydown', function(e) {
+    if (document.getElementById('stickerModal').style.display !== 'block') return;
+    // 입력 필드에 포커스 있으면 좌우 화살표·Enter로 네비게이션 막음 (타이핑 간섭 방지)
+    const t = e.target;
+    const inInput = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA');
+    if (e.key === 'Escape') closeStickerModal();
+    else if (!inInput && e.key === 'ArrowLeft') stickerModalNav(-1);
+    else if (!inInput && e.key === 'ArrowRight') stickerModalNav(+1);
+    else if (!inInput && e.key === 'Enter') selectStickerFromModal();
+  });
+
+  // 터치 스와이프 지원
+  (function() {
+    const area = document.getElementById('stickerModalSwipeArea');
+    if (!area) return;
+    let touchStartX = 0;
+    area.addEventListener('touchstart', function(e) {
+      touchStartX = e.touches[0].clientX;
+    }, { passive: true });
+    area.addEventListener('touchend', function(e) {
+      const dx = e.changedTouches[0].clientX - touchStartX;
+      if (Math.abs(dx) < 40) return;
+      stickerModalNav(dx < 0 ? +1 : -1);
+    }, { passive: true });
+  })();
 
   function renderCurrentStep() {
+    // 스크롤 위치 보존하여 터치 시 화면 점프/깜빡임 방지
+    const scrollY = window.pageYOffset || document.documentElement.scrollTop;
     $stepContent.innerHTML = STEP_RENDERERS[currentStep]();
     renderStepIndicator();
     updateNavButtons();
     saveFormState();
+    // 동일 스텝 재렌더링 시 이전 스크롤 복원
+    if (scrollY > 0) {
+      window.scrollTo({ top: scrollY, behavior: 'instant' });
+    }
   }
 
   // ============================================
@@ -1023,38 +2175,90 @@
   // ============================================
   function handleAction(action, target) {
     switch (action) {
+      // 구 'selectShipping' 액션은 출고방식 스텝이 캘린더 존과 합쳐지면서 더 이상 사용되지 않음.
+      // 구버전 세션이 호출할 가능성에 대비해 유지만 함.
       case 'selectShipping': {
         const val = target.closest('[data-value]')?.dataset?.value;
-        if (val) { formState.shipping_type = val; renderCurrentStep(); }
+        if (val) {
+          formState.shipping_type = val;
+          validateShipDate();
+          renderCurrentStep();
+        }
         break;
       }
       case 'productDate': {
+        // 레거시: 상품별 날짜 (현재는 미사용, formState.desired_ship_date 사용)
         const idx = target.dataset.idx;
-        const val = target.value;
         const ps = ensureProductEntry(idx);
-        ps.desired_ship_date = val;
+        ps.desired_ship_date = target.value;
         renderCurrentStep();
         break;
       }
       case 'productStickerType': {
         const idx = target.dataset.idx;
-        const val = target.value;
+        // 썸네일 버튼(data-value 속성) 우선, 레거시 <select>는 value 사용
+        const val = ('value' in target.dataset) ? target.dataset.value : target.value;
         const ps = ensureProductEntry(idx);
         if (ps.sticker_type !== val) {
           ps.sticker_type = val || null;
-          ps.sticker_input = 'none';
+          ps.sticker_input = val ? 'custom' : 'none'; // 스티커 선택 시 입력 필드 기본 표시
           ps.sticker_fields = {};
         }
         renderCurrentStep();
         break;
       }
-      case 'productStickerInput': {
-        const idx = target.dataset.idx;
-        const val = target.value;
+      case 'productBoxSelect': {
+        // 박스 패키지 옵션 선택
+        const idx = target.closest('[data-idx]')?.dataset?.idx;
+        const val = target.closest('[data-value]')?.dataset?.value;
+        if (idx == null || val == null) break;
         const ps = ensureProductEntry(idx);
+        if (ps.box_code !== val) {
+          ps.box_code = val || null;
+          saveFormState();
+          renderCurrentStep();
+        }
+        break;
+      }
+      case 'openStickerModal': {
+        const idx = target.dataset.idx;
+        const stId = target.dataset.value;
+        openStickerModalFor(idx, stId);
+        break;
+      }
+      case 'productStickerInput': {
+        var idx = target.dataset.idx;
+        var val = target.value;
+        var ps = ensureProductEntry(idx);
         ps.sticker_input = val || 'none';
         if (val !== 'custom') ps.sticker_fields = {};
-        renderCurrentStep();
+        saveFormState();
+        updateNavButtons();
+        var wrapEl = document.getElementById('sticker-input-wrap-' + idx);
+        if (wrapEl) {
+          var t = document.createElement('div');
+          t.innerHTML = buildStickerInputSection(idx);
+          wrapEl.replaceWith(t.firstElementChild || t);
+        } else {
+          renderCurrentStep();
+        }
+        break;
+      }
+      case 'productStickerInputNone': {
+        var idx = target.dataset.idx;
+        var ps = ensureProductEntry(idx);
+        ps.sticker_input = target.checked ? 'none' : 'custom';
+        if (target.checked) ps.sticker_fields = {};
+        saveFormState();
+        updateNavButtons();
+        var wrapEl = document.getElementById('sticker-input-wrap-' + idx);
+        if (wrapEl) {
+          var t = document.createElement('div');
+          t.innerHTML = buildStickerInputSection(idx);
+          wrapEl.replaceWith(t.firstElementChild || t);
+        } else {
+          renderCurrentStep();
+        }
         break;
       }
       case 'productStickerField': {
@@ -1075,14 +2279,21 @@
         updateNavButtons();
         break;
       }
-      case 'copyAccount': {
+      case 'copyAccount':
+      case 'copyAccountPending': {
         const acct = orderData?.bank_info?.account_number || '';
         if (navigator.clipboard) {
           navigator.clipboard.writeText(acct).then(() => {
-            target.textContent = '복사됨!';
-            target.classList.add('bg-green-50', 'text-green-600');
-            target.classList.remove('bg-blue-50', 'text-blue-500');
-            setTimeout(() => { target.textContent = '복사'; target.classList.remove('bg-green-50', 'text-green-600'); target.classList.add('bg-blue-50', 'text-blue-500'); }, 1500);
+            target.textContent = '복사됨 ✓';
+            target.classList.remove('gradient-brand-soft');
+            target.classList.add('bg-emerald-50');
+            target.style.color = '#059669';
+            setTimeout(() => {
+              target.textContent = '복사';
+              target.classList.remove('bg-emerald-50');
+              target.classList.add('gradient-brand-soft');
+              target.style.color = 'var(--brand-600)';
+            }, 1500);
           });
         }
         break;
@@ -1107,6 +2318,38 @@
         updateNavButtons();
         break;
       }
+      case 'calNav': {
+        var dir = parseInt(target.dataset.dir || '0');
+        if (!dir) break;
+        var cp = calendarViewMonth.split('-');
+        var ny = parseInt(cp[0]), nm = parseInt(cp[1]) + dir;
+        if (nm > 12) { ny++; nm = 1; }
+        if (nm < 1) { ny--; nm = 12; }
+        calendarViewMonth = ny + '-' + String(nm).padStart(2, '0');
+        patchCalendar();
+        break;
+      }
+      case 'calDay': {
+        var ds = target.closest('[data-date]') ? target.closest('[data-date]').dataset.date : target.dataset.date;
+        if (!ds) break;
+        var zone = getDateZone(ds);
+        if (zone === 'closed') break; // 선택 불가
+        // 존에 따라 shipping_type 자동 결정 + 날짜 저장
+        formState.desired_ship_date = ds;
+        formState.shipping_type = zone; // 'express' or 'normal'
+        // 일반출고 전환시 현금영수증 state 초기화 (결제 금액 없어지면 무의미)
+        if (zone === 'normal' && formState.cash_receipt_yn) {
+          formState.cash_receipt_yn = false;
+          formState.receipt_type = null;
+          formState.receipt_number = '';
+        }
+        saveFormState();
+        updateNavButtons();
+        patchCalendar();
+        // 프로그레스바 — 결제정보 스텝 노출 여부가 shipping_type 으로 바뀌므로 재렌더
+        renderStepIndicator();
+        break;
+      }
       case 'goToStep': {
         const step = parseInt(target.closest('[data-step]')?.dataset?.step);
         if (!isNaN(step) && step >= 0 && step < STEP_LABELS.length) {
@@ -1125,6 +2368,12 @@
     if (el) handleAction(el.dataset.action, el);
   });
 
+  // 결제대기 화면도 data-action 동작 지원 (계좌 복사 등)
+  $paymentPending.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-action]');
+    if (el) handleAction(el.dataset.action, el);
+  });
+
   $stepContent.addEventListener('change', (e) => {
     const el = e.target.closest('[data-action]');
     if (el) handleAction(el.dataset.action, el);
@@ -1139,24 +2388,32 @@
     }
   });
 
-  // Navigation buttons
+  // Navigation buttons (visibleSteps 기반 — 조건부 스텝 자동 스킵)
   $btnBack.addEventListener('click', () => {
-    if (currentStep > 0) {
-      currentStep--;
-      renderCurrentStep();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
+    goPrevStep();
   });
 
+  // 중복 실행 방지 플래그 — 빠른 연속 클릭으로 submit/goNext 가 두번 트리거되는 것 차단
+  let _navInFlight = false;
   $btnNext.addEventListener('click', async () => {
+    if (_navInFlight) return; // 이미 처리 중
     if (!isStepValid(currentStep)) return;
-    if (currentStep < STEP_LABELS.length - 1) {
-      currentStep++;
-      renderCurrentStep();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else {
-      // Submit
-      await submitForm();
+    _navInFlight = true;
+    // 버튼도 즉시 disabled 처리 (시각 피드백 + 추가 클릭 차단)
+    $btnNext.disabled = true;
+    try {
+      const visible = getVisibleSteps();
+      const visIdx = getVisibleIndex();
+      if (visIdx < visible.length - 1) {
+        goNextStep();
+      } else {
+        // Submit
+        await submitForm();
+      }
+    } finally {
+      _navInFlight = false;
+      // disabled 재활성화는 updateNavButtons 가 다음 렌더에서 처리
+      // 실패로 제출 재시도 필요시 submitForm catch 에서 $btnNext.disabled = false 함
     }
   });
 
@@ -1164,7 +2421,9 @@
   // API calls
   // ============================================
   async function fetchOrder(orderId) {
-    const resp = await fetch(API_BASE + '/api/bg/orders/' + encodeURIComponent(orderId));
+    // URL 에 t/sig 가 있으면 서버 HMAC 검증용으로 그대로 전달
+    const url = withSignature(API_BASE + '/api/bg/orders/' + encodeURIComponent(orderId));
+    const resp = await fetch(url);
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({}));
       throw new Error(body.error || '주문을 불러올 수 없습니다. (HTTP ' + resp.status + ')');
@@ -1178,31 +2437,48 @@
 
     const products = orderData?.products || [];
     const fallbackDate = getMinDate();
+    // 주문 단위 단일 출고일 (모든 상품에 동일 적용)
+    const orderShipDate = formState.desired_ship_date || (isDateRequired() ? null : fallbackDate);
     const productInputs = products.map(function(p, i) {
       const ps = formState.products[String(i)] || {};
       const matching = getStickersForProduct(p.product_code);
       const sticker = ps.sticker_type ? matching.find(function(s){ return s.id === ps.sticker_type; }) : null;
+      // 박스 옵션 선택 정보 (있는 상품만)
+      const boxOptions = getBoxOptionsForProduct(p.product_code);
+      const box = (boxOptions.length && ps.box_code) ? boxOptions.find(function(o){ return o.code === ps.box_code; }) : null;
       return {
         product_code: p.product_code,
         product_name: p.product_name,
         quantity: p.quantity,
-        desired_ship_date: ps.desired_ship_date || (isDateRequired() ? null : fallbackDate),
+        desired_ship_date: orderShipDate,  // 주문 단위 공통 출고일
         sticker_id: sticker ? sticker.id : null,
         sticker_name: sticker ? sticker.name : null,
         sticker_input: ps.sticker_input || 'none',
         custom_values: ps.sticker_input === 'custom' ? (ps.sticker_fields || {}) : {},
+        box_code: box ? box.code : null,
+        box_name: box ? (box.name || box.code) : null,
       };
     });
 
-    const representativeDate = productInputs[0]?.desired_ship_date || fallbackDate;
+    const representativeDate = orderShipDate || fallbackDate;
     const payload = {
       is_express: formState.shipping_type === 'express',
       express_fee: formState.shipping_type === 'express' ? getExpressFee() : 0,
       desired_ship_date: representativeDate,
       products: productInputs,
       sticker_selections: productInputs
-        .filter(function(pi){ return pi.sticker_id; })
-        .map(function(pi){ return { product_code: pi.product_code, sticker_id: pi.sticker_id, sticker_name: pi.sticker_name, custom_values: pi.custom_values }; }),
+        // 스티커 OR 박스 어느 하나라도 있으면 선택 row 로 남김
+        .filter(function(pi){ return pi.sticker_id || pi.box_code; })
+        .map(function(pi){ return {
+          product_code: pi.product_code,
+          product_name: pi.product_name,
+          quantity: pi.quantity,
+          sticker_id: pi.sticker_id,
+          sticker_name: pi.sticker_name,
+          custom_values: pi.custom_values,
+          box_code: pi.box_code,
+          box_name: pi.box_name,
+        }; }),
       cash_receipt_yn: formState.cash_receipt_yn,
       receipt_type: formState.receipt_type,
       receipt_number: formState.receipt_number || null,
@@ -1210,7 +2486,8 @@
     };
 
     try {
-      const resp = await fetch(API_BASE + '/api/bg/orders/' + encodeURIComponent(orderData.order_id) + '/customer-info', {
+      const submitUrl = withSignature(API_BASE + '/api/bg/orders/' + encodeURIComponent(orderData.order_id) + '/customer-info');
+      const resp = await fetch(submitUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -1224,8 +2501,20 @@
       // Clear session storage
       try { sessionStorage.removeItem(storageKey(orderData.order_id)); } catch(e) {}
 
+      // 방금 제출한 주문의 info_status 를 lastLoadedOrders 에 즉시 반영 (주문선택 화면 재진입시 최신 상태)
+      markOrderCompletedInList(orderData.order_id);
+
+      // orderData.existing_info 를 방금 제출한 payload 로 즉시 업데이트.
+      // successScreen 의 '입력한 정보 확인하기' 가 renderSubmittedSummary 를 호출할 때
+      // 최신 값을 보여주기 위함 (API 재호출 없이).
+      if (orderData) {
+        orderData.existing_info = { ...payload, submitted_at: new Date().toISOString() };
+      }
+
       // Show success
       $successOrderNum.textContent = orderData.order_number || '';
+      // 다른 답례품 주문이 있으면 "다른 주문으로" 버튼 노출 (lastLoadedOrders 기준)
+      toggleBackToListButtons();
       showScreen('successScreen');
     } catch (err) {
       alert(err.message || '제출 중 오류가 발생했습니다. 다시 시도해주세요.');
@@ -1247,17 +2536,28 @@
     const isLogin = tab === 'login';
     document.getElementById('loginForm').classList.toggle('hidden', !isLogin);
     document.getElementById('searchForm').classList.toggle('hidden', isLogin);
-    document.getElementById('tabLogin').className = isLogin
-      ? 'flex-1 py-2.5 text-sm font-semibold text-blue-600 border-b-2 border-blue-500'
-      : 'flex-1 py-2.5 text-sm font-medium text-gray-400 border-b-2 border-transparent';
-    document.getElementById('tabSearch').className = !isLogin
-      ? 'flex-1 py-2.5 text-sm font-semibold text-blue-600 border-b-2 border-blue-500'
-      : 'flex-1 py-2.5 text-sm font-medium text-gray-400 border-b-2 border-transparent';
-    // 결과 초기화
-    document.getElementById('searchResults').classList.add('hidden');
-    document.getElementById('searchEmpty').classList.add('hidden');
-    document.getElementById('loginError').classList.add('hidden');
+    const activeCls = 'pressable flex-1 py-2.5 text-[13px] font-semibold bg-white rounded-xl shadow-soft transition-all';
+    const inactiveCls = 'pressable flex-1 py-2.5 text-[13px] font-medium text-slate-500 rounded-xl transition-all';
+    const tabLoginEl = document.getElementById('tabLogin');
+    const tabSearchEl = document.getElementById('tabSearch');
+    tabLoginEl.className = isLogin ? activeCls : inactiveCls;
+    tabSearchEl.className = !isLogin ? activeCls : inactiveCls;
+    tabLoginEl.style.color = isLogin ? 'var(--brand-600)' : '';
+    tabSearchEl.style.color = !isLogin ? 'var(--brand-600)' : '';
+    // 로그인 에러 메시지만 초기화 (결과는 별도 화면이라 건드릴 필요 없음)
+    const loginErr = document.getElementById('loginError');
+    if (loginErr) loginErr.classList.add('hidden');
   };
+
+  /** 로그인/검색 후 결과에 따라 적절한 화면으로 전환 */
+  function handleOrdersResult(orders, { titleOverride } = {}) {
+    if (!orders || !orders.length) {
+      showScreen('searchEmptyScreen');
+      return;
+    }
+    renderOrderList(orders, titleOverride);
+    showScreen('orderListScreen');
+  }
 
   // ============================================
   // Barunson login
@@ -1273,8 +2573,6 @@
     document.getElementById('loginBtn').disabled = true;
     document.getElementById('loginBtn').textContent = '로그인 중...';
     document.getElementById('searchLoading').classList.remove('hidden');
-    document.getElementById('searchResults').classList.add('hidden');
-    document.getElementById('searchEmpty').classList.add('hidden');
 
     try {
       const resp = await fetch(API_BASE + '/api/bg/auth/login', {
@@ -1292,20 +2590,8 @@
       }
 
       const orders = data.orders || [];
-      if (!orders.length) {
-        document.getElementById('loginForm').classList.add('hidden');
-        document.getElementById('searchForm').classList.add('hidden');
-        document.querySelectorAll('#searchScreen .flex.border-b').forEach(el => el.classList.add('hidden'));
-        document.getElementById('searchEmpty').classList.remove('hidden');
-        return;
-      }
-
-      // 로그인 폼 숨기고 결과 표시
-      document.getElementById('loginForm').classList.add('hidden');
-      document.getElementById('searchForm').classList.add('hidden');
-      document.querySelectorAll('#searchScreen .flex.border-b').forEach(el => el.classList.add('hidden'));
-
-      renderOrderList(orders, data.user?.name ? data.user.name + '님의 주문' : null);
+      const title = data.user?.name ? data.user.name + '님의 주문' : null;
+      handleOrdersResult(orders, { titleOverride: title });
     } catch (err) {
       document.getElementById('searchLoading').classList.add('hidden');
       errEl.textContent = '네트워크 오류가 발생했습니다.';
@@ -1320,33 +2606,131 @@
   document.getElementById('loginPwd')?.addEventListener('keydown', e => { if (e.key === 'Enter') loginBarunson(); });
   document.getElementById('loginUid')?.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('loginPwd').focus(); });
 
+  // 고객센터 플로팅 버튼 토글 + 외부 클릭 시 닫기
+  (function setupHelpFab() {
+    const $btn = document.getElementById('helpFabBtn');
+    const $panel = document.getElementById('helpPanel');
+    const $fab = document.getElementById('helpFab');
+    if (!$btn || !$panel) return;
+    $btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      $panel.classList.toggle('hidden');
+    });
+    // 바깥 클릭 시 닫기
+    document.addEventListener('click', (e) => {
+      if (!$fab.contains(e.target)) $panel.classList.add('hidden');
+    });
+    // Esc 키로 닫기
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') $panel.classList.add('hidden');
+    });
+  })();
+
   // ============================================
-  // Render order list (공통)
+  // Render order list (주문선택 화면에 렌더 — 공통)
   // ============================================
+  // 마지막 로드된 주문 리스트 — 완료 후 "다른 주문으로" 이동용.
+  // 페이지 리로드(?oid=... 이동)에도 유지되도록 sessionStorage 에 백업.
+  const LAST_ORDERS_KEY = 'bg_last_orders';
+  let lastLoadedOrders = (function() {
+    try {
+      const raw = sessionStorage.getItem(LAST_ORDERS_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed?.orders) ? parsed.orders : null;
+    } catch { return null; }
+  })();
+  let lastLoadedOrdersTitle = (function() {
+    try {
+      const raw = sessionStorage.getItem(LAST_ORDERS_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed?.title || null;
+    } catch { return null; }
+  })();
+
   function renderOrderList(orders, title) {
-    document.getElementById('searchResultCount').textContent = title || ('주문 ' + orders.length + '건');
+    lastLoadedOrders = orders;
+    lastLoadedOrdersTitle = title || null;
+    // 세션에 백업 (selectOrder 리로드 후에도 복원)
+    try {
+      sessionStorage.setItem(LAST_ORDERS_KEY, JSON.stringify({ orders, title: title || null, ts: Date.now() }));
+    } catch (e) { /* quota exceeded 등 무시 */ }
+
+    // 상단 안내 배너 — 입력대기 건수 반영
+    const pendingCnt = orders.filter(o => o.status_seq !== 3 && o.status_seq !== 5 && o.info_status !== 'completed').length;
+    const banner = document.getElementById('orderListBannerSubtitle');
+    if (banner) {
+      if (pendingCnt > 0) {
+        banner.innerHTML = '⏳ 아직 <b class="text-indigo-700">' + pendingCnt + '건</b>이 <b>입력대기</b> 상태예요. 눌러서 정보를 입력해주세요.';
+      } else {
+        banner.innerHTML = '✅ 모든 주문의 입력이 완료됐습니다.';
+      }
+    }
+    // 카운트 헤더 — 제목이 있으면 제목 + 총 건수, 없으면 총 건수만
+    document.getElementById('searchResultCount').textContent = title
+      ? title + ' · 총 ' + orders.length + '건'
+      : '총 ' + orders.length + '건';
     document.getElementById('searchResultList').innerHTML = orders.map(o => {
       const dateStr = o.order_date ? new Date(o.order_date).toLocaleDateString('ko-KR') : '';
-      const amount = (o.total_amount || 0).toLocaleString('ko-KR');
       const isCancelled = o.status_seq === 3 || o.status_seq === 5;
       const isDone = o.info_status === 'completed';
-      const statusBadge = isCancelled
-        ? '<span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-100 text-red-600">취소</span>'
-        : isDone
-          ? '<span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-600">입력완료</span>'
-          : '<span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-700">입력대기</span>';
+      const isPaid = o.payment_status === 'paid';
+      const isPending = o.payment_status === 'pending';
 
-      return '<button onclick="selectOrder(\'' + o.order_id + '\')" ' + (isCancelled ? 'disabled' : '') +
-        ' class="w-full text-left bg-white rounded-xl border border-gray-200 p-4 hover:border-blue-300 transition shadow-sm ' + (isCancelled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer') + '">' +
-        '<div class="flex items-center justify-between mb-1.5">' +
-          '<span class="text-sm font-semibold text-gray-900">' + o.order_number + '</span>' + statusBadge +
+      // 주문상태(결제) 뱃지 + 입력상태 뱃지 를 분리해 둘 다 표시.
+      //   - 취소: 취소 뱃지만
+      //   - 결제대기: 결제대기 뱃지만 (아직 입력 불가 단계)
+      //   - 결제완료 + 미입력: 결제완료 + 입력대기 (2개)
+      //   - 결제완료 + 입력완료: 결제완료 + 입력완료 (2개)
+      const cls = 'inline-block px-2.5 py-1 rounded-full text-[10px] font-bold whitespace-nowrap';
+      const badges = [];
+      if (isCancelled) {
+        badges.push('<span class="' + cls + ' bg-rose-50 text-rose-600">취소</span>');
+      } else if (isPending) {
+        badges.push('<span class="' + cls + ' bg-orange-50 text-orange-700">💳 결제대기</span>');
+      } else {
+        // 결제완료(or unknown 포함) → 결제완료 뱃지 + 입력 상태 뱃지
+        if (isPaid) {
+          badges.push('<span class="' + cls + ' bg-indigo-50 text-indigo-700">💰 결제완료</span>');
+        }
+        if (isDone) {
+          badges.push('<span class="' + cls + ' bg-emerald-50 text-emerald-700">✓ 입력완료</span>');
+        } else {
+          badges.push('<span class="' + cls + ' bg-amber-50 text-amber-700">⏳ 입력대기</span>');
+        }
+      }
+      const statusBadge = badges.join(' ');
+      const priorityBadge = ''; // 별도 '우선' 뱃지는 제거 (결제완료 배지로 대체)
+
+      // 상품명 표시: 대표상품명 + 추가 상품 개수 ("외 n종")
+      //   상품명 앞에 붙은 '[14%할인가]' 같은 태그는 제거해 가독성 확보
+      //   XSS: 상품명은 MSSQL S2_Card 에서 옴 → escape 필수
+      const rawName = (o.product_name || '답례품').replace(/^\[[^\]]+\]\s*/g, '');
+      const cnt = Number(o.product_count) || 1;
+      const productDisplay = cnt > 1
+        ? esc(rawName) + ' <span class="text-slate-400 font-normal">외 ' + (cnt - 1) + '종</span>'
+        : esc(rawName);
+
+      // 카드 하이라이트 — 결제완료 + 미입력 (고객이 바로 입력해야 할 행)
+      const needsInput = isPaid && !isDone && !isCancelled;
+      const cardSurface = isCancelled
+        ? 'surface'
+        : (needsInput ? 'surface ring-2 ring-indigo-500 bg-indigo-50/40 shadow-lifted' : 'surface');
+
+      // XSS: o.customer_name, phone_last4 도 escape. order_id 는 selectOrder 로 넘기니 quote-safe 하게 escape.
+      return '<button onclick="selectOrder(\'' + esc(o.order_id).replace(/\\/g, '\\\\').replace(/\'/g, "\\'") + '\')" ' + (isCancelled ? 'disabled' : '') +
+        ' class="pressable w-full text-left ' + cardSurface + ' p-4 mb-2 transition-all ' +
+        (isCancelled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:-translate-y-0.5 hover:shadow-lifted') + '">' +
+        '<div class="flex items-center justify-between mb-2 gap-1 flex-wrap">' +
+          '<span class="text-[13px] font-bold text-slate-900">' + esc(o.order_number) + '</span>' +
+          '<div class="flex items-center gap-1 flex-wrap">' + statusBadge + priorityBadge + '</div>' +
         '</div>' +
-        '<div class="text-xs text-gray-500 space-y-0.5">' +
-          '<div class="flex justify-between"><span>' + (o.customer_name || '') + (o.phone_last4 ? ' (' + o.phone_last4 + ')' : '') + '</span><span>' + dateStr + '</span></div>' +
-          '<div class="flex justify-between"><span class="text-gray-400">' + (o.product_name || '') + '</span><span class="font-medium text-gray-700">' + amount + '원</span></div>' +
+        '<div class="text-[12px] text-slate-500 space-y-1">' +
+          '<div class="flex justify-between items-center"><span class="font-medium text-slate-700">' + esc(o.customer_name || '') + (o.phone_last4 ? ' <span class="text-slate-400">(' + esc(o.phone_last4) + ')</span>' : '') + '</span><span class="text-slate-400">' + esc(dateStr) + '</span></div>' +
+          '<div class="text-slate-700 font-medium truncate">' + productDisplay + '</div>' +
         '</div></button>';
     }).join('');
-    document.getElementById('searchResults').classList.remove('hidden');
   }
 
   window.searchOrders = async function() {
@@ -1355,8 +2739,6 @@
     if (!phone || !name) { alert('주문자명과 전화번호를 모두 입력해주세요.'); return; }
 
     document.getElementById('searchLoading').classList.remove('hidden');
-    document.getElementById('searchResults').classList.add('hidden');
-    document.getElementById('searchEmpty').classList.add('hidden');
     document.getElementById('searchBtn').disabled = true;
 
     try {
@@ -1365,20 +2747,8 @@
       if (name) params.set('name', name);
       const resp = await fetch(API_BASE + '/api/bg/orders/search?' + params.toString());
       const data = await resp.json();
-      const orders = data.orders || [];
-
       document.getElementById('searchLoading').classList.add('hidden');
-
-      if (!orders.length) {
-        // 검색폼/탭 숨기고 빈 상태 카드만 표시
-        document.getElementById('loginForm').classList.add('hidden');
-        document.getElementById('searchForm').classList.add('hidden');
-        document.querySelectorAll('#searchScreen .flex.border-b').forEach(el => el.classList.add('hidden'));
-        document.getElementById('searchEmpty').classList.remove('hidden');
-        return;
-      }
-
-      renderOrderList(orders);
+      handleOrdersResult(data.orders || []);
     } catch(err) {
       document.getElementById('searchLoading').classList.add('hidden');
       alert(err.message || '검색 중 오류가 발생했습니다.');
@@ -1387,15 +2757,222 @@
     }
   };
 
+  /** 검색 화면으로 복귀 (주문선택 / 빈결과 → 검색입력으로 돌아감) */
   window.goBackToSearch = function() {
-    document.getElementById('searchEmpty').classList.add('hidden');
-    document.getElementById('searchResults').classList.add('hidden');
+    showScreen('searchScreen');
+    // 검색 폼/탭 복원
     document.getElementById('loginForm').classList.remove('hidden');
     document.getElementById('searchForm').classList.remove('hidden');
-    // 탭 복원
-    document.querySelectorAll('#searchScreen .flex.border-b').forEach(el => el.classList.remove('hidden'));
+    document.querySelectorAll('#searchTabStrip').forEach(el => el.classList.remove('hidden'));
     switchSearchTab('login');
   };
+
+  /** 주문선택 화면으로 돌아가기 (로드된 주문 리스트가 있을 때만 사용 가능) */
+  window.goBackToOrderList = function() {
+    if (lastLoadedOrders && lastLoadedOrders.length) {
+      // 리로드된 상태라면 리스트가 아직 렌더 안 됐을 수 있으니 복원
+      const resultCount = document.getElementById('searchResultCount');
+      if (!resultCount || !resultCount.textContent) {
+        renderOrderList(lastLoadedOrders, lastLoadedOrdersTitle);
+      }
+      // URL 에서 oid 제거 → 리프레시해도 완료 주문 화면으로 되돌아가지 않음
+      try {
+        const u = new URL(window.location);
+        u.searchParams.delete('oid');
+        window.history.replaceState({}, '', u.toString());
+      } catch (e) { /* 브라우저 비호환 무시 */ }
+      showScreen('orderListScreen');
+    } else {
+      goBackToSearch();
+    }
+  };
+
+  // ============================================
+  // 제출 완료 주문 — 요약 보기
+  // ============================================
+  /** completedScreen / successScreen 공용 '입력한 정보 확인하기' 핸들러 */
+  let _prevScreenBeforeSummary = 'completedScreen';
+  window.viewSubmittedInfo = function() {
+    // 돌아갈 화면 기억 (success vs completed 분기)
+    _prevScreenBeforeSummary = !document.getElementById('successScreen').classList.contains('hidden')
+      ? 'successScreen' : 'completedScreen';
+    renderSubmittedSummary();
+    showScreen('submittedSummaryScreen');
+    window.scrollTo({ top: 0 });
+  };
+
+  /** 요약 화면 뒤로가기 — 이전에 있던 화면(success/completed) 으로 복귀 */
+  window.backFromSummary = function() {
+    showScreen(_prevScreenBeforeSummary || 'completedScreen');
+  };
+
+  /** 이미 제출된 정보를 orderData.existing_info 기반으로 요약 렌더 */
+  function renderSubmittedSummary() {
+    const info = orderData?.existing_info || {};
+    const products = orderData?.products || [];
+    const headerEl = document.getElementById('summaryHeaderOrderNum');
+    if (headerEl) headerEl.textContent = orderData?.order_number || '';
+
+    const isExpress = !!info.is_express;
+    const expressFee = info.express_fee || 0;
+    const shipDate = info.desired_ship_date;
+    const shipDateLabel = shipDate ? formatDate(shipDate) : '<span class="text-slate-400 font-normal">미입력</span>';
+    const shipTypeLabel = isExpress
+      ? '<span class="text-amber-700 font-semibold">⚡ 빠른출고</span>' + (expressFee > 0 ? ' <span class="text-amber-700">(+' + formatMoney(expressFee) + ')</span>' : '')
+      : '<span class="text-slate-700 font-semibold">📦 일반출고</span> <span class="text-emerald-600">(무료)</span>';
+
+    // 상품별 요약 (sticker_selections 에서 product_code 매칭)
+    const selsByCode = {};
+    (info.sticker_selections || []).forEach(s => {
+      if (s.product_code) selsByCode[s.product_code] = s;
+    });
+
+    // 스티커 id → sticker_code / sticker_name 매핑 (저장된 데이터엔 sticker_code 가 없음)
+    const stickerById = {};
+    (orderData?.available_stickers || []).forEach(function(st) {
+      stickerById[st.id] = st;
+    });
+
+    const productBlocks = products.map(function(p) {
+      const code = p.product_code || '';
+      const s = selsByCode[code] || {};
+      // 저장 데이터: sticker_id + sticker_name (sticker_code 는 없음).
+      // available_stickers 에서 sticker_code 를 조회해 표시 (없어도 이름만 표시).
+      const sticker = s.sticker_id ? stickerById[s.sticker_id] : null;
+      const displayName = s.sticker_name || sticker?.name || '';
+      const displayCode = sticker?.sticker_code || '';
+      const stickerLine = s.sticker_id
+        ? '<div class="flex justify-between text-sm"><span class="text-slate-500">스티커</span><span class="text-slate-900 font-medium">' + esc(displayName || '스티커') + (displayCode ? ' <span class="text-slate-400 font-mono text-[11px]">[' + esc(displayCode) + ']</span>' : '') + '</span></div>'
+        : '<div class="flex justify-between text-sm"><span class="text-slate-500">스티커</span><span class="text-slate-400">선택안함</span></div>';
+      const boxLine = s.box_code
+        ? '<div class="flex justify-between text-sm"><span class="text-slate-500">박스 패키지</span><span class="text-slate-900 font-medium">' + esc(s.box_name || s.box_code) + ' <span class="text-slate-400 font-mono text-[11px]">[' + esc(s.box_code) + ']</span></span></div>'
+        : '';
+      // 고객 입력 문구. 기본 fallback 키 'text' 는 '스티커 문구' 로 치환해서 보여줌.
+      const FIELD_LABEL = { text: '스티커 문구' };
+      const customVals = Object.entries(s.custom_values || {}).filter(function(pair){ return pair[1]; });
+      const customHtml = customVals.length
+        ? '<div class="mt-2 p-3 bg-slate-50 rounded-xl space-y-1.5">' + customVals.map(function(pair){
+            const label = FIELD_LABEL[pair[0]] || pair[0];
+            // XSS: label/value 모두 사용자 입력 가능성 → escape
+            return '<div class="flex justify-between text-xs"><span class="text-slate-500">' + esc(label) + '</span><span class="text-slate-900 font-medium">' + esc(pair[1]) + '</span></div>';
+          }).join('') + '</div>'
+        : '';
+
+      return '<div class="surface p-4 mb-2">'
+        + '<h4 class="text-[14px] font-bold text-slate-900 mb-2">' + esc(p.product_name || '상품') + ' <span class="text-[11px] font-medium text-slate-400">(수량 ' + (Number(p.quantity) || 1) + ')</span></h4>'
+        + '<div class="space-y-1.5">' + boxLine + stickerLine + '</div>'
+        + customHtml
+        + '</div>';
+    }).join('');
+
+    // 결제정보 (추가비용 있을 때만)
+    let paymentHtml = '';
+    if (expressFee > 0) {
+      const receipt = info.cash_receipt_yn
+        ? (RECEIPT_TYPES[info.receipt_type] || '') + ' ' + (info.receipt_number || '')
+        : '미신청';
+      paymentHtml = '<div class="surface p-4 mb-2">'
+        + '<h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">결제정보</h3>'
+        + '<div class="space-y-1.5 text-sm">'
+        +   '<div class="flex justify-between"><span class="text-slate-500">추가 결제금액</span><span class="font-bold text-amber-700">' + formatMoney(expressFee) + '</span></div>'
+        +   '<div class="flex justify-between"><span class="text-slate-500">현금영수증</span><span class="text-slate-900 font-medium">' + esc(receipt) + '</span></div>'
+        + '</div>'
+        + '</div>';
+    }
+
+    // 요청사항 (있을 때만). XSS: 관리자 입력 텍스트지만 방어적으로 escape.
+    const requestHtml = info.customer_request
+      ? '<div class="surface p-4 mb-2">'
+        + '<h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">요청사항</h3>'
+        + '<p class="text-sm text-slate-900 whitespace-pre-wrap leading-relaxed">' + esc(info.customer_request) + '</p>'
+        + '</div>'
+      : '';
+
+    const content = document.getElementById('submittedSummaryContent');
+    content.innerHTML = ''
+      + '<div class="fade-in">'
+      + '<div class="surface p-4 mb-2">'
+      +   '<h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">희망 출고일</h3>'
+      +   '<p class="text-[14px] font-semibold text-slate-900">📅 ' + shipDateLabel + '</p>'
+      +   '<p class="text-[12px] mt-1">' + shipTypeLabel + '</p>'
+      + '</div>'
+      + (productBlocks ? '<div class="mt-3"><h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">상품별 정보</h3>' + productBlocks + '</div>' : '')
+      + (paymentHtml ? '<div class="mt-3">' + paymentHtml + '</div>' : '')
+      + (requestHtml ? '<div class="mt-3">' + requestHtml + '</div>' : '')
+      + '<div class="mt-6 p-4 bg-slate-50 rounded-2xl text-xs text-slate-500 leading-relaxed">'
+      +   '<p class="font-semibold text-slate-600 mb-1">수정이 필요하신가요?</p>'
+      +   '<p>고객센터로 연락주시면 도와드리겠습니다.</p>'
+      +   '<p class="mt-2">📞 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a> · 💬 <a href="https://open.kakao.com/o/s4RMIwni" target="_blank" class="font-semibold" style="color: var(--brand-600)">오픈채팅</a></p>'
+      + '</div>'
+      + '</div>';
+  }
+
+  /**
+   * 방금 제출한 주문의 info_status 를 lastLoadedOrders 에 반영.
+   * 주문선택 화면 재진입시 해당 주문이 '입력완료' 로 보이도록 stale 상태 갱신.
+   */
+  function markOrderCompletedInList(orderId) {
+    if (!lastLoadedOrders || !orderId) return;
+    let changed = false;
+    lastLoadedOrders = lastLoadedOrders.map(o => {
+      if (o.order_id === orderId && o.info_status !== 'completed') {
+        changed = true;
+        return { ...o, info_status: 'completed' };
+      }
+      return o;
+    });
+    if (changed) {
+      try {
+        sessionStorage.setItem(LAST_ORDERS_KEY, JSON.stringify({
+          orders: lastLoadedOrders,
+          title: lastLoadedOrdersTitle,
+          ts: Date.now(),
+        }));
+      } catch (e) { /* quota 등 무시 */ }
+      // 리스트가 이미 렌더되어 있다면 다시 렌더
+      const list = document.getElementById('searchResultList');
+      if (list && list.children.length > 0) {
+        renderOrderList(lastLoadedOrders, lastLoadedOrdersTitle);
+      }
+    }
+  }
+
+  /**
+   * 완료/성공 화면의 버튼 토글.
+   * - '남은 주문 n건 입력하기' (attention-cta): 현재 주문 말고 입력대기 주문 있을 때
+   * - '주문 선택 화면으로' (secondary): 로드된 주문 목록이 1건 이상일 때 (항상 가능)
+   */
+  function toggleBackToListButtons() {
+    const currentOid = orderData?.order_id;
+    let pendingOthers = [];
+    if (lastLoadedOrders && lastLoadedOrders.length > 1) {
+      // 현재 주문 제외 + 취소 제외 + 아직 입력 안된 주문만 카운트
+      pendingOthers = lastLoadedOrders.filter(function(o) {
+        return o.order_id !== currentOid
+          && o.status_seq !== 3 && o.status_seq !== 5
+          && o.info_status !== 'completed';
+      });
+    }
+    const showAttention = pendingOthers.length > 0;
+    const attentionLabel = showAttention
+      ? '🎁 남은 답례품 주문 <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/90 text-indigo-600 font-black text-[11px] mx-1 align-middle">' + pendingOthers.length + '</span>건도 입력하기 →'
+      : '';
+    // 주의 환기용 CTA (남은 입력대기 주문 있을 때만)
+    ['completedBackToListBtn', 'successBackToListBtn'].forEach(function(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.toggle('hidden', !showAttention);
+      if (showAttention) el.innerHTML = attentionLabel;
+    });
+    // 일반 '주문 선택 화면으로' — 로드된 주문 목록이 있고, attention-cta 가 노출되지
+    // 않을 때(중복 방지) 만 노출. 단, 주문 1건만 있는 경우는 이동해도 목록 1개 뿐이라 숨김.
+    const hasLoadedList = !!(lastLoadedOrders && lastLoadedOrders.length > 1);
+    const showGoList = hasLoadedList && !showAttention;
+    ['completedGoListBtn', 'successGoListBtn'].forEach(function(id) {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('hidden', !showGoList);
+    });
+  }
 
   window.selectOrder = function(orderId) {
     // URL을 변경하여 해당 주문으로 이동
@@ -1408,6 +2985,42 @@
   document.getElementById('searchPhone')?.addEventListener('keydown', e => { if (e.key === 'Enter') searchOrders(); });
   document.getElementById('searchName')?.addEventListener('keydown', e => { if (e.key === 'Enter') searchOrders(); });
 
+  /** 결제대기 화면 채우기 — 주문별 가상계좌(virtual_account) 우선 */
+  function fillPaymentPendingScreen() {
+    // 1순위: 주문별 발급된 가상계좌 (결제대기 상태에서 제공됨)
+    // 2순위(폴백): 고정 계좌 (가상계좌 정보가 없을 때만)
+    const va = orderData?.virtual_account;
+    const bank = va || orderData?.bank_info || {};
+    const amount = va?.amount || orderData?.total_amount || 0;
+
+    const $amountBox = document.getElementById('paymentPendingAmount');
+    const $amountVal = document.getElementById('paymentPendingAmountValue');
+    const $bank = document.getElementById('paymentPendingBank');
+    const $acct = document.getElementById('paymentPendingAccount');
+    const $holder = document.getElementById('paymentPendingHolder');
+    const $due = document.getElementById('paymentPendingDueDate');
+
+    if ($bank) $bank.textContent = bank.bank_name || '-';
+    if ($acct) $acct.textContent = bank.account_number || '-';
+    if ($holder) $holder.textContent = bank.account_holder || '-';
+
+    if (amount > 0 && $amountBox && $amountVal) {
+      $amountVal.textContent = formatMoney(amount);
+      $amountBox.classList.remove('hidden');
+    }
+
+    // 입금 기한 표시 (가상계좌인 경우만)
+    if ($due) {
+      if (va?.due_date) {
+        const dueStr = String(va.due_date).replace('T', ' ').slice(0, 16);
+        $due.textContent = `입금 기한: ${dueStr}까지`;
+        $due.classList.remove('hidden');
+      } else {
+        $due.classList.add('hidden');
+      }
+    }
+  }
+
   async function init() {
     const orderId = getOrderId();
     if (!orderId) {
@@ -1418,8 +3031,23 @@
     try {
       orderData = await fetchOrder(orderId);
 
+      // 결제대기 상태: 입금 안내 화면으로 직행
+      // (서버에서 settle_status/settle_date 기반으로 계산한 payment_status 사용)
+      if (orderData.payment_status === 'pending') {
+        fillPaymentPendingScreen();
+        // 주문 목록이 로드된 상태라면 '주문 선택 화면으로' 버튼 노출
+        const goListBtn = document.getElementById('paymentPendingGoListBtn');
+        if (goListBtn) {
+          const showBtn = !!(lastLoadedOrders && lastLoadedOrders.length >= 1);
+          goListBtn.classList.toggle('hidden', !showBtn);
+        }
+        showScreen('paymentPendingScreen');
+        return;
+      }
+
       // Already completed check
       if (orderData.info_status === 'completed') {
+        toggleBackToListButtons();
         showScreen('completedScreen');
         return;
       }
@@ -1427,12 +3055,12 @@
       // Restore saved form state
       loadFormState();
 
-      // Initialize per-product form state
+      // Initialize per-product form state — 기본값: 첫번째 매칭 스티커 선택 + 직접입력
       if (!formState.products) formState.products = {};
       (orderData.products || []).forEach(function(_, i) {
         const key = String(i);
         if (!formState.products[key]) {
-          formState.products[key] = { desired_ship_date: null, sticker_type: null, sticker_input: 'none', sticker_fields: {} };
+          formState.products[key] = makeDefaultProductEntry(i);
         }
       });
 

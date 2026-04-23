@@ -74,6 +74,17 @@ async function sbUpdate(table, filter, data) {
   return rows[0] || null;
 }
 
+async function sbDelete(table, filter) {
+  const res = await fetch(`${REST_BASE}/${table}?${filter}`, {
+    method: 'DELETE',
+    headers: HEADERS,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase DELETE ${table} [${res.status}]: ${text}`);
+  }
+}
+
 // ============================================
 // JSON 파일 폴백 (개발용)
 // ============================================
@@ -223,6 +234,8 @@ async function upsertProductSettings(productId, data) {
     notice_enabled: data.notice_enabled ?? false,
     notice_text: data.notice_text ?? '',
     available_sticker_ids: data.available_sticker_ids ?? [],
+    available_box_options: data.available_box_options ?? [],
+    shipping_group_id: data.shipping_group_id ?? null,
     express_available: data.express_available ?? (data.shipping_type === 'today_shipping'),
     express_fee: data.express_fee ?? 0,
     express_cutoff_time: data.express_cutoff_time ?? `${String(data.cutoff_hour ?? 14).padStart(2,'0')}:${String(data.cutoff_minute ?? 0).padStart(2,'0')}`,
@@ -240,8 +253,7 @@ async function upsertProductSettings(productId, data) {
 
 async function deleteProductSettings(productId) {
   if (USE_SUPABASE) {
-    const url = `${SB_URL}/rest/v1/bg_product_settings?product_id=eq.${encodeURIComponent(productId)}`;
-    await fetch(url, { method: 'DELETE', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY } });
+    await sbDelete('bg_product_settings', `product_id=eq.${encodeURIComponent(productId)}`);
     return;
   }
   let settings = readJson(FILES.productSettings, []);
@@ -289,10 +301,25 @@ async function saveCustomerInfo(orderId, data) {
     cash_receipt_yn: data.cash_receipt_yn || false,
     receipt_type: data.receipt_type || null,
     receipt_number: data.receipt_number || null,
+    customer_request: data.customer_request || null,
     submitted_at: now(),
   };
 
-  if (USE_SUPABASE) return sbInsert('bg_order_customer_info', info);
+  if (USE_SUPABASE) {
+    // migration 미적용 환경 대응: 스키마에 없는 컬럼 오류(PGRST204) 발생 시
+    // 해당 컬럼을 제거하고 재시도. 데이터 일부 손실되지만 제출 자체는 성공
+    try {
+      return await sbInsert('bg_order_customer_info', info);
+    } catch (err) {
+      const m = err.message && err.message.match(/Could not find the '(\w+)' column/);
+      if (m) {
+        console.warn(`[saveCustomerInfo] 스키마에 '${m[1]}' 컬럼 없음 - 해당 필드 제거 후 재시도. migration 적용 필요.`);
+        const { [m[1]]: _, ...retry } = info;
+        return sbInsert('bg_order_customer_info', retry);
+      }
+      throw err;
+    }
+  }
 
   const infos = readJson(FILES.customerInfo, []);
   const local = { id: uuid(), ...info, created_at: now() };
@@ -302,8 +329,236 @@ async function saveCustomerInfo(orderId, data) {
 }
 
 async function getAllCustomerInfos() {
-  if (USE_SUPABASE) return sbGet('bg_order_customer_info');
-  return readJson(FILES.customerInfo, []);
+  if (USE_SUPABASE) return sbGet('bg_order_customer_info', 'order=submitted_at.desc');
+  const infos = readJson(FILES.customerInfo, []);
+  return [...infos].sort((a, b) => (b.submitted_at || '').localeCompare(a.submitted_at || ''));
+}
+
+/**
+ * 관리자 upsert. 기존 레코드 있으면 PATCH, 없으면 INSERT (고객이 아직 입력 안 한
+ * 주문에 관리자가 수동 입력할 때 사용). 고객이 직접 제출하는 POST 경로와 달리
+ * ALREADY_SUBMITTED 체크 없이 덮어쓰기.
+ */
+async function updateCustomerInfo(orderId, data) {
+  const allowed = ['desired_ship_date', 'is_express', 'express_fee', 'sticker_selections', 'cash_receipt_yn', 'receipt_type', 'receipt_number', 'customer_request'];
+  const patch = {};
+  for (const k of allowed) { if (k in data) patch[k] = data[k]; }
+  patch.updated_at = now();
+
+  const existing = await getCustomerInfo(orderId);
+
+  if (USE_SUPABASE) {
+    if (existing) {
+      return sbUpdate('bg_order_customer_info', `order_id=eq.${encodeURIComponent(orderId)}`, patch);
+    }
+    // INSERT 경로: 필수 필드 기본값 채움
+    const insert = {
+      order_id: orderId,
+      is_express: data.is_express || false,
+      express_fee: data.express_fee || 0,
+      desired_ship_date: data.desired_ship_date || null,
+      sticker_selections: data.sticker_selections || [],
+      cash_receipt_yn: data.cash_receipt_yn || false,
+      receipt_type: data.receipt_type || null,
+      receipt_number: data.receipt_number || null,
+      customer_request: data.customer_request || null,
+      submitted_at: now(),
+    };
+    // migration 미적용 대응
+    try {
+      return await sbInsert('bg_order_customer_info', insert);
+    } catch (err) {
+      const m = err.message && err.message.match(/Could not find the '(\w+)' column/);
+      if (m) {
+        console.warn(`[updateCustomerInfo] 스키마에 '${m[1]}' 컬럼 없음 - 제거 후 재시도`);
+        const { [m[1]]: _, ...retry } = insert;
+        return sbInsert('bg_order_customer_info', retry);
+      }
+      throw err;
+    }
+  }
+
+  // 로컬 JSON fallback
+  const infos = readJson(FILES.customerInfo, []);
+  const idx = infos.findIndex(i => i.order_id === orderId);
+  if (idx === -1) {
+    const insert = {
+      order_id: orderId,
+      is_express: data.is_express || false,
+      express_fee: data.express_fee || 0,
+      desired_ship_date: data.desired_ship_date || null,
+      sticker_selections: data.sticker_selections || [],
+      cash_receipt_yn: data.cash_receipt_yn || false,
+      receipt_type: data.receipt_type || null,
+      receipt_number: data.receipt_number || null,
+      customer_request: data.customer_request || null,
+      submitted_at: now(),
+      updated_at: patch.updated_at,
+    };
+    infos.push(insert);
+    writeJson(FILES.customerInfo, infos);
+    return insert;
+  }
+  infos[idx] = { ...infos[idx], ...patch };
+  writeJson(FILES.customerInfo, infos);
+  return infos[idx];
+}
+
+/** 고객 입력 초기화 (삭제) — 잘못 제출한 고객이 재입력 할 수 있게 */
+async function deleteCustomerInfo(orderId) {
+  if (USE_SUPABASE) {
+    await sbDelete('bg_order_customer_info', `order_id=eq.${encodeURIComponent(orderId)}`);
+    return;
+  }
+  let infos = readJson(FILES.customerInfo, []);
+  const before = infos.length;
+  infos = infos.filter(i => i.order_id !== orderId);
+  if (infos.length === before) throw new Error('NOT_FOUND');
+  writeJson(FILES.customerInfo, infos);
+}
+
+// ============================================
+// 후공정 처리 상태 (processed_at / processed_by)
+// 관리자가 스프레드시트에 복사해 후공정 진행했음을 추적.
+// ============================================
+
+/**
+ * 특정 주문의 처리 상태 토글.
+ * @param {string} orderId
+ * @param {{processed: boolean, processed_by?: string}} data
+ *   processed=true  → processed_at = now(), processed_by 세팅
+ *   processed=false → processed_at = NULL, processed_by = NULL (되돌리기)
+ */
+async function setProcessed(orderId, data) {
+  const wantProcessed = !!data.processed;
+  const patch = wantProcessed
+    ? { processed_at: now(), processed_by: data.processed_by || null }
+    : { processed_at: null, processed_by: null };
+
+  if (USE_SUPABASE) {
+    const existing = await sbGet('bg_order_customer_info', `order_id=eq.${encodeURIComponent(orderId)}`);
+    if (!existing || !existing.length) throw new Error('NOT_FOUND');
+    try {
+      return await sbUpdate('bg_order_customer_info', `order_id=eq.${encodeURIComponent(orderId)}`, patch);
+    } catch (err) {
+      const m = err.message && err.message.match(/Could not find the '(\w+)' column/);
+      if (m) {
+        console.warn(`[setProcessed] 스키마에 '${m[1]}' 컬럼 없음 — migration 011 적용 필요`);
+        throw new Error('PROCESSED_COLUMN_MISSING');
+      }
+      throw err;
+    }
+  }
+  const infos = readJson(FILES.customerInfo, []);
+  const idx = infos.findIndex(i => i.order_id === orderId);
+  if (idx === -1) throw new Error('NOT_FOUND');
+  infos[idx] = { ...infos[idx], ...patch };
+  writeJson(FILES.customerInfo, infos);
+  return infos[idx];
+}
+
+/**
+ * 여러 주문 일괄 처리 마킹 (수집복사 버튼 연동용).
+ * @param {string[]} orderIds
+ * @param {{processed: boolean, processed_by?: string}} data
+ * @returns {{ok: number, fail: number, errors: Array<{order_id, error}>}}
+ */
+async function setProcessedBatch(orderIds, data) {
+  const unique = [...new Set(orderIds.filter(Boolean))];
+  let ok = 0, fail = 0;
+  const errors = [];
+  for (const oid of unique) {
+    try { await setProcessed(oid, data); ok++; }
+    catch (e) { fail++; errors.push({ order_id: oid, error: e.message }); }
+  }
+  return { ok, fail, errors };
+}
+
+// ============================================
+// 주문조회 '수집완료' 상태 (bg_order_collected)
+// 답례품/데코소품/꽃다발 주문조회 페이지에서 마킹하는 수집 상태.
+// 기존 로컬 파일(collected.json) 에서 Supabase 로 이전 (migration 012).
+// ============================================
+
+/**
+ * 전체 수집완료 order_seq 목록 조회.
+ * Supabase 미설정 모드: 빈 배열 반환 (서버에선 호출 안 함).
+ * Supabase 오류(네트워크/테이블 미존재 등): throw → 호출측 server.js 가 파일 폴백.
+ */
+async function getCollectedOrderSeqs() {
+  if (!USE_SUPABASE) return [];
+  // sbGet 이 기본으로 select=* 를 붙이므로 table 만 넘기고 컬럼은 * 그대로 받음.
+  const rows = await sbGet('bg_order_collected');
+  return Array.isArray(rows) ? rows.map(r => r.order_seq).filter(Boolean) : [];
+}
+
+/**
+ * 다건 수집완료 마킹. category='daeryepum'|'deco'|'flower' 옵션.
+ *
+ * 방어:
+ *   - 빈/null/undefined/공백 order_seq 제거
+ *   - 중복 order_seq 제거 (Postgres ON CONFLICT 가 같은 요청 내 중복 키에서 실패함)
+ */
+async function addCollectedOrderSeqs(orderSeqs, { category, collectedBy } = {}) {
+  // 1) 정규화 → 빈값 제거 → 중복 제거
+  const list = [...new Set(
+    (orderSeqs || [])
+      .map(v => (v == null ? '' : String(v).trim()))
+      .filter(Boolean)
+  )];
+  if (!list.length) return { added: 0 };
+  if (!USE_SUPABASE) {
+    throw new Error('LOCAL_MODE_NOT_SUPPORTED');
+  }
+  // Supabase UPSERT — 이미 있으면 collected_at/by 갱신 (on_conflict 지원)
+  const now_ = now();
+  const rows = list.map(seq => ({
+    order_seq: seq,
+    collected_at: now_,
+    collected_by: collectedBy || null,
+    category: category || null,
+  }));
+  // POST /rest/v1/bg_order_collected?on_conflict=order_seq
+  // Prefer: resolution=merge-duplicates
+  const url = `${REST_BASE}/bg_order_collected?on_conflict=order_seq`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      ...HEADERS,
+      Prefer: 'resolution=merge-duplicates,return=minimal',
+    },
+    body: JSON.stringify(rows),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase UPSERT bg_order_collected [${res.status}] rows=${list.length}: ${text}`);
+  }
+  return { added: list.length };
+}
+
+/** 다건 수집해제 */
+async function removeCollectedOrderSeqs(orderSeqs) {
+  const list = [...new Set(
+    (orderSeqs || [])
+      .map(v => (v == null ? '' : String(v).trim()))
+      .filter(Boolean)
+  )];
+  if (!list.length) return { removed: 0 };
+  if (!USE_SUPABASE) {
+    throw new Error('LOCAL_MODE_NOT_SUPPORTED');
+  }
+  // DELETE /rest/v1/bg_order_collected?order_seq=in.("a","b","c")
+  const inList = list.map(s => `"${encodeURIComponent(s)}"`).join(',');
+  const url = `${REST_BASE}/bg_order_collected?order_seq=in.(${inList})`;
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: { ...HEADERS, Prefer: 'return=minimal' },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase DELETE bg_order_collected [${res.status}] rows=${list.length}: ${text}`);
+  }
+  return { removed: list.length };
 }
 
 // ============================================
@@ -318,6 +573,7 @@ const DEFAULT_SHIPPING_CONFIG = {
   lead_time_days: 2,
   min_select_days: 3,
   max_select_days: 60,
+  express_fee: 0,
   closed_weekdays: [0, 6],
   closed_dates: [],
   date_required: true,
@@ -325,14 +581,129 @@ const DEFAULT_SHIPPING_CONFIG = {
   notice_text: '',
 };
 
-function getShippingConfig() {
+// 단일 row 식별 ID — '기본 그룹' 의 고정 UUID (레거시 호환)
+const SHIPPING_CONFIG_ID = '00000000-0000-0000-0000-000000000001';
+
+/** 전체 그룹 목록 조회 (is_default=true 가 최상단) */
+async function getShippingGroups() {
+  if (USE_SUPABASE) {
+    try {
+      const rows = await sbGet('bg_shipping_config', 'order=is_default.desc,created_at.asc');
+      if (Array.isArray(rows)) {
+        return rows.map(r => ({ ...DEFAULT_SHIPPING_CONFIG, ...r }));
+      }
+    } catch (e) {
+      console.warn('[store] bg_shipping_config list 실패:', e.message);
+    }
+  }
+  // JSON 폴백 — 단일 row 를 기본 그룹으로 취급
+  const single = readJson(FILES.shippingConfig, DEFAULT_SHIPPING_CONFIG);
+  return [{
+    id: SHIPPING_CONFIG_ID, name: '기본 그룹', is_default: true, ...single,
+  }];
+}
+
+/** 특정 그룹 조회 (id 또는 '기본'). 없으면 기본 그룹 fallback. */
+async function getShippingConfig(idOrNull) {
+  const wantId = idOrNull || null;
+  if (USE_SUPABASE) {
+    try {
+      // 명시 id 조회 → 실패시 default 조회
+      if (wantId) {
+        const rows = await sbGet('bg_shipping_config', `id=eq.${encodeURIComponent(wantId)}`);
+        if (rows && rows[0]) return { ...DEFAULT_SHIPPING_CONFIG, ...rows[0] };
+      }
+      const defRows = await sbGet('bg_shipping_config', 'is_default=eq.true&limit=1');
+      if (defRows && defRows[0]) return { ...DEFAULT_SHIPPING_CONFIG, ...defRows[0] };
+      // 폴백: 레거시 고정 ID
+      const legacy = await sbGet('bg_shipping_config', `id=eq.${SHIPPING_CONFIG_ID}`);
+      if (legacy && legacy[0]) return { ...DEFAULT_SHIPPING_CONFIG, ...legacy[0] };
+      return DEFAULT_SHIPPING_CONFIG;
+    } catch (e) {
+      console.warn('[store] bg_shipping_config fetch 실패, JSON 폴백:', e.message);
+    }
+  }
   return readJson(FILES.shippingConfig, DEFAULT_SHIPPING_CONFIG);
 }
 
-function saveShippingConfig(data) {
-  const config = { ...getShippingConfig(), ...data, updated_at: now() };
-  writeJson(FILES.shippingConfig, config);
-  return config;
+/**
+ * 그룹 저장 (업데이트 전용 — 기본 그룹 또는 특정 그룹).
+ * id 가 없으면 default 그룹을 업데이트. 기존 호환 경로.
+ */
+async function saveShippingConfig(data, idOrNull) {
+  const targetId = idOrNull || null;
+  const current = await getShippingConfig(targetId);
+  const merged = { ...current, ...data, updated_at: now() };
+
+  if (USE_SUPABASE) {
+    try {
+      const filter = targetId
+        ? `id=eq.${encodeURIComponent(targetId)}`
+        : 'is_default=eq.true';
+      const existing = await sbGet('bg_shipping_config', filter);
+      if (existing && existing.length) {
+        const { id: _id, created_at, ...updateData } = merged;
+        return await sbUpdate('bg_shipping_config', filter, updateData);
+      }
+      // 기본 그룹이 없으면 레거시 고정 ID 로 생성
+      return await sbInsert('bg_shipping_config', {
+        id: targetId || SHIPPING_CONFIG_ID,
+        name: merged.name || '기본 그룹',
+        is_default: !targetId,
+        ...merged,
+      });
+    } catch (e) {
+      console.warn('[store] bg_shipping_config save 실패, JSON 폴백:', e.message);
+    }
+  }
+  writeJson(FILES.shippingConfig, merged);
+  return merged;
+}
+
+/** 새 그룹 생성 (is_default 는 항상 false) */
+async function createShippingGroup(data) {
+  const name = (data.name || '').trim();
+  if (!name) throw new Error('그룹 이름이 필요합니다.');
+  const row = {
+    ...DEFAULT_SHIPPING_CONFIG,
+    ...data,
+    name,
+    is_default: false,
+    created_at: now(),
+    updated_at: now(),
+  };
+  if (USE_SUPABASE) {
+    try {
+      return await sbInsert('bg_shipping_config', row);
+    } catch (e) {
+      console.warn('[store] createShippingGroup 실패:', e.message);
+      throw e;
+    }
+  }
+  throw new Error('로컬 JSON 모드에서는 그룹 생성 미지원 — Supabase 환경변수 설정 필요');
+}
+
+/** 그룹 삭제 (기본 그룹은 삭제 불가). 삭제 전에 해당 그룹을 쓰는 상품이 있으면 에러. */
+async function deleteShippingGroup(id) {
+  if (!id) throw new Error('그룹 id 가 필요합니다.');
+  if (id === SHIPPING_CONFIG_ID) throw new Error('기본 그룹은 삭제할 수 없습니다.');
+  if (USE_SUPABASE) {
+    // is_default=true 는 삭제 금지
+    const target = await sbGet('bg_shipping_config', `id=eq.${encodeURIComponent(id)}`);
+    if (!target || !target[0]) throw new Error('존재하지 않는 그룹입니다.');
+    if (target[0].is_default) throw new Error('기본 그룹은 삭제할 수 없습니다.');
+
+    // 사용 중인 상품 확인
+    const usingProducts = await sbGet('bg_product_settings', `shipping_group_id=eq.${encodeURIComponent(id)}&select=product_id&limit=5`);
+    if (usingProducts && usingProducts.length) {
+      const codes = usingProducts.map(p => p.product_id).join(', ');
+      throw new Error(`이 그룹을 사용하는 상품이 있어 삭제할 수 없습니다: ${codes}`);
+    }
+
+    await sbDelete('bg_shipping_config', `id=eq.${encodeURIComponent(id)}`);
+    return;
+  }
+  throw new Error('로컬 JSON 모드에서는 그룹 삭제 미지원');
 }
 
 // ============================================
@@ -415,8 +786,18 @@ module.exports = {
   getCustomerInfoBatch,
   saveCustomerInfo,
   getAllCustomerInfos,
+  updateCustomerInfo,
+  deleteCustomerInfo,
+  setProcessed,
+  setProcessedBatch,
+  getCollectedOrderSeqs,
+  addCollectedOrderSeqs,
+  removeCollectedOrderSeqs,
   getShippingConfig,
   saveShippingConfig,
+  getShippingGroups,
+  createShippingGroup,
+  deleteShippingGroup,
   logAlimtalkSend,
   getAlimtalkHistory,
 };
