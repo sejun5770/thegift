@@ -264,6 +264,10 @@
       "464b220a-96a5-4757-89f2-fd16ed0cd15d",
       "df07e3f0-f11f-4c64-aabc-fe9cb6d6125c"
     ],
+    "available_box_options": [
+      { "code": "TGIKX01B1", "name": "블랙", "color": "#1F2937", "preview_image_url": "https://xshhhczmboeuoexuprhv.supabase.co/storage/v1/object/public/bg-box-previews/TGIKX01B1.png", "sold_out": false },
+      { "code": "TGIKX01B2", "name": "화이트", "color": "#FFFFFF", "preview_image_url": "https://xshhhczmboeuoexuprhv.supabase.co/storage/v1/object/public/bg-box-previews/TGIKX01B2.png", "sold_out": false }
+    ],
     "express_available": false,
     "express_fee": 0,
     "express_cutoff_time": "14:00",
@@ -408,6 +412,10 @@
     "notice_enabled": false,
     "notice_text": "",
     "available_sticker_ids": [],
+    "available_box_options": [
+      { "code": "TGJSD04B1", "name": "화이트", "color": "#FFFFFF", "preview_image_url": "https://xshhhczmboeuoexuprhv.supabase.co/storage/v1/object/public/bg-box-previews/TGJSD04B1.jpg", "sold_out": false },
+      { "code": "TGJSD04B2", "name": "블루", "color": "#1E40AF", "preview_image_url": "https://xshhhczmboeuoexuprhv.supabase.co/storage/v1/object/public/bg-box-previews/TGJSD04B2.jpg", "sold_out": false }
+    ],
     "express_available": false,
     "express_fee": 0,
     "express_cutoff_time": "14:00",
