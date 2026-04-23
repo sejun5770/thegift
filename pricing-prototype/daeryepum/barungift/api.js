@@ -884,6 +884,7 @@ async function searchDaeryepumOrders(pool, sql, opts) {
     SELECT DISTINCT TOP 20
       co.order_seq, co.order_date, co.order_name, co.order_hphone,
       co.order_total_price, co.last_total_price, co.status_seq,
+      co.settle_status, co.settle_date,
       (SELECT TOP 1 c2.Card_Name FROM custom_order_item coi2 WITH (NOLOCK)
        INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
        WHERE coi2.order_seq = co.order_seq
@@ -935,6 +936,19 @@ async function searchDaeryepumOrders(pool, sql, opts) {
     ORDER BY co.order_date DESC
   `);
 
+  // 결제상태 계산 헬퍼 (고객 상세 API 로직과 일치)
+  //   CARD : settle_status 2=완료, 1=대기, 3·5=취소
+  //   ETC  : settle_status 컬럼 없음 → settle_date 유무로 판정
+  function calcCardPaymentStatus(r) {
+    if (r.settle_status === 2) return 'paid';
+    if (r.settle_status === 1) return 'pending';
+    if (r.settle_status === 3 || r.settle_status === 5) return 'cancelled';
+    return 'unknown';
+  }
+  function calcEtcPaymentStatus(r) {
+    return r.settle_date ? 'paid' : 'pending';
+  }
+
   // 병합 + 정렬
   const combined = [
     ...cardResult.recordset.map(r => ({
@@ -947,6 +961,7 @@ async function searchDaeryepumOrders(pool, sql, opts) {
       product_name: r.card_name || '답례품',
       product_count: r.product_count || 1, // DISTINCT D01 상품 개수
       status_seq: r.status_seq,
+      payment_status: calcCardPaymentStatus(r), // 'paid' | 'pending' | 'cancelled' | 'unknown'
       source: 'card',
     })),
     ...etcResult.recordset.map(r => ({
@@ -959,6 +974,7 @@ async function searchDaeryepumOrders(pool, sql, opts) {
       product_name: r.card_name || '답례품',
       product_count: r.product_count || 1,
       status_seq: r.status_seq,
+      payment_status: calcEtcPaymentStatus(r),
       source: 'etc',
     })),
   ].sort((a, b) => new Date(b.order_date) - new Date(a.order_date));

@@ -471,8 +471,13 @@
 
     <p class="text-[12px] text-slate-500 mb-3">입금 확인 후 별도 안내를 드립니다.</p>
 
-    <button onclick="window.location.reload()" class="btn-primary pressable w-full py-3 rounded-2xl text-sm mb-3">
+    <button onclick="window.location.reload()" class="btn-primary pressable w-full py-3 rounded-2xl text-sm mb-2">
       🔄 결제 상태 새로고침
+    </button>
+
+    <!-- 주문 선택 화면으로 (로드된 주문 목록이 있을 때만) -->
+    <button id="paymentPendingGoListBtn" onclick="goBackToOrderList()" class="hidden btn pressable w-full py-3 rounded-2xl text-sm font-semibold mb-3" style="border:1px solid var(--gray-300);color:var(--gray-700);background:#fff">
+      📋 주문 선택 화면으로
     </button>
 
     <div class="text-[11px] text-slate-400 space-y-0.5">
@@ -2631,11 +2636,26 @@
       const dateStr = o.order_date ? new Date(o.order_date).toLocaleDateString('ko-KR') : '';
       const isCancelled = o.status_seq === 3 || o.status_seq === 5;
       const isDone = o.info_status === 'completed';
-      const statusBadge = isCancelled
-        ? '<span class="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-600">취소</span>'
-        : isDone
-          ? '<span class="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700">✓ 입력완료</span>'
-          : '<span class="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700">⏳ 입력대기</span>';
+      const isPaid = o.payment_status === 'paid';
+      const isPending = o.payment_status === 'pending';
+
+      // 상태 뱃지 — 취소 > 입력완료 > 결제대기 > 입력대기 순 우선순위
+      let statusBadge;
+      if (isCancelled) {
+        statusBadge = '<span class="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-600">취소</span>';
+      } else if (isDone) {
+        statusBadge = '<span class="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700">✓ 입력완료</span>';
+      } else if (isPending) {
+        statusBadge = '<span class="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold bg-orange-50 text-orange-700">💳 결제대기</span>';
+      } else {
+        statusBadge = '<span class="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700">⏳ 입력대기</span>';
+      }
+
+      // 결제완료 + 아직 미입력 주문은 고객이 '바로 입력해야 할' 행 — 하이라이트
+      const isPriority = isPaid && !isDone && !isCancelled;
+      const priorityBadge = isPriority
+        ? '<span class="inline-block px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-600 text-white ml-1" title="결제가 완료되어 입력 가능한 주문">💰 결제완료</span>'
+        : '';
 
       // 상품명 표시: 대표상품명 + 추가 상품 개수 ("외 n종")
       //   상품명 앞에 붙은 '[14%할인가]' 같은 태그는 제거해 가독성 확보
@@ -2645,11 +2665,17 @@
         ? rawName + ' <span class="text-slate-400 font-normal">외 ' + (cnt - 1) + '종</span>'
         : rawName;
 
+      // 카드 테두리/배경 — 결제완료(입력대기) 하이라이트
+      const cardSurface = isCancelled
+        ? 'surface'
+        : (isPriority ? 'surface ring-2 ring-indigo-500 bg-indigo-50/40 shadow-lifted' : 'surface');
+
       return '<button onclick="selectOrder(\'' + o.order_id + '\')" ' + (isCancelled ? 'disabled' : '') +
-        ' class="pressable w-full text-left surface p-4 mb-2 transition-all ' +
+        ' class="pressable w-full text-left ' + cardSurface + ' p-4 mb-2 transition-all ' +
         (isCancelled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:-translate-y-0.5 hover:shadow-lifted') + '">' +
-        '<div class="flex items-center justify-between mb-2">' +
-          '<span class="text-[13px] font-bold text-slate-900">' + o.order_number + '</span>' + statusBadge +
+        '<div class="flex items-center justify-between mb-2 gap-1 flex-wrap">' +
+          '<span class="text-[13px] font-bold text-slate-900">' + o.order_number + '</span>' +
+          '<div class="flex items-center gap-1 flex-wrap">' + statusBadge + priorityBadge + '</div>' +
         '</div>' +
         '<div class="text-[12px] text-slate-500 space-y-1">' +
           '<div class="flex justify-between items-center"><span class="font-medium text-slate-700">' + (o.customer_name || '') + (o.phone_last4 ? ' <span class="text-slate-400">(' + o.phone_last4 + ')</span>' : '') + '</span><span class="text-slate-400">' + dateStr + '</span></div>' +
@@ -2942,6 +2968,12 @@
       // (서버에서 settle_status/settle_date 기반으로 계산한 payment_status 사용)
       if (orderData.payment_status === 'pending') {
         fillPaymentPendingScreen();
+        // 주문 목록이 로드된 상태라면 '주문 선택 화면으로' 버튼 노출
+        const goListBtn = document.getElementById('paymentPendingGoListBtn');
+        if (goListBtn) {
+          const showBtn = !!(lastLoadedOrders && lastLoadedOrders.length >= 1);
+          goListBtn.classList.toggle('hidden', !showBtn);
+        }
         showScreen('paymentPendingScreen');
         return;
       }
