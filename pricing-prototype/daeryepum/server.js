@@ -251,6 +251,14 @@ async function readCollected() {
 
 /**
  * 수집 상태 반영 — body.add / body.remove 배열.
+ *
+ * 쓰기 정책:
+ *   - Supabase 설정됐으면 Supabase 로만 저장. 실패 시 500 에러 throw (클라이언트 가시화).
+ *     → 파일로 조용히 폴백하면 "저장 성공" 토스트가 뜨지만 새로고침시 날아간 것처럼 보임 (고아 데이터)
+ *   - Supabase 미설정 (레거시/개발 모드) 만 파일로 저장.
+ *
+ * 읽기 정책 (readCollected): Supabase 오류시엔 파일 폴백 유지 (서비스 중단 방지)
+ *
  * @returns {order_seqs, added, removed, source}
  */
 async function applyCollectedChanges(body, session, category) {
@@ -259,26 +267,23 @@ async function applyCollectedChanges(body, session, category) {
   const email = session?.email || 'unknown';
 
   if (_USE_SUPABASE_COLLECTED) {
-    try {
-      if (addSeqs.length) {
-        await _bgStore.addCollectedOrderSeqs(addSeqs, { collectedBy: email, category: category || null });
-      }
-      if (removeSeqs.length) {
-        await _bgStore.removeCollectedOrderSeqs(removeSeqs);
-      }
-      const all = await _bgStore.getCollectedOrderSeqs();
-      return {
-        order_seqs: all,
-        added: addSeqs.length,
-        removed: removeSeqs.length,
-        source: 'supabase',
-      };
-    } catch (e) {
-      console.warn('[collected] Supabase 쓰기 실패 → 파일 폴백:', e.message);
+    // Supabase 가 설정된 경우 — 실패 시 throw 하여 클라이언트에 에러 노출
+    if (addSeqs.length) {
+      await _bgStore.addCollectedOrderSeqs(addSeqs, { collectedBy: email, category: category || null });
     }
+    if (removeSeqs.length) {
+      await _bgStore.removeCollectedOrderSeqs(removeSeqs);
+    }
+    const all = await _bgStore.getCollectedOrderSeqs();
+    return {
+      order_seqs: all,
+      added: addSeqs.length,
+      removed: removeSeqs.length,
+      source: 'supabase',
+    };
   }
 
-  // 파일 폴백 (기존 로직과 동일)
+  // 레거시/개발 모드 — 파일 저장
   const col = readCollectedFile();
   const set = new Set(col.order_seqs);
   addSeqs.forEach(s => set.add(s));

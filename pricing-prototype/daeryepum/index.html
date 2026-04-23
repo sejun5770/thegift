@@ -1552,15 +1552,20 @@ async function loadCollectedFromServer() {
   } catch(e) { console.warn('수집완료 로드 실패:', e); }
 }
 async function saveCollectedToServer(addSeqs, removeSeqs) {
-  try {
-    // category 를 query 로 전달 — 어느 탭에서 마킹했는지 추적용 (통계/필터링)
-    const cat = currentCategory || 'daeryepum';
-    await fetch(API + '/api/collected?category=' + encodeURIComponent(cat), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ add: addSeqs || [], remove: removeSeqs || [] })
-    });
-  } catch(e) { console.warn('수집완료 저장 실패:', e); }
+  // category 를 query 로 전달 — 어느 탭에서 마킹했는지 추적용 (통계/필터링)
+  const cat = currentCategory || 'daeryepum';
+  const res = await fetch(API + '/api/collected?category=' + encodeURIComponent(cat), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ add: addSeqs || [], remove: removeSeqs || [] })
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    const msg = `[${res.status}] ${text}`;
+    console.error('수집완료 저장 실패:', msg);
+    throw new Error(msg);
+  }
+  return res.json();
 }
 // 주문상태 매핑 (bar_shop1 status_seq)
 // ETC (CUSTOM_ETC_ORDER) 상태
@@ -1857,32 +1862,62 @@ function getSelectedRows() {
 
 // --- 수집완료 마킹 ---
 //   이미 수집된 행은 건너뜀 (중복 저장 방지 + 정확한 건수 토스트)
+//   저장 실패시 낙관적 업데이트 롤백 + 에러 토스트
 async function markCollected() {
   const rows = getCheckedRows();
   if (!rows.length) { showToast('선택된 주문이 없습니다'); return; }
   // 이미 수집완료인 행 제외 — 실제 상태 전환되는 것만 대상
-  const targetSeqs = rows
-    .map(r => String(r.order_seq))
-    .filter(s => !_collectedSet.has(s));
+  // Set 으로 중복 제거 (같은 order_seq 가 여러 행에 걸리면 Supabase UPSERT 가 실패함)
+  const targetSeqs = [...new Set(
+    rows
+      .map(r => String(r.order_seq || '').trim())
+      .filter(s => s && !_collectedSet.has(s))
+  )];
   if (!targetSeqs.length) { showToast('모두 이미 수집완료 상태입니다'); return; }
+  // 낙관적 업데이트
   targetSeqs.forEach(s => _collectedSet.add(s));
   renderOrderTable();
-  await saveCollectedToServer(targetSeqs, []);
-  showToast(`${targetSeqs.length}건 수집완료 처리`);
+  try {
+    const result = await saveCollectedToServer(targetSeqs, []);
+    // 서버 응답에서 최신 상태 동기화 (다른 관리자 마킹 반영)
+    if (result && Array.isArray(result.order_seqs)) {
+      _collectedSet = new Set(result.order_seqs.map(String));
+      renderOrderTable();
+    }
+    showToast(`${targetSeqs.length}건 수집완료 처리`);
+  } catch (e) {
+    // 롤백
+    targetSeqs.forEach(s => _collectedSet.delete(s));
+    renderOrderTable();
+    showToast('⚠️ 수집완료 저장 실패 — 새로고침 후 재시도 (콘솔 확인)');
+  }
 }
 
 async function unmarkCollected() {
   const rows = getCheckedRows();
   if (!rows.length) { showToast('선택된 주문이 없습니다'); return; }
   // 수집완료가 아닌 행 제외 — 실제 해제될 것만 대상
-  const targetSeqs = rows
-    .map(r => String(r.order_seq))
-    .filter(s => _collectedSet.has(s));
+  const targetSeqs = [...new Set(
+    rows
+      .map(r => String(r.order_seq || '').trim())
+      .filter(s => s && _collectedSet.has(s))
+  )];
   if (!targetSeqs.length) { showToast('수집해제할 주문이 없습니다'); return; }
   targetSeqs.forEach(s => _collectedSet.delete(s));
   renderOrderTable();
-  await saveCollectedToServer([], targetSeqs);
-  showToast(`${targetSeqs.length}건 수집해제 처리`);
+  try {
+    const result = await saveCollectedToServer([], targetSeqs);
+    if (result && Array.isArray(result.order_seqs)) {
+      _collectedSet = new Set(result.order_seqs.map(String));
+      renderOrderTable();
+    }
+    showToast(`${targetSeqs.length}건 수집해제 처리`);
+  } catch (e) {
+    // 롤백
+    targetSeqs.forEach(s => _collectedSet.add(s));
+    renderOrderTable();
+    showToast('⚠️ 수집해제 저장 실패 — 새로고침 후 재시도 (콘솔 확인)');
+  }
 }
 
 function getCheckedRows() {

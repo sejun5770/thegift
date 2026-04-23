@@ -487,13 +487,25 @@ async function setProcessedBatch(orderIds, data) {
  */
 async function getCollectedOrderSeqs() {
   if (!USE_SUPABASE) return [];
-  const rows = await sbGet('bg_order_collected', 'select=order_seq');
-  return Array.isArray(rows) ? rows.map(r => r.order_seq) : [];
+  // sbGet 이 기본으로 select=* 를 붙이므로 table 만 넘기고 컬럼은 * 그대로 받음.
+  const rows = await sbGet('bg_order_collected');
+  return Array.isArray(rows) ? rows.map(r => r.order_seq).filter(Boolean) : [];
 }
 
-/** 다건 수집완료 마킹. category='daeryepum'|'deco'|'flower' 옵션. */
+/**
+ * 다건 수집완료 마킹. category='daeryepum'|'deco'|'flower' 옵션.
+ *
+ * 방어:
+ *   - 빈/null/undefined/공백 order_seq 제거
+ *   - 중복 order_seq 제거 (Postgres ON CONFLICT 가 같은 요청 내 중복 키에서 실패함)
+ */
 async function addCollectedOrderSeqs(orderSeqs, { category, collectedBy } = {}) {
-  const list = (orderSeqs || []).map(String).filter(Boolean);
+  // 1) 정규화 → 빈값 제거 → 중복 제거
+  const list = [...new Set(
+    (orderSeqs || [])
+      .map(v => (v == null ? '' : String(v).trim()))
+      .filter(Boolean)
+  )];
   if (!list.length) return { added: 0 };
   if (!USE_SUPABASE) {
     throw new Error('LOCAL_MODE_NOT_SUPPORTED');
@@ -519,14 +531,18 @@ async function addCollectedOrderSeqs(orderSeqs, { category, collectedBy } = {}) 
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Supabase UPSERT bg_order_collected [${res.status}]: ${text}`);
+    throw new Error(`Supabase UPSERT bg_order_collected [${res.status}] rows=${list.length}: ${text}`);
   }
   return { added: list.length };
 }
 
 /** 다건 수집해제 */
 async function removeCollectedOrderSeqs(orderSeqs) {
-  const list = (orderSeqs || []).map(String).filter(Boolean);
+  const list = [...new Set(
+    (orderSeqs || [])
+      .map(v => (v == null ? '' : String(v).trim()))
+      .filter(Boolean)
+  )];
   if (!list.length) return { removed: 0 };
   if (!USE_SUPABASE) {
     throw new Error('LOCAL_MODE_NOT_SUPPORTED');
@@ -540,7 +556,7 @@ async function removeCollectedOrderSeqs(orderSeqs) {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Supabase DELETE bg_order_collected [${res.status}]: ${text}`);
+    throw new Error(`Supabase DELETE bg_order_collected [${res.status}] rows=${list.length}: ${text}`);
   }
   return { removed: list.length };
 }
