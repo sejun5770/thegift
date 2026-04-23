@@ -181,13 +181,13 @@ nav a:hover{color:var(--gray-900)}
   <span class="logo">💐 답례품 관리</span>
   <a href="#dashboard" class="active" onclick="showPage('dashboard')">대시보드</a>
   <a href="#orders" onclick="showPage('orders')">주문조회</a>
+  <a href="#bg-unified" onclick="showPage('bg-unified')">📋 정보입력현황</a>
   <a href="#sns" onclick="showPage('sns')">💡 SNS 인사이트</a>
   <a href="#worklog" onclick="showPage('worklog')">📝 일지</a>
   <a href="#bg-stickers" onclick="showPage('bg-stickers')">🏷️ 스티커</a>
   <a href="#bg-products" onclick="showPage('bg-products')">⚙️ 상품설정</a>
   <a href="#bg-shipping" onclick="showPage('bg-shipping')">📅 출고일설정</a>
   <a href="#bg-alimtalk" onclick="showPage('bg-alimtalk')">📨 알림톡 발송</a>
-  <a href="#bg-unified" onclick="showPage('bg-unified')">🔗 통합현황</a>
   <div class="user-area" id="user-area"></div>
 </nav>
 
@@ -1280,7 +1280,7 @@ nav a:hover{color:var(--gray-900)}
 <!-- ========== UNIFIED VIEW ========== -->
 <div id="page-bg-unified" class="page">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <h2 style="margin:0">🔗 통합현황</h2>
+    <h2 style="margin:0">📋 정보입력현황</h2>
     <button class="btn" onclick="loadBgUnified()">🔄 새로고침</button>
   </div>
   <div class="toolbar" style="margin-bottom:12px">
@@ -1290,14 +1290,24 @@ nav a:hover{color:var(--gray-900)}
       <input type="date" id="uni-end" />
       <button class="btn btn-primary" onclick="loadBgUnified()">조회</button>
     </div>
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <div>
       <label style="font-size:13px;cursor:pointer"><input type="checkbox" id="uni-hide-cancel" onchange="renderBgUnified()"> 취소 제외</label>
-      <span style="color:var(--gray-300)">|</span>
-      <label style="font-size:13px;cursor:pointer"><input type="radio" name="uni-filter-status" id="uni-filter-all" value="all" checked onchange="renderBgUnified()"> 전체</label>
-      <label style="font-size:13px;cursor:pointer"><input type="radio" name="uni-filter-status" id="uni-only-submitted" value="submitted" onchange="renderBgUnified()"> 입력완료만</label>
-      <label style="font-size:13px;cursor:pointer"><input type="radio" name="uni-filter-status" id="uni-only-unsubmitted" value="unsubmitted" onchange="renderBgUnified()"> 미입력만</label>
     </div>
   </div>
+
+  <!-- 탭: 미입력 / 입력완료 (기본: 미입력) -->
+  <div id="uni-tab-strip" style="display:flex;gap:2px;border-bottom:2px solid var(--gray-200);margin-bottom:12px">
+    <button class="uni-tab" data-uni-tab="unsubmitted" onclick="switchUniTab('unsubmitted')"
+      style="padding:10px 18px;background:none;border:none;border-bottom:3px solid var(--primary);color:var(--primary);font-weight:600;font-size:14px;cursor:pointer;margin-bottom:-2px">
+      ⏳ 미입력 <span id="uni-count-unsubmitted" style="color:var(--gray-400);font-weight:500;font-size:12px;margin-left:3px">(0)</span>
+    </button>
+    <button class="uni-tab" data-uni-tab="submitted" onclick="switchUniTab('submitted')"
+      style="padding:10px 18px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:14px;cursor:pointer;margin-bottom:-2px">
+      ✅ 입력완료 <span id="uni-count-submitted" style="color:var(--gray-400);font-weight:500;font-size:12px;margin-left:3px">(0)</span>
+    </button>
+  </div>
+  <!-- 현재 활성 탭 상태 (내부) -->
+  <input type="hidden" id="uni-active-tab" value="unsubmitted">
   <div id="uni-loading" style="text-align:center;padding:40px;color:var(--gray-400)">날짜를 선택하고 조회하세요.</div>
   <div id="uni-table-wrap" style="display:none">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
@@ -5638,21 +5648,61 @@ async function loadBgUnified() {
   }
 }
 
+/** 정보입력현황 탭 전환 (submitted / unsubmitted) */
+function switchUniTab(tab) {
+  document.getElementById('uni-active-tab').value = tab;
+  // 탭 시각 스타일 업데이트
+  document.querySelectorAll('#uni-tab-strip .uni-tab').forEach(btn => {
+    const isActive = btn.dataset.uniTab === tab;
+    btn.style.borderBottomColor = isActive ? 'var(--primary)' : 'transparent';
+    btn.style.color = isActive ? 'var(--primary)' : 'var(--gray-500)';
+    btn.style.fontWeight = isActive ? '600' : '500';
+  });
+  renderBgUnified();
+}
+
 function renderBgUnified() {
   const hideCancel = document.getElementById('uni-hide-cancel')?.checked;
-  const filterStatus = document.querySelector('input[name="uni-filter-status"]:checked')?.value || 'all';
+  // 탭 상태 = 필터 소스 (submitted / unsubmitted). 기존 '전체' 옵션은 제거됨.
+  const activeTab = document.getElementById('uni-active-tab')?.value || 'unsubmitted';
 
   const receiptLabel = { personal: '소득공제', business: '지출증빙' };
 
-  // 필터링 (filterStatus: 'all' | 'submitted' | 'unsubmitted' — 상호배타)
-  let filtered = bgUnifiedOrders.filter(o => {
-    if (hideCancel && (o.status_seq === 3 || o.status_seq === 5)) return false;
+  // 탭별 카운트 미리 계산 (취소 제외 적용 후)
+  const isCancelled = o => o.status_seq === 3 || o.status_seq === 5;
+  const visibleBase = bgUnifiedOrders.filter(o => !hideCancel || !isCancelled(o));
+  let cntSubmitted = 0, cntUnsubmitted = 0;
+  visibleBase.forEach(o => {
+    const ciKey = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
+    if (bgUnifiedCiMap.get(ciKey)) cntSubmitted++; else cntUnsubmitted++;
+  });
+  const cntSubEl = document.getElementById('uni-count-submitted');
+  const cntUnsubEl = document.getElementById('uni-count-unsubmitted');
+  if (cntSubEl) cntSubEl.textContent = '(' + cntSubmitted + ')';
+  if (cntUnsubEl) cntUnsubEl.textContent = '(' + cntUnsubmitted + ')';
+
+  // 필터링 — 활성 탭에 따라
+  let filtered = visibleBase.filter(o => {
     const ciKey = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
     const ci = bgUnifiedCiMap.get(ciKey);
-    if (filterStatus === 'submitted' && !ci) return false;
-    if (filterStatus === 'unsubmitted' && ci) return false;
+    if (activeTab === 'submitted' && !ci) return false;
+    if (activeTab === 'unsubmitted' && ci) return false;
     return true;
   });
+
+  // 입력완료 탭은 submitted_at / updated_at 기준 최신순 정렬
+  //   관리자 추가/수정으로 updated_at 이 최신이면 그것 기준, 아니면 submitted_at
+  if (activeTab === 'submitted') {
+    filtered.sort((a, b) => {
+      const ciKeyA = a.order_type === 'ETC' ? `ETC-${a.order_seq}` : String(a.order_seq);
+      const ciKeyB = b.order_type === 'ETC' ? `ETC-${b.order_seq}` : String(b.order_seq);
+      const ciA = bgUnifiedCiMap.get(ciKeyA);
+      const ciB = bgUnifiedCiMap.get(ciKeyB);
+      const tA = Math.max(Date.parse(ciA?.updated_at || 0) || 0, Date.parse(ciA?.submitted_at || 0) || 0);
+      const tB = Math.max(Date.parse(ciB?.updated_at || 0) || 0, Date.parse(ciB?.submitted_at || 0) || 0);
+      return tB - tA; // DESC (최신순)
+    });
+  }
 
   // 평탄화: 한 주문에 여러 상품이 있으면 상품별로 각각 1행씩 생성
   // - 미입력 상태(sels=[]): 주문의 모든 상품에 대해 각각 sel=null 행 생성
