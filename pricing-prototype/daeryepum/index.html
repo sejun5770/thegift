@@ -4712,6 +4712,7 @@ async function openBgProductForm(productId) {
           name: opt.name || '',
           color: opt.color || '#FFFFFF',
           preview_image_url: opt.preview_image_url || '',
+          sold_out: !!opt.sold_out,
         }))
       : [];
     renderBgStickerModal();
@@ -4735,28 +4736,35 @@ function renderBgBoxOptions() {
     wrap.innerHTML = '<div style="padding:10px;text-align:center;color:var(--gray-400);font-size:12px;background:#fff;border:1px dashed var(--gray-200);border-radius:6px">박스 옵션 없음</div>';
     return;
   }
-  wrap.innerHTML = _bgBoxOptions.map((opt, i) => `
-    <div style="display:grid;grid-template-columns:110px 1fr 44px 28px;gap:6px;align-items:center;background:#fff;padding:6px;border:1px solid var(--gray-200);border-radius:6px">
-      <input type="text" data-bgbox-idx="${i}" data-bgbox-field="code" value="${(opt.code || '').replace(/"/g, '&quot;')}" placeholder="코드 (TGJSD04B1)"
-        oninput="bgBoxUpdate(${i}, 'code', this.value)"
-        style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;font-family:monospace">
-      <input type="text" data-bgbox-idx="${i}" data-bgbox-field="name" value="${(opt.name || '').replace(/"/g, '&quot;')}" placeholder="표시명 (예: 화이트 박스)"
-        oninput="bgBoxUpdate(${i}, 'name', this.value)"
-        style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
-      <input type="color" value="${opt.color || '#FFFFFF'}" title="색상"
-        oninput="bgBoxUpdate(${i}, 'color', this.value)"
-        style="width:44px;height:28px;padding:0;border:1px solid var(--gray-300);border-radius:4px;cursor:pointer">
-      <button type="button" onclick="bgBoxRemove(${i})" title="삭제"
-        style="border:none;background:#fee;color:#dc2626;width:28px;height:28px;border-radius:4px;cursor:pointer;font-size:14px;line-height:1">&times;</button>
-    </div>
-  `).join('') + _bgBoxOptions.map((opt, i) => `
-    <div style="display:flex;align-items:center;gap:6px;padding:0 6px 0 6px;margin-top:-4px;font-size:10.5px;color:var(--gray-500)">
-      <span style="width:110px">↑ 옵션 ${i + 1}</span>
-      <input type="text" value="${(opt.preview_image_url || '').replace(/"/g, '&quot;')}" placeholder="이미지 URL (선택)"
-        oninput="bgBoxUpdate(${i}, 'preview_image_url', this.value)"
-        style="flex:1;padding:3px 6px;border:1px solid var(--gray-200);border-radius:3px;font-size:10.5px;background:#fafafa">
-    </div>
-  `).join('');
+  // 각 옵션: 1) 메인 편집 행 (코드/이름/색/삭제) 2) 보조 행 (이미지 URL + 품절 체크)
+  wrap.innerHTML = _bgBoxOptions.map((opt, i) => {
+    const isSoldOut = !!opt.sold_out;
+    return `
+    <div style="background:#fff;padding:6px;border:1px solid var(--gray-200);border-radius:6px;${isSoldOut ? 'opacity:0.7' : ''}">
+      <div style="display:grid;grid-template-columns:110px 1fr 44px 28px;gap:6px;align-items:center">
+        <input type="text" data-bgbox-idx="${i}" data-bgbox-field="code" value="${(opt.code || '').replace(/"/g, '&quot;')}" placeholder="코드 (TGJSD04B1)"
+          oninput="bgBoxUpdate(${i}, 'code', this.value)"
+          style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;font-family:monospace">
+        <input type="text" data-bgbox-idx="${i}" data-bgbox-field="name" value="${(opt.name || '').replace(/"/g, '&quot;')}" placeholder="표시명 (예: 화이트 박스)"
+          oninput="bgBoxUpdate(${i}, 'name', this.value)"
+          style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+        <input type="color" value="${opt.color || '#FFFFFF'}" title="색상"
+          oninput="bgBoxUpdate(${i}, 'color', this.value)"
+          style="width:44px;height:28px;padding:0;border:1px solid var(--gray-300);border-radius:4px;cursor:pointer">
+        <button type="button" onclick="bgBoxRemove(${i})" title="삭제"
+          style="border:none;background:#fee;color:#dc2626;width:28px;height:28px;border-radius:4px;cursor:pointer;font-size:14px;line-height:1">&times;</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:5px;font-size:10.5px;color:var(--gray-500)">
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;padding:3px 8px;border-radius:4px;${isSoldOut ? 'background:#fee2e2;color:#b91c1c;font-weight:600' : 'background:#f3f4f6'};flex-shrink:0" title="품절로 표시하면 고객 화면에서 선택 불가">
+          <input type="checkbox" ${isSoldOut ? 'checked' : ''} onchange="bgBoxUpdate(${i}, 'sold_out', this.checked); renderBgBoxOptions()" style="margin:0;cursor:pointer">
+          ${isSoldOut ? '🚫 품절' : '품절 표시'}
+        </label>
+        <input type="text" value="${(opt.preview_image_url || '').replace(/"/g, '&quot;')}" placeholder="이미지 URL (선택)"
+          oninput="bgBoxUpdate(${i}, 'preview_image_url', this.value)"
+          style="flex:1;padding:3px 6px;border:1px solid var(--gray-200);border-radius:3px;font-size:10.5px;background:#fafafa">
+      </div>
+    </div>`;
+  }).join('');
 }
 
 function bgBoxAddRow() {
@@ -4966,6 +4974,7 @@ async function saveBgProduct() {
       name: (opt.name || '').trim(),
       color: opt.color || '#FFFFFF',
       preview_image_url: (opt.preview_image_url || '').trim() || null,
+      sold_out: !!opt.sold_out,
     }))
     .filter(opt => opt.code); // 코드 없는 행은 제외
 

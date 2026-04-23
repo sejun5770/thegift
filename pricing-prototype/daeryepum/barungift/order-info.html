@@ -991,8 +991,8 @@
   }
 
   /**
-   * 상품별 기본 state 생성 — 첫번째 매칭 스티커 + 첫번째 박스 옵션을 기본 선택값으로.
-   * (고객이 박스/스티커 선택을 그냥 지나치지 않도록 첫번째 옵션 pre-select)
+   * 상품별 기본 state 생성 — 첫번째 매칭 스티커 + 첫번째 '선택 가능한' 박스 옵션.
+   * 품절(sold_out) 옵션은 기본 선택에서 제외.
    */
   function makeDefaultProductEntry(idx) {
     const i = Number(idx);
@@ -1001,12 +1001,13 @@
     const matching = getStickersForProduct(productCode);
     const firstStickerId = (matching && matching.length > 0) ? matching[0].id : null;
     const boxOptions = getBoxOptionsForProduct(productCode);
-    const firstBoxCode = (boxOptions && boxOptions.length > 0) ? boxOptions[0].code : null;
+    // 품절 아닌 첫 옵션을 기본값으로. 모든 옵션이 품절이면 null → 고객이 수동 선택 필요
+    const firstAvailableBox = (boxOptions || []).find(o => !o.sold_out);
     return {
       sticker_type: firstStickerId,
       sticker_input: firstStickerId ? 'custom' : 'none',
       sticker_fields: {},
-      box_code: firstBoxCode, // 박스 옵션 있으면 첫번째 기본 선택
+      box_code: firstAvailableBox ? firstAvailableBox.code : null,
     };
   }
 
@@ -1102,11 +1103,11 @@
           const ps = formState.products[String(i)] || {};
           const productCode = products[i].product_code;
 
-          // 박스 옵션이 노출되는 상품은 박스 선택 필수
+          // 박스 옵션이 노출되는 상품은 박스 선택 필수 (품절 옵션은 invalid)
           const boxOptions = getBoxOptionsForProduct(productCode);
           if (boxOptions.length > 0) {
-            const boxValid = boxOptions.some(o => o.code === ps.box_code);
-            if (!boxValid) return false;
+            const picked = boxOptions.find(o => o.code === ps.box_code);
+            if (!picked || picked.sold_out) return false;
           }
 
           if (ps.sticker_input === 'custom' && ps.sticker_type) {
@@ -1249,8 +1250,36 @@
     `;
   }
 
+  /**
+   * 각 상품의 선택된 box_code 유효성 재검증.
+   * - 품절로 변경된 옵션: 품절 아닌 첫 옵션으로 자동 전환 (없으면 null)
+   * - 목록에서 제거된 옵션: 마찬가지
+   * (관리자가 옵션을 변경한 뒤 고객이 다시 들어왔을 때 stale 선택 복원 방지)
+   */
+  function validateBoxSelections() {
+    const products = orderData?.products || [];
+    let changed = false;
+    for (let i = 0; i < products.length; i++) {
+      const productCode = products[i].product_code;
+      const boxOptions = getBoxOptionsForProduct(productCode);
+      if (!boxOptions.length) continue;
+      const ps = formState.products[String(i)];
+      if (!ps) continue;
+      const picked = boxOptions.find(o => o.code === ps.box_code);
+      if (!picked || picked.sold_out) {
+        const fallback = boxOptions.find(o => !o.sold_out);
+        ps.box_code = fallback ? fallback.code : null;
+        changed = true;
+      }
+    }
+    if (changed) {
+      try { saveFormState(); } catch (e) { /* ignore */ }
+    }
+  }
+
   /** 스티커 선택 (Step 0) — 상품 개인화를 먼저 받아 고객 몰입도 확보 */
   function renderStep0() {
+    validateBoxSelections(); // 진입시마다 품절/삭제된 옵션 정리
     const products = orderData?.products || [];
 
     var cardsHtml = products.map(function(p, i) {
@@ -1267,23 +1296,37 @@
       if (boxOptions.length > 0) {
         var boxCards = boxOptions.map(function(opt) {
           var isSel = selBoxCode === opt.code;
-          var cardCls = isSel
-            ? 'ring-2 ring-indigo-500 gradient-brand-soft'
-            : 'ring-1 ring-slate-200 bg-white hover:ring-indigo-300';
+          var isSoldOut = !!opt.sold_out;
+          // 품절: 선택 불가 + 비활성화 스타일 + 오버레이 배지
+          var cardCls = isSoldOut
+            ? 'ring-1 ring-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
+            : (isSel
+                ? 'ring-2 ring-indigo-500 gradient-brand-soft'
+                : 'ring-1 ring-slate-200 bg-white hover:ring-indigo-300');
           var safeName = (opt.name || opt.code || '박스').replace(/"/g, '&quot;');
           var safeCode = (opt.code || '').replace(/"/g, '&quot;');
           var thumb = opt.preview_image_url
-            ? '<img src="' + opt.preview_image_url + '" alt="' + safeName + '" class="w-full aspect-square object-contain bg-white pointer-events-none" loading="lazy" />'
-            : '<div class="w-full aspect-square pointer-events-none" style="background:' + (opt.color || '#F3F4F6') + '"></div>';
+            ? '<img src="' + opt.preview_image_url + '" alt="' + safeName + '" class="w-full aspect-square object-contain bg-white pointer-events-none' + (isSoldOut ? ' grayscale' : '') + '" loading="lazy" />'
+            : '<div class="w-full aspect-square pointer-events-none' + (isSoldOut ? ' grayscale' : '') + '" style="background:' + (opt.color || '#F3F4F6') + '"></div>';
+          // 품절은 버튼이 아닌 div 로 렌더 (클릭 이벤트 비활성) + 대각선 빗금 오버레이
+          var tag = isSoldOut ? 'div' : 'button';
+          var actionAttrs = isSoldOut ? '' : ' data-action="productBoxSelect" data-idx="' + idx + '" data-value="' + safeCode + '"';
+          var soldOutOverlay = isSoldOut
+            ? '<div class="absolute inset-0 flex items-center justify-center pointer-events-none">'
+              + '<span class="bg-rose-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-lifted" style="letter-spacing:0.5px">🚫 품절</span>'
+              + '</div>'
+            : '';
           return ''
-            + '<button type="button" data-action="productBoxSelect" data-idx="' + idx + '" data-value="' + safeCode + '" '
-            +   'class="pressable ' + cardCls + ' rounded-xl overflow-hidden text-left w-full transition touch-manipulation relative">'
-            +   (isSel ? '<span class="absolute top-1.5 right-1.5 z-10 gradient-brand text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-lifted">✓</span>' : '')
+            + '<' + tag + ' type="button"' + actionAttrs
+            +   (isSoldOut ? '' : ' type="button"')
+            +   ' class="' + (isSoldOut ? '' : 'pressable ') + cardCls + ' rounded-xl overflow-hidden text-left w-full transition touch-manipulation relative">'
+            +   (isSel && !isSoldOut ? '<span class="absolute top-1.5 right-1.5 z-10 gradient-brand text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-lifted">✓</span>' : '')
             +   thumb
+            +   soldOutOverlay
             +   '<div class="px-2 py-1.5 text-xs">'
-            +     '<div class="font-semibold text-slate-800 truncate">' + (opt.name || opt.code) + '</div>'
+            +     '<div class="font-semibold truncate ' + (isSoldOut ? 'text-slate-400' : 'text-slate-800') + '">' + (opt.name || opt.code) + '</div>'
             +   '</div>'
-            + '</button>';
+            + '</' + tag + '>';
         }).join('');
         boxHtml = ''
           + '<div class="mt-4">'
