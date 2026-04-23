@@ -1303,19 +1303,27 @@ nav a:hover{color:var(--gray-900)}
 
 <!-- ========== UNIFIED VIEW ========== -->
 <div id="page-bg-unified" class="page">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+  <!-- 헤더: 타이틀만 -->
+  <div style="margin-bottom:12px">
     <h2 style="margin:0">📋 정보입력현황</h2>
-    <button class="btn" onclick="loadBgUnified()">🔄 새로고침</button>
   </div>
-  <div class="toolbar" style="margin-bottom:12px">
+
+  <!-- 필터바: 날짜 + 필터 + 새로고침 (한 줄에 통합) -->
+  <div class="toolbar" style="margin-bottom:12px;gap:12px">
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex:1;min-width:0">
       <input type="date" id="uni-start" />
       <span>~</span>
       <input type="date" id="uni-end" />
       <button class="btn btn-primary" onclick="loadBgUnified()">조회</button>
     </div>
-    <div>
-      <label style="font-size:13px;cursor:pointer"><input type="checkbox" id="uni-hide-cancel" onchange="renderBgUnified()"> 취소 제외</label>
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
+        <input type="checkbox" id="uni-hide-cancel" onchange="renderBgUnified()"> 취소 제외
+      </label>
+      <label id="uni-hide-processed-wrap" style="font-size:13px;cursor:pointer;display:none;align-items:center;gap:4px">
+        <input type="checkbox" id="uni-hide-processed" checked onchange="renderBgUnified()"> 수집완료 숨기기
+      </label>
+      <button class="btn" onclick="loadBgUnified()" title="목록 새로고침" style="padding:4px 10px;font-size:12px">🔄 새로고침</button>
     </div>
   </div>
 
@@ -1333,28 +1341,26 @@ nav a:hover{color:var(--gray-900)}
   <!-- 현재 활성 탭 상태 (내부) -->
   <input type="hidden" id="uni-active-tab" value="unsubmitted">
 
-  <!-- 입력완료 탭 전용 서브필터 (주문수집 상태) — 탭 상태에 따라 표시/숨김 -->
-  <div id="uni-submitted-subfilter" style="display:none;padding:10px 12px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;margin-bottom:12px;align-items:center;gap:16px;flex-wrap:wrap">
-    <span style="font-size:12px;color:#4338ca;font-weight:600" title="정보수집이 완료되어 주문수집 스프레드시트로 등록이 완료된 주문건입니다.">📋 주문수집 현황 <span style="font-size:11px;color:var(--gray-500);font-weight:400;cursor:help">ⓘ</span></span>
+  <!-- 주문수집 현황 카드 (입력완료 탭 전용, 카운트만 — 액션 버튼은 통합 액션바로 이동) -->
+  <div id="uni-submitted-subfilter" style="display:none;padding:9px 12px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;margin-bottom:12px;align-items:center;gap:12px;flex-wrap:wrap">
+    <span style="font-size:12px;color:#4338ca;font-weight:600;cursor:help" title="정보수집이 완료되어 주문수집 스프레드시트로 등록이 완료된 주문건입니다.">📋 주문수집 현황 <span style="font-size:11px;color:var(--gray-500);font-weight:400">ⓘ</span></span>
     <span id="uni-processed-summary" style="font-size:12px;color:var(--gray-700)">-</span>
-    <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
-      <button class="btn" id="uni-bulk-process-btn" onclick="bulkProcessedAction(true)" style="padding:4px 10px;font-size:11px;display:none" title="선택된 주문을 '주문수집 완료' 로 일괄 처리">📋 선택 주문 수집처리</button>
-      <button class="btn" id="uni-bulk-unprocess-btn" onclick="bulkProcessedAction(false)" style="padding:4px 10px;font-size:11px;display:none" title="선택된 주문의 주문수집 상태를 되돌림">↺ 선택 되돌리기</button>
-      <label style="font-size:12px;cursor:pointer;display:flex;align-items:center;gap:4px">
-        <input type="checkbox" id="uni-hide-processed" checked onchange="renderBgUnified()"> 수집완료 숨기기
-      </label>
-    </div>
   </div>
 
   <div id="uni-loading" style="text-align:center;padding:40px;color:var(--gray-400)">날짜를 선택하고 조회하세요.</div>
   <div id="uni-table-wrap" style="display:none">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+    <!-- 통합 액션바: 선택 상태 + 모든 액션 버튼 한 곳에 -->
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;flex-shrink:0">
         <input type="checkbox" id="uni-select-all" onchange="toggleBgUnifiedSelectAll(this)"> 전체선택
       </label>
-      <span id="uni-selected-count" style="font-size:13px;color:var(--gray-500)">0건 선택</span>
-      <span id="uni-row-count" style="font-size:13px;color:var(--gray-500)"></span>
-      <button class="btn" onclick="copyBgUnified()" style="margin-left:auto">📋 수집복사</button>
+      <span id="uni-selected-count" style="font-size:13px;color:var(--gray-500);flex-shrink:0">0건 선택</span>
+      <span id="uni-row-count" style="font-size:13px;color:var(--gray-500);flex-shrink:0"></span>
+      <div style="flex:1"></div>
+      <!-- 액션 버튼들 — 선택 상태에 따라 지능적으로 show/hide -->
+      <button class="btn" id="uni-btn-copy" onclick="copyBgUnified()" style="padding:6px 12px;font-size:12px;display:none">📋 수집복사</button>
+      <button class="btn btn-primary" id="uni-btn-mark-processed" onclick="bulkProcessedAction(true)" style="padding:6px 12px;font-size:12px;display:none" title="선택된 주문을 주문수집 완료로 처리 (복사 없이 마킹만)">📋 <span id="uni-btn-mark-processed-label">수집처리</span></button>
+      <button class="btn" id="uni-btn-unmark-processed" onclick="bulkProcessedAction(false)" style="padding:6px 12px;font-size:12px;display:none;border-color:#fbbf24;color:#92400e;background:#fef3c7" title="선택된 주문의 주문수집 상태를 되돌림">↺ <span id="uni-btn-unmark-processed-label">되돌리기</span></button>
     </div>
     <div style="overflow-x:auto">
       <table class="data-table" id="uni-table">
@@ -5842,9 +5848,12 @@ function switchUniTab(tab) {
     btn.style.color = isActive ? 'var(--primary)' : 'var(--gray-500)';
     btn.style.fontWeight = isActive ? '600' : '500';
   });
-  // 입력완료 탭일 때만 주문수집 서브필터 표시
+  // 입력완료 탭일 때만 주문수집 서브필터(현황 카드) 표시
   const subFilter = document.getElementById('uni-submitted-subfilter');
   if (subFilter) subFilter.style.display = (tab === 'submitted') ? 'flex' : 'none';
+  // 입력완료 탭일 때만 '수집완료 숨기기' 체크박스 표시
+  const hideProcessedWrap = document.getElementById('uni-hide-processed-wrap');
+  if (hideProcessedWrap) hideProcessedWrap.style.display = (tab === 'submitted') ? 'flex' : 'none';
   // 주문수집 컬럼 헤더 show/hide
   document.querySelectorAll('.uni-col-processed').forEach(el => {
     el.style.display = (tab === 'submitted') ? '' : 'none';
@@ -6101,39 +6110,87 @@ function toggleBgUnifiedSelectAll(el) {
 }
 
 function updateBgUnifiedSelectedCount() {
-  const cnt = document.querySelectorAll('.uni-row-check:checked').length;
+  const checked = [...document.querySelectorAll('.uni-row-check:checked')];
+  const cnt = checked.length;
   document.getElementById('uni-selected-count').textContent = cnt + '건 선택';
 
-  // 입력완료 탭 + 선택 1건 이상일 때만 일괄 처리/되돌리기 버튼 노출
   const activeTab = document.getElementById('uni-active-tab')?.value;
-  const processBtn = document.getElementById('uni-bulk-process-btn');
-  const unprocessBtn = document.getElementById('uni-bulk-unprocess-btn');
-  const show = (activeTab === 'submitted' && cnt > 0);
-  if (processBtn) processBtn.style.display = show ? '' : 'none';
-  if (unprocessBtn) unprocessBtn.style.display = show ? '' : 'none';
+  const btnCopy = document.getElementById('uni-btn-copy');
+  const btnMark = document.getElementById('uni-btn-mark-processed');
+  const btnUnmark = document.getElementById('uni-btn-unmark-processed');
+  const btnMarkLabel = document.getElementById('uni-btn-mark-processed-label');
+  const btnUnmarkLabel = document.getElementById('uni-btn-unmark-processed-label');
+
+  // 선택 0 → 모두 숨김
+  if (cnt === 0) {
+    if (btnCopy) btnCopy.style.display = 'none';
+    if (btnMark) btnMark.style.display = 'none';
+    if (btnUnmark) btnUnmark.style.display = 'none';
+    return;
+  }
+
+  // 선택된 행들의 처리 상태 분석
+  let pendingCnt = 0;    // 미처리 (ci 있고 processed_at 없음)
+  let processedCnt = 0;  // 처리완료
+  let unsubmittedCnt = 0;// 미입력 (ci 없음 — 처리 대상 아님)
+  checked.forEach(cb => {
+    const row = bgUnifiedRows[parseInt(cb.dataset.idx)];
+    if (!row) return;
+    if (!row.ci) { unsubmittedCnt++; return; }
+    if (row.ci.processed_at) processedCnt++; else pendingCnt++;
+  });
+
+  // 수집복사: 항상 표시 (선택된 모든 행 대상)
+  if (btnCopy) btnCopy.style.display = '';
+
+  if (activeTab === 'submitted') {
+    // 처리 버튼: 미처리 건이 있을 때만 표시 (이미 처리된건 제외)
+    if (pendingCnt > 0) {
+      btnMark.style.display = '';
+      btnMarkLabel.textContent = `수집처리 (${pendingCnt}건)`;
+    } else {
+      btnMark.style.display = 'none';
+    }
+    // 되돌리기 버튼: 처리된 건이 있을 때만 표시
+    if (processedCnt > 0) {
+      btnUnmark.style.display = '';
+      btnUnmarkLabel.textContent = `되돌리기 (${processedCnt}건)`;
+    } else {
+      btnUnmark.style.display = 'none';
+    }
+  } else {
+    // 미입력 탭에선 수집처리 관련 버튼 표시 안 함
+    btnMark.style.display = 'none';
+    btnUnmark.style.display = 'none';
+  }
 }
 
 /**
  * 선택된 행들을 일괄로 주문수집 처리/되돌리기.
- *   - processed=true  : 스프레드시트 등록 완료로 마킹 (processed_at = now)
- *   - processed=false : 처리 상태 되돌리기 (processed_at = NULL)
- * 취소 주문 / 미입력 주문은 대상에서 제외.
+ *   - processed=true  : 미처리 행만 대상 → processed_at = now 세팅
+ *   - processed=false : 처리된 행만 대상 → processed_at = NULL (되돌림)
+ * 미입력(ci 없음) / 상태 무관(이미 원하는 상태) 주문은 대상에서 자동 제외.
  */
 async function bulkProcessedAction(processed) {
   const checked = [...document.querySelectorAll('.uni-row-check:checked')];
   if (!checked.length) { showToast('대상 주문을 선택해주세요'); return; }
 
-  // 입력된 주문(ci 존재) 중에서 유니크 order_id 추출
+  // 입력된 주문 중 '상태 전환이 필요한' 것만 필터
+  //   processed=true  → processed_at 이 현재 비어있는 (미처리) 행
+  //   processed=false → processed_at 이 현재 있는 (처리완료) 행
   const seen = new Set();
   const orderIds = [];
   checked.forEach(cb => {
     const row = bgUnifiedRows[parseInt(cb.dataset.idx)];
-    if (!row || !row.ci) return; // 미입력은 대상 아님
+    if (!row || !row.ci) return;
+    const isCurrentlyProcessed = !!row.ci.processed_at;
+    if (processed && isCurrentlyProcessed) return;   // 이미 처리됨 → 건너뜀
+    if (!processed && !isCurrentlyProcessed) return; // 이미 미처리 → 건너뜀
     const id = row.order.order_type === 'ETC' ? ('ETC-' + row.order.order_seq) : String(row.order.order_seq);
     if (!seen.has(id)) { seen.add(id); orderIds.push(id); }
   });
   if (!orderIds.length) {
-    showToast('처리 가능한 주문이 없습니다. (미입력 주문은 제외됨)');
+    showToast(processed ? '처리할 주문이 없습니다 (모두 이미 처리됨)' : '되돌릴 주문이 없습니다 (모두 미처리 상태)');
     return;
   }
 
