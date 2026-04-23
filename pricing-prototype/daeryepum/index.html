@@ -1349,12 +1349,12 @@ nav a:hover{color:var(--gray-900)}
             <th style="width:36px"></th>
             <th>주문번호</th>
             <th>주문일</th>
+            <th style="white-space:nowrap">입력</th>
             <th>상품명</th>
             <th style="text-align:center">수량</th>
             <th>수령인</th>
             <th>연락처</th>
             <th>배송지</th>
-            <th style="text-align:center">입력</th>
             <th>박스선택</th>
             <th>스티커코드</th>
             <th>스티커명</th>
@@ -5923,18 +5923,28 @@ function renderBgUnified() {
     const recvAddr = order.recv_address || '-';
     const itemCount = product_qty || 1;
 
+    // 입력 셀 — 완료시 제출(또는 관리자 저장) 일시 표시, 미입력시 '미입력' 뱃지
+    const submittedAt = ci?.updated_at || ci?.submitted_at;
+    const fmtSubmittedAt = (() => {
+      if (!submittedAt) return '';
+      try {
+        const d = new Date(submittedAt);
+        const pad = (n) => String(n).padStart(2, '0');
+        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+          + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+      } catch { return ''; }
+    })();
     const hasInput = !!ci;
     const inputBadge = hasInput
-      ? '<span style="color:#16a34a;font-size:11px;font-weight:600">✅ 완료</span>'
+      ? '<span style="color:#16a34a;font-size:11px;font-weight:600;white-space:nowrap">' + (fmtSubmittedAt || '✅ 완료') + '</span>'
       : '<span style="color:var(--gray-300);font-size:11px">미입력</span>';
 
-    // 고객 입력 필드
-    // 박스선택: 스티커코드 앞에 별도 컬럼으로 표시
+    // 박스선택 — 아이콘/수량 제거, 코드만 표시 (스티커코드 컬럼과 일관)
     const boxCell = sel?.box_code
-      ? `<div style="font-family:monospace;font-size:12px;color:#059669">📦 ${sel.box_code}</div>${sel.box_name ? `<div style="font-size:11px;color:var(--gray-500);margin-top:2px">${sel.box_name}</div>` : ''}`
+      ? `<span style="font-family:monospace;font-size:12px">${sel.box_code}</span>`
       : '<span style="color:var(--gray-300)">-</span>';
     const stickerCode = sel?.sticker_code
-      ? `<span style="font-family:monospace;font-size:12px">${sel.sticker_code}${sel.quantity ? `(${sel.quantity}개)` : ''}</span>`
+      ? `<span style="font-family:monospace;font-size:12px">${sel.sticker_code}</span>`
       : '<span style="color:var(--gray-300)">-</span>';
     const stickerName = sel?.sticker_name || '<span style="color:var(--gray-300)">-</span>';
     const customVals = sel ? Object.entries(sel.custom_values || {}).filter(([, v]) => v) : [];
@@ -5972,12 +5982,12 @@ function renderBgUnified() {
       <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()"></td>
       <td style="font-weight:600;white-space:nowrap">${order.order_seq}</td>
       <td style="font-size:12px;color:var(--gray-500);white-space:nowrap">${orderDateFmt}</td>
+      <td style="font-size:12px">${inputBadge}</td>
       <td style="font-size:12px">${productName}</td>
       <td style="text-align:center;font-size:12px">${itemCount}</td>
       <td style="font-size:12px;white-space:nowrap">${recvName}</td>
       <td style="font-size:12px;white-space:nowrap">${recvPhone}</td>
       <td style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${recvAddr}">${recvAddr}</td>
-      <td style="text-align:center">${inputBadge}</td>
       <td style="font-size:12px">${boxCell}</td>
       <td style="font-size:12px">${stickerCode}</td>
       <td style="font-size:12px">${stickerName}</td>

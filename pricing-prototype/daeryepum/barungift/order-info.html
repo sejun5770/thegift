@@ -500,6 +500,11 @@
       <p id="successOrderNumber" class="text-xl font-bold text-gradient-brand mt-1"></p>
     </div>
 
+    <!-- 입력 내용 확인 버튼 — 방금 제출한 요약 보기 (completedScreen 과 동일) -->
+    <button onclick="viewSubmittedInfo()" class="btn pressable w-full py-3 rounded-2xl text-sm font-semibold mb-2" style="border:1px solid var(--brand-600);color:var(--brand-600);background:#fff">
+      📋 입력한 정보 확인하기
+    </button>
+
     <!-- 주문 선택 화면으로 (로드된 주문 목록이 있을 때만) -->
     <button id="successGoListBtn" onclick="goBackToOrderList()" class="hidden btn pressable w-full py-3 rounded-2xl text-sm font-semibold mb-2" style="border:1px solid var(--gray-300);color:var(--gray-700);background:#fff">
       📋 주문 선택 화면으로
@@ -2472,6 +2477,13 @@
       // 방금 제출한 주문의 info_status 를 lastLoadedOrders 에 즉시 반영 (주문선택 화면 재진입시 최신 상태)
       markOrderCompletedInList(orderData.order_id);
 
+      // orderData.existing_info 를 방금 제출한 payload 로 즉시 업데이트.
+      // successScreen 의 '입력한 정보 확인하기' 가 renderSubmittedSummary 를 호출할 때
+      // 최신 값을 보여주기 위함 (API 재호출 없이).
+      if (orderData) {
+        orderData.existing_info = { ...payload, submitted_at: new Date().toISOString() };
+      }
+
       // Show success
       $successOrderNum.textContent = orderData.order_number || '';
       // 다른 답례품 주문이 있으면 "다른 주문으로" 버튼 노출 (lastLoadedOrders 기준)
@@ -2741,16 +2753,20 @@
   // ============================================
   // 제출 완료 주문 — 요약 보기
   // ============================================
-  /** completedScreen '입력한 정보 확인하기' 버튼 핸들러 */
+  /** completedScreen / successScreen 공용 '입력한 정보 확인하기' 핸들러 */
+  let _prevScreenBeforeSummary = 'completedScreen';
   window.viewSubmittedInfo = function() {
+    // 돌아갈 화면 기억 (success vs completed 분기)
+    _prevScreenBeforeSummary = !document.getElementById('successScreen').classList.contains('hidden')
+      ? 'successScreen' : 'completedScreen';
     renderSubmittedSummary();
     showScreen('submittedSummaryScreen');
     window.scrollTo({ top: 0 });
   };
 
-  /** 요약 화면 뒤로가기 */
+  /** 요약 화면 뒤로가기 — 이전에 있던 화면(success/completed) 으로 복귀 */
   window.backFromSummary = function() {
-    showScreen('completedScreen');
+    showScreen(_prevScreenBeforeSummary || 'completedScreen');
   };
 
   /** 이미 제출된 정보를 orderData.existing_info 기반으로 요약 렌더 */
@@ -2774,20 +2790,33 @@
       if (s.product_code) selsByCode[s.product_code] = s;
     });
 
+    // 스티커 id → sticker_code / sticker_name 매핑 (저장된 데이터엔 sticker_code 가 없음)
+    const stickerById = {};
+    (orderData?.available_stickers || []).forEach(function(st) {
+      stickerById[st.id] = st;
+    });
+
     const productBlocks = products.map(function(p) {
       const code = p.product_code || '';
       const s = selsByCode[code] || {};
-      const stickerLine = s.sticker_code
-        ? '<div class="flex justify-between text-sm"><span class="text-slate-500">스티커</span><span class="text-slate-900 font-medium">' + (s.sticker_name || '스티커') + ' <span class="text-slate-400 font-mono text-[11px]">[' + s.sticker_code + ']</span></span></div>'
+      // 저장 데이터: sticker_id + sticker_name (sticker_code 는 없음).
+      // available_stickers 에서 sticker_code 를 조회해 표시 (없어도 이름만 표시).
+      const sticker = s.sticker_id ? stickerById[s.sticker_id] : null;
+      const displayName = s.sticker_name || sticker?.name || '';
+      const displayCode = sticker?.sticker_code || '';
+      const stickerLine = s.sticker_id
+        ? '<div class="flex justify-between text-sm"><span class="text-slate-500">스티커</span><span class="text-slate-900 font-medium">' + (displayName || '스티커') + (displayCode ? ' <span class="text-slate-400 font-mono text-[11px]">[' + displayCode + ']</span>' : '') + '</span></div>'
         : '<div class="flex justify-between text-sm"><span class="text-slate-500">스티커</span><span class="text-slate-400">선택안함</span></div>';
       const boxLine = s.box_code
         ? '<div class="flex justify-between text-sm"><span class="text-slate-500">박스 패키지</span><span class="text-slate-900 font-medium">' + (s.box_name || s.box_code) + ' <span class="text-slate-400 font-mono text-[11px]">[' + s.box_code + ']</span></span></div>'
         : '';
-      // 고객 입력 문구
+      // 고객 입력 문구. 기본 fallback 키 'text' 는 '스티커 문구' 로 치환해서 보여줌.
+      const FIELD_LABEL = { text: '스티커 문구' };
       const customVals = Object.entries(s.custom_values || {}).filter(function(pair){ return pair[1]; });
       const customHtml = customVals.length
         ? '<div class="mt-2 p-3 bg-slate-50 rounded-xl space-y-1.5">' + customVals.map(function(pair){
-            return '<div class="flex justify-between text-xs"><span class="text-slate-500">' + pair[0] + '</span><span class="text-slate-900 font-medium">' + String(pair[1]) + '</span></div>';
+            const label = FIELD_LABEL[pair[0]] || pair[0];
+            return '<div class="flex justify-between text-xs"><span class="text-slate-500">' + label + '</span><span class="text-slate-900 font-medium">' + String(pair[1]) + '</span></div>';
           }).join('') + '</div>'
         : '';
 
