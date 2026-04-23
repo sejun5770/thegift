@@ -807,6 +807,19 @@
     } catch (e) { /* orderData 미로딩 등 예외 상황 — 무시 */ }
   }
 
+  /**
+   * HTML-escape 사용자 입력값. innerHTML/템플릿 리터럴 에 사용자 문자열을 삽입할 때
+   * XSS 방지를 위해 필수. 숫자/boolean/null/undefined 도 안전하게 문자열화.
+   */
+  function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+  }
+  // 짧은 alias (인라인 템플릿에서 빈번 사용)
+  const esc = escapeHtml;
+
   function formatDate(dateStr) {
     if (!dateStr) return '';
     const d = new Date(dateStr + 'T00:00:00');
@@ -1348,11 +1361,13 @@
             : (isSel
                 ? 'ring-2 ring-indigo-500 gradient-brand-soft'
                 : 'ring-1 ring-slate-200 bg-white hover:ring-indigo-300');
-          var safeName = (opt.name || opt.code || '박스').replace(/"/g, '&quot;');
-          var safeCode = (opt.code || '').replace(/"/g, '&quot;');
+          var safeName = esc(opt.name || opt.code || '박스');
+          var safeCode = esc(opt.code || '');
+          var safeImgUrl = esc(opt.preview_image_url || '');
+          var safeColor = esc(opt.color || '#F3F4F6');
           var thumb = opt.preview_image_url
-            ? '<img src="' + opt.preview_image_url + '" alt="' + safeName + '" class="w-full aspect-square object-contain bg-white pointer-events-none' + (isSoldOut ? ' grayscale' : '') + '" loading="lazy" />'
-            : '<div class="w-full aspect-square pointer-events-none' + (isSoldOut ? ' grayscale' : '') + '" style="background:' + (opt.color || '#F3F4F6') + '"></div>';
+            ? '<img src="' + safeImgUrl + '" alt="' + safeName + '" class="w-full aspect-square object-contain bg-white pointer-events-none' + (isSoldOut ? ' grayscale' : '') + '" loading="lazy" />'
+            : '<div class="w-full aspect-square pointer-events-none' + (isSoldOut ? ' grayscale' : '') + '" style="background:' + safeColor + '"></div>';
           // 품절은 버튼이 아닌 div 로 렌더 (클릭 이벤트 비활성) + 대각선 빗금 오버레이
           var tag = isSoldOut ? 'div' : 'button';
           var actionAttrs = isSoldOut ? '' : ' data-action="productBoxSelect" data-idx="' + idx + '" data-value="' + safeCode + '"';
@@ -1369,7 +1384,7 @@
             +   thumb
             +   soldOutOverlay
             +   '<div class="px-2 py-1.5 text-xs">'
-            +     '<div class="font-semibold truncate ' + (isSoldOut ? 'text-slate-400' : 'text-slate-800') + '">' + (opt.name || opt.code) + '</div>'
+            +     '<div class="font-semibold truncate ' + (isSoldOut ? 'text-slate-400' : 'text-slate-800') + '">' + esc(opt.name || opt.code) + '</div>'
             +   '</div>'
             + '</' + tag + '>';
         }).join('');
@@ -1404,17 +1419,17 @@
           var cardCls = isSelected
             ? 'ring-2 ring-indigo-500 gradient-brand-soft'
             : 'ring-1 ring-slate-200 bg-white hover:ring-indigo-300';
-          var safeName = (st.name || '스티커').replace(/"/g, '&quot;');
+          var safeName = esc(st.name || '스티커');
           var thumb = st.preview_image_url
-            ? '<img src="' + st.preview_image_url + '" alt="' + safeName + '" class="w-full aspect-square object-contain bg-white pointer-events-none" loading="lazy" />'
-            : '<div class="w-full aspect-square flex items-center justify-center text-slate-400 text-xs pointer-events-none" style="background:' + (st.preview_color || '#F9FAFB') + '">이미지 없음</div>';
+            ? '<img src="' + esc(st.preview_image_url) + '" alt="' + safeName + '" class="w-full aspect-square object-contain bg-white pointer-events-none" loading="lazy" />'
+            : '<div class="w-full aspect-square flex items-center justify-center text-slate-400 text-xs pointer-events-none" style="background:' + esc(st.preview_color || '#F9FAFB') + '">이미지 없음</div>';
           return ''
-            + '<button type="button" data-action="openStickerModal" data-idx="' + idx + '" data-value="' + st.id + '" '
+            + '<button type="button" data-action="openStickerModal" data-idx="' + idx + '" data-value="' + esc(st.id) + '" '
             +   'class="sticker-card pressable ' + cardCls + ' rounded-xl overflow-hidden text-left w-full transition touch-manipulation relative">'
             +   (isSelected ? '<span class="absolute top-1.5 right-1.5 z-10 gradient-brand text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-lifted">✓</span>' : '')
             +   thumb
             +   '<div class="px-2 py-1.5 text-xs">'
-            +     '<div class="font-semibold text-slate-800 truncate">' + (st.name || '스티커') + '</div>'
+            +     '<div class="font-semibold text-slate-800 truncate">' + esc(st.name || '스티커') + '</div>'
             +   '</div>'
             + '</button>';
         }).join('');
@@ -1432,8 +1447,8 @@
 
       return (
         '<div class="surface p-5 mb-3" data-product-idx="' + idx + '">' +
-          '<h3 class="text-[15px] font-bold text-slate-900 mb-1">' + (p.product_name || '상품') + '</h3>' +
-          '<p class="text-[12px] text-slate-400">수량 ' + (p.quantity || 1) + '개 · <span class="font-mono">' + productCode + '</span></p>' +
+          '<h3 class="text-[15px] font-bold text-slate-900 mb-1">' + esc(p.product_name || '상품') + '</h3>' +
+          '<p class="text-[12px] text-slate-400">수량 ' + (Number(p.quantity) || 1) + '개 · <span class="font-mono">' + esc(productCode) + '</span></p>' +
           boxHtml +       // 박스 패키지 선택 (해당 상품만)
           stTypeHtml +    // 스티커 선택
           stInputHtml +   // 스티커 직접입력
@@ -1621,35 +1636,35 @@
         fieldHtml = sticker.custom_fields.map(function(f){
           var key = f.field_id || f.name || f.field_label;
           var val = (ps.sticker_fields || {})[key] || '-';
-          return '<div class="flex justify-between text-xs"><span class="text-slate-500">' + (f.field_label || f.label || key) + '</span><span class="text-slate-900 font-medium">' + val + '</span></div>';
+          return '<div class="flex justify-between text-xs"><span class="text-slate-500">' + esc(f.field_label || f.label || key) + '</span><span class="text-slate-900 font-medium">' + esc(val) + '</span></div>';
         }).join('');
         if (fieldHtml) fieldHtml = '<div class="mt-2 p-3 bg-slate-50 rounded-xl space-y-1.5">' + fieldHtml + '</div>';
       }
-      var stickerLabel = sticker ? sticker.name : (matching.length === 0 ? '스티커 없음' : '선택안함');
+      var stickerLabel = sticker ? esc(sticker.name) : (matching.length === 0 ? '스티커 없음' : '선택안함');
       var inputLabel = ps.sticker_input === 'custom' ? '직접입력' : '선택안함';
       var stickerThumb = '';
       if (sticker && sticker.preview_image_url) {
-        var safeName = (sticker.name || '').replace(/"/g, '&quot;');
-        stickerThumb = '<img src="' + sticker.preview_image_url + '" alt="' + safeName + '" class="inline-block w-10 h-10 object-contain rounded-lg border border-slate-200 mr-2 align-middle" />';
+        var safeName = esc(sticker.name || '');
+        stickerThumb = '<img src="' + esc(sticker.preview_image_url) + '" alt="' + safeName + '" class="inline-block w-10 h-10 object-contain rounded-lg border border-slate-200 mr-2 align-middle" />';
       } else if (sticker) {
-        stickerThumb = '<span class="inline-block w-10 h-10 rounded-lg border border-slate-200 mr-2 align-middle" style="background:' + (sticker.preview_color || '#F3F4F6') + '"></span>';
+        stickerThumb = '<span class="inline-block w-10 h-10 rounded-lg border border-slate-200 mr-2 align-middle" style="background:' + esc(sticker.preview_color || '#F3F4F6') + '"></span>';
       }
       // 박스 표시 thumbnail + label
       var boxRowHtml = '';
       if (boxOptions.length > 0) {
         var boxThumb = '';
         if (box && box.preview_image_url) {
-          boxThumb = '<img src="' + box.preview_image_url + '" alt="box" class="inline-block w-10 h-10 object-contain rounded-lg border border-slate-200 mr-2 align-middle" />';
+          boxThumb = '<img src="' + esc(box.preview_image_url) + '" alt="box" class="inline-block w-10 h-10 object-contain rounded-lg border border-slate-200 mr-2 align-middle" />';
         } else {
-          boxThumb = '<span class="inline-block w-10 h-10 rounded-lg border border-slate-200 mr-2 align-middle" style="background:' + ((box && box.color) || '#F3F4F6') + '"></span>';
+          boxThumb = '<span class="inline-block w-10 h-10 rounded-lg border border-slate-200 mr-2 align-middle" style="background:' + esc((box && box.color) || '#F3F4F6') + '"></span>';
         }
-        var boxLabel = box ? (box.name || box.code) : '<span class="text-rose-500">미선택</span>';
+        var boxLabel = box ? esc(box.name || box.code) : '<span class="text-rose-500">미선택</span>';
         boxRowHtml = '<div class="flex justify-between items-center"><span class="text-slate-500">박스 패키지</span><span class="text-slate-900 font-medium flex items-center">' + boxThumb + boxLabel + '</span></div>';
       }
       return (
         '<div class="surface p-4 mb-2">' +
           '<div class="flex items-center justify-between mb-2">' +
-            '<h4 class="text-[14px] font-bold text-slate-900">' + (p.product_name || '상품') + ' <span class="text-[11px] font-medium text-slate-400">(수량 ' + (p.quantity || 1) + ')</span></h4>' +
+            '<h4 class="text-[14px] font-bold text-slate-900">' + esc(p.product_name || '상품') + ' <span class="text-[11px] font-medium text-slate-400">(수량 ' + (Number(p.quantity) || 1) + ')</span></h4>' +
           '</div>' +
           '<div class="space-y-1.5 text-sm">' +
             boxRowHtml +
@@ -2378,15 +2393,27 @@
     goPrevStep();
   });
 
+  // 중복 실행 방지 플래그 — 빠른 연속 클릭으로 submit/goNext 가 두번 트리거되는 것 차단
+  let _navInFlight = false;
   $btnNext.addEventListener('click', async () => {
+    if (_navInFlight) return; // 이미 처리 중
     if (!isStepValid(currentStep)) return;
-    const visible = getVisibleSteps();
-    const visIdx = getVisibleIndex();
-    if (visIdx < visible.length - 1) {
-      goNextStep();
-    } else {
-      // Submit
-      await submitForm();
+    _navInFlight = true;
+    // 버튼도 즉시 disabled 처리 (시각 피드백 + 추가 클릭 차단)
+    $btnNext.disabled = true;
+    try {
+      const visible = getVisibleSteps();
+      const visIdx = getVisibleIndex();
+      if (visIdx < visible.length - 1) {
+        goNextStep();
+      } else {
+        // Submit
+        await submitForm();
+      }
+    } finally {
+      _navInFlight = false;
+      // disabled 재활성화는 updateNavButtons 가 다음 렌더에서 처리
+      // 실패로 제출 재시도 필요시 submitForm catch 에서 $btnNext.disabled = false 함
     }
   });
 
@@ -2678,11 +2705,12 @@
 
       // 상품명 표시: 대표상품명 + 추가 상품 개수 ("외 n종")
       //   상품명 앞에 붙은 '[14%할인가]' 같은 태그는 제거해 가독성 확보
+      //   XSS: 상품명은 MSSQL S2_Card 에서 옴 → escape 필수
       const rawName = (o.product_name || '답례품').replace(/^\[[^\]]+\]\s*/g, '');
       const cnt = Number(o.product_count) || 1;
       const productDisplay = cnt > 1
-        ? rawName + ' <span class="text-slate-400 font-normal">외 ' + (cnt - 1) + '종</span>'
-        : rawName;
+        ? esc(rawName) + ' <span class="text-slate-400 font-normal">외 ' + (cnt - 1) + '종</span>'
+        : esc(rawName);
 
       // 카드 하이라이트 — 결제완료 + 미입력 (고객이 바로 입력해야 할 행)
       const needsInput = isPaid && !isDone && !isCancelled;
@@ -2690,15 +2718,16 @@
         ? 'surface'
         : (needsInput ? 'surface ring-2 ring-indigo-500 bg-indigo-50/40 shadow-lifted' : 'surface');
 
-      return '<button onclick="selectOrder(\'' + o.order_id + '\')" ' + (isCancelled ? 'disabled' : '') +
+      // XSS: o.customer_name, phone_last4 도 escape. order_id 는 selectOrder 로 넘기니 quote-safe 하게 escape.
+      return '<button onclick="selectOrder(\'' + esc(o.order_id).replace(/\\/g, '\\\\').replace(/\'/g, "\\'") + '\')" ' + (isCancelled ? 'disabled' : '') +
         ' class="pressable w-full text-left ' + cardSurface + ' p-4 mb-2 transition-all ' +
         (isCancelled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:-translate-y-0.5 hover:shadow-lifted') + '">' +
         '<div class="flex items-center justify-between mb-2 gap-1 flex-wrap">' +
-          '<span class="text-[13px] font-bold text-slate-900">' + o.order_number + '</span>' +
+          '<span class="text-[13px] font-bold text-slate-900">' + esc(o.order_number) + '</span>' +
           '<div class="flex items-center gap-1 flex-wrap">' + statusBadge + priorityBadge + '</div>' +
         '</div>' +
         '<div class="text-[12px] text-slate-500 space-y-1">' +
-          '<div class="flex justify-between items-center"><span class="font-medium text-slate-700">' + (o.customer_name || '') + (o.phone_last4 ? ' <span class="text-slate-400">(' + o.phone_last4 + ')</span>' : '') + '</span><span class="text-slate-400">' + dateStr + '</span></div>' +
+          '<div class="flex justify-between items-center"><span class="font-medium text-slate-700">' + esc(o.customer_name || '') + (o.phone_last4 ? ' <span class="text-slate-400">(' + esc(o.phone_last4) + ')</span>' : '') + '</span><span class="text-slate-400">' + esc(dateStr) + '</span></div>' +
           '<div class="text-slate-700 font-medium truncate">' + productDisplay + '</div>' +
         '</div></button>';
     }).join('');
@@ -2813,10 +2842,10 @@
       const displayName = s.sticker_name || sticker?.name || '';
       const displayCode = sticker?.sticker_code || '';
       const stickerLine = s.sticker_id
-        ? '<div class="flex justify-between text-sm"><span class="text-slate-500">스티커</span><span class="text-slate-900 font-medium">' + (displayName || '스티커') + (displayCode ? ' <span class="text-slate-400 font-mono text-[11px]">[' + displayCode + ']</span>' : '') + '</span></div>'
+        ? '<div class="flex justify-between text-sm"><span class="text-slate-500">스티커</span><span class="text-slate-900 font-medium">' + esc(displayName || '스티커') + (displayCode ? ' <span class="text-slate-400 font-mono text-[11px]">[' + esc(displayCode) + ']</span>' : '') + '</span></div>'
         : '<div class="flex justify-between text-sm"><span class="text-slate-500">스티커</span><span class="text-slate-400">선택안함</span></div>';
       const boxLine = s.box_code
-        ? '<div class="flex justify-between text-sm"><span class="text-slate-500">박스 패키지</span><span class="text-slate-900 font-medium">' + (s.box_name || s.box_code) + ' <span class="text-slate-400 font-mono text-[11px]">[' + s.box_code + ']</span></span></div>'
+        ? '<div class="flex justify-between text-sm"><span class="text-slate-500">박스 패키지</span><span class="text-slate-900 font-medium">' + esc(s.box_name || s.box_code) + ' <span class="text-slate-400 font-mono text-[11px]">[' + esc(s.box_code) + ']</span></span></div>'
         : '';
       // 고객 입력 문구. 기본 fallback 키 'text' 는 '스티커 문구' 로 치환해서 보여줌.
       const FIELD_LABEL = { text: '스티커 문구' };
@@ -2824,12 +2853,13 @@
       const customHtml = customVals.length
         ? '<div class="mt-2 p-3 bg-slate-50 rounded-xl space-y-1.5">' + customVals.map(function(pair){
             const label = FIELD_LABEL[pair[0]] || pair[0];
-            return '<div class="flex justify-between text-xs"><span class="text-slate-500">' + label + '</span><span class="text-slate-900 font-medium">' + String(pair[1]) + '</span></div>';
+            // XSS: label/value 모두 사용자 입력 가능성 → escape
+            return '<div class="flex justify-between text-xs"><span class="text-slate-500">' + esc(label) + '</span><span class="text-slate-900 font-medium">' + esc(pair[1]) + '</span></div>';
           }).join('') + '</div>'
         : '';
 
       return '<div class="surface p-4 mb-2">'
-        + '<h4 class="text-[14px] font-bold text-slate-900 mb-2">' + (p.product_name || '상품') + ' <span class="text-[11px] font-medium text-slate-400">(수량 ' + (p.quantity || 1) + ')</span></h4>'
+        + '<h4 class="text-[14px] font-bold text-slate-900 mb-2">' + esc(p.product_name || '상품') + ' <span class="text-[11px] font-medium text-slate-400">(수량 ' + (Number(p.quantity) || 1) + ')</span></h4>'
         + '<div class="space-y-1.5">' + boxLine + stickerLine + '</div>'
         + customHtml
         + '</div>';
@@ -2845,16 +2875,16 @@
         + '<h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">결제정보</h3>'
         + '<div class="space-y-1.5 text-sm">'
         +   '<div class="flex justify-between"><span class="text-slate-500">추가 결제금액</span><span class="font-bold text-amber-700">' + formatMoney(expressFee) + '</span></div>'
-        +   '<div class="flex justify-between"><span class="text-slate-500">현금영수증</span><span class="text-slate-900 font-medium">' + receipt + '</span></div>'
+        +   '<div class="flex justify-between"><span class="text-slate-500">현금영수증</span><span class="text-slate-900 font-medium">' + esc(receipt) + '</span></div>'
         + '</div>'
         + '</div>';
     }
 
-    // 요청사항 (있을 때만)
+    // 요청사항 (있을 때만). XSS: 관리자 입력 텍스트지만 방어적으로 escape.
     const requestHtml = info.customer_request
       ? '<div class="surface p-4 mb-2">'
         + '<h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">요청사항</h3>'
-        + '<p class="text-sm text-slate-900 whitespace-pre-wrap leading-relaxed">' + String(info.customer_request) + '</p>'
+        + '<p class="text-sm text-slate-900 whitespace-pre-wrap leading-relaxed">' + esc(info.customer_request) + '</p>'
         + '</div>'
       : '';
 

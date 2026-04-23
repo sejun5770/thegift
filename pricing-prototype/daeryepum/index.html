@@ -1467,6 +1467,18 @@ nav a:hover{color:var(--gray-900)}
 <script>
 // basePath 자동 감지: /c/barungift/ → '/c/barungift', localhost:3457/ → ''
 const API = window.location.pathname.replace(/\/+$/, '') || '';
+
+/**
+ * XSS 방지용 HTML escape. innerHTML/템플릿 리터럴 에 사용자 입력을 삽입할 때 사용.
+ * - 주문자명, 주소, 스티커 문구 등은 고객/외부 DB 에서 오는 값이라 XSS 위험.
+ */
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+const esc = escapeHtml;
 const ALL_COLS = [
   {key:'order_seq',label:'주문번호',default:true},
   {key:'member_id',label:'회원ID',default:true},
@@ -5925,11 +5937,11 @@ function renderBgUnified() {
     const borderStyle = isFirstOfOrder ? 'border-top:2px solid var(--gray-200)' : '';
     const rowClass = isCancelled(order) ? 'row-cancelled' : '';
 
-    const orderDateFmt = order.order_date_fmt || '-';
-    const recvName = order.display_name || '-';
-    const recvPhone = order.recv_hphone || '-';
-    const recvAddr = order.recv_address || '-';
-    const itemCount = product_qty || 1;
+    const orderDateFmt = esc(order.order_date_fmt || '-');
+    const recvName = esc(order.display_name || '-');
+    const recvPhone = esc(order.recv_hphone || '-');
+    const recvAddr = esc(order.recv_address || '-');
+    const itemCount = Number(product_qty) || 1;
 
     // 입력 셀 — 완료시 제출(또는 관리자 저장) 일시 표시, 미입력시 '미입력' 뱃지
     const submittedAt = ci?.updated_at || ci?.submitted_at;
@@ -5948,34 +5960,37 @@ function renderBgUnified() {
       : '<span style="color:var(--gray-300);font-size:11px">미입력</span>';
 
     // 박스선택 — 아이콘/수량 제거, 코드만 표시 (스티커코드 컬럼과 일관)
+    // XSS: 스티커/박스 코드는 sticker_code/box_code DB 에서 옴 → escape 적용
     const boxCell = sel?.box_code
-      ? `<span style="font-family:monospace;font-size:12px">${sel.box_code}</span>`
+      ? `<span style="font-family:monospace;font-size:12px">${esc(sel.box_code)}</span>`
       : '<span style="color:var(--gray-300)">-</span>';
     const stickerCode = sel?.sticker_code
-      ? `<span style="font-family:monospace;font-size:12px">${sel.sticker_code}</span>`
+      ? `<span style="font-family:monospace;font-size:12px">${esc(sel.sticker_code)}</span>`
       : '<span style="color:var(--gray-300)">-</span>';
-    const stickerName = sel?.sticker_name || '<span style="color:var(--gray-300)">-</span>';
+    const stickerName = sel?.sticker_name ? esc(sel.sticker_name) : '<span style="color:var(--gray-300)">-</span>';
     const customVals = sel ? Object.entries(sel.custom_values || {}).filter(([, v]) => v) : [];
     const customText = customVals.length
       ? customVals.map(([k, v]) => {
           // 기본 'text' 필드는 접두어 없이 값만 표시 (가독성).
           // 다른 커스텀 키는 기존처럼 'key: value' 로 구분.
+          // XSS: k, v 모두 고객 입력 → escape 필수
           return k === 'text'
-            ? String(v)
-            : `<span style="color:var(--gray-500)">${k}:</span> ${v}`;
+            ? esc(v)
+            : `<span style="color:var(--gray-500)">${esc(k)}:</span> ${esc(v)}`;
         }).join('<br>')
       : '<span style="color:var(--gray-300)">-</span>';
-    const shipDate = ci?.desired_ship_date || '<span style="color:var(--gray-300)">-</span>';
+    const shipDate = ci?.desired_ship_date ? esc(ci.desired_ship_date) : '<span style="color:var(--gray-300)">-</span>';
     const shipType = ci ? (ci.is_express
       ? '<span style="color:#dc2626;font-weight:600">⚡ 빠른출고</span>'
       : '일반') : '<span style="color:var(--gray-300)">-</span>';
     const receiptText = ci ? (ci.cash_receipt_yn
-      ? (receiptLabel[ci.receipt_type] || '') + ' ' + (ci.receipt_number || '')
+      ? esc((receiptLabel[ci.receipt_type] || '') + ' ' + (ci.receipt_number || ''))
       : '미신청') : '<span style="color:var(--gray-300)">-</span>';
     const requestText = ci?.customer_request || '';
 
     // 상품명: 행 단위로 이미 product_name 제공. sel.product_name이 있으면 우선 사용 (사용자 저장값).
-    const productName = sel?.product_name || product_name || '-';
+    // XSS: 상품명은 MSSQL S2_Card 에서 옴 → escape 적용
+    const productName = esc(sel?.product_name || product_name || '-');
     // 수정/추가 버튼 — 같은 위치에 노출
     //  · ci 있음 → '수정' (기존)
     //  · ci 없고 취소 아님 → '추가' (관리자가 고객 대신 수동 입력)
@@ -5988,7 +6003,7 @@ function renderBgUnified() {
 
     html += `<tr class="${rowClass}" style="${borderStyle}">
       <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()"></td>
-      <td style="font-weight:600;white-space:nowrap">${order.order_seq}</td>
+      <td style="font-weight:600;white-space:nowrap">${esc(order.order_seq)}</td>
       <td style="font-size:12px;color:var(--gray-500);white-space:nowrap">${orderDateFmt}</td>
       <td style="font-size:12px">${inputBadge}</td>
       <td style="font-size:12px">${productName}</td>
@@ -6003,7 +6018,7 @@ function renderBgUnified() {
       <td style="font-size:12px;white-space:nowrap">${shipDate}</td>
       <td style="font-size:12px">${shipType}</td>
       <td style="font-size:12px">${receiptText}</td>
-      <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray-500)" title="${requestText}">${requestText || '<span style="color:var(--gray-300)">-</span>'}</td>
+      <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray-500)" title="${esc(requestText)}">${requestText ? esc(requestText) : '<span style="color:var(--gray-300)">-</span>'}</td>
       <td>${editBtn}</td>
     </tr>`;
   });
