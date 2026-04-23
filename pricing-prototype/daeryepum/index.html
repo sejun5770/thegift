@@ -639,7 +639,8 @@ nav a:hover{color:var(--gray-900)}
     <button class="cat-tab" data-cat="deco" onclick="switchCategory('deco')">✨ 데코소품</button>
     <button class="cat-tab" data-cat="flower" onclick="switchCategory('flower')">💐 꽃다발</button>
   </div>
-  <div class="toolbar">
+  <!-- 필터바: 날짜/검색/조회 + 표시 필터 통합 -->
+  <div class="toolbar" style="gap:12px">
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex:1;min-width:0">
       <input type="date" id="ord-start" />
       <span>~</span>
@@ -647,31 +648,39 @@ nav a:hover{color:var(--gray-900)}
       <input type="text" id="ord-code-search" placeholder="상품코드 검색" style="width:160px;min-width:100px" oninput="renderOrderTable()" />
       <button class="btn btn-primary" onclick="loadOrders()">조회</button>
     </div>
-    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-      <button class="btn" onclick="markCollected()" style="background:#dcfce7;border-color:#86efac">✅ 수집완료</button>
-      <button class="btn" onclick="unmarkCollected()" style="background:#fef3c7;border-color:#fcd34d">↩️ 수집해제</button>
-      <button class="btn" onclick="copySelected()">📋 복사</button>
-      <button class="btn" onclick="downloadExcel()">📥 엑셀</button>
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
+        <input type="checkbox" id="exclude-cancel" onchange="renderOrderTable()"> 취소주문 제외
+      </label>
+      <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
+        <input type="checkbox" id="exclude-pending" onchange="renderOrderTable()"> 결제대기 제외
+      </label>
+      <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
+        <input type="checkbox" id="hide-collected" onchange="renderOrderTable()"> 수집완료 숨기기
+      </label>
     </div>
   </div>
   <div class="col-selector" id="col-selector"></div>
-  <div class="col-selector" id="status-filter" style="gap:8px;align-items:center">
-    <span style="font-weight:600;font-size:12px;color:var(--gray-700);white-space:nowrap">제외 필터</span>
-    <label style="border-color:#fca5a5;background:#fef2f2"><input type="checkbox" id="exclude-cancel" onchange="renderOrderTable()"><span>취소주문 제외</span></label>
-    <label style="border-color:#fdba74;background:#fff7ed"><input type="checkbox" id="exclude-pending" onchange="renderOrderTable()"><span>결제대기 제외</span></label>
+
+  <!-- 통합 액션바: 카운트 + 지능적 액션 버튼 -->
+  <div style="display:flex;align-items:center;gap:12px;margin:12px 0 8px;flex-wrap:wrap;font-size:12px;color:var(--gray-500)">
+    <span style="flex-shrink:0">총 <strong id="order-count" style="color:var(--gray-800)">0</strong>건</span>
+    <span style="flex-shrink:0">선택 <strong id="order-selected-count" style="color:var(--gray-800)">0</strong>건</span>
+    <span style="flex-shrink:0;color:#16a34a">수집완료 <strong id="order-collected-count">0</strong>건</span>
+    <span style="flex-shrink:0;color:#dc2626">취소주의 <strong id="order-cancel-count">0</strong>건</span>
+    <div style="flex:1"></div>
+    <!-- 액션 버튼 — 선택 상태에 따라 지능 표시 -->
+    <button class="btn" id="ord-btn-mark" onclick="markCollected()" style="display:none;background:#dcfce7;border-color:#86efac;padding:5px 12px;font-size:12px" title="선택된 주문을 수집완료로 표시">✅ <span id="ord-btn-mark-label">수집완료</span></button>
+    <button class="btn" id="ord-btn-unmark" onclick="unmarkCollected()" style="display:none;background:#fef3c7;border-color:#fcd34d;padding:5px 12px;font-size:12px" title="선택된 주문의 수집완료 상태를 해제">↩️ <span id="ord-btn-unmark-label">수집해제</span></button>
+    <button class="btn" onclick="copySelected()" style="padding:5px 12px;font-size:12px" title="선택된 주문 (없으면 전체) 을 클립보드로 복사">📋 복사</button>
+    <button class="btn" onclick="downloadExcel()" style="padding:5px 12px;font-size:12px" title="선택된 주문 (없으면 전체) 을 엑셀로 다운로드">📥 엑셀</button>
   </div>
+
   <div class="card" style="padding:0;overflow-x:auto">
     <table class="data-table">
       <thead><tr id="order-thead"></tr></thead>
       <tbody id="order-tbody"></tbody>
     </table>
-  </div>
-  <div style="margin-top:8px;font-size:12px;color:var(--gray-500);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-    <span>총 <strong id="order-count">0</strong>건</span>
-    <span>선택 <strong id="order-selected-count">0</strong>건</span>
-    <span style="color:#16a34a">수집완료 <strong id="order-collected-count">0</strong>건</span>
-    <span style="color:#dc2626">취소주의 <strong id="order-cancel-count">0</strong>건</span>
-    <label style="margin-left:auto;cursor:pointer;white-space:nowrap"><input type="checkbox" id="hide-collected" onchange="renderOrderTable()"> 수집완료 숨기기</label>
   </div>
 </div>
 </div>
@@ -1785,8 +1794,53 @@ function toggleSelectAll(el) {
 }
 
 function updateSelectedCount() {
-  const checked = document.querySelectorAll('.row-check:checked').length;
-  document.getElementById('order-selected-count').textContent = checked;
+  const checkedBoxes = [...document.querySelectorAll('.row-check:checked')];
+  const cnt = checkedBoxes.length;
+  document.getElementById('order-selected-count').textContent = cnt;
+
+  // 선택된 행들의 수집 상태 분석 → 버튼 지능 표시
+  const btnMark = document.getElementById('ord-btn-mark');
+  const btnUnmark = document.getElementById('ord-btn-unmark');
+  const btnMarkLabel = document.getElementById('ord-btn-mark-label');
+  const btnUnmarkLabel = document.getElementById('ord-btn-unmark-label');
+
+  if (cnt === 0) {
+    if (btnMark) btnMark.style.display = 'none';
+    if (btnUnmark) btnUnmark.style.display = 'none';
+    return;
+  }
+
+  const collected = getCollectedSet();
+  const filtered = document.getElementById('hide-collected')?.checked
+    ? getFilteredOrders().filter(r => !collected.has(String(r.order_seq)))
+    : getFilteredOrders();
+  let pendingCnt = 0, collectedCnt = 0;
+  checkedBoxes.forEach(cb => {
+    const idx = parseInt(cb.dataset.idx);
+    const row = filtered[idx];
+    if (!row) return;
+    if (collected.has(String(row.order_seq))) collectedCnt++;
+    else pendingCnt++;
+  });
+
+  // 미수집 행이 있으면 '수집완료' 버튼, 건수는 실제 전환 대상만
+  if (btnMark) {
+    if (pendingCnt > 0) {
+      btnMark.style.display = '';
+      btnMarkLabel.textContent = `수집완료 (${pendingCnt}건)`;
+    } else {
+      btnMark.style.display = 'none';
+    }
+  }
+  // 수집완료 행이 있으면 '수집해제' 버튼
+  if (btnUnmark) {
+    if (collectedCnt > 0) {
+      btnUnmark.style.display = '';
+      btnUnmarkLabel.textContent = `수집해제 (${collectedCnt}건)`;
+    } else {
+      btnUnmark.style.display = 'none';
+    }
+  }
 }
 
 function getSelectedRows() {
@@ -1800,24 +1854,33 @@ function getSelectedRows() {
 }
 
 // --- 수집완료 마킹 ---
+//   이미 수집된 행은 건너뜀 (중복 저장 방지 + 정확한 건수 토스트)
 async function markCollected() {
   const rows = getCheckedRows();
   if (!rows.length) { showToast('선택된 주문이 없습니다'); return; }
-  const seqs = rows.map(r => String(r.order_seq));
-  seqs.forEach(s => _collectedSet.add(s));
+  // 이미 수집완료인 행 제외 — 실제 상태 전환되는 것만 대상
+  const targetSeqs = rows
+    .map(r => String(r.order_seq))
+    .filter(s => !_collectedSet.has(s));
+  if (!targetSeqs.length) { showToast('모두 이미 수집완료 상태입니다'); return; }
+  targetSeqs.forEach(s => _collectedSet.add(s));
   renderOrderTable();
-  await saveCollectedToServer(seqs, []);
-  showToast(`${rows.length}건 수집완료 처리`);
+  await saveCollectedToServer(targetSeqs, []);
+  showToast(`${targetSeqs.length}건 수집완료 처리`);
 }
 
 async function unmarkCollected() {
   const rows = getCheckedRows();
   if (!rows.length) { showToast('선택된 주문이 없습니다'); return; }
-  const seqs = rows.map(r => String(r.order_seq));
-  seqs.forEach(s => _collectedSet.delete(s));
+  // 수집완료가 아닌 행 제외 — 실제 해제될 것만 대상
+  const targetSeqs = rows
+    .map(r => String(r.order_seq))
+    .filter(s => _collectedSet.has(s));
+  if (!targetSeqs.length) { showToast('수집해제할 주문이 없습니다'); return; }
+  targetSeqs.forEach(s => _collectedSet.delete(s));
   renderOrderTable();
-  await saveCollectedToServer([], seqs);
-  showToast(`${rows.length}건 수집해제 처리`);
+  await saveCollectedToServer([], targetSeqs);
+  showToast(`${targetSeqs.length}건 수집해제 처리`);
 }
 
 function getCheckedRows() {
