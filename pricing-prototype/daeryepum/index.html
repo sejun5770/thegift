@@ -5872,7 +5872,36 @@ function openBgOrderEditByIdx(idx) {
   openBgOrderEdit({ ...ci, _order_seq: order.order_seq, _productNames });
 }
 
-function openBgOrderEdit(info) {
+// 수정 모달 전역 캐시 (불필요한 재조회 방지)
+let _bgEditAllStickers = null;            // [{id, sticker_code, name, custom_fields, ...}]
+const _bgEditProductSettingsCache = new Map(); // productCode → { available_sticker_ids, available_box_options }
+
+async function _loadBgEditStickersAndSettings(productCodes) {
+  // 전체 스티커 한번만 로드
+  if (!_bgEditAllStickers) {
+    try {
+      const r = await fetch(API + '/api/bg/stickers?active_only=true');
+      _bgEditAllStickers = (await r.json()).stickers || [];
+    } catch(e) { console.warn('sticker fetch fail', e); _bgEditAllStickers = []; }
+  }
+  // 상품별 설정 로드 (캐시 활용)
+  const pending = productCodes.filter(c => c && !_bgEditProductSettingsCache.has(c));
+  await Promise.all(pending.map(async code => {
+    try {
+      const r = await fetch(API + '/api/bg/products/' + encodeURIComponent(code) + '/settings');
+      const s = (await r.json()).settings || {};
+      _bgEditProductSettingsCache.set(code, {
+        available_sticker_ids: s.available_sticker_ids || [],
+        available_box_options: Array.isArray(s.available_box_options) ? s.available_box_options : [],
+      });
+    } catch(e) {
+      console.warn('settings fetch fail', code, e);
+      _bgEditProductSettingsCache.set(code, { available_sticker_ids: [], available_box_options: [] });
+    }
+  }));
+}
+
+async function openBgOrderEdit(info) {
   document.getElementById('bg-edit-order-id').value = info.order_id;
   document.getElementById('bg-edit-modal-title').textContent = '고객 입력 수정 — ' + info.order_id;
   document.getElementById('bg-edit-ship-date').value = info.desired_ship_date || '';
@@ -5883,46 +5912,162 @@ function openBgOrderEdit(info) {
   document.getElementById('bg-edit-request').value = info.customer_request || '';
   toggleBgReceiptEdit(!!info.cash_receipt_yn);
 
-  // 스티커 입력 렌더
   const stickerWrap = document.getElementById('bg-edit-stickers');
   const sels = info.sticker_selections || [];
-  // 상품명 조회: infoJson에 포함된 _productNames 딕셔너리 우선 사용
+  stickerWrap.innerHTML = '<p style="color:var(--gray-400);font-size:13px">불러오는 중…</p>';
+
+  // 모달 표시는 먼저 (비동기 로드 중에도 UI 보이게)
+  document.getElementById('bg-order-edit-modal').__stickerSelections = sels;
+  document.getElementById('bg-order-edit-modal').__info = info;
+  document.getElementById('bg-order-edit-modal').style.display = 'flex';
+  loadBgEditAuditLog(info.order_id);
+
+  // 스티커/박스 옵션 데이터 로드
+  const productCodes = [...new Set(sels.map(s => s.product_code).filter(Boolean))];
+  await _loadBgEditStickersAndSettings(productCodes);
+  renderBgEditStickers();
+}
+
+/** 수정 모달 스티커/박스 섹션 렌더 (드롭다운 + 입력란) */
+function renderBgEditStickers() {
+  const modal = document.getElementById('bg-order-edit-modal');
+  const sels = modal.__stickerSelections || [];
+  const info = modal.__info || {};
+  const stickerWrap = document.getElementById('bg-edit-stickers');
+
   const _productNames = info._productNames || {};
   const _editOrderSeq = info._order_seq
     || (info.order_id && String(info.order_id).startsWith('ETC-')
       ? parseInt(String(info.order_id).replace('ETC-', ''))
       : parseInt(info.order_id));
   const _editPm = bgUnifiedProductMap.get(_editOrderSeq);
+
   if (!sels.length) {
     stickerWrap.innerHTML = '<p style="color:var(--gray-400);font-size:13px">스티커 선택 없음</p>';
-  } else {
-    stickerWrap.innerHTML = sels.map((s, idx) => {
-      const fields = Object.entries(s.custom_values || {});
-      const fieldInputs = fields.length
-        ? fields.map(([k, v]) => `<div style="margin-top:6px"><label style="font-size:11px;color:var(--gray-500)">${k}</label><input type="text" data-sticker-idx="${idx}" data-field="${k}" value="${String(v).replace(/"/g,'&quot;')}" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px;margin-top:2px"></div>`).join('')
-        : '<p style="font-size:12px;color:var(--gray-400)">문구 입력안함</p>';
-      // _productNames(딕셔너리)가 1순위, _editPm(내부 Map)은 {card_name, ...} 객체이므로 .card_name 접근
-      const productName = s.product_name
-        || (s.product_code && _productNames[s.product_code])
-        || (_editPm && s.product_code ? (_editPm.get(s.product_code)?.card_name) : null)
-        || '';
-      const productLabel = productName || s.product_code
-        ? `<div style="font-size:11px;color:var(--gray-500);margin-bottom:4px">📦 ${productName}${s.product_code ? ' <span style="font-family:monospace">('+s.product_code+')</span>' : ''}</div>`
-        : '';
-      return `<div style="padding:10px;background:var(--gray-50);border-radius:6px;margin-bottom:8px;border-left:3px solid var(--primary)">
-        ${productLabel}
-        <div style="font-size:13px;font-weight:600;margin-bottom:4px">🏷️ ${s.sticker_name || '스티커'}${s.sticker_code ? ' <span style="font-family:monospace;font-size:11px;color:var(--gray-500);font-weight:400">[' + s.sticker_code + ']</span>' : ''}</div>
-        ${fieldInputs}
-      </div>`;
-    }).join('');
+    return;
   }
 
-  // 수정 모달에 sticker_selections 원본 임시 저장
-  document.getElementById('bg-order-edit-modal').__stickerSelections = sels;
-  document.getElementById('bg-order-edit-modal').style.display = 'flex';
+  const stickerById = new Map((_bgEditAllStickers || []).map(s => [s.id, s]));
 
-  // 해당 주문의 최근 접근 로그 비동기 로드
-  loadBgEditAuditLog(info.order_id);
+  stickerWrap.innerHTML = sels.map((s, idx) => {
+    const productCode = s.product_code || '';
+    const productName = s.product_name
+      || (productCode && _productNames[productCode])
+      || (_editPm && productCode ? (_editPm.get(productCode)?.card_name) : null)
+      || '';
+    const productLabel = (productName || productCode)
+      ? `<div style="font-size:11px;color:var(--gray-500);margin-bottom:8px">📦 ${productName}${productCode ? ' <span style="font-family:monospace">(' + productCode + ')</span>' : ''}</div>`
+      : '';
+
+    const settings = _bgEditProductSettingsCache.get(productCode) || { available_sticker_ids: [], available_box_options: [] };
+
+    // 박스 드롭다운 (옵션 있을 때만)
+    let boxBlock = '';
+    if (settings.available_box_options.length > 0) {
+      const boxOpts = settings.available_box_options.map(opt => {
+        const sel = s.box_code === opt.code ? 'selected' : '';
+        const soldOut = opt.sold_out ? ' [🚫 품절]' : '';
+        return '<option value="' + (opt.code || '').replace(/"/g,'&quot;') + '"' + sel + (opt.sold_out ? ' disabled' : '') + '>' + (opt.name || opt.code) + soldOut + '</option>';
+      }).join('');
+      boxBlock = `<div style="margin-bottom:8px">
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">박스 패키지</label>
+        <select data-edit-sticker-idx="${idx}" data-edit-field="box_code" onchange="onBgEditStickerChange(this)" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px">
+          <option value="">선택안함</option>
+          ${boxOpts}
+        </select>
+      </div>`;
+    }
+
+    // 스티커 드롭다운 — 해당 상품에 매핑된 스티커만
+    const availableStickers = (settings.available_sticker_ids || [])
+      .map(sid => stickerById.get(sid))
+      .filter(Boolean);
+    let stickerBlock = '';
+    if (availableStickers.length > 0) {
+      const stOpts = availableStickers.map(st => {
+        const sel = s.sticker_id === st.id ? 'selected' : '';
+        const code = st.sticker_code ? ' [' + st.sticker_code + ']' : '';
+        return '<option value="' + st.id + '"' + sel + '>' + (st.name || '스티커') + code + '</option>';
+      }).join('');
+      stickerBlock = `<div style="margin-bottom:6px">
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">스티커 타입</label>
+        <select data-edit-sticker-idx="${idx}" data-edit-field="sticker_id" onchange="onBgEditStickerChange(this)" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px">
+          <option value="">선택안함</option>
+          ${stOpts}
+        </select>
+      </div>`;
+    } else if (s.sticker_code) {
+      // 매핑된 스티커 목록을 못 받은 경우 (설정 누락 등) — 현재값만 표시
+      stickerBlock = `<div style="font-size:13px;font-weight:600;margin-bottom:6px">🏷️ ${s.sticker_name || '스티커'}${s.sticker_code ? ' <span style="font-family:monospace;font-size:11px;color:var(--gray-500);font-weight:400">[' + s.sticker_code + ']</span>' : ''}</div>`;
+    }
+
+    // 커스텀 필드 입력 — 현재 선택된 스티커 기준
+    const selectedSticker = s.sticker_id ? stickerById.get(s.sticker_id) : null;
+    let fieldInputsHtml = '';
+    if (selectedSticker) {
+      // 스티커의 custom_fields 정의 우선, 없으면 기존 저장된 custom_values 키 기반 fallback
+      const definedFields = Array.isArray(selectedSticker.custom_fields) && selectedSticker.custom_fields.length
+        ? selectedSticker.custom_fields.map(f => ({ key: f.field_id || f.name || f.field_label, label: f.field_label || f.label || f.field_id || f.name }))
+        : Object.keys(s.custom_values || {}).map(k => ({ key: k, label: k }));
+      // 기본 fallback: custom_fields 정의도 없고 저장값도 없으면 'text' 필드 하나
+      const fields = definedFields.length ? definedFields : [{ key: 'text', label: '스티커 문구' }];
+      fieldInputsHtml = fields.map(f => {
+        const v = (s.custom_values || {})[f.key] || '';
+        return `<div style="margin-top:6px"><label style="font-size:11px;color:var(--gray-500)">${f.label}</label>
+          <input type="text" data-sticker-idx="${idx}" data-field="${f.key}" value="${String(v).replace(/"/g,'&quot;')}"
+            style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px;margin-top:2px"></div>`;
+      }).join('');
+    }
+
+    return `<div data-edit-row="${idx}" style="padding:10px;background:var(--gray-50);border-radius:6px;margin-bottom:8px;border-left:3px solid var(--primary)">
+      ${productLabel}
+      ${boxBlock}
+      ${stickerBlock}
+      ${fieldInputsHtml}
+    </div>`;
+  }).join('');
+}
+
+/** 드롭다운 변경시 — 선택값을 __stickerSelections 에 반영 후 재렌더 (custom_fields 변경 대응) */
+function onBgEditStickerChange(el) {
+  const modal = document.getElementById('bg-order-edit-modal');
+  const sels = modal.__stickerSelections || [];
+  const idx = parseInt(el.dataset.editStickerIdx);
+  const field = el.dataset.editField;
+  if (!sels[idx]) return;
+
+  if (field === 'box_code') {
+    sels[idx].box_code = el.value || null;
+    // 박스명 자동 동기화
+    const productCode = sels[idx].product_code || '';
+    const settings = _bgEditProductSettingsCache.get(productCode);
+    const opt = settings && settings.available_box_options.find(o => o.code === el.value);
+    sels[idx].box_name = opt ? (opt.name || opt.code) : null;
+  } else if (field === 'sticker_id') {
+    const stickerId = el.value || null;
+    sels[idx].sticker_id = stickerId;
+    // 스티커 코드/이름 자동 동기화
+    const st = stickerId && (_bgEditAllStickers || []).find(x => x.id === stickerId);
+    sels[idx].sticker_code = st ? (st.sticker_code || null) : null;
+    sels[idx].sticker_name = st ? (st.name || null) : null;
+    // 스티커 변경시 기존 입력값은 유지하되, 새 스티커의 필드 구조로 재렌더
+  }
+  // 먼저 현재 필드 입력값을 읽어 보존
+  _readBgEditFieldInputsInto(sels);
+  renderBgEditStickers();
+}
+
+/** 현재 DOM 의 텍스트 입력값을 __stickerSelections.custom_values 에 수집 */
+function _readBgEditFieldInputsInto(sels) {
+  const modal = document.getElementById('bg-order-edit-modal');
+  modal.querySelectorAll('input[data-sticker-idx][data-field]').forEach(inp => {
+    const idx = parseInt(inp.dataset.stickerIdx);
+    const field = inp.dataset.field;
+    if (sels[idx]) {
+      if (!sels[idx].custom_values) sels[idx].custom_values = {};
+      sels[idx].custom_values[field] = inp.value;
+    }
+  });
 }
 
 /** 수정 모달 — HMAC 서명 URL 발급 (관리자 → 고객에게 안전한 접근 링크 전달용) */
@@ -6057,14 +6202,17 @@ async function saveBgOrderEdit() {
   const modal = document.getElementById('bg-order-edit-modal');
   const stickerSelections = modal.__stickerSelections || [];
 
-  // 스티커 custom_values 수정값 수집
+  // 스티커 custom_values 수정값 수집 — 스티커 타입 변경으로 필드가 바뀌었을 수 있으므로
+  // 각 row 의 custom_values 를 현재 DOM 입력값만으로 완전히 재구성 (stale 키 제거)
+  const collected = {}; // idx → { field: value }
   modal.querySelectorAll('input[data-sticker-idx]').forEach(inp => {
     const idx = parseInt(inp.dataset.stickerIdx);
     const field = inp.dataset.field;
-    if (stickerSelections[idx]) {
-      if (!stickerSelections[idx].custom_values) stickerSelections[idx].custom_values = {};
-      stickerSelections[idx].custom_values[field] = inp.value;
-    }
+    if (!collected[idx]) collected[idx] = {};
+    collected[idx][field] = inp.value;
+  });
+  stickerSelections.forEach((sel, idx) => {
+    sel.custom_values = collected[idx] || {};
   });
 
   const payload = {
