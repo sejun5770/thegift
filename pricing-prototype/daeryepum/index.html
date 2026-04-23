@@ -5899,7 +5899,7 @@ function renderBgUnified() {
   document.getElementById('uni-table-wrap').style.display = 'block';
   document.getElementById('uni-row-count').textContent = `총 ${filtered.length}건 / ${bgUnifiedRows.length}행`;
 
-  const isCancelled = o => o.status_seq === 3 || o.status_seq === 5;
+  // isCancelled 는 함수 상단 (카운트 계산) 에서 이미 선언됨 — 재선언 금지
   let html = '';
 
   bgUnifiedRows.forEach(({ order, ci, sel, product_code, product_name, product_qty }, rowIdx) => {
