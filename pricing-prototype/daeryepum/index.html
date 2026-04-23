@@ -4752,16 +4752,26 @@ async function openBgProductForm(productId) {
           sold_out: !!opt.sold_out,
         }))
       : [];
-    // 출고일 그룹 드롭다운 옵션 렌더
+    // 출고일 그룹 드롭다운 옵션 렌더.
+    // 기본 그룹은 value="" (null) 로만 노출 — 관리자가 기본 그룹을 변경하더라도
+    // 기존 상품들이 '자동으로 기본' 을 따라가도록 하기 위함. 기본 그룹 row 자체는
+    // 목록에서 제외해 중복 표시 방지.
     const groupSel = document.getElementById('bg-p-shipping-group');
     if (groupSel) {
-      const options = ['<option value="">기본 그룹 (미지정)</option>']
-        .concat(groups.map(g => {
-          const label = (g.name || '그룹').replace(/</g, '&lt;') + (g.is_default ? ' (기본)' : '');
-          return '<option value="' + g.id + '">' + label + '</option>';
-        }));
+      const defaultLabel = (groups.find(g => g.is_default)?.name || '기본 그룹').replace(/</g, '&lt;');
+      const options = ['<option value="">' + defaultLabel + '</option>']
+        .concat(groups
+          .filter(g => !g.is_default)
+          .map(g => {
+            const label = (g.name || '그룹').replace(/</g, '&lt;');
+            return '<option value="' + g.id + '">' + label + '</option>';
+          })
+        );
       groupSel.innerHTML = options.join('');
-      groupSel.value = s?.shipping_group_id || '';
+      // 저장된 값이 기본 그룹의 id 와 같으면 빈값(기본)으로 표시
+      const defId = groups.find(g => g.is_default)?.id;
+      const savedId = s?.shipping_group_id || '';
+      groupSel.value = (savedId === defId) ? '' : savedId;
     }
     renderBgStickerModal();
     renderBgBoxOptions();
