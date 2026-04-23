@@ -991,21 +991,22 @@
   }
 
   /**
-   * 상품별 기본 state 생성 — 첫번째 매칭 스티커를 기본 선택값으로.
-   * (이전엔 sticker_type=null 로 '선택안함' 기본이었으나, 고객이 스티커 상품을
-   *  그냥 지나치지 않도록 첫번째 스티커를 pre-select + 직접입력 모드 기본.)
+   * 상품별 기본 state 생성 — 첫번째 매칭 스티커 + 첫번째 박스 옵션을 기본 선택값으로.
+   * (고객이 박스/스티커 선택을 그냥 지나치지 않도록 첫번째 옵션 pre-select)
    */
   function makeDefaultProductEntry(idx) {
     const i = Number(idx);
     const product = (orderData?.products || [])[i];
-    const matching = product ? getStickersForProduct(product.product_code) : [];
+    const productCode = product?.product_code || '';
+    const matching = getStickersForProduct(productCode);
     const firstStickerId = (matching && matching.length > 0) ? matching[0].id : null;
+    const boxOptions = getBoxOptionsForProduct(productCode);
+    const firstBoxCode = (boxOptions && boxOptions.length > 0) ? boxOptions[0].code : null;
     return {
       sticker_type: firstStickerId,
-      // 스티커가 있으면 'custom' (직접입력) 으로 기본 — 고객 참여 유도
-      // 스티커가 없으면 'none' (노출할 입력란 자체가 없음)
       sticker_input: firstStickerId ? 'custom' : 'none',
       sticker_fields: {},
+      box_code: firstBoxCode, // 박스 옵션 있으면 첫번째 기본 선택
     };
   }
 
@@ -1095,12 +1096,21 @@
   function isStepValid(step) {
     switch (step) {
       case 0: {
-        // 스티커 선택 — 직접입력 모드 스티커는 필수 필드 검증
+        // 스티커/박스 선택 — 직접입력 모드 스티커는 필수 필드 검증, 박스 옵션이 있으면 선택 필수
         const products = orderData?.products || [];
         for (let i = 0; i < products.length; i++) {
           const ps = formState.products[String(i)] || {};
+          const productCode = products[i].product_code;
+
+          // 박스 옵션이 노출되는 상품은 박스 선택 필수
+          const boxOptions = getBoxOptionsForProduct(productCode);
+          if (boxOptions.length > 0) {
+            const boxValid = boxOptions.some(o => o.code === ps.box_code);
+            if (!boxValid) return false;
+          }
+
           if (ps.sticker_input === 'custom' && ps.sticker_type) {
-            const matching = getStickersForProduct(products[i].product_code);
+            const matching = getStickersForProduct(productCode);
             const sticker = matching.find(s => s.id === ps.sticker_type);
             // custom_fields 비어있으면 기본 fallback 필드(text)를 필수로 간주
             const fieldsToCheck = (sticker && Array.isArray(sticker.custom_fields) && sticker.custom_fields.length > 0)
@@ -1199,6 +1209,20 @@
     return matched.length > 0 ? matched : [];
   }
 
+  /**
+   * 상품에 매핑된 박스 패키지 옵션 목록.
+   * @returns {Array<{code,name,color,preview_image_url}>}
+   *   서버(bg_product_settings.available_box_options)에서 내려온 옵션.
+   *   해당 상품이 박스 선택 기능을 쓰지 않으면 빈 배열.
+   */
+  function getBoxOptionsForProduct(productCode) {
+    const map = orderData?.box_options_by_product;
+    if (productCode && map && Array.isArray(map[productCode])) {
+      return map[productCode];
+    }
+    return [];
+  }
+
   function renderStep1() {
     // 진입시마다 이전 선택값을 관리자 최신 설정 기준으로 재검증 (무효하면 초기화)
     validateShipDate();
@@ -1235,6 +1259,38 @@
       var productCode = p.product_code || '';
       var matching = getStickersForProduct(productCode);
       var selStickerId = ps.sticker_type || '';
+
+      // 박스 패키지 옵션 — 있을 때만 상단에 선택 UI 노출
+      var boxOptions = getBoxOptionsForProduct(productCode);
+      var selBoxCode = ps.box_code || '';
+      var boxHtml = '';
+      if (boxOptions.length > 0) {
+        var boxCards = boxOptions.map(function(opt) {
+          var isSel = selBoxCode === opt.code;
+          var cardCls = isSel
+            ? 'ring-2 ring-indigo-500 gradient-brand-soft'
+            : 'ring-1 ring-slate-200 bg-white hover:ring-indigo-300';
+          var safeName = (opt.name || opt.code || '박스').replace(/"/g, '&quot;');
+          var safeCode = (opt.code || '').replace(/"/g, '&quot;');
+          var thumb = opt.preview_image_url
+            ? '<img src="' + opt.preview_image_url + '" alt="' + safeName + '" class="w-full aspect-square object-contain bg-white pointer-events-none" loading="lazy" />'
+            : '<div class="w-full aspect-square pointer-events-none" style="background:' + (opt.color || '#F3F4F6') + '"></div>';
+          return ''
+            + '<button type="button" data-action="productBoxSelect" data-idx="' + idx + '" data-value="' + safeCode + '" '
+            +   'class="pressable ' + cardCls + ' rounded-xl overflow-hidden text-left w-full transition touch-manipulation relative">'
+            +   (isSel ? '<span class="absolute top-1.5 right-1.5 z-10 gradient-brand text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-lifted">✓</span>' : '')
+            +   thumb
+            +   '<div class="px-2 py-1.5 text-xs">'
+            +     '<div class="font-semibold text-slate-800 truncate">' + (opt.name || opt.code) + '</div>'
+            +   '</div>'
+            + '</button>';
+        }).join('');
+        boxHtml = ''
+          + '<div class="mt-4">'
+          +   '<label class="block text-[12px] font-semibold text-slate-700 mb-2">📦 박스 패키지 선택 <span class="text-rose-500">*</span></label>'
+          +   '<div class="grid grid-cols-3 sm:grid-cols-4 gap-2">' + boxCards + '</div>'
+          + '</div>';
+      }
 
       var stTypeHtml = '';
       if (matching.length === 0) {
@@ -1290,8 +1346,9 @@
         '<div class="surface p-5 mb-3" data-product-idx="' + idx + '">' +
           '<h3 class="text-[15px] font-bold text-slate-900 mb-1">' + (p.product_name || '상품') + '</h3>' +
           '<p class="text-[12px] text-slate-400">수량 ' + (p.quantity || 1) + '개 · <span class="font-mono">' + productCode + '</span></p>' +
-          stTypeHtml +
-          stInputHtml +
+          boxHtml +       // 박스 패키지 선택 (해당 상품만)
+          stTypeHtml +    // 스티커 선택
+          stInputHtml +   // 스티커 직접입력
         '</div>'
       );
     }).join('');
@@ -1488,6 +1545,9 @@
       var ps = formState.products[idx] || {};
       var matching = getStickersForProduct(p.product_code);
       var sticker = ps.sticker_type ? matching.find(function(s){ return s.id === ps.sticker_type; }) : null;
+      // 박스 옵션 선택
+      var boxOptions = getBoxOptionsForProduct(p.product_code);
+      var box = (boxOptions.length && ps.box_code) ? boxOptions.find(function(o){ return o.code === ps.box_code; }) : null;
       var fieldHtml = '';
       if (sticker && ps.sticker_input === 'custom' && Array.isArray(sticker.custom_fields)) {
         fieldHtml = sticker.custom_fields.map(function(f){
@@ -1506,12 +1566,25 @@
       } else if (sticker) {
         stickerThumb = '<span class="inline-block w-10 h-10 rounded-lg border border-slate-200 mr-2 align-middle" style="background:' + (sticker.preview_color || '#F3F4F6') + '"></span>';
       }
+      // 박스 표시 thumbnail + label
+      var boxRowHtml = '';
+      if (boxOptions.length > 0) {
+        var boxThumb = '';
+        if (box && box.preview_image_url) {
+          boxThumb = '<img src="' + box.preview_image_url + '" alt="box" class="inline-block w-10 h-10 object-contain rounded-lg border border-slate-200 mr-2 align-middle" />';
+        } else {
+          boxThumb = '<span class="inline-block w-10 h-10 rounded-lg border border-slate-200 mr-2 align-middle" style="background:' + ((box && box.color) || '#F3F4F6') + '"></span>';
+        }
+        var boxLabel = box ? (box.name || box.code) : '<span class="text-rose-500">미선택</span>';
+        boxRowHtml = '<div class="flex justify-between items-center"><span class="text-slate-500">박스 패키지</span><span class="text-slate-900 font-medium flex items-center">' + boxThumb + boxLabel + '</span></div>';
+      }
       return (
         '<div class="surface p-4 mb-2">' +
           '<div class="flex items-center justify-between mb-2">' +
             '<h4 class="text-[14px] font-bold text-slate-900">' + (p.product_name || '상품') + ' <span class="text-[11px] font-medium text-slate-400">(수량 ' + (p.quantity || 1) + ')</span></h4>' +
           '</div>' +
           '<div class="space-y-1.5 text-sm">' +
+            boxRowHtml +
             '<div class="flex justify-between items-center"><span class="text-slate-500">스티커</span><span class="text-slate-900 font-medium flex items-center">' + stickerThumb + stickerLabel + '</span></div>' +
             (sticker ? '<div class="flex justify-between"><span class="text-slate-500">스티커정보</span><span class="text-slate-900 font-medium">' + inputLabel + '</span></div>' : '') +
           '</div>' +
@@ -2069,6 +2142,19 @@
         renderCurrentStep();
         break;
       }
+      case 'productBoxSelect': {
+        // 박스 패키지 옵션 선택
+        const idx = target.closest('[data-idx]')?.dataset?.idx;
+        const val = target.closest('[data-value]')?.dataset?.value;
+        if (idx == null || val == null) break;
+        const ps = ensureProductEntry(idx);
+        if (ps.box_code !== val) {
+          ps.box_code = val || null;
+          saveFormState();
+          renderCurrentStep();
+        }
+        break;
+      }
       case 'openStickerModal': {
         const idx = target.dataset.idx;
         const stId = target.dataset.value;
@@ -2280,6 +2366,9 @@
       const ps = formState.products[String(i)] || {};
       const matching = getStickersForProduct(p.product_code);
       const sticker = ps.sticker_type ? matching.find(function(s){ return s.id === ps.sticker_type; }) : null;
+      // 박스 옵션 선택 정보 (있는 상품만)
+      const boxOptions = getBoxOptionsForProduct(p.product_code);
+      const box = (boxOptions.length && ps.box_code) ? boxOptions.find(function(o){ return o.code === ps.box_code; }) : null;
       return {
         product_code: p.product_code,
         product_name: p.product_name,
@@ -2289,6 +2378,8 @@
         sticker_name: sticker ? sticker.name : null,
         sticker_input: ps.sticker_input || 'none',
         custom_values: ps.sticker_input === 'custom' ? (ps.sticker_fields || {}) : {},
+        box_code: box ? box.code : null,
+        box_name: box ? (box.name || box.code) : null,
       };
     });
 
@@ -2299,8 +2390,18 @@
       desired_ship_date: representativeDate,
       products: productInputs,
       sticker_selections: productInputs
-        .filter(function(pi){ return pi.sticker_id; })
-        .map(function(pi){ return { product_code: pi.product_code, product_name: pi.product_name, quantity: pi.quantity, sticker_id: pi.sticker_id, sticker_name: pi.sticker_name, custom_values: pi.custom_values }; }),
+        // 스티커 OR 박스 어느 하나라도 있으면 선택 row 로 남김
+        .filter(function(pi){ return pi.sticker_id || pi.box_code; })
+        .map(function(pi){ return {
+          product_code: pi.product_code,
+          product_name: pi.product_name,
+          quantity: pi.quantity,
+          sticker_id: pi.sticker_id,
+          sticker_name: pi.sticker_name,
+          custom_values: pi.custom_values,
+          box_code: pi.box_code,
+          box_name: pi.box_name,
+        }; }),
       cash_receipt_yn: formState.cash_receipt_yn,
       receipt_type: formState.receipt_type,
       receipt_number: formState.receipt_number || null,

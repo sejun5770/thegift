@@ -967,6 +967,24 @@ nav a:hover{color:var(--gray-900)}
 
       <!-- 스티커 목록 (스크롤) -->
       <div id="bg-p-sticker-list" style="flex:1;overflow-y:auto;border:1px solid var(--gray-200);border-radius:8px;min-height:0"></div>
+
+      <!-- 박스 패키지 옵션 (선택) — 비타민답례품, 이코복스 등 박스 컬러 선택 가능한 상품용 -->
+      <details style="border:1px solid var(--gray-200);border-radius:8px;background:#fafafa" id="bg-p-box-section">
+        <summary style="cursor:pointer;padding:10px 14px;font-size:13px;font-weight:600;color:var(--gray-700);list-style:disclosure-closed">
+          📦 박스 패키지 옵션 <span id="bg-p-box-count" style="color:var(--primary);font-weight:500">0</span>개
+          <span style="color:var(--gray-400);font-weight:400;font-size:11px;margin-left:6px">(박스 컬러 선택이 필요한 상품만)</span>
+        </summary>
+        <div style="padding:6px 14px 12px">
+          <p style="font-size:11px;color:var(--gray-500);margin:0 0 8px;line-height:1.5">
+            고객 화면의 스티커 선택 스텝에서 박스 패키지를 함께 선택할 수 있게 합니다.<br>
+            옵션이 없거나 비어 있으면 고객 화면에 박스 선택 UI 미노출.
+          </p>
+          <div id="bg-p-box-rows" style="display:flex;flex-direction:column;gap:6px"></div>
+          <button type="button" onclick="bgBoxAddRow()" class="btn" style="margin-top:8px;font-size:12px;padding:5px 12px;width:100%">
+            ➕ 박스 옵션 추가
+          </button>
+        </div>
+      </details>
     </div>
 
     <!-- 푸터 -->
@@ -4667,6 +4685,9 @@ function renderBgProducts() {
 let _bgAllStickers = [];
 let _bgSelectedStickerIds = new Set();
 
+// 박스 옵션 편집용 임시 상태
+let _bgBoxOptions = []; // [{ code, name, color, preview_image_url }]
+
 async function openBgProductForm(productId) {
   if (!productId || !productId.trim()) { alert('상품코드를 입력해주세요.'); return; }
   productId = productId.trim();
@@ -4684,10 +4705,77 @@ async function openBgProductForm(productId) {
     const s = (await settingsRes.json()).settings;
     _bgAllStickers = (await stickersRes.json()).stickers || [];
     _bgSelectedStickerIds = new Set(s?.available_sticker_ids || []);
+    // 박스 옵션 로드 (없으면 빈 배열)
+    _bgBoxOptions = Array.isArray(s?.available_box_options)
+      ? s.available_box_options.map(opt => ({
+          code: opt.code || '',
+          name: opt.name || '',
+          color: opt.color || '#FFFFFF',
+          preview_image_url: opt.preview_image_url || '',
+        }))
+      : [];
     renderBgStickerModal();
+    renderBgBoxOptions();
   } catch(e) { console.error('openBgProductForm:', e); }
 
   document.getElementById('bg-product-modal').style.display = 'flex';
+}
+
+/** 박스 옵션 리스트 렌더 (편집 가능한 각 행) */
+function renderBgBoxOptions() {
+  const wrap = document.getElementById('bg-p-box-rows');
+  const countEl = document.getElementById('bg-p-box-count');
+  const section = document.getElementById('bg-p-box-section');
+  if (!wrap) return;
+  countEl.textContent = _bgBoxOptions.length;
+  // 옵션이 1개 이상이면 자동으로 섹션 펼침
+  if (_bgBoxOptions.length > 0 && section && !section.open) section.open = true;
+
+  if (_bgBoxOptions.length === 0) {
+    wrap.innerHTML = '<div style="padding:10px;text-align:center;color:var(--gray-400);font-size:12px;background:#fff;border:1px dashed var(--gray-200);border-radius:6px">박스 옵션 없음</div>';
+    return;
+  }
+  wrap.innerHTML = _bgBoxOptions.map((opt, i) => `
+    <div style="display:grid;grid-template-columns:110px 1fr 44px 28px;gap:6px;align-items:center;background:#fff;padding:6px;border:1px solid var(--gray-200);border-radius:6px">
+      <input type="text" data-bgbox-idx="${i}" data-bgbox-field="code" value="${(opt.code || '').replace(/"/g, '&quot;')}" placeholder="코드 (TGJSD04B1)"
+        oninput="bgBoxUpdate(${i}, 'code', this.value)"
+        style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;font-family:monospace">
+      <input type="text" data-bgbox-idx="${i}" data-bgbox-field="name" value="${(opt.name || '').replace(/"/g, '&quot;')}" placeholder="표시명 (예: 화이트 박스)"
+        oninput="bgBoxUpdate(${i}, 'name', this.value)"
+        style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+      <input type="color" value="${opt.color || '#FFFFFF'}" title="색상"
+        oninput="bgBoxUpdate(${i}, 'color', this.value)"
+        style="width:44px;height:28px;padding:0;border:1px solid var(--gray-300);border-radius:4px;cursor:pointer">
+      <button type="button" onclick="bgBoxRemove(${i})" title="삭제"
+        style="border:none;background:#fee;color:#dc2626;width:28px;height:28px;border-radius:4px;cursor:pointer;font-size:14px;line-height:1">&times;</button>
+    </div>
+  `).join('') + _bgBoxOptions.map((opt, i) => `
+    <div style="display:flex;align-items:center;gap:6px;padding:0 6px 0 6px;margin-top:-4px;font-size:10.5px;color:var(--gray-500)">
+      <span style="width:110px">↑ 옵션 ${i + 1}</span>
+      <input type="text" value="${(opt.preview_image_url || '').replace(/"/g, '&quot;')}" placeholder="이미지 URL (선택)"
+        oninput="bgBoxUpdate(${i}, 'preview_image_url', this.value)"
+        style="flex:1;padding:3px 6px;border:1px solid var(--gray-200);border-radius:3px;font-size:10.5px;background:#fafafa">
+    </div>
+  `).join('');
+}
+
+function bgBoxAddRow() {
+  _bgBoxOptions.push({ code: '', name: '', color: '#FFFFFF', preview_image_url: '' });
+  renderBgBoxOptions();
+}
+
+function bgBoxRemove(i) {
+  _bgBoxOptions.splice(i, 1);
+  renderBgBoxOptions();
+}
+
+function bgBoxUpdate(i, field, value) {
+  if (!_bgBoxOptions[i]) return;
+  _bgBoxOptions[i][field] = value;
+  // 입력 중엔 re-render 하면 커서 튐 → DOM 업데이트만
+  if (field === 'color') {
+    // 컬러는 즉시 시각 피드백 필요 없음 (값만 저장)
+  }
 }
 
 /** 스티커 코드에서 상품 prefix 추출 (S1~S99 접미사 제거) */
@@ -4866,13 +4954,32 @@ function calcMinDate(cfg) {
   return getNextBizDay(earliest, closedWeekdays, closedDateList);
 }
 
-// 저장 (스티커 연결만)
+// 저장 (스티커 연결 + 박스 옵션)
 async function saveBgProduct() {
   const productId = document.getElementById('bg-p-code').value;
   const stickerIds = [..._bgSelectedStickerIds];
 
+  // 박스 옵션 검증 — code 는 필수, 빈 code 는 무시
+  const boxOptions = (_bgBoxOptions || [])
+    .map(opt => ({
+      code: (opt.code || '').trim(),
+      name: (opt.name || '').trim(),
+      color: opt.color || '#FFFFFF',
+      preview_image_url: (opt.preview_image_url || '').trim() || null,
+    }))
+    .filter(opt => opt.code); // 코드 없는 행은 제외
+
+  // 중복 코드 체크
+  const codes = boxOptions.map(o => o.code);
+  const dups = codes.filter((c, i) => codes.indexOf(c) !== i);
+  if (dups.length) {
+    alert('박스 옵션 코드가 중복됩니다: ' + [...new Set(dups)].join(', '));
+    return;
+  }
+
   const body = {
     available_sticker_ids: stickerIds,
+    available_box_options: boxOptions,
   };
 
   try {
@@ -5613,9 +5720,13 @@ function renderBgUnified() {
       : '<span style="color:var(--gray-300);font-size:11px">미입력</span>';
 
     // 고객 입력 필드
-    const stickerCode = sel?.sticker_code
-      ? `<span style="font-family:monospace;font-size:12px">${sel.sticker_code}${sel.quantity ? `(${sel.quantity}개)` : ''}</span>`
-      : '<span style="color:var(--gray-300)">-</span>';
+    const boxLine = sel?.box_code
+      ? `<div style="font-family:monospace;font-size:11px;color:#059669"><span style="font-size:10px">📦</span> ${sel.box_code}${sel.box_name ? ` <span style="color:var(--gray-500)">(${sel.box_name})</span>` : ''}</div>`
+      : '';
+    const stickerLine = sel?.sticker_code
+      ? `<div style="font-family:monospace;font-size:12px">${sel.sticker_code}${sel.quantity ? `(${sel.quantity}개)` : ''}</div>`
+      : (sel?.box_code ? '' : '<span style="color:var(--gray-300)">-</span>');
+    const stickerCode = (boxLine + stickerLine) || '<span style="color:var(--gray-300)">-</span>';
     const stickerName = sel?.sticker_name || '<span style="color:var(--gray-300)">-</span>';
     const customVals = sel ? Object.entries(sel.custom_values || {}).filter(([, v]) => v) : [];
     const customText = customVals.length

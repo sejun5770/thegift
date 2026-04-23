@@ -240,10 +240,12 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         });
       }
 
-      // 상품별 스티커 매핑 + 합집합 계산
+      // 상품별 스티커 / 박스옵션 매핑 + 합집합 계산
       // stickersByProduct: { product_code: [sticker, ...] } — 고객 화면에서 상품별 필터링에 사용
+      // boxOptionsByProduct: { product_code: [{code,name,color,preview_image_url}, ...] } — 박스 패키지 선택용
       const allMappedStickerIds = new Set();
       const stickersByProduct = {};
+      const boxOptionsByProduct = {};
       const stickerById = new Map(allActiveStickers.map(s => [s.id, s]));
       for (const p of products) {
         if (!p.product_code) continue;
@@ -253,6 +255,9 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         stickersByProduct[p.product_code] = ids
           .map(id => stickerById.get(id))
           .filter(Boolean);
+        // 박스 옵션 매핑 (없거나 비어있으면 빈 배열)
+        const boxOpts = Array.isArray(ps?.available_box_options) ? ps.available_box_options : [];
+        boxOptionsByProduct[p.product_code] = boxOpts;
       }
       const availableStickers = allMappedStickerIds.size > 0
         ? allActiveStickers.filter(s => allMappedStickerIds.has(s.id))
@@ -325,6 +330,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         shipping_config: await store.getShippingConfig(),
         available_stickers: availableStickers,
         stickers_by_product: stickersByProduct,
+        box_options_by_product: boxOptionsByProduct, // { product_code: [{code,name,color,preview_image_url}] }
         existing_info: existingInfo,
         virtual_account: virtualAccount,  // 주문 결제용 가상계좌 (결제대기 상태일 때만)
         bank_info: {                       // 오늘출발 추가비용용 고정 계좌 (항상)
