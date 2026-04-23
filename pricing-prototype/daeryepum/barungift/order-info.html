@@ -2651,23 +2651,30 @@
       const isPaid = o.payment_status === 'paid';
       const isPending = o.payment_status === 'pending';
 
-      // 상태 뱃지 — 취소 > 입력완료 > 결제대기 > 입력대기 순 우선순위
-      let statusBadge;
+      // 주문상태(결제) 뱃지 + 입력상태 뱃지 를 분리해 둘 다 표시.
+      //   - 취소: 취소 뱃지만
+      //   - 결제대기: 결제대기 뱃지만 (아직 입력 불가 단계)
+      //   - 결제완료 + 미입력: 결제완료 + 입력대기 (2개)
+      //   - 결제완료 + 입력완료: 결제완료 + 입력완료 (2개)
+      const cls = 'inline-block px-2.5 py-1 rounded-full text-[10px] font-bold whitespace-nowrap';
+      const badges = [];
       if (isCancelled) {
-        statusBadge = '<span class="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 text-rose-600">취소</span>';
-      } else if (isDone) {
-        statusBadge = '<span class="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700">✓ 입력완료</span>';
+        badges.push('<span class="' + cls + ' bg-rose-50 text-rose-600">취소</span>');
       } else if (isPending) {
-        statusBadge = '<span class="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold bg-orange-50 text-orange-700">💳 결제대기</span>';
+        badges.push('<span class="' + cls + ' bg-orange-50 text-orange-700">💳 결제대기</span>');
       } else {
-        statusBadge = '<span class="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700">⏳ 입력대기</span>';
+        // 결제완료(or unknown 포함) → 결제완료 뱃지 + 입력 상태 뱃지
+        if (isPaid) {
+          badges.push('<span class="' + cls + ' bg-indigo-50 text-indigo-700">💰 결제완료</span>');
+        }
+        if (isDone) {
+          badges.push('<span class="' + cls + ' bg-emerald-50 text-emerald-700">✓ 입력완료</span>');
+        } else {
+          badges.push('<span class="' + cls + ' bg-amber-50 text-amber-700">⏳ 입력대기</span>');
+        }
       }
-
-      // 결제완료 + 아직 미입력 주문은 고객이 '바로 입력해야 할' 행 — 하이라이트
-      const isPriority = isPaid && !isDone && !isCancelled;
-      const priorityBadge = isPriority
-        ? '<span class="inline-block px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-600 text-white ml-1" title="결제가 완료되어 입력 가능한 주문">💰 결제완료</span>'
-        : '';
+      const statusBadge = badges.join(' ');
+      const priorityBadge = ''; // 별도 '우선' 뱃지는 제거 (결제완료 배지로 대체)
 
       // 상품명 표시: 대표상품명 + 추가 상품 개수 ("외 n종")
       //   상품명 앞에 붙은 '[14%할인가]' 같은 태그는 제거해 가독성 확보
@@ -2677,10 +2684,11 @@
         ? rawName + ' <span class="text-slate-400 font-normal">외 ' + (cnt - 1) + '종</span>'
         : rawName;
 
-      // 카드 테두리/배경 — 결제완료(입력대기) 하이라이트
+      // 카드 하이라이트 — 결제완료 + 미입력 (고객이 바로 입력해야 할 행)
+      const needsInput = isPaid && !isDone && !isCancelled;
       const cardSurface = isCancelled
         ? 'surface'
-        : (isPriority ? 'surface ring-2 ring-indigo-500 bg-indigo-50/40 shadow-lifted' : 'surface');
+        : (needsInput ? 'surface ring-2 ring-indigo-500 bg-indigo-50/40 shadow-lifted' : 'surface');
 
       return '<button onclick="selectOrder(\'' + o.order_id + '\')" ' + (isCancelled ? 'disabled' : '') +
         ' class="pressable w-full text-left ' + cardSurface + ' p-4 mb-2 transition-all ' +

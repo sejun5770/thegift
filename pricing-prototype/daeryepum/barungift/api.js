@@ -946,7 +946,7 @@ async function searchDaeryepumOrders(pool, sql, opts) {
   const etcResult = await etcRequest.query(`
     SELECT DISTINCT TOP 20
       co.order_seq, co.order_date, co.order_name, co.order_hphone, co.settle_price,
-      co.status_seq,
+      co.status_seq, co.settle_date,
       (SELECT TOP 1 c2.Card_Name FROM CUSTOM_ETC_ORDER_ITEM ei2 WITH (NOLOCK)
        INNER JOIN S2_Card c2 WITH (NOLOCK) ON ei2.card_seq = c2.Card_Seq
        WHERE ei2.order_seq = co.order_seq
