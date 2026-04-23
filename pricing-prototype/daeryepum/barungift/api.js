@@ -863,7 +863,12 @@ async function searchDaeryepumOrders(pool, sql, opts) {
        INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
        WHERE coi2.order_seq = co.order_seq
          AND ${DAERYEPUM_WHERE.replace(/c\./g, 'c2.')}
-      ) AS card_name
+      ) AS card_name,
+      (SELECT COUNT(DISTINCT c3.Card_Code) FROM custom_order_item coi3 WITH (NOLOCK)
+       INNER JOIN S2_Card c3 WITH (NOLOCK) ON coi3.card_seq = c3.Card_Seq
+       WHERE coi3.order_seq = co.order_seq
+         AND ${DAERYEPUM_WHERE.replace(/c\./g, 'c3.')}
+      ) AS product_count
     FROM custom_order co WITH (NOLOCK)
     INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
     INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
@@ -889,7 +894,12 @@ async function searchDaeryepumOrders(pool, sql, opts) {
        INNER JOIN S2_Card c2 WITH (NOLOCK) ON ei2.card_seq = c2.Card_Seq
        WHERE ei2.order_seq = co.order_seq
          AND ${DAERYEPUM_WHERE.replace(/c\./g, 'c2.')}
-      ) AS card_name
+      ) AS card_name,
+      (SELECT COUNT(DISTINCT c3.Card_Code) FROM CUSTOM_ETC_ORDER_ITEM ei3 WITH (NOLOCK)
+       INNER JOIN S2_Card c3 WITH (NOLOCK) ON ei3.card_seq = c3.Card_Seq
+       WHERE ei3.order_seq = co.order_seq
+         AND ${DAERYEPUM_WHERE.replace(/c\./g, 'c3.')}
+      ) AS product_count
     FROM CUSTOM_ETC_ORDER co WITH (NOLOCK)
     INNER JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON co.order_seq = ei.order_seq
     INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
@@ -910,6 +920,7 @@ async function searchDaeryepumOrders(pool, sql, opts) {
       order_date: r.order_date,
       total_amount: r.last_total_price || r.order_total_price || 0,
       product_name: r.card_name || '답례품',
+      product_count: r.product_count || 1, // DISTINCT D01 상품 개수
       status_seq: r.status_seq,
       source: 'card',
     })),
@@ -921,6 +932,7 @@ async function searchDaeryepumOrders(pool, sql, opts) {
       order_date: r.order_date,
       total_amount: r.settle_price || 0,
       product_name: r.card_name || '답례품',
+      product_count: r.product_count || 1,
       status_seq: r.status_seq,
       source: 'etc',
     })),

@@ -2632,7 +2632,6 @@
       : '총 ' + orders.length + '건';
     document.getElementById('searchResultList').innerHTML = orders.map(o => {
       const dateStr = o.order_date ? new Date(o.order_date).toLocaleDateString('ko-KR') : '';
-      const amount = (o.total_amount || 0).toLocaleString('ko-KR');
       const isCancelled = o.status_seq === 3 || o.status_seq === 5;
       const isDone = o.info_status === 'completed';
       const statusBadge = isCancelled
@@ -2640,6 +2639,14 @@
         : isDone
           ? '<span class="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700">✓ 입력완료</span>'
           : '<span class="inline-block px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700">⏳ 입력대기</span>';
+
+      // 상품명 표시: 대표상품명 + 추가 상품 개수 ("외 n종")
+      //   상품명 앞에 붙은 '[14%할인가]' 같은 태그는 제거해 가독성 확보
+      const rawName = (o.product_name || '답례품').replace(/^\[[^\]]+\]\s*/g, '');
+      const cnt = Number(o.product_count) || 1;
+      const productDisplay = cnt > 1
+        ? rawName + ' <span class="text-slate-400 font-normal">외 ' + (cnt - 1) + '종</span>'
+        : rawName;
 
       return '<button onclick="selectOrder(\'' + o.order_id + '\')" ' + (isCancelled ? 'disabled' : '') +
         ' class="pressable w-full text-left surface p-4 mb-2 transition-all ' +
@@ -2649,7 +2656,7 @@
         '</div>' +
         '<div class="text-[12px] text-slate-500 space-y-1">' +
           '<div class="flex justify-between items-center"><span class="font-medium text-slate-700">' + (o.customer_name || '') + (o.phone_last4 ? ' <span class="text-slate-400">(' + o.phone_last4 + ')</span>' : '') + '</span><span class="text-slate-400">' + dateStr + '</span></div>' +
-          '<div class="flex justify-between items-center"><span class="text-slate-500 truncate mr-2">' + (o.product_name || '') + '</span><span class="font-bold text-slate-800">' + amount + '원</span></div>' +
+          '<div class="text-slate-700 font-medium truncate">' + productDisplay + '</div>' +
         '</div></button>';
     }).join('');
   }
