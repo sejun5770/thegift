@@ -644,12 +644,37 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     return json(res, { infos: enriched });
   }
 
-  // PUT /api/bg/orders/:orderId/customer-info - 관리자 수정
+  // PUT /api/bg/orders/:orderId/customer-info - 관리자 수정/추가
   const customerInfoEditMatch = pathname.match(/^\/api\/bg\/orders\/([^/]+)\/customer-info$/);
   if (customerInfoEditMatch && method === 'PUT') {
     const orderId = decodeURIComponent(customerInfoEditMatch[1]);
     try {
       const body = await parseBody(req);
+
+      // 필수 필드 검증 — submitted_at 이 세팅되어 고객이 '입력완료' 로 인식하는
+      // 상태가 되므로, 최소 핵심 필드는 반드시 있어야 함.
+      if (!body.desired_ship_date) {
+        return json(res, { error: '희망출고일은 필수입니다.' }, 400);
+      }
+
+      // 박스 옵션이 등록된 상품은 box_code 필수 (품절 옵션 차단)
+      const sels = Array.isArray(body.sticker_selections) ? body.sticker_selections : [];
+      for (const sel of sels) {
+        if (!sel.product_code) continue;
+        const ps = await store.getProductSettings(sel.product_code);
+        const boxOpts = Array.isArray(ps?.available_box_options) ? ps.available_box_options : [];
+        if (boxOpts.length > 0) {
+          const picked = boxOpts.find(o => o.code === sel.box_code);
+          const productLabel = sel.product_name || sel.product_code;
+          if (!picked) {
+            return json(res, { error: `${productLabel}: 박스 패키지 선택이 필요합니다.` }, 400);
+          }
+          if (picked.sold_out) {
+            return json(res, { error: `${productLabel}: 선택한 박스 패키지가 품절입니다.` }, 400);
+          }
+        }
+      }
+
       const updated = await store.updateCustomerInfo(orderId, body);
       return json(res, { ok: true, info: updated });
     } catch (err) {
