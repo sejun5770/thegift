@@ -332,18 +332,71 @@ async function getAllCustomerInfos() {
   return [...infos].sort((a, b) => (b.submitted_at || '').localeCompare(a.submitted_at || ''));
 }
 
+/**
+ * 관리자 upsert. 기존 레코드 있으면 PATCH, 없으면 INSERT (고객이 아직 입력 안 한
+ * 주문에 관리자가 수동 입력할 때 사용). 고객이 직접 제출하는 POST 경로와 달리
+ * ALREADY_SUBMITTED 체크 없이 덮어쓰기.
+ */
 async function updateCustomerInfo(orderId, data) {
-  const allowed = ['desired_ship_date', 'is_express', 'sticker_selections', 'cash_receipt_yn', 'receipt_type', 'receipt_number', 'customer_request'];
+  const allowed = ['desired_ship_date', 'is_express', 'express_fee', 'sticker_selections', 'cash_receipt_yn', 'receipt_type', 'receipt_number', 'customer_request'];
   const patch = {};
   for (const k of allowed) { if (k in data) patch[k] = data[k]; }
   patch.updated_at = now();
 
+  const existing = await getCustomerInfo(orderId);
+
   if (USE_SUPABASE) {
-    return sbUpdate('bg_order_customer_info', `order_id=eq.${encodeURIComponent(orderId)}`, patch);
+    if (existing) {
+      return sbUpdate('bg_order_customer_info', `order_id=eq.${encodeURIComponent(orderId)}`, patch);
+    }
+    // INSERT 경로: 필수 필드 기본값 채움
+    const insert = {
+      order_id: orderId,
+      is_express: data.is_express || false,
+      express_fee: data.express_fee || 0,
+      desired_ship_date: data.desired_ship_date || null,
+      sticker_selections: data.sticker_selections || [],
+      cash_receipt_yn: data.cash_receipt_yn || false,
+      receipt_type: data.receipt_type || null,
+      receipt_number: data.receipt_number || null,
+      customer_request: data.customer_request || null,
+      submitted_at: now(),
+    };
+    // migration 미적용 대응
+    try {
+      return await sbInsert('bg_order_customer_info', insert);
+    } catch (err) {
+      const m = err.message && err.message.match(/Could not find the '(\w+)' column/);
+      if (m) {
+        console.warn(`[updateCustomerInfo] 스키마에 '${m[1]}' 컬럼 없음 - 제거 후 재시도`);
+        const { [m[1]]: _, ...retry } = insert;
+        return sbInsert('bg_order_customer_info', retry);
+      }
+      throw err;
+    }
   }
+
+  // 로컬 JSON fallback
   const infos = readJson(FILES.customerInfo, []);
   const idx = infos.findIndex(i => i.order_id === orderId);
-  if (idx === -1) throw new Error('NOT_FOUND');
+  if (idx === -1) {
+    const insert = {
+      order_id: orderId,
+      is_express: data.is_express || false,
+      express_fee: data.express_fee || 0,
+      desired_ship_date: data.desired_ship_date || null,
+      sticker_selections: data.sticker_selections || [],
+      cash_receipt_yn: data.cash_receipt_yn || false,
+      receipt_type: data.receipt_type || null,
+      receipt_number: data.receipt_number || null,
+      customer_request: data.customer_request || null,
+      submitted_at: now(),
+      updated_at: patch.updated_at,
+    };
+    infos.push(insert);
+    writeJson(FILES.customerInfo, infos);
+    return insert;
+  }
   infos[idx] = { ...infos[idx], ...patch };
   writeJson(FILES.customerInfo, infos);
   return infos[idx];

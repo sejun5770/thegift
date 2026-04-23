@@ -614,9 +614,10 @@
   // ============================================
   // Constants
   // ============================================
-  // 스텝 순서: 스티커(상품 개인화) → 희망출고일(+자동 출고방식) → 결제정보(조건부) → 요청사항 → 최종 확인
+  // 스텝 순서: 스티커(상품 개인화) → 희망출고일(+자동 출고방식) → 결제정보(조건부) → 최종 확인
   // 결제정보는 getTotalAmount() === 0 일 때 네비게이션에서 자동 스킵 (getVisibleSteps)
-  const STEP_LABELS = ['스티커 선택', '희망출고일', '결제정보', '요청사항', '최종 확인'];
+  // '요청사항' 은 고객 플로우에서 제거되었고 관리자 통합현황/수정 모달에서만 입력 가능.
+  const STEP_LABELS = ['스티커 선택', '희망출고일', '결제정보', '최종 확인'];
   const RECEIPT_TYPES = { personal: '소득공제용 (휴대폰번호)', business: '지출증빙용 (사업자번호)' };
   const HOLIDAYS_2026 = ['2026-01-01','2026-02-16','2026-02-17','2026-02-18','2026-03-01','2026-05-05','2026-05-24','2026-06-06','2026-08-15','2026-09-24','2026-09-25','2026-09-26','2026-10-03','2026-10-09','2026-12-25'];
   // BASE_PATH 자동 감지: /c/barungift/order-info → '/c/barungift'
@@ -699,7 +700,8 @@
   // v1: 원본 5스텝 ('출고방식','희망출고일','결제정보','요청사항','최종확인')
   // v2: 6스텝 ('출고방식','희망출고일','스티커선택','결제정보','요청사항','최종확인')
   // v3: 5스텝 재구성 — 스티커 맨앞으로, 출고방식 스텝 제거, 결제 조건부
-  const FORM_STATE_VERSION = 3;
+  // v4: 4스텝 — 요청사항 스텝 제거 (관리자 수정 모달에서만 입력)
+  const FORM_STATE_VERSION = 4;
 
   function storageKey(orderId) {
     return 'bg_form_' + orderId;
@@ -1145,8 +1147,7 @@
         }
         return true;
       }
-      case 3: return true; // 요청사항 (선택)
-      case 4: return true; // 최종확인
+      case 3: return true; // 최종확인
       default: return false;
     }
   }
@@ -1556,28 +1557,8 @@
     `;
   }
 
-  /** 요청사항 (Step 3) — 선택 */
+  /** 최종 확인 (Step 3) */
   function renderStep3() {
-    return `
-      <div class="fade-in">
-        <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">요청사항</h2>
-        <p class="text-sm text-slate-500 mb-6">추가 요청사항이 있으시면 입력해주세요 <span class="text-slate-400">(선택)</span></p>
-        <div class="surface p-5">
-          <textarea rows="5" placeholder="예: 포장을 꼼꼼하게 해주세요, 리본 추가 부탁드립니다."
-            class="input-mod resize-none"
-            maxlength="500"
-            data-action="customerRequest">${formState.customer_request || ''}</textarea>
-          <p class="text-[11px] text-slate-400 mt-2">최대 500자까지 입력 가능합니다.</p>
-          <div class="mt-3 px-3.5 py-2.5 rounded-xl gradient-brand-soft">
-            <p class="text-[12px] leading-relaxed" style="color:var(--brand-700)">💡 나눔배송 요청시 배송지별 정보를 입력해주세요<br><span class="text-[11px] opacity-80">(수령인/연락처/주소지/상품별 수량)</span></p>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  /** 최종 확인 (Step 4) */
-  function renderStep4() {
     const products = orderData?.products || [];
     const total = getTotalAmount();
     const bankInfo = orderData?.bank_info || {};
@@ -1706,24 +1687,6 @@
           </div>
           ` : ''}
 
-          <!-- Customer request (Step 3) -->
-          ${formState.customer_request ? `
-            <div class="surface p-4">
-              <div class="flex items-center justify-between mb-2">
-                <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">요청사항</h3>
-                ${_editBtn(3)}
-              </div>
-              <p class="text-sm text-slate-900 whitespace-pre-wrap leading-relaxed">${formState.customer_request}</p>
-            </div>
-          ` : `
-            <div class="surface p-4">
-              <div class="flex items-center justify-between">
-                <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">요청사항</h3>
-                <button class="pressable text-[11px] font-bold px-2.5 py-1 rounded-lg gradient-brand-soft" style="color:var(--brand-600)" data-action="goToStep" data-step="3">추가</button>
-              </div>
-              <p class="text-sm text-slate-400 mt-2">요청사항 없음</p>
-            </div>
-          `}
         </div>
       </div>
     `;
@@ -1924,7 +1887,7 @@
     return '<div id="sticker-input-wrap-' + idx + '">' + headerHtml + fieldsHtml + '</div>';
   }
 
-  const STEP_RENDERERS = [renderStep0, renderStep1, renderStep2, renderStep3, renderStep4];
+  const STEP_RENDERERS = [renderStep0, renderStep1, renderStep2, renderStep3];
 
   // ============================================
   // 스티커 라이트박스 모달

@@ -5753,10 +5753,15 @@ function renderBgUnified() {
 
     // 상품명: 행 단위로 이미 product_name 제공. sel.product_name이 있으면 우선 사용 (사용자 저장값).
     const productName = sel?.product_name || product_name || '-';
-    // 수정 버튼: onclick 인라인 JSON 대신 data-edit-idx로 전달 (XSS 안전)
+    // 수정/추가 버튼 — 같은 위치에 노출
+    //  · ci 있음 → '수정' (기존)
+    //  · ci 없고 취소 아님 → '추가' (관리자가 고객 대신 수동 입력)
+    //  · 취소 → 버튼 없음
     const editBtn = ci
       ? `<button class="btn" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">수정</button>`
-      : '';
+      : (isCancelled(order)
+        ? ''
+        : `<button class="btn btn-primary" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">+ 추가</button>`);
 
     html += `<tr class="${rowClass}" style="${borderStyle}">
       <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()"></td>
@@ -5862,14 +5867,51 @@ function copyBgUnified() {
 // rowIdx로 bgUnifiedRows에서 info를 재구성 후 수정 모달 오픈 (XSS 안전)
 function openBgOrderEditByIdx(idx) {
   const row = bgUnifiedRows[parseInt(idx)];
-  if (!row || !row.ci) { console.warn('openBgOrderEditByIdx: row not found', idx); return; }
+  if (!row) { console.warn('openBgOrderEditByIdx: row not found', idx); return; }
   const { order, ci } = row;
   const _pm = bgUnifiedProductMap.get(order.order_seq);
   // productMap 값은 {card_name, item_count} 객체. 모달에 넘길 때는 {code: name} 딕셔너리로 변환
   const _productNames = _pm
     ? Object.fromEntries([..._pm.entries()].map(([code, info]) => [code, info.card_name]))
     : {};
-  openBgOrderEdit({ ...ci, _order_seq: order.order_seq, _productNames });
+
+  if (ci) {
+    // 기존: 수정
+    openBgOrderEdit({ ...ci, _order_seq: order.order_seq, _productNames });
+    return;
+  }
+
+  // ci 없음: '추가' 경로 — 주문의 상품 목록을 기반으로 빈 sticker_selections 초기화해 오픈
+  //   각 상품에 대해 product_code/product_name 만 채운 placeholder row 생성 →
+  //   관리자가 모달에서 박스/스티커 타입을 직접 선택 가능
+  const order_id = order.order_type === 'ETC' ? `ETC-${order.order_seq}` : String(order.order_seq);
+  const sticker_selections = _pm
+    ? [..._pm.entries()].map(([code, info]) => ({
+        product_code: code,
+        product_name: info.card_name || '',
+        quantity: info.item_count || 1,
+        sticker_id: null,
+        sticker_code: null,
+        sticker_name: null,
+        custom_values: {},
+        box_code: null,
+        box_name: null,
+      }))
+    : [];
+  const blank = {
+    order_id,
+    desired_ship_date: '',
+    is_express: false,
+    cash_receipt_yn: false,
+    receipt_type: 'personal',
+    receipt_number: '',
+    customer_request: '',
+    sticker_selections,
+    _order_seq: order.order_seq,
+    _productNames,
+    _isCreate: true, // 모달 타이틀/버튼 텍스트 분기용
+  };
+  openBgOrderEdit(blank);
 }
 
 // 수정 모달 전역 캐시 (불필요한 재조회 방지)
@@ -5903,7 +5945,8 @@ async function _loadBgEditStickersAndSettings(productCodes) {
 
 async function openBgOrderEdit(info) {
   document.getElementById('bg-edit-order-id').value = info.order_id;
-  document.getElementById('bg-edit-modal-title').textContent = '고객 입력 수정 — ' + info.order_id;
+  const titleLabel = info._isCreate ? '고객 정보 추가 (관리자 대행 입력)' : '고객 입력 수정';
+  document.getElementById('bg-edit-modal-title').textContent = titleLabel + ' — ' + info.order_id;
   document.getElementById('bg-edit-ship-date').value = info.desired_ship_date || '';
   document.getElementById('bg-edit-shipping-type').value = info.is_express ? 'true' : 'false';
   document.getElementById('bg-edit-receipt-yn').checked = !!info.cash_receipt_yn;
