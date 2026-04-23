@@ -221,14 +221,73 @@ function saveWorklog(data) {
   fs.writeFileSync(WORKLOG_PATH, JSON.stringify(data, null, 2), 'utf8');
 }
 
-// --- 수집완료 상태 (공유 저장소) ---
+// --- 수집완료 상태 (Supabase 영속화 + 로컬 파일 폴백) ---
+// 1순위: Supabase `bg_order_collected` 테이블 (migration 012)
+// 2순위: 로컬 /app/data/collected.json — Supabase 미설정/오류 시 폴백 (호환성)
 const COLLECTED_PATH = path.join(DATA_DIR, 'collected.json');
-function readCollected() {
+const _bgStore = require('./barungift/store');
+const _USE_SUPABASE_COLLECTED = !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY);
+
+function readCollectedFile() {
   try { return JSON.parse(fs.readFileSync(COLLECTED_PATH, 'utf8')); }
   catch { return { order_seqs: [], updated_by: '', updated_at: '' }; }
 }
-function saveCollected(data) {
-  fs.writeFileSync(COLLECTED_PATH, JSON.stringify(data, null, 2), 'utf8');
+function saveCollectedFile(data) {
+  try { fs.writeFileSync(COLLECTED_PATH, JSON.stringify(data, null, 2), 'utf8'); }
+  catch (e) { console.warn('[collected] file save 실패:', e.message); }
+}
+
+async function readCollected() {
+  if (_USE_SUPABASE_COLLECTED) {
+    try {
+      const seqs = await _bgStore.getCollectedOrderSeqs();
+      return { order_seqs: seqs, source: 'supabase' };
+    } catch (e) {
+      console.warn('[collected] Supabase 읽기 실패 → 파일 폴백:', e.message);
+    }
+  }
+  return { ...readCollectedFile(), source: 'file' };
+}
+
+/**
+ * 수집 상태 반영 — body.add / body.remove 배열.
+ * @returns {order_seqs, added, removed, source}
+ */
+async function applyCollectedChanges(body, session, category) {
+  const addSeqs = (body.add || []).map(String);
+  const removeSeqs = (body.remove || []).map(String);
+  const email = session?.email || 'unknown';
+
+  if (_USE_SUPABASE_COLLECTED) {
+    try {
+      if (addSeqs.length) {
+        await _bgStore.addCollectedOrderSeqs(addSeqs, { collectedBy: email, category: category || null });
+      }
+      if (removeSeqs.length) {
+        await _bgStore.removeCollectedOrderSeqs(removeSeqs);
+      }
+      const all = await _bgStore.getCollectedOrderSeqs();
+      return {
+        order_seqs: all,
+        added: addSeqs.length,
+        removed: removeSeqs.length,
+        source: 'supabase',
+      };
+    } catch (e) {
+      console.warn('[collected] Supabase 쓰기 실패 → 파일 폴백:', e.message);
+    }
+  }
+
+  // 파일 폴백 (기존 로직과 동일)
+  const col = readCollectedFile();
+  const set = new Set(col.order_seqs);
+  addSeqs.forEach(s => set.add(s));
+  removeSeqs.forEach(s => set.delete(s));
+  col.order_seqs = [...set];
+  col.updated_by = email;
+  col.updated_at = new Date().toISOString();
+  saveCollectedFile(col);
+  return { ...col, added: addSeqs.length, removed: removeSeqs.length, source: 'file' };
 }
 
 // 일별 메트릭 스냅샷 (해당 날짜의 주요 지표 캡처)
@@ -2008,22 +2067,15 @@ const server = http.createServer(async (req, res) => {
         }
       } else if (pathname === '/api/collected') {
         if (req.method === 'GET') {
-          data = readCollected();
+          data = await readCollected();
         } else if (req.method === 'POST') {
           const body = await new Promise((resolve) => {
             let raw = '';
             req.on('data', c => raw += c);
             req.on('end', () => resolve(JSON.parse(raw)));
           });
-          const col = readCollected();
-          const set = new Set(col.order_seqs);
-          (body.add || []).forEach(seq => set.add(String(seq)));
-          (body.remove || []).forEach(seq => set.delete(String(seq)));
-          col.order_seqs = [...set];
-          col.updated_by = session?.email || 'unknown';
-          col.updated_at = new Date().toISOString();
-          saveCollected(col);
-          data = col;
+          // category 는 query 에서 옵션으로 받음 (예: ?category=daeryepum)
+          data = await applyCollectedChanges(body, session, parsed.query.category);
         }
       } else if (pathname === '/api/worklog/metrics') {
         const dateStr = parsed.query.date;

@@ -475,6 +475,77 @@ async function setProcessedBatch(orderIds, data) {
 }
 
 // ============================================
+// 주문조회 '수집완료' 상태 (bg_order_collected)
+// 답례품/데코소품/꽃다발 주문조회 페이지에서 마킹하는 수집 상태.
+// 기존 로컬 파일(collected.json) 에서 Supabase 로 이전 (migration 012).
+// ============================================
+
+/**
+ * 전체 수집완료 order_seq 목록 조회.
+ * Supabase 미설정 모드: 빈 배열 반환 (서버에선 호출 안 함).
+ * Supabase 오류(네트워크/테이블 미존재 등): throw → 호출측 server.js 가 파일 폴백.
+ */
+async function getCollectedOrderSeqs() {
+  if (!USE_SUPABASE) return [];
+  const rows = await sbGet('bg_order_collected', 'select=order_seq');
+  return Array.isArray(rows) ? rows.map(r => r.order_seq) : [];
+}
+
+/** 다건 수집완료 마킹. category='daeryepum'|'deco'|'flower' 옵션. */
+async function addCollectedOrderSeqs(orderSeqs, { category, collectedBy } = {}) {
+  const list = (orderSeqs || []).map(String).filter(Boolean);
+  if (!list.length) return { added: 0 };
+  if (!USE_SUPABASE) {
+    throw new Error('LOCAL_MODE_NOT_SUPPORTED');
+  }
+  // Supabase UPSERT — 이미 있으면 collected_at/by 갱신 (on_conflict 지원)
+  const now_ = now();
+  const rows = list.map(seq => ({
+    order_seq: seq,
+    collected_at: now_,
+    collected_by: collectedBy || null,
+    category: category || null,
+  }));
+  // POST /rest/v1/bg_order_collected?on_conflict=order_seq
+  // Prefer: resolution=merge-duplicates
+  const url = `${REST_BASE}/bg_order_collected?on_conflict=order_seq`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      ...HEADERS,
+      Prefer: 'resolution=merge-duplicates,return=minimal',
+    },
+    body: JSON.stringify(rows),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase UPSERT bg_order_collected [${res.status}]: ${text}`);
+  }
+  return { added: list.length };
+}
+
+/** 다건 수집해제 */
+async function removeCollectedOrderSeqs(orderSeqs) {
+  const list = (orderSeqs || []).map(String).filter(Boolean);
+  if (!list.length) return { removed: 0 };
+  if (!USE_SUPABASE) {
+    throw new Error('LOCAL_MODE_NOT_SUPPORTED');
+  }
+  // DELETE /rest/v1/bg_order_collected?order_seq=in.("a","b","c")
+  const inList = list.map(s => `"${encodeURIComponent(s)}"`).join(',');
+  const url = `${REST_BASE}/bg_order_collected?order_seq=in.(${inList})`;
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: { ...HEADERS, Prefer: 'return=minimal' },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase DELETE bg_order_collected [${res.status}]: ${text}`);
+  }
+  return { removed: list.length };
+}
+
+// ============================================
 // 공통 출고일 설정 (shipping config)
 // ============================================
 
@@ -703,6 +774,9 @@ module.exports = {
   deleteCustomerInfo,
   setProcessed,
   setProcessedBatch,
+  getCollectedOrderSeqs,
+  addCollectedOrderSeqs,
+  removeCollectedOrderSeqs,
   getShippingConfig,
   saveShippingConfig,
   getShippingGroups,

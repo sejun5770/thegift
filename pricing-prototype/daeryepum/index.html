@@ -1553,7 +1553,9 @@ async function loadCollectedFromServer() {
 }
 async function saveCollectedToServer(addSeqs, removeSeqs) {
   try {
-    await fetch(API + '/api/collected', {
+    // category 를 query 로 전달 — 어느 탭에서 마킹했는지 추적용 (통계/필터링)
+    const cat = currentCategory || 'daeryepum';
+    await fetch(API + '/api/collected?category=' + encodeURIComponent(cat), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ add: addSeqs || [], remove: removeSeqs || [] })
