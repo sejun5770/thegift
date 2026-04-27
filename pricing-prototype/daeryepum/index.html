@@ -3867,43 +3867,91 @@ function renderDashTable() {
   else renderWeeklyTable(data, topProducts);
 }
 
+/**
+ * 사이트명 → 그룹 매핑.
+ *   - 4자리 제휴 코드(예: '웨딩크라우드(8170)') → '바른손몰' 그룹
+ *   - 그 외('바른손카드', '바른손M카드' 등) → 그대로 유지
+ *
+ * 사용처: 주문유형별·사이트별 매출 행을 그룹 단위로 묶어 보여줄 때.
+ */
+function getSiteGroup(siteName) {
+  if (!siteName) return '기타';
+  if (/\(\d{4}\)$/.test(siteName)) return '바른손몰';
+  return siteName;
+}
+function isAffiliateSite(siteName) {
+  return !!siteName && /\(\d{4}\)$/.test(siteName);
+}
+
 function renderDailyTable(data, topProducts) {
   const dayMap = {};
   const daySiteMap = {}; // day -> site -> {amount, qty, orders}
-  const dayTypeMap = {}; // day -> {copurchase:{amount,orders}, standalone:{amount,orders}}
+  const dayTypeMap = {}; // day -> {copurchase, standalone} (전체 합계, 호환)
+  // day -> siteGroup -> {copurchase, standalone}: B 요청 — 사이트 그룹별 동시/단독 분리
+  const dayGroupTypeMap = {};
+  // day -> {amount, qty, orders}: C 요청 — 4자리 제휴 코드(바른손몰) 합계 행 데이터
+  const dayAffiliateMap = {};
+  function ensureGroupType(day, group) {
+    if (!dayGroupTypeMap[day]) dayGroupTypeMap[day] = {};
+    if (!dayGroupTypeMap[day][group]) {
+      dayGroupTypeMap[day][group] = {
+        copurchase:{amount:0,orders:0,qty:0},
+        standalone:{amount:0,orders:0,qty:0},
+      };
+    }
+    return dayGroupTypeMap[day][group];
+  }
   data.forEach(r => {
     const day = r.order_day;
     const name = (r.card_name||'').replace(/^\[.*?\]\s*/g,'');
     const sn = r.site_name || '기타';
+    const group = getSiteGroup(sn);
     if (!dayMap[day]) dayMap[day] = { amount:0, qty:0, orders:0, products:{} };
     dayMap[day].amount += r.total_amount||0;
     dayMap[day].qty += r.total_qty||0;
     if (!dayMap[day].products[name]) dayMap[day].products[name] = {amount:0, qty:0};
     dayMap[day].products[name].amount += r.total_amount||0;
     dayMap[day].products[name].qty += r.total_qty||0;
-    // 사이트별
+    // 사이트별 (개별)
     if (!daySiteMap[day]) daySiteMap[day] = {};
     if (!daySiteMap[day][sn]) daySiteMap[day][sn] = {amount:0, qty:0, orders:0};
     daySiteMap[day][sn].amount += r.total_amount||0;
     daySiteMap[day][sn].qty += r.total_qty||0;
-    // 동시구매/단독주문별 (금액/수량만)
+    // 4자리 제휴사 합계 (바른손몰)
+    if (isAffiliateSite(sn)) {
+      if (!dayAffiliateMap[day]) dayAffiliateMap[day] = {amount:0, qty:0, orders:0};
+      dayAffiliateMap[day].amount += r.total_amount||0;
+      dayAffiliateMap[day].qty += r.total_qty||0;
+    }
+    // 동시구매/단독주문별 (전체 합계용 — 호환 유지)
     if (!dayTypeMap[day]) dayTypeMap[day] = { copurchase:{amount:0,orders:0,qty:0}, standalone:{amount:0,orders:0,qty:0} };
     const typeKey = r.order_type === '동시구매' ? 'copurchase' : 'standalone';
     dayTypeMap[day][typeKey].amount += r.total_amount||0;
     dayTypeMap[day][typeKey].qty += r.total_qty||0;
+    // 사이트 그룹 × 동시/단독
+    const gt = ensureGroupType(day, group);
+    gt[typeKey].amount += r.total_amount||0;
+    gt[typeKey].qty += r.total_qty||0;
   });
   // 주문번호 기준 건수 (dashboardOrderCounts에서 집계)
   dashboardOrderCounts.forEach(r => {
     const day = r.order_day;
     const sn = r.site_name || '기타';
+    const group = getSiteGroup(sn);
     if (!dayMap[day]) dayMap[day] = { amount:0, qty:0, orders:0, products:{} };
     dayMap[day].orders += r.distinct_order_count||0;
     if (!daySiteMap[day]) daySiteMap[day] = {};
     if (!daySiteMap[day][sn]) daySiteMap[day][sn] = {amount:0, qty:0, orders:0};
     daySiteMap[day][sn].orders += r.distinct_order_count||0;
+    if (isAffiliateSite(sn)) {
+      if (!dayAffiliateMap[day]) dayAffiliateMap[day] = {amount:0, qty:0, orders:0};
+      dayAffiliateMap[day].orders += r.distinct_order_count||0;
+    }
     if (!dayTypeMap[day]) dayTypeMap[day] = { copurchase:{amount:0,orders:0,qty:0}, standalone:{amount:0,orders:0,qty:0} };
     const typeKey = r.order_type === '동시구매' ? 'copurchase' : 'standalone';
     dayTypeMap[day][typeKey].orders += r.distinct_order_count||0;
+    const gt = ensureGroupType(day, group);
+    gt[typeKey].orders += r.distinct_order_count||0;
   });
   // 활성 사이트 목록 (매출순)
   const allSiteTotals = {};
@@ -3959,17 +4007,39 @@ function renderDailyTable(data, topProducts) {
     return `<td class="num" style="font-size:12px">${avg ? fmtKRW(avg) : '<span style="color:var(--gray-300)">-</span>'}</td>`;
   }).join('');
 
-  // 사이트별 매출 행
+  // 사이트별 매출 행 — 4자리 제휴사는 '바른손몰' 합계 행으로 묶어서 먼저 노출 + 개별 행 유지
   const siteDivider = activeSites.length > 1 ? `<tr style="background:var(--gray-100)">
     <td style="${STICKY}background:var(--gray-100);font-size:10px;color:var(--gray-500);padding:3px 12px;font-weight:600;letter-spacing:.5px">사이트별 매출</td>
     ${days.map(()=>`<td style="background:var(--gray-100)"></td>`).join('')}
     <td style="background:#fef9c3;border-left:2px solid var(--gray-200)"></td>
   </tr>` : '';
+  // 바른손몰 (4자리 제휴사 합계) 행 — affiliate 가 둘 이상일 때만 의미가 있음
+  const affiliateSites = activeSites.filter(s => isAffiliateSite(s));
+  const hasAffiliateSummary = affiliateSites.length >= 2;
+  const affiliateSummaryRow = hasAffiliateSummary ? (() => {
+    const color = SITE_COLORS['바른손몰'] || '#10b981';
+    const sTotal = days.reduce((s,d) => s + ((dayAffiliateMap[d]||{amount:0}).amount), 0);
+    const sPct = totalAmt > 0 ? Math.round(sTotal / totalAmt * 1000) / 10 : 0;
+    const sCells = days.map(d => {
+      const sv = dayAffiliateMap[d] || {amount:0};
+      const dayTotal = dayMap[d].amount || 0;
+      const pct = dayTotal > 0 ? Math.round(sv.amount / dayTotal * 1000) / 10 : 0;
+      return `<td class="num" style="font-size:12px;font-weight:600">${sv.amount ? fmtKRW(sv.amount)+' <span style="color:var(--gray-500);font-size:10px;font-weight:400">('+pct+'%)</span>' : '<span style="color:var(--gray-200)">-</span>'}</td>`;
+    }).join('');
+    const label = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};margin-right:4px"></span><strong>바른손몰</strong> <span style="color:var(--gray-400);font-weight:400;font-size:10px">(제휴 ${affiliateSites.length}곳 합계)</span>`;
+    return `<tr style="background:#f0fdf4">
+      <td style="${STICKY}background:#f0fdf4;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${label}</td>
+      ${sCells}
+      <td class="num" style="background:#fef9c3;font-size:12px;font-weight:600;border-left:2px solid var(--gray-200)">${sTotal ? fmtKRW(sTotal)+' <span style="color:var(--gray-500);font-weight:400">('+sPct+'%)</span>' : '-'}</td>
+    </tr>`;
+  })() : '';
   const siteRows = activeSites.length > 1 ? activeSites.map(site => {
-    const color = SITE_COLORS[site] || '#a1a1aa';
+    const color = SITE_COLORS[site] || (isAffiliateSite(site) ? SITE_COLORS['바른손몰'] : '#a1a1aa');
     const sTotal = days.reduce((s,d) => s + ((daySiteMap[d]&&daySiteMap[d][site])?daySiteMap[d][site].amount:0), 0);
     const sTotalQty = days.reduce((s,d) => s + ((daySiteMap[d]&&daySiteMap[d][site])?daySiteMap[d][site].qty:0), 0);
     const sPct = totalAmt > 0 ? Math.round(sTotal / totalAmt * 1000) / 10 : 0;
+    // 제휴사 행은 합계 행 아래 들여쓰기 표시 (계층 명확화)
+    const indent = hasAffiliateSummary && isAffiliateSite(site) ? 24 : 12;
     const sCells = days.map(d => {
       const sv = (daySiteMap[d]&&daySiteMap[d][site]) || {amount:0,qty:0};
       const dayTotal = dayMap[d].amount || 0;
@@ -3978,11 +4048,43 @@ function renderDailyTable(data, topProducts) {
     }).join('');
     const label = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};margin-right:4px"></span>${site}`;
     return `<tr>
-      <td style="${STICKY}background:#fff;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${label}</td>
+      <td style="${STICKY}background:#fff;font-size:12px;color:var(--gray-700);padding-left:${indent}px;white-space:nowrap">${label}</td>
       ${sCells}
       <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${sTotal ? fmtKRW(sTotal)+' <span style="color:var(--gray-500)">('+sPct+'%)</span>' : '-'}</td>
     </tr>`;
   }).join('') : '';
+  // 합계 행 + 개별 행 결합 (affiliate 그룹은 sort 순서대로 자연스럽게 합계 아래 나열되도록)
+  const sortedSiteRows = (() => {
+    if (!hasAffiliateSummary) return siteRows;
+    // activeSites 가 매출 큰 순 정렬 → 합계 행을 첫 affiliate 위에 끼워넣음
+    const siteRowsArr = activeSites.map(site => {
+      // 위 siteRows 와 동일 로직 (간소화 위해 다시 구성)
+      const color = SITE_COLORS[site] || (isAffiliateSite(site) ? SITE_COLORS['바른손몰'] : '#a1a1aa');
+      const sTotal = days.reduce((s,d) => s + ((daySiteMap[d]&&daySiteMap[d][site])?daySiteMap[d][site].amount:0), 0);
+      const sPct = totalAmt > 0 ? Math.round(sTotal / totalAmt * 1000) / 10 : 0;
+      const indent = isAffiliateSite(site) ? 24 : 12;
+      const sCells = days.map(d => {
+        const sv = (daySiteMap[d]&&daySiteMap[d][site]) || {amount:0,qty:0};
+        const dayTotal = dayMap[d].amount || 0;
+        const pct = dayTotal > 0 ? Math.round(sv.amount / dayTotal * 1000) / 10 : 0;
+        return `<td class="num" style="font-size:12px">${sv.amount ? fmtKRW(sv.amount)+' <span style="color:var(--gray-500);font-size:10px">('+pct+'%)</span>' : '<span style="color:var(--gray-200)">-</span>'}</td>`;
+      }).join('');
+      const label = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};margin-right:4px"></span>${site}`;
+      return {
+        site,
+        isAffiliate: isAffiliateSite(site),
+        html: `<tr>
+          <td style="${STICKY}background:#fff;font-size:12px;color:var(--gray-700);padding-left:${indent}px;white-space:nowrap">${label}</td>
+          ${sCells}
+          <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${sTotal ? fmtKRW(sTotal)+' <span style="color:var(--gray-500)">('+sPct+'%)</span>' : '-'}</td>
+        </tr>`,
+      };
+    });
+    // 비제휴 사이트 먼저, 제휴 합계, 그 다음 개별 제휴 사이트
+    const nonAffiliate = siteRowsArr.filter(r => !r.isAffiliate).map(r => r.html).join('');
+    const affiliates = siteRowsArr.filter(r => r.isAffiliate).map(r => r.html).join('');
+    return nonAffiliate + affiliateSummaryRow + affiliates;
+  })();
 
   // 상품별 행 구분선
   const divider = `<tr style="background:var(--gray-100)">
@@ -4011,16 +4113,15 @@ function renderDailyTable(data, topProducts) {
     </tr>`;
   }).join('');
 
-  // 동시구매/단독주문 행 (매출 + 건수 + 수량)
-  const totalCopurchase = days.reduce((s,d) => s + ((dayTypeMap[d]||{copurchase:{amount:0}}).copurchase.amount), 0);
-  const totalStandalone = days.reduce((s,d) => s + ((dayTypeMap[d]||{standalone:{amount:0}}).standalone.amount), 0);
-  const totalCpOrders = days.reduce((s,d) => s + ((dayTypeMap[d]||{copurchase:{orders:0}}).copurchase.orders), 0);
-  const totalSaOrders = days.reduce((s,d) => s + ((dayTypeMap[d]||{standalone:{orders:0}}).standalone.orders), 0);
-  const totalCpQty = days.reduce((s,d) => s + ((dayTypeMap[d]||{copurchase:{qty:0}}).copurchase.qty), 0);
-  const totalSaQty = days.reduce((s,d) => s + ((dayTypeMap[d]||{standalone:{qty:0}}).standalone.qty), 0);
-  const mkTypeCells = (typeKey, metric) => days.map(d => {
-    const tm = (dayTypeMap[d]||{})[typeKey]||{amount:0,orders:0,qty:0};
-    const v = tm[metric];
+  // 동시구매/단독주문 행 — 사이트 그룹별로 분리 (B 요청).
+  //   바른손카드: 동시 + 단독, 바른손몰: 단독만 (Q1=a). 데이터에 없는 그룹은 자동 스킵.
+  const DOT_CP = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#8b5cf6;margin-right:4px"></span>';
+  const DOT_SA = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#f59e0b;margin-right:4px"></span>';
+  // 그룹 셀 렌더링 — group 이 없는 날은 0
+  const mkGroupTypeCells = (group, typeKey, metric) => days.map(d => {
+    const gt = (dayGroupTypeMap[d]||{})[group];
+    const tm = gt ? gt[typeKey] : null;
+    const v = tm ? tm[metric] : 0;
     if (!v) return `<td class="num" style="font-size:12px"><span style="color:var(--gray-300)">-</span></td>`;
     if (metric === 'amount') {
       const dayTotal = dayMap[d].amount || 0;
@@ -4032,42 +4133,68 @@ function renderDailyTable(data, topProducts) {
       return `<td class="num" style="font-size:12px">${fmtNum(v)}</td>`;
     }
   }).join('');
-  const cpPctTotal = totalAmt > 0 ? Math.round(totalCopurchase / totalAmt * 100) : 0;
-  const saPctTotal = totalAmt > 0 ? Math.round(totalStandalone / totalAmt * 100) : 0;
-  const DOT_CP = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#8b5cf6;margin-right:4px"></span>';
-  const DOT_SA = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#f59e0b;margin-right:4px"></span>';
+  const sumGroupType = (group, typeKey, metric) => days.reduce((s,d) => {
+    const gt = (dayGroupTypeMap[d]||{})[group];
+    return s + (gt && gt[typeKey] ? (gt[typeKey][metric] || 0) : 0);
+  }, 0);
+  function mkGroupRow(group, typeKey, typeLabel, metric, isFirstOfGroup) {
+    const total = sumGroupType(group, typeKey, metric);
+    const dot = typeKey === 'copurchase' ? DOT_CP : DOT_SA;
+    const bg = typeKey === 'copurchase' ? '#fff' : '#fafafa';
+    let totalCell;
+    if (!total) totalCell = '-';
+    else if (metric === 'amount') {
+      const pct = totalAmt > 0 ? Math.round(total / totalAmt * 100) : 0;
+      totalCell = fmtKRW(total) + ' <span style="color:var(--gray-500)">('+pct+'%)</span>';
+    } else if (metric === 'orders') totalCell = fmtNum(total) + '건';
+    else totalCell = fmtNum(total);
+    const groupTag = isFirstOfGroup ? `<span style="font-weight:600;color:var(--gray-800)">${group}</span> ` : '<span style="display:inline-block;width:60px"></span>';
+    return `<tr>
+      <td style="${STICKY}background:${bg};font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${groupTag}${dot}${typeLabel}</td>
+      ${mkGroupTypeCells(group, typeKey, metric)}
+      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalCell}</td>
+    </tr>`;
+  }
+  // 데이터에 등장한 사이트 그룹 추출 — 등장 순서: 바른손카드/바른손M카드 → 바른손몰 → 기타
+  const presentGroups = (() => {
+    const set = new Set();
+    Object.values(dayGroupTypeMap).forEach(byGroup => {
+      Object.keys(byGroup).forEach(g => set.add(g));
+    });
+    const order = [...set];
+    order.sort((a, b) => {
+      const score = g => g === '바른손몰' ? 1 : (g === '기타' ? 2 : 0);
+      return score(a) - score(b);
+    });
+    return order;
+  })();
+  // 그룹별 행 생성 — 그룹 안의 (typeKey, metric) 6 조합 중 모두 0 인 typeKey 는 스킵
+  const typeRowsParts = [];
+  presentGroups.forEach(group => {
+    const hasCopurchase = sumGroupType(group, 'copurchase', 'amount') > 0
+      || sumGroupType(group, 'copurchase', 'orders') > 0
+      || sumGroupType(group, 'copurchase', 'qty') > 0;
+    const hasStandalone = sumGroupType(group, 'standalone', 'amount') > 0
+      || sumGroupType(group, 'standalone', 'orders') > 0
+      || sumGroupType(group, 'standalone', 'qty') > 0;
+    if (hasCopurchase) {
+      typeRowsParts.push(mkGroupRow(group, 'copurchase', '동시구매 매출', 'amount', true));
+      typeRowsParts.push(mkGroupRow(group, 'copurchase', '동시구매 건수', 'orders', false));
+      typeRowsParts.push(mkGroupRow(group, 'copurchase', '동시구매 수량', 'qty', false));
+    }
+    if (hasStandalone) {
+      typeRowsParts.push(mkGroupRow(group, 'standalone', '단독주문 매출', 'amount', !hasCopurchase));
+      typeRowsParts.push(mkGroupRow(group, 'standalone', '단독주문 건수', 'orders', false));
+      typeRowsParts.push(mkGroupRow(group, 'standalone', '단독주문 수량', 'qty', false));
+    }
+  });
+  const typeRows = typeRowsParts.join('');
 
   const typeDivider = `<tr style="background:var(--gray-100)">
-    <td style="${STICKY}background:var(--gray-100);font-size:10px;color:var(--gray-500);padding:3px 12px;font-weight:600;letter-spacing:.5px">주문유형별</td>
+    <td style="${STICKY}background:var(--gray-100);font-size:10px;color:var(--gray-500);padding:3px 12px;font-weight:600;letter-spacing:.5px">주문유형별 (사이트 그룹별)</td>
     ${days.map(()=>`<td style="background:var(--gray-100)"></td>`).join('')}
     <td style="background:#fef9c3;border-left:2px solid var(--gray-200)"></td>
   </tr>`;
-  const typeRows =
-    `<tr>
-      <td style="${STICKY}background:#fff;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${DOT_CP}동시구매 매출</td>
-      ${mkTypeCells('copurchase','amount')}
-      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalCopurchase ? fmtKRW(totalCopurchase)+' <span style="color:var(--gray-500)">('+cpPctTotal+'%)</span>' : '-'}</td>
-    </tr><tr>
-      <td style="${STICKY}background:#fff;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${DOT_CP}동시구매 건수</td>
-      ${mkTypeCells('copurchase','orders')}
-      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalCpOrders ? fmtNum(totalCpOrders)+'건' : '-'}</td>
-    </tr><tr>
-      <td style="${STICKY}background:#fff;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${DOT_CP}동시구매 수량</td>
-      ${mkTypeCells('copurchase','qty')}
-      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalCpQty ? fmtNum(totalCpQty) : '-'}</td>
-    </tr><tr>
-      <td style="${STICKY}background:#fafafa;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${DOT_SA}단독주문 매출</td>
-      ${mkTypeCells('standalone','amount')}
-      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalStandalone ? fmtKRW(totalStandalone)+' <span style="color:var(--gray-500)">('+saPctTotal+'%)</span>' : '-'}</td>
-    </tr><tr>
-      <td style="${STICKY}background:#fafafa;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${DOT_SA}단독주문 건수</td>
-      ${mkTypeCells('standalone','orders')}
-      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalSaOrders ? fmtNum(totalSaOrders)+'건' : '-'}</td>
-    </tr><tr>
-      <td style="${STICKY}background:#fafafa;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${DOT_SA}단독주문 수량</td>
-      ${mkTypeCells('standalone','qty')}
-      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalSaQty ? fmtNum(totalSaQty) : '-'}</td>
-    </tr>`;
 
   const tbody =
     mkRow('총 매출', amtCells, fmtKRW(totalAmt)) +
@@ -4075,7 +4202,7 @@ function renderDailyTable(data, topProducts) {
     mkRow('주문수량', qtyCells, fmtNum(totalQty)) +
     mkRow('객단가', avgCells, fmtKRW(totalAvg)) +
     typeDivider + typeRows +
-    siteDivider + siteRows +
+    siteDivider + sortedSiteRows +
     divider +
     productRows;
 
@@ -4085,40 +4212,70 @@ function renderDailyTable(data, topProducts) {
 function renderWeeklyTable(data, topProducts) {
   const weekMap = {};
   const weekSiteMap = {}; // week -> site -> {amount, qty, orders}
-  const weekTypeMap = {}; // week -> {copurchase:{amount,orders}, standalone:{amount,orders}}
+  const weekTypeMap = {}; // week -> {copurchase, standalone} (호환용 글로벌 합계)
+  const weekGroupTypeMap = {}; // week -> siteGroup -> {copurchase, standalone}
+  const weekAffiliateMap = {}; // week -> {amount, qty, orders} — 4자리 제휴사 합계
+  function ensureWeekGroupType(wk, group) {
+    if (!weekGroupTypeMap[wk]) weekGroupTypeMap[wk] = {};
+    if (!weekGroupTypeMap[wk][group]) {
+      weekGroupTypeMap[wk][group] = {
+        copurchase:{amount:0,orders:0,qty:0},
+        standalone:{amount:0,orders:0,qty:0},
+      };
+    }
+    return weekGroupTypeMap[wk][group];
+  }
   data.forEach(r => {
     const wk = getWeekMondayStr(r.order_day);
     const name = (r.card_name||'').replace(/^\[.*?\]\s*/g,'');
     const sn = r.site_name || '기타';
+    const group = getSiteGroup(sn);
     if (!weekMap[wk]) weekMap[wk] = { amount:0, qty:0, orders:0, products:{} };
     weekMap[wk].amount += r.total_amount||0;
     weekMap[wk].qty += r.total_qty||0;
     if (!weekMap[wk].products[name]) weekMap[wk].products[name] = {amount:0, qty:0};
     weekMap[wk].products[name].amount += r.total_amount||0;
     weekMap[wk].products[name].qty += r.total_qty||0;
-    // 사이트별
+    // 사이트별 (개별)
     if (!weekSiteMap[wk]) weekSiteMap[wk] = {};
     if (!weekSiteMap[wk][sn]) weekSiteMap[wk][sn] = {amount:0, qty:0, orders:0};
     weekSiteMap[wk][sn].amount += r.total_amount||0;
     weekSiteMap[wk][sn].qty += r.total_qty||0;
-    // 동시구매/단독주문별 (금액/수량만)
+    // 4자리 제휴사 합계
+    if (isAffiliateSite(sn)) {
+      if (!weekAffiliateMap[wk]) weekAffiliateMap[wk] = {amount:0, qty:0, orders:0};
+      weekAffiliateMap[wk].amount += r.total_amount||0;
+      weekAffiliateMap[wk].qty += r.total_qty||0;
+    }
+    // 동시구매/단독주문별 (전체 합계 — 호환 유지)
     if (!weekTypeMap[wk]) weekTypeMap[wk] = { copurchase:{amount:0,orders:0,qty:0}, standalone:{amount:0,orders:0,qty:0} };
     const typeKey = r.order_type === '동시구매' ? 'copurchase' : 'standalone';
     weekTypeMap[wk][typeKey].amount += r.total_amount||0;
     weekTypeMap[wk][typeKey].qty += r.total_qty||0;
+    // 사이트 그룹 × 동시/단독
+    const gt = ensureWeekGroupType(wk, group);
+    gt[typeKey].amount += r.total_amount||0;
+    gt[typeKey].qty += r.total_qty||0;
   });
   // 주문번호 기준 건수 (dashboardOrderCounts에서 집계)
   dashboardOrderCounts.forEach(r => {
     const wk = getWeekMondayStr(r.order_day);
     const sn = r.site_name || '기타';
+    const group = getSiteGroup(sn);
     if (!weekMap[wk]) weekMap[wk] = { amount:0, qty:0, orders:0, products:{} };
     weekMap[wk].orders += r.distinct_order_count||0;
     if (!weekSiteMap[wk]) weekSiteMap[wk] = {};
     if (!weekSiteMap[wk][sn]) weekSiteMap[wk][sn] = {amount:0, qty:0, orders:0};
     weekSiteMap[wk][sn].orders += r.distinct_order_count||0;
+    if (isAffiliateSite(sn)) {
+      if (!weekAffiliateMap[wk]) weekAffiliateMap[wk] = {amount:0, qty:0, orders:0};
+      weekAffiliateMap[wk].orders += r.distinct_order_count||0;
+    }
     if (!weekTypeMap[wk]) weekTypeMap[wk] = { copurchase:{amount:0,orders:0,qty:0}, standalone:{amount:0,orders:0,qty:0} };
     const typeKey = r.order_type === '동시구매' ? 'copurchase' : 'standalone';
     weekTypeMap[wk][typeKey].orders += r.distinct_order_count||0;
+    const gt = ensureWeekGroupType(wk, group);
+    gt[typeKey].orders += r.distinct_order_count||0;
   });
   // 활성 사이트 목록
   const allSiteTotals = {};
@@ -4184,29 +4341,57 @@ function renderWeeklyTable(data, topProducts) {
     return `<td class="num" style="font-size:12px">${avg ? fmtKRW(avg) : '<span style="color:var(--gray-300)">-</span>'}</td>`;
   }).join('');
 
-  // 사이트별 매출 행
+  // 사이트별 매출 행 — 4자리 제휴사는 '바른손몰' 합계 + 개별 행 (들여쓰기)
   const siteDivider = activeSites.length > 1 ? `<tr style="background:var(--gray-100)">
     <td style="${STICKY}background:var(--gray-100);font-size:10px;color:var(--gray-500);padding:3px 12px;font-weight:600;letter-spacing:.5px">사이트별 매출</td>
     ${weeks.map(()=>`<td style="background:var(--gray-100)"></td>`).join('')}
     <td style="background:#fef9c3;border-left:2px solid var(--gray-200)"></td>
   </tr>` : '';
-  const siteRows = activeSites.length > 1 ? activeSites.map(site => {
-    const color = SITE_COLORS[site] || '#a1a1aa';
-    const sTotal = weeks.reduce((s,w) => s + ((weekSiteMap[w]&&weekSiteMap[w][site])?weekSiteMap[w][site].amount:0), 0);
-    const sPct = totalAmt > 0 ? Math.round(sTotal / totalAmt * 1000) / 10 : 0;
-    const sCells = weeks.map(w => {
-      const sv = (weekSiteMap[w]&&weekSiteMap[w][site]) || {amount:0};
-      const wkTotal = weekMap[w].amount || 0;
-      const pct = wkTotal > 0 ? Math.round(sv.amount / wkTotal * 1000) / 10 : 0;
-      return `<td class="num" style="font-size:12px">${sv.amount ? fmtKRW(sv.amount)+' <span style="color:var(--gray-500);font-size:10px">('+pct+'%)</span>' : '<span style="color:var(--gray-200)">-</span>'}</td>`;
-    }).join('');
-    const label = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};margin-right:4px"></span>${site}`;
-    return `<tr>
-      <td style="${STICKY}background:#fff;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${label}</td>
-      ${sCells}
-      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${sTotal ? fmtKRW(sTotal)+' <span style="color:var(--gray-500)">('+sPct+'%)</span>' : '-'}</td>
-    </tr>`;
-  }).join('') : '';
+  const affiliateSitesW = activeSites.filter(s => isAffiliateSite(s));
+  const hasAffiliateSummaryW = affiliateSitesW.length >= 2;
+  const sortedSiteRows = (() => {
+    if (activeSites.length <= 1) return '';
+    function buildSiteRow(site) {
+      const color = SITE_COLORS[site] || (isAffiliateSite(site) ? SITE_COLORS['바른손몰'] : '#a1a1aa');
+      const sTotal = weeks.reduce((s,w) => s + ((weekSiteMap[w]&&weekSiteMap[w][site])?weekSiteMap[w][site].amount:0), 0);
+      const sPct = totalAmt > 0 ? Math.round(sTotal / totalAmt * 1000) / 10 : 0;
+      const indent = hasAffiliateSummaryW && isAffiliateSite(site) ? 24 : 12;
+      const sCells = weeks.map(w => {
+        const sv = (weekSiteMap[w]&&weekSiteMap[w][site]) || {amount:0};
+        const wkTotal = weekMap[w].amount || 0;
+        const pct = wkTotal > 0 ? Math.round(sv.amount / wkTotal * 1000) / 10 : 0;
+        return `<td class="num" style="font-size:12px">${sv.amount ? fmtKRW(sv.amount)+' <span style="color:var(--gray-500);font-size:10px">('+pct+'%)</span>' : '<span style="color:var(--gray-200)">-</span>'}</td>`;
+      }).join('');
+      const label = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};margin-right:4px"></span>${site}`;
+      return `<tr>
+        <td style="${STICKY}background:#fff;font-size:12px;color:var(--gray-700);padding-left:${indent}px;white-space:nowrap">${label}</td>
+        ${sCells}
+        <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${sTotal ? fmtKRW(sTotal)+' <span style="color:var(--gray-500)">('+sPct+'%)</span>' : '-'}</td>
+      </tr>`;
+    }
+    function buildAffiliateSummary() {
+      if (!hasAffiliateSummaryW) return '';
+      const color = SITE_COLORS['바른손몰'] || '#10b981';
+      const sTotal = weeks.reduce((s,w) => s + ((weekAffiliateMap[w]||{amount:0}).amount), 0);
+      const sPct = totalAmt > 0 ? Math.round(sTotal / totalAmt * 1000) / 10 : 0;
+      const sCells = weeks.map(w => {
+        const sv = weekAffiliateMap[w] || {amount:0};
+        const wkTotal = weekMap[w].amount || 0;
+        const pct = wkTotal > 0 ? Math.round(sv.amount / wkTotal * 1000) / 10 : 0;
+        return `<td class="num" style="font-size:12px;font-weight:600">${sv.amount ? fmtKRW(sv.amount)+' <span style="color:var(--gray-500);font-size:10px;font-weight:400">('+pct+'%)</span>' : '<span style="color:var(--gray-200)">-</span>'}</td>`;
+      }).join('');
+      const label = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};margin-right:4px"></span><strong>바른손몰</strong> <span style="color:var(--gray-400);font-weight:400;font-size:10px">(제휴 ${affiliateSitesW.length}곳 합계)</span>`;
+      return `<tr style="background:#f0fdf4">
+        <td style="${STICKY}background:#f0fdf4;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${label}</td>
+        ${sCells}
+        <td class="num" style="background:#fef9c3;font-size:12px;font-weight:600;border-left:2px solid var(--gray-200)">${sTotal ? fmtKRW(sTotal)+' <span style="color:var(--gray-500);font-weight:400">('+sPct+'%)</span>' : '-'}</td>
+      </tr>`;
+    }
+    if (!hasAffiliateSummaryW) return activeSites.map(buildSiteRow).join('');
+    const nonAff = activeSites.filter(s => !isAffiliateSite(s)).map(buildSiteRow).join('');
+    const affs = activeSites.filter(s => isAffiliateSite(s)).map(buildSiteRow).join('');
+    return nonAff + buildAffiliateSummary() + affs;
+  })();
 
   // 상품별 구분선 + 행
   const divider = `<tr style="background:var(--gray-100)">
@@ -4234,16 +4419,13 @@ function renderWeeklyTable(data, topProducts) {
     </tr>`;
   }).join('');
 
-  // 동시구매/단독주문 행 (매출 + 건수 + 수량)
-  const totalCopurchase = weeks.reduce((s,w) => s + ((weekTypeMap[w]||{copurchase:{amount:0}}).copurchase.amount), 0);
-  const totalStandalone = weeks.reduce((s,w) => s + ((weekTypeMap[w]||{standalone:{amount:0}}).standalone.amount), 0);
-  const totalCpOrders = weeks.reduce((s,w) => s + ((weekTypeMap[w]||{copurchase:{orders:0}}).copurchase.orders), 0);
-  const totalSaOrders = weeks.reduce((s,w) => s + ((weekTypeMap[w]||{standalone:{orders:0}}).standalone.orders), 0);
-  const totalCpQty = weeks.reduce((s,w) => s + ((weekTypeMap[w]||{copurchase:{qty:0}}).copurchase.qty), 0);
-  const totalSaQty = weeks.reduce((s,w) => s + ((weekTypeMap[w]||{standalone:{qty:0}}).standalone.qty), 0);
-  const mkTypeCells = (typeKey, metric) => weeks.map(w => {
-    const tm = (weekTypeMap[w]||{})[typeKey]||{amount:0,orders:0,qty:0};
-    const v = tm[metric];
+  // 동시구매/단독주문 행 — 사이트 그룹별로 분리 (B 요청).
+  const DOT_CP = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#8b5cf6;margin-right:4px"></span>';
+  const DOT_SA = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#f59e0b;margin-right:4px"></span>';
+  const mkGroupTypeCellsW = (group, typeKey, metric) => weeks.map(w => {
+    const gt = (weekGroupTypeMap[w]||{})[group];
+    const tm = gt ? gt[typeKey] : null;
+    const v = tm ? tm[metric] : 0;
     if (!v) return `<td class="num" style="font-size:12px"><span style="color:var(--gray-300)">-</span></td>`;
     if (metric === 'amount') {
       const wkTotal = weekMap[w].amount || 0;
@@ -4255,41 +4437,65 @@ function renderWeeklyTable(data, topProducts) {
       return `<td class="num" style="font-size:12px">${fmtNum(v)}</td>`;
     }
   }).join('');
-  const cpPctTotal = totalAmt > 0 ? Math.round(totalCopurchase / totalAmt * 100) : 0;
-  const saPctTotal = totalAmt > 0 ? Math.round(totalStandalone / totalAmt * 100) : 0;
-  const DOT_CP = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#8b5cf6;margin-right:4px"></span>';
-  const DOT_SA = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#f59e0b;margin-right:4px"></span>';
+  const sumGroupTypeW = (group, typeKey, metric) => weeks.reduce((s,w) => {
+    const gt = (weekGroupTypeMap[w]||{})[group];
+    return s + (gt && gt[typeKey] ? (gt[typeKey][metric] || 0) : 0);
+  }, 0);
+  function mkGroupRowW(group, typeKey, typeLabel, metric, isFirstOfGroup) {
+    const total = sumGroupTypeW(group, typeKey, metric);
+    const dot = typeKey === 'copurchase' ? DOT_CP : DOT_SA;
+    const bg = typeKey === 'copurchase' ? '#fff' : '#fafafa';
+    let totalCell;
+    if (!total) totalCell = '-';
+    else if (metric === 'amount') {
+      const pct = totalAmt > 0 ? Math.round(total / totalAmt * 100) : 0;
+      totalCell = fmtKRW(total) + ' <span style="color:var(--gray-500)">('+pct+'%)</span>';
+    } else if (metric === 'orders') totalCell = fmtNum(total) + '건';
+    else totalCell = fmtNum(total);
+    const groupTag = isFirstOfGroup ? `<span style="font-weight:600;color:var(--gray-800)">${group}</span> ` : '<span style="display:inline-block;width:60px"></span>';
+    return `<tr>
+      <td style="${STICKY}background:${bg};font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${groupTag}${dot}${typeLabel}</td>
+      ${mkGroupTypeCellsW(group, typeKey, metric)}
+      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalCell}</td>
+    </tr>`;
+  }
+  const presentGroupsW = (() => {
+    const set = new Set();
+    Object.values(weekGroupTypeMap).forEach(byGroup => {
+      Object.keys(byGroup).forEach(g => set.add(g));
+    });
+    const order = [...set];
+    order.sort((a, b) => {
+      const score = g => g === '바른손몰' ? 1 : (g === '기타' ? 2 : 0);
+      return score(a) - score(b);
+    });
+    return order;
+  })();
+  const typeRowsParts = [];
+  presentGroupsW.forEach(group => {
+    const hasCopurchase = sumGroupTypeW(group, 'copurchase', 'amount') > 0
+      || sumGroupTypeW(group, 'copurchase', 'orders') > 0
+      || sumGroupTypeW(group, 'copurchase', 'qty') > 0;
+    const hasStandalone = sumGroupTypeW(group, 'standalone', 'amount') > 0
+      || sumGroupTypeW(group, 'standalone', 'orders') > 0
+      || sumGroupTypeW(group, 'standalone', 'qty') > 0;
+    if (hasCopurchase) {
+      typeRowsParts.push(mkGroupRowW(group, 'copurchase', '동시구매 매출', 'amount', true));
+      typeRowsParts.push(mkGroupRowW(group, 'copurchase', '동시구매 건수', 'orders', false));
+      typeRowsParts.push(mkGroupRowW(group, 'copurchase', '동시구매 수량', 'qty', false));
+    }
+    if (hasStandalone) {
+      typeRowsParts.push(mkGroupRowW(group, 'standalone', '단독주문 매출', 'amount', !hasCopurchase));
+      typeRowsParts.push(mkGroupRowW(group, 'standalone', '단독주문 건수', 'orders', false));
+      typeRowsParts.push(mkGroupRowW(group, 'standalone', '단독주문 수량', 'qty', false));
+    }
+  });
+  const typeRows = typeRowsParts.join('');
   const typeDivider = `<tr style="background:var(--gray-100)">
-    <td style="${STICKY}background:var(--gray-100);font-size:10px;color:var(--gray-500);padding:3px 12px;font-weight:600;letter-spacing:.5px">주문유형별</td>
+    <td style="${STICKY}background:var(--gray-100);font-size:10px;color:var(--gray-500);padding:3px 12px;font-weight:600;letter-spacing:.5px">주문유형별 (사이트 그룹별)</td>
     ${weeks.map(()=>`<td style="background:var(--gray-100)"></td>`).join('')}
     <td style="background:#fef9c3;border-left:2px solid var(--gray-200)"></td>
   </tr>`;
-  const typeRows =
-    `<tr>
-      <td style="${STICKY}background:#fff;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${DOT_CP}동시구매 매출</td>
-      ${mkTypeCells('copurchase','amount')}
-      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalCopurchase ? fmtKRW(totalCopurchase)+' <span style="color:var(--gray-500)">('+cpPctTotal+'%)</span>' : '-'}</td>
-    </tr><tr>
-      <td style="${STICKY}background:#fff;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${DOT_CP}동시구매 건수</td>
-      ${mkTypeCells('copurchase','orders')}
-      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalCpOrders ? fmtNum(totalCpOrders)+'건' : '-'}</td>
-    </tr><tr>
-      <td style="${STICKY}background:#fff;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${DOT_CP}동시구매 수량</td>
-      ${mkTypeCells('copurchase','qty')}
-      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalCpQty ? fmtNum(totalCpQty) : '-'}</td>
-    </tr><tr>
-      <td style="${STICKY}background:#fafafa;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${DOT_SA}단독주문 매출</td>
-      ${mkTypeCells('standalone','amount')}
-      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalStandalone ? fmtKRW(totalStandalone)+' <span style="color:var(--gray-500)">('+saPctTotal+'%)</span>' : '-'}</td>
-    </tr><tr>
-      <td style="${STICKY}background:#fafafa;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${DOT_SA}단독주문 건수</td>
-      ${mkTypeCells('standalone','orders')}
-      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalSaOrders ? fmtNum(totalSaOrders)+'건' : '-'}</td>
-    </tr><tr>
-      <td style="${STICKY}background:#fafafa;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${DOT_SA}단독주문 수량</td>
-      ${mkTypeCells('standalone','qty')}
-      <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalSaQty ? fmtNum(totalSaQty) : '-'}</td>
-    </tr>`;
 
   const tbody =
     mkRow('총 매출', amtCells, fmtKRW(totalAmt)) +
@@ -4298,7 +4504,7 @@ function renderWeeklyTable(data, topProducts) {
     mkRow('주문수량', qtyCells, fmtNum(totalQty)) +
     mkRow('객단가', avgCells, fmtKRW(totalAvg)) +
     typeDivider + typeRows +
-    siteDivider + siteRows +
+    siteDivider + sortedSiteRows +
     divider +
     productRows;
 
