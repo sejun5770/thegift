@@ -2335,6 +2335,7 @@
         var zone = getDateZone(ds);
         if (zone === 'closed') break; // 선택 불가
         // 존에 따라 shipping_type 자동 결정 + 날짜 저장
+        var prevShippingType = formState.shipping_type;
         formState.desired_ship_date = ds;
         formState.shipping_type = zone; // 'express' or 'normal'
         // 일반출고 전환시 현금영수증 state 초기화 (결제 금액 없어지면 무의미)
@@ -2342,6 +2343,12 @@
           formState.cash_receipt_yn = false;
           formState.receipt_type = null;
           formState.receipt_number = '';
+        }
+        // 빠른출고 최초 전환시 현금영수증 발행을 기본값(활성)으로 설정.
+        // 같은 express 안에서 날짜만 바꿀 때는 사용자가 Step 2 에서 끈 선택을 존중.
+        if (zone === 'express' && prevShippingType !== 'express') {
+          formState.cash_receipt_yn = true;
+          if (!formState.receipt_type) formState.receipt_type = 'personal'; // 소득공제용 기본
         }
         saveFormState();
         updateNavButtons();
