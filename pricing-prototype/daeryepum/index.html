@@ -884,11 +884,14 @@ nav a:hover{color:var(--gray-900)}
         </label>
       </div>
 
-      <!-- 커스텀 영역 편집기 -->
+      <!-- 입력 필드 편집기 — 고객이 이 스티커 선택시 노출되는 입력 폼 정의 -->
       <div style="border-top:1px solid var(--gray-200);padding-top:16px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <span style="font-size:14px;font-weight:600">커스텀 영역</span>
-          <button class="btn btn-sm" onclick="addBgStickerField()">+ 영역 추가</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div>
+            <div style="font-size:14px;font-weight:600">입력 필드</div>
+            <div style="font-size:11px;color:var(--gray-500);margin-top:2px">고객이 이 스티커 선택 시 노출되는 입력 항목입니다. 비워두면 기본 "스티커 문구" 한 줄만 노출됩니다.</div>
+          </div>
+          <button class="btn btn-sm" onclick="addBgStickerField()">+ 필드 추가</button>
         </div>
         <div id="bg-s-fields"></div>
       </div>
@@ -4747,46 +4750,62 @@ function addBgStickerFieldRow(field) {
   const div = document.createElement('div');
   div.id = id;
   div.style.cssText = 'border:1px solid var(--gray-200);border-radius:var(--radius);padding:12px;margin-bottom:8px;background:var(--gray-50)';
+  // 기존 데이터의 field_id 유지 (편집/저장 반복시 안정성). 신규는 동적 생성.
+  const fieldId = field?.field_id || ('f-' + Math.random().toString(36).slice(2,8));
+  const ftype = field?.field_type || 'text';
+  const optionsCsv = Array.isArray(field?.options) ? field.options.join(', ') : '';
+  div.dataset.fieldId = fieldId;
   div.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <span style="font-size:11px;color:var(--gray-500)">영역</span>
+      <span style="font-size:11px;color:var(--gray-500)">필드</span>
       <button class="btn btn-sm" onclick="document.getElementById('${id}').remove()" style="color:var(--red);font-size:11px">삭제</button>
     </div>
     <div style="display:grid;grid-template-columns:1fr 100px 80px;gap:8px;margin-bottom:8px">
-      <input type="text" class="bgf-label" value="${field ? field.field_label : ''}" placeholder="라벨 (예: 보내는 분)" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
-      <select class="bgf-type" style="padding:6px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
-        <option value="text" ${field?.field_type==='text'?'selected':''}>텍스트</option>
-        <option value="date" ${field?.field_type==='date'?'selected':''}>날짜</option>
-        <option value="select" ${field?.field_type==='select'?'selected':''}>선택</option>
+      <input type="text" class="bgf-label" value="${esc(field ? field.field_label : '')}" placeholder="라벨 (예: 보내는 분)" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+      <select class="bgf-type" onchange="bgfToggleOptions(this)" style="padding:6px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+        <option value="text" ${ftype==='text'?'selected':''}>텍스트</option>
+        <option value="textarea" ${ftype==='textarea'?'selected':''}>긴 텍스트</option>
+        <option value="date" ${ftype==='date'?'selected':''}>날짜</option>
+        <option value="select" ${ftype==='select'?'selected':''}>선택</option>
       </select>
       <label style="display:flex;align-items:center;gap:3px;font-size:11px"><input type="checkbox" class="bgf-req" ${field?.required?'checked':''}> 필수</label>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(4,1fr) 60px;gap:6px">
-      <input type="number" class="bgf-x" value="${field?field.position.x:20}" min="0" max="100" placeholder="X%" style="padding:4px 6px;border:1px solid var(--gray-300);border-radius:4px;font-size:11px">
-      <input type="number" class="bgf-y" value="${field?field.position.y:20}" min="0" max="100" placeholder="Y%" style="padding:4px 6px;border:1px solid var(--gray-300);border-radius:4px;font-size:11px">
-      <input type="number" class="bgf-w" value="${field?field.position.w:60}" min="0" max="100" placeholder="W%" style="padding:4px 6px;border:1px solid var(--gray-300);border-radius:4px;font-size:11px">
-      <input type="number" class="bgf-h" value="${field?field.position.h:10}" min="0" max="100" placeholder="H%" style="padding:4px 6px;border:1px solid var(--gray-300);border-radius:4px;font-size:11px">
-      <input type="number" class="bgf-maxlen" value="${field?.max_length||30}" min="1" placeholder="글자수" style="padding:4px 6px;border:1px solid var(--gray-300);border-radius:4px;font-size:11px">
+    <div style="display:grid;grid-template-columns:1fr 80px;gap:8px;margin-bottom:8px">
+      <input type="text" class="bgf-placeholder" value="${esc(field?.placeholder || '')}" placeholder="플레이스홀더 (예: 김철수 ♥ 이영희)" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+      <input type="number" class="bgf-maxlen" value="${field?.max_length || 30}" min="1" max="500" placeholder="글자수" title="최대 글자수" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+    </div>
+    <div class="bgf-options-wrap" style="display:${ftype==='select'?'block':'none'}">
+      <input type="text" class="bgf-options" value="${esc(optionsCsv)}" placeholder="선택 옵션 (콤마 구분: 옵션1, 옵션2, 옵션3)" style="width:100%;padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
     </div>`;
   document.getElementById('bg-s-fields').appendChild(div);
+}
+
+// 타입이 'select' 일 때만 옵션 입력란 표시
+function bgfToggleOptions(typeSelect) {
+  const wrap = typeSelect.closest('div[id^="bgf-"]')?.querySelector('.bgf-options-wrap');
+  if (wrap) wrap.style.display = typeSelect.value === 'select' ? 'block' : 'none';
 }
 
 function collectBgStickerFields() {
   const fields = [];
   document.querySelectorAll('#bg-s-fields > div').forEach(div => {
-    fields.push({
-      field_id: 'f-' + Math.random().toString(36).slice(2,8),
-      field_label: div.querySelector('.bgf-label').value,
-      field_type: div.querySelector('.bgf-type').value,
+    const ftype = div.querySelector('.bgf-type').value;
+    const f = {
+      // 기존 field_id 보존 — 편집·재저장 시 fields 매핑 안정성 (이미 입력된 값 유지)
+      field_id: div.dataset.fieldId || ('f-' + Math.random().toString(36).slice(2,8)),
+      field_label: div.querySelector('.bgf-label').value.trim(),
+      field_type: ftype,
       required: div.querySelector('.bgf-req').checked,
       max_length: parseInt(div.querySelector('.bgf-maxlen').value) || 30,
-      position: {
-        x: parseFloat(div.querySelector('.bgf-x').value) || 0,
-        y: parseFloat(div.querySelector('.bgf-y').value) || 0,
-        w: parseFloat(div.querySelector('.bgf-w').value) || 50,
-        h: parseFloat(div.querySelector('.bgf-h').value) || 10,
-      }
-    });
+      placeholder: div.querySelector('.bgf-placeholder').value.trim(),
+    };
+    // 라벨이 비어있으면 저장 안 함 (실수 방지)
+    if (!f.field_label) return;
+    if (ftype === 'select') {
+      const csv = (div.querySelector('.bgf-options')?.value || '').trim();
+      f.options = csv ? csv.split(',').map(s => s.trim()).filter(Boolean) : [];
+    }
+    fields.push(f);
   });
   return fields;
 }
