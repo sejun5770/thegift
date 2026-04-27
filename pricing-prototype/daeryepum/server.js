@@ -1311,6 +1311,89 @@ async function apiDashboardSummary(query) {
   return { summary: rows, order_counts: orderCounts, express_daily: expressDaily };
 }
 
+/**
+ * 빠른출고 추가 분석 — 채택율(전환율) + 시간대/요일 분포 + 누적 추가비용.
+ *
+ * 데이터원: Supabase bg_order_customer_info (정보입력 완료 데이터)
+ *   - 분모: submitted_at 이 조회 기간 내 인 모든 row (정보입력 완료 건수)
+ *   - 분자: 그 중 is_express=true 인 row
+ *   - 시간대/요일: submitted_at timestamp 의 시(0-23) / 요일(0=일~6=토)
+ *
+ * 기간 차원이 다른 endpoint(apiDashboardSummary 는 order_date 기준)와 다름:
+ *   '조회 기간 내 정보입력을 완료한 고객 중 빠른출고 비율' 측정이 목표.
+ *   UI 에서 명시 필요.
+ */
+async function apiExpressAnalysis(query) {
+  const startDate = query.start_date || fmtDate(addDays(today(), -30));
+  const endDate = query.end_date || fmtDate(addDays(today(), 1));
+  const empty = {
+    period: { start: startDate, end: endDate },
+    total_info_completed: 0,
+    total_express: 0,
+    adoption_rate: 0,
+    total_express_fee: 0,
+    avg_express_fee: 0,
+    by_hour: Array.from({length:24}, (_, h) => ({ hour: h, total: 0, express: 0, adoption: 0 })),
+    by_dow:  Array.from({length:7},  (_, d) => ({ dow: d,  total: 0, express: 0, adoption: 0 })),
+  };
+
+  try {
+    const _bgStore = require('./barungift/store');
+    const allInfos = await _bgStore.getAllCustomerInfos();
+    if (!Array.isArray(allInfos) || !allInfos.length) return empty;
+
+    // submitted_at 기준 기간 필터.
+    //   endDate 는 dashboard 컨벤션상 exclusive (next day) 가 아닌 day boundary 일 수 있어
+    //   안전하게 'YYYY-MM-DD' 비교 (lex order — submitted_at 이 ISO timestamp 라 prefix 비교 정상)
+    const inRange = allInfos.filter(ci => {
+      if (!ci.submitted_at) return false;
+      const day = String(ci.submitted_at).slice(0, 10);
+      return day >= startDate && day <= endDate;
+    });
+
+    const total = inRange.length;
+    const expressInfos = inRange.filter(ci => ci.is_express);
+    const expressCount = expressInfos.length;
+    const totalExpressFee = expressInfos.reduce((s, ci) => s + (parseInt(ci.express_fee) || 0), 0);
+    const adoptionRate = total > 0 ? (expressCount / total * 100) : 0;
+    const avgExpressFee = expressCount > 0 ? Math.round(totalExpressFee / expressCount) : 0;
+
+    // 시간대 분포 (submitted_at 의 시간대)
+    const byHour = Array.from({length:24}, (_, h) => ({ hour: h, total: 0, express: 0, adoption: 0 }));
+    const byDow  = Array.from({length:7},  (_, d) => ({ dow: d,  total: 0, express: 0, adoption: 0 }));
+    inRange.forEach(ci => {
+      const dt = new Date(ci.submitted_at);
+      if (isNaN(dt.getTime())) return;
+      const h = dt.getHours();
+      const d = dt.getDay();
+      if (h >= 0 && h <= 23) {
+        byHour[h].total++;
+        if (ci.is_express) byHour[h].express++;
+      }
+      if (d >= 0 && d <= 6) {
+        byDow[d].total++;
+        if (ci.is_express) byDow[d].express++;
+      }
+    });
+    byHour.forEach(b => { b.adoption = b.total > 0 ? Math.round(b.express / b.total * 1000) / 10 : 0; });
+    byDow.forEach(b  => { b.adoption = b.total > 0 ? Math.round(b.express / b.total * 1000) / 10 : 0; });
+
+    return {
+      period: { start: startDate, end: endDate },
+      total_info_completed: total,
+      total_express: expressCount,
+      adoption_rate: Math.round(adoptionRate * 10) / 10,
+      total_express_fee: totalExpressFee,
+      avg_express_fee: avgExpressFee,
+      by_hour: byHour,
+      by_dow: byDow,
+    };
+  } catch (e) {
+    console.error('[express-analysis] 실패:', e.message);
+    return { ...empty, error: e.message };
+  }
+}
+
 async function apiForecast() {
   const p = await getPool();
   const todayStr = fmtDate(today());
@@ -2381,6 +2464,8 @@ const server = http.createServer(async (req, res) => {
         data = await apiDashboardComparison();
       } else if (pathname === '/api/dashboard/summary') {
         data = await apiDashboardSummary(parsed.query);
+      } else if (pathname === '/api/dashboard/express-analysis') {
+        data = await apiExpressAnalysis(parsed.query);
       } else if (pathname === '/api/dashboard/forecast') {
         data = await apiForecast();
       } else if (pathname === '/api/dashboard/leadtime') {

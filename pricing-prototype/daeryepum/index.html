@@ -313,6 +313,42 @@ nav a:hover{color:var(--gray-900)}
     </div>
   </div>
 
+  <!-- 빠른출고 추가 분석 — 채택율(전환율) / 시간대 / 요일 / 누적비용 -->
+  <div class="section">
+    <div class="section-title">⚡ 빠른출고 분석 <span style="font-size:11px;color:var(--gray-500);font-weight:400;margin-left:6px">조회 기간 정보입력 완료 기준</span></div>
+    <div class="card-grid card-grid-2">
+      <!-- KPI 박스 (좌) — 채택율, 누적 추가비용 -->
+      <div class="card" style="padding:14px 16px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">
+          <div style="padding:10px;background:#fef3c7;border-radius:8px">
+            <div style="font-size:11px;color:#92400e;font-weight:600">채택율 (전환율)</div>
+            <div id="exp-adoption-rate" style="font-size:24px;font-weight:700;color:#78350f;margin-top:2px">-</div>
+            <div id="exp-adoption-detail" style="font-size:10px;color:#92400e;margin-top:2px">-</div>
+          </div>
+          <div style="padding:10px;background:#fef9c3;border-radius:8px">
+            <div style="font-size:11px;color:#78350f;font-weight:600">누적 추가비용</div>
+            <div id="exp-total-fee" style="font-size:18px;font-weight:700;color:#451a03;margin-top:2px">-</div>
+            <div id="exp-avg-fee" style="font-size:10px;color:#78350f;margin-top:2px">건당 평균 -</div>
+          </div>
+        </div>
+        <!-- 요일별 채택율 -->
+        <div style="margin-top:12px">
+          <div style="font-size:11px;font-weight:600;color:var(--gray-700);margin-bottom:6px">📅 요일별 채택율</div>
+          <div id="exp-dow-bars" style="display:flex;align-items:flex-end;gap:6px;height:80px;border-bottom:1px solid var(--gray-100)">-</div>
+        </div>
+      </div>
+      <!-- 시간대별 (우) -->
+      <div class="card" style="padding:14px 16px">
+        <div style="font-size:11px;font-weight:600;color:var(--gray-700);margin-bottom:6px">⏰ 시간대별 채택율 (입력 완료 시점)</div>
+        <div id="exp-hour-bars" style="display:flex;align-items:flex-end;gap:2px;height:120px;border-bottom:1px solid var(--gray-100)">-</div>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--gray-400);margin-top:4px;padding:0 2px">
+          <span>0시</span><span>6시</span><span>12시</span><span>18시</span><span>23시</span>
+        </div>
+        <div id="exp-hour-peak" style="margin-top:8px;font-size:11px;color:var(--gray-600)"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Today vs Last Week Same Day -->
   <div class="section">
     <div class="section-title">📅 오늘 vs 전주 같은 요일 (WoW)</div>
@@ -2441,16 +2477,40 @@ function showDashboardSkeleton() {
     ).join('');
     tbl.innerHTML = '<tbody>' + skelRows + '</tbody>';
   }
+  // 빠른출고 분석 — 채택율/누적비용/요일/시간대 펄스
+  ['exp-adoption-rate','exp-total-fee'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '<span class="skeleton" style="width:60px;height:18px"></span>';
+  });
+  ['exp-adoption-detail','exp-avg-fee','exp-hour-peak'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '<span class="skeleton" style="width:80px;height:11px"></span>';
+  });
+  const dowEl = document.getElementById('exp-dow-bars');
+  if (dowEl) {
+    dowEl.innerHTML = Array(7).fill(0).map(() =>
+      `<div style="flex:1"><div class="skeleton" style="width:100%;height:${20 + Math.random()*40}px"></div></div>`
+    ).join('');
+  }
+  const hourEl = document.getElementById('exp-hour-bars');
+  if (hourEl) {
+    hourEl.innerHTML = Array(24).fill(0).map(() =>
+      `<div class="skeleton" style="flex:1;height:${20 + Math.random()*80}px"></div>`
+    ).join('');
+  }
 }
 
 async function loadDashboard() {
   showDashboardSkeleton();
+  const dashStart = document.getElementById('dash-start').value;
+  const dashEndPlus = fmt(new Date(new Date(document.getElementById('dash-end').value).getTime()+86400000));
   try {
-    const [cmp, forecast, leadtime, summary] = await Promise.all([
+    const [cmp, forecast, leadtime, summary, expressAnalysis] = await Promise.all([
       fetch(`${API}/api/dashboard/comparison`).then(r=>r.json()),
       fetch(`${API}/api/dashboard/forecast`).then(r=>r.json()),
       fetch(`${API}/api/dashboard/leadtime`).then(r=>r.json()),
-      fetch(`${API}/api/dashboard/summary?start_date=${document.getElementById('dash-start').value}&end_date=${fmt(new Date(new Date(document.getElementById('dash-end').value).getTime()+86400000))}`).then(r=>r.json()),
+      fetch(`${API}/api/dashboard/summary?start_date=${dashStart}&end_date=${dashEndPlus}`).then(r=>r.json()),
+      fetch(`${API}/api/dashboard/express-analysis?start_date=${dashStart}&end_date=${document.getElementById('dash-end').value}`).then(r=>r.json()),
     ]);
     const summaryRows = summary.summary || summary;
     const orderCounts = summary.order_counts || [];
@@ -2459,6 +2519,7 @@ async function loadDashboard() {
     try { renderComparison(cmp); } catch(e) { console.warn('Comparison render failed:', e); }
     renderForecast(forecast);
     renderLeadtime(leadtime);
+    try { renderExpressAnalysis(expressAnalysis); } catch(e) { console.warn('Express analysis render failed:', e); }
     // 마케팅 분석 (별도 로드 - 무거운 쿼리)
     loadMarketing();
     // 전환율 + 샘플 (별도 로드)
@@ -2577,6 +2638,75 @@ function renderSummary(summary, lt, orderCounts) {
   else fb += '📌 리드타임 중앙값이 <strong>3주 이상</strong>으로, 사전 준비형 고객이 많습니다. 얼리버드 할인이 효과적일 수 있습니다.';
 
   document.getElementById('summary-feedback').innerHTML = fb;
+}
+
+/**
+ * ⚡ 빠른출고 분석 카드 렌더 — apiExpressAnalysis 응답 기반.
+ *   - 채택율 / 누적비용 / 평균비용 / 요일·시간대 막대 차트.
+ *   - 데이터 없으면 모든 값 '-' 표시 (서비스 정상 동작 보장).
+ */
+function renderExpressAnalysis(data) {
+  const safe = data || {};
+  const total = safe.total_info_completed || 0;
+  const expressN = safe.total_express || 0;
+  const adoption = safe.adoption_rate;
+
+  // 채택율
+  document.getElementById('exp-adoption-rate').textContent = (typeof adoption === 'number') ? (adoption + '%') : '-';
+  document.getElementById('exp-adoption-detail').textContent = total > 0
+    ? `${fmtNum(expressN)}건 / ${fmtNum(total)}건`
+    : '데이터 없음';
+
+  // 누적/평균 추가비용
+  document.getElementById('exp-total-fee').textContent = (safe.total_express_fee >= 0) ? fmtKRW(safe.total_express_fee) : '-';
+  document.getElementById('exp-avg-fee').textContent = expressN > 0
+    ? `건당 평균 ${fmtKRW(safe.avg_express_fee || 0)}`
+    : '건당 평균 -';
+
+  // 요일별 막대
+  const DOW_LABELS = ['일','월','화','수','목','금','토'];
+  const DOW_COLORS = ['#fb923c','#a3a3a3','#a3a3a3','#a3a3a3','#a3a3a3','#a3a3a3','#fb923c'];
+  const byDow = Array.isArray(safe.by_dow) ? safe.by_dow : [];
+  const maxDow = Math.max(...byDow.map(b => b.adoption || 0), 1);
+  const dowEl = document.getElementById('exp-dow-bars');
+  if (byDow.length === 7) {
+    dowEl.innerHTML = byDow.map((b, i) => {
+      const h = Math.max(4, Math.round((b.adoption || 0) / maxDow * 60));
+      const color = b.express > 0 ? '#f59e0b' : 'var(--gray-200)';
+      return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
+        <div style="font-size:10px;color:var(--gray-600);font-weight:600">${b.adoption || 0}%</div>
+        <div style="width:100%;height:${h}px;background:${color};border-radius:3px 3px 0 0" title="${DOW_LABELS[i]}: ${b.express}/${b.total}건"></div>
+        <div style="font-size:10px;color:${i===0||i===6?'#dc2626':'var(--gray-500)'};font-weight:${i===0||i===6?600:400}">${DOW_LABELS[i]}</div>
+      </div>`;
+    }).join('');
+  } else {
+    dowEl.innerHTML = '<div style="color:var(--gray-400);font-size:11px;margin:auto">데이터 없음</div>';
+  }
+
+  // 시간대별 막대 (24시간)
+  const byHour = Array.isArray(safe.by_hour) ? safe.by_hour : [];
+  const maxHour = Math.max(...byHour.map(b => b.adoption || 0), 1);
+  const hourEl = document.getElementById('exp-hour-bars');
+  if (byHour.length === 24) {
+    hourEl.innerHTML = byHour.map(b => {
+      const h = Math.max(2, Math.round((b.adoption || 0) / maxHour * 100));
+      const color = b.express > 0 ? '#f59e0b' : 'var(--gray-200)';
+      const op = b.total === 0 ? 0.3 : 1;
+      return `<div style="flex:1;height:${h}px;background:${color};border-radius:2px 2px 0 0;opacity:${op}"
+                title="${b.hour}시: ${b.adoption}% (${b.express}/${b.total}건)"></div>`;
+    }).join('');
+    // 피크 시간대 추출 (최소 3건 이상 데이터 + 최고 채택율)
+    const significant = byHour.filter(b => b.total >= 3);
+    if (significant.length) {
+      const peak = significant.reduce((a, b) => (b.adoption > a.adoption ? b : a));
+      document.getElementById('exp-hour-peak').textContent = `피크: ${peak.hour}시 (${peak.adoption}% 채택, ${peak.express}/${peak.total}건)`;
+    } else {
+      document.getElementById('exp-hour-peak').textContent = '시간대별 분석 데이터가 부족합니다 (최소 3건 필요)';
+    }
+  } else {
+    hourEl.innerHTML = '<div style="color:var(--gray-400);font-size:11px;margin:auto">데이터 없음</div>';
+    document.getElementById('exp-hour-peak').textContent = '';
+  }
 }
 
 /**
