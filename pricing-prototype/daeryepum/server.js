@@ -1187,7 +1187,85 @@ async function apiDashboardSummary(query) {
     `);
 
   const orderCounts = countResult.recordset.map(r => ({ ...r, site_name: formatSiteName(r.site_name) }));
-  return { summary: rows, order_counts: orderCounts };
+
+  // 빠른출고 일별 매출 (정보입력 완료 + is_express=true 주문의 원금 매출).
+  //   apiDashboardComparison 의 getExpressTotal 과 동일 데이터원이지만 일자 단위로 분해.
+  //   실패해도 빈 배열 반환 (테이블 메인 데이터엔 영향 없음).
+  let expressDaily = [];
+  try {
+    const _bgStore = require('./barungift/store');
+    const expressInfos = await _bgStore.getExpressCustomerInfos();
+    if (expressInfos && expressInfos.length) {
+      const cardSeqs = [];
+      const etcSeqs = [];
+      expressInfos.forEach(ci => {
+        const oid = String(ci.order_id || '');
+        if (oid.startsWith('ETC-')) {
+          const seq = parseInt(oid.slice(4));
+          if (seq) etcSeqs.push(seq);
+        } else {
+          const seq = parseInt(oid);
+          if (seq) cardSeqs.push(seq);
+        }
+      });
+      const expressRows = [];
+      if (cardSeqs.length) {
+        const inList = cardSeqs.join(',');
+        const rc = await p.request()
+          .input('startDate', sql.VarChar, startDate)
+          .input('endDate', sql.VarChar, endDate)
+          .query(`
+            SELECT
+              CONVERT(varchar(10), co.order_date, 120) AS order_day,
+              ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
+              COUNT(DISTINCT co.order_seq) AS order_count,
+              ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)),0) AS total_amount,
+              ISNULL(SUM(coi.item_count),0) AS total_qty
+            FROM custom_order co WITH (NOLOCK)
+            INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+            INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+            LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+            WHERE ${D01_FILTER} AND co.order_seq IN (${inList})
+              AND co.order_date >= @startDate AND co.order_date < @endDate
+              AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+            GROUP BY CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR))
+          `);
+        expressRows.push(...rc.recordset);
+      }
+      if (etcSeqs.length) {
+        const inList = etcSeqs.join(',');
+        const re = await p.request()
+          .input('startDate', sql.VarChar, startDate)
+          .input('endDate', sql.VarChar, endDate)
+          .query(`
+            SELECT
+              CONVERT(varchar(10), o.order_date, 120) AS order_day,
+              ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
+              COUNT(DISTINCT o.order_seq) AS order_count,
+              ISNULL(SUM(${ETC_AMOUNT_EXPR}),0) AS total_amount,
+              ISNULL(SUM(oi.order_count),0) AS total_qty
+            FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+            INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+            INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+            LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+            WHERE ${D01_FILTER} AND o.order_seq IN (${inList})
+              AND o.order_date >= @startDate AND o.order_date < @endDate
+              AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+            GROUP BY CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
+          `);
+        expressRows.push(...re.recordset);
+      }
+      expressDaily = expressRows.map(r => ({
+        ...r,
+        site_name: formatSiteName(r.site_name),
+        total_amount: Math.round(r.total_amount || 0),
+      }));
+    }
+  } catch (e) {
+    console.warn('[summary] expressDaily 실패 (빠른출고 행 빈값):', e.message);
+  }
+
+  return { summary: rows, order_counts: orderCounts, express_daily: expressDaily };
 }
 
 async function apiForecast() {
