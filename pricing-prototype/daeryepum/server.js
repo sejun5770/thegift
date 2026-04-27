@@ -1548,42 +1548,82 @@ async function apiLeadtime() {
     console.error('[leadtime] getPool 실패:', e.message);
     return { ...FALLBACK, error: 'pool: ' + e.message };
   }
-  // ETC + CARD 답례품 리드타임 통합
-  let result;
+
+  // partial 로딩 — 큰 단일 쿼리(CROSS APPLY) 대신 작은 쿼리 여러개로 분리해 timeout 위험 감소.
+  //   1) ETC 주문 목록 (order_seq, member_id, order_date)
+  //   2) 위 member_id 들의 최신 청첩장 정보 (chunk 단위로 IN-list)
+  //   3) CARD 주문 + 청첩장 (단일 쿼리 — PK JOIN 으로 빠름)
+  //   4) JS 에서 join → lead_days 계산
+  // 윈도우는 90일 (기존 180일 → 데이터 부담 절반)
+  const WINDOW_DAYS = 90;
+  const allRows = []; // { order_key, order_date, wedding_date, lead_days }
+  const t0 = Date.now();
+
   try {
-    result = await p.request().query(`
-    SELECT order_key, order_date, wedding_date, lead_days FROM (
-      -- ETC: 별도 주문 → 같은 member의 청첩장 예식일 참조
-      SELECT
-        CONCAT('E', o.order_seq) AS order_key,
-        o.order_date,
-        TRY_CAST(cw.event_year+'-'+RIGHT('0'+cw.event_month,2)+'-'+RIGHT('0'+cw.event_Day,2) AS date) AS wedding_date,
-        DATEDIFF(day, o.order_date, TRY_CAST(cw.event_year+'-'+RIGHT('0'+cw.event_month,2)+'-'+RIGHT('0'+cw.event_Day,2) AS date)) AS lead_days,
-        ROW_NUMBER() OVER (PARTITION BY o.order_seq ORDER BY o.order_seq) AS rn
+    // === Step 1: ETC 주문 목록 + member_id ===
+    const etcOrdersRes = await p.request().query(`
+      SELECT DISTINCT o.order_seq, o.member_id, CONVERT(varchar(10), o.order_date, 120) AS order_date
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-      CROSS APPLY (
-        SELECT TOP 1 w2.event_year, w2.event_month, w2.event_Day
-        FROM custom_order co2 WITH (NOLOCK)
-        INNER JOIN custom_order_WeddInfo w2 WITH (NOLOCK) ON co2.order_seq = w2.order_seq
-        WHERE co2.member_id = o.member_id AND co2.status_seq >= 1
-          AND w2.event_year IS NOT NULL AND LEN(w2.event_year) = 4
-        ORDER BY co2.order_seq DESC
-      ) cw
       WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
-        AND TRY_CAST(cw.event_year+'-'+RIGHT('0'+cw.event_month,2)+'-'+RIGHT('0'+cw.event_Day,2) AS date) IS NOT NULL
-        AND o.order_date >= DATEADD(day, -180, GETDATE())
+        AND o.member_id IS NOT NULL
+        AND o.order_date >= DATEADD(day, -${WINDOW_DAYS}, GETDATE())
+    `);
+    const etcOrders = etcOrdersRes.recordset;
+    const memberIds = [...new Set(etcOrders.map(r => r.member_id).filter(Boolean))];
 
-      UNION ALL
+    // === Step 2: member_id chunk 단위로 최신 청첩장 정보 lookup ===
+    //   member_id → wedding_date map. 한번에 너무 많으면 SQL parameter limit (max 2100) 초과 가능 → 500 chunk
+    const CHUNK = 500;
+    const memberWeddingMap = new Map(); // member_id → wedding_date (Date object or null)
+    for (let i = 0; i < memberIds.length; i += CHUNK) {
+      const chunk = memberIds.slice(i, i + CHUNK);
+      const req = p.request();
+      const placeholders = chunk.map((_, idx) => {
+        const name = `m${idx}`;
+        req.input(name, sql.VarChar, String(chunk[idx]));
+        return `@${name}`;
+      }).join(',');
+      // ROW_NUMBER 로 회원당 최신 청첩장 1개 picking — CROSS APPLY 보다 훨씬 빠름
+      const r = await req.query(`
+        SELECT member_id, wedding_date FROM (
+          SELECT
+            co2.member_id,
+            TRY_CAST(w2.event_year+'-'+RIGHT('0'+w2.event_month,2)+'-'+RIGHT('0'+w2.event_Day,2) AS date) AS wedding_date,
+            ROW_NUMBER() OVER (PARTITION BY co2.member_id ORDER BY co2.order_seq DESC) AS rn
+          FROM custom_order co2 WITH (NOLOCK)
+          INNER JOIN custom_order_WeddInfo w2 WITH (NOLOCK) ON co2.order_seq = w2.order_seq
+          WHERE co2.member_id IN (${placeholders})
+            AND co2.status_seq >= 1
+            AND w2.event_year IS NOT NULL AND LEN(w2.event_year) = 4
+        ) t WHERE rn = 1 AND wedding_date IS NOT NULL
+      `);
+      r.recordset.forEach(row => { memberWeddingMap.set(row.member_id, row.wedding_date); });
+    }
 
-      -- CARD: 청첩장+답례품 동시주문 → 같은 주문의 예식일 직접 참조
-      SELECT
+    // === Step 3: ETC 주문에 wedding_date join → lead_days 계산 ===
+    for (const o of etcOrders) {
+      const wd = memberWeddingMap.get(o.member_id);
+      if (!wd) continue;
+      const orderDt = new Date(o.order_date);
+      const weddingDt = new Date(wd);
+      const leadDays = Math.round((weddingDt - orderDt) / 86400000);
+      allRows.push({
+        order_key: 'E' + o.order_seq,
+        order_date: o.order_date,
+        wedding_date: wd,
+        lead_days: leadDays,
+      });
+    }
+
+    // === Step 4: CARD 주문 + 청첩장 (PK JOIN — 빠름) ===
+    const cardRes = await p.request().query(`
+      SELECT DISTINCT
         CONCAT('C', co.order_seq) AS order_key,
-        co.order_date,
+        CONVERT(varchar(10), co.order_date, 120) AS order_date,
         TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) AS wedding_date,
-        DATEDIFF(day, co.order_date, TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date)) AS lead_days,
-        ROW_NUMBER() OVER (PARTITION BY co.order_seq ORDER BY co.order_seq) AS rn
+        DATEDIFF(day, co.order_date, TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date)) AS lead_days
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
@@ -1591,17 +1631,16 @@ async function apiLeadtime() {
       WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
         AND w.event_year IS NOT NULL AND LEN(w.event_year) = 4
         AND TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) IS NOT NULL
-        AND co.order_date >= DATEADD(day, -180, GETDATE())
-    ) t WHERE rn = 1
-    ORDER BY order_date DESC
-  `);
+        AND co.order_date >= DATEADD(day, -${WINDOW_DAYS}, GETDATE())
+    `);
+    cardRes.recordset.forEach(r => allRows.push(r));
+    console.log(`[leadtime] partial 로드 완료 — ETC ${etcOrders.length} (members ${memberIds.length}) + CARD ${cardRes.recordset.length} = ${allRows.length}건, ${Date.now()-t0}ms`);
   } catch (e) {
-    // SQL 실패 → '-' 표시되도록 fallback. 콘솔에 자세히 남겨 디버깅 가능.
     console.error('[leadtime] SQL 실패:', e.message);
     return { ...FALLBACK, error: 'sql: ' + e.message };
   }
 
-  const allDays = result.recordset.map(r => r.lead_days).filter(d => d !== null && d > -365 && d < 365);
+  const allDays = allRows.map(r => r.lead_days).filter(d => d !== null && d > -365 && d < 365);
   const positiveDays = allDays.filter(d => d >= 0);
   const avg = positiveDays.length ? Math.round(positiveDays.reduce((a,b) => a+b, 0) / positiveDays.length) : 0;
   const sorted = [...positiveDays].sort((a,b) => a-b);
