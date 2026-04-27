@@ -1502,9 +1502,19 @@ function getISOWeek(d) {
 }
 
 async function apiLeadtime() {
-  const p = await getPool();
+  // 실패시 프론트가 'undefined일' 안 뜨도록 number 0 으로 폴백 (renderLeadtime 가 typeof === 'number' 체크).
+  const FALLBACK = { avg_days: null, median_days: null, total_samples: 0, distribution: {}, error: null };
+  let p;
+  try {
+    p = await getPool();
+  } catch (e) {
+    console.error('[leadtime] getPool 실패:', e.message);
+    return { ...FALLBACK, error: 'pool: ' + e.message };
+  }
   // ETC + CARD 답례품 리드타임 통합
-  const result = await p.request().query(`
+  let result;
+  try {
+    result = await p.request().query(`
     SELECT order_key, order_date, wedding_date, lead_days FROM (
       -- ETC: 별도 주문 → 같은 member의 청첩장 예식일 참조
       SELECT
@@ -1548,6 +1558,11 @@ async function apiLeadtime() {
     ) t WHERE rn = 1
     ORDER BY order_date DESC
   `);
+  } catch (e) {
+    // SQL 실패 → '-' 표시되도록 fallback. 콘솔에 자세히 남겨 디버깅 가능.
+    console.error('[leadtime] SQL 실패:', e.message);
+    return { ...FALLBACK, error: 'sql: ' + e.message };
+  }
 
   const allDays = result.recordset.map(r => r.lead_days).filter(d => d !== null && d > -365 && d < 365);
   const positiveDays = allDays.filter(d => d >= 0);
