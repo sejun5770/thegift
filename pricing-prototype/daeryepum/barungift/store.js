@@ -337,6 +337,20 @@ async function getAllCustomerInfos() {
 }
 
 /**
+ * 빠른출고 옵션 선택한 고객 입력 정보만 fetch — 대시보드 빠른출고 매출 집계용.
+ * Supabase 서버측 필터 (is_express=eq.true) 로 페이로드 대폭 감소.
+ *   → getAllCustomerInfos() 대비 큰 성능 개선 (대부분 주문은 is_express=false 라 제외됨).
+ */
+async function getExpressCustomerInfos() {
+  if (USE_SUPABASE) {
+    // sbGet 가 select=* 자동 포함하므로 filter 만 추가
+    return sbGet('bg_order_customer_info', 'is_express=eq.true');
+  }
+  const infos = readJson(FILES.customerInfo, []);
+  return infos.filter(ci => ci.is_express === true);
+}
+
+/**
  * 관리자 upsert. 기존 레코드 있으면 PATCH, 없으면 INSERT (고객이 아직 입력 안 한
  * 주문에 관리자가 수동 입력할 때 사용). 고객이 직접 제출하는 POST 경로와 달리
  * ALREADY_SUBMITTED 체크 없이 덮어쓰기.
@@ -788,6 +802,7 @@ module.exports = {
   getCustomerInfoBatch,
   saveCustomerInfo,
   getAllCustomerInfos,
+  getExpressCustomerInfos,
   updateCustomerInfo,
   deleteCustomerInfo,
   setProcessed,

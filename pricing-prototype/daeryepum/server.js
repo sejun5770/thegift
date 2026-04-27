@@ -898,16 +898,20 @@ async function apiDashboardComparison() {
    *   - 바른손카드: 동시주문(A01 청첩장 함께) / 단독주문 분리
    *   - 바른손몰  : 항상 단독주문
    *
+   * @param expressInfos 호출측이 미리 fetch 한 is_express=true 고객 입력 목록 (성능 최적화).
+   *                     없으면 함수 내부에서 fetch (단독 호출 시).
    * 실패해도 빈 결과 반환 (대시보드 전체 집계 멈추지 않게).
    */
-  async function getExpressTotal(startStr, endStr) {
+  async function getExpressTotal(startStr, endStr, expressInfos) {
     const empty = { amount: 0, orders: 0, qty: 0, express_fee: 0, by_site: {},
                     copurchase: { amount: 0, orders: 0, qty: 0 },
                     standalone: { amount: 0, orders: 0, qty: 0 } };
     try {
-      const _bgStore = require('./barungift/store');
-      const allInfos = await _bgStore.getAllCustomerInfos();
-      const expressInfos = (allInfos || []).filter(ci => ci && ci.is_express);
+      // 외부에서 주입받지 않았으면 한번 fetch (단독 호출 호환)
+      if (!Array.isArray(expressInfos)) {
+        const _bgStore = require('./barungift/store');
+        expressInfos = await _bgStore.getExpressCustomerInfos();
+      }
       if (!expressInfos.length) return empty;
 
       // CARD/ETC 분리 — ETC- 접두어로 식별
@@ -1048,14 +1052,24 @@ async function apiDashboardComparison() {
     }
   }
 
+  // 빠른출고용 고객 입력 정보 — 한번만 fetch 해서 3개 기간에 재사용 (Supabase 호출 1회로 축소).
+  //   기존엔 getExpressTotal 안에서 매번 fetch → 3회 중복 호출로 대시보드 로딩 지연 발생.
+  let expressInfos = [];
+  try {
+    const _bgStore = require('./barungift/store');
+    expressInfos = await _bgStore.getExpressCustomerInfos();
+  } catch (e) {
+    console.warn('[dashboard] expressInfos fetch 실패 (빠른출고 카드 빈 값):', e.message);
+  }
+
   const [todayTotal, yesterdayTotal, lastWeekTotal,
          todayExpress, yesterdayExpress, lastWeekExpress] = await Promise.all([
     getPeriodTotal(todayStr, tomorrowStr),
     getPeriodTotal(yesterdayStr, todayStr),
     getPeriodTotal(lastWeekSameDayStr, lastWeekSameDayNextStr),
-    getExpressTotal(todayStr, tomorrowStr),
-    getExpressTotal(yesterdayStr, todayStr),
-    getExpressTotal(lastWeekSameDayStr, lastWeekSameDayNextStr),
+    getExpressTotal(todayStr, tomorrowStr, expressInfos),
+    getExpressTotal(yesterdayStr, todayStr, expressInfos),
+    getExpressTotal(lastWeekSameDayStr, lastWeekSameDayNextStr, expressInfos),
   ]);
   todayTotal.express = todayExpress;
   yesterdayTotal.express = yesterdayExpress;
