@@ -221,6 +221,8 @@ async function upsertProductSettings(productId, data) {
   // 신규 생성
   const newSetting = {
     product_id: productId,
+    brand: data.brand ?? null,
+    product_name: data.product_name ?? null,
     shipping_type: data.shipping_type ?? 'desired_date',
     cutoff_enabled: data.cutoff_enabled ?? false,
     cutoff_hour: data.cutoff_hour ?? 14,

@@ -957,6 +957,23 @@ nav a:hover{color:var(--gray-900)}
     <!-- 바디 (스크롤 없음 — 내부 리스트만 스크롤) -->
     <div style="padding:16px 20px;display:flex;flex-direction:column;gap:12px;flex:1;min-height:0">
 
+      <!-- 품목 식별 정보 — 품목코드/브랜드/제품명 -->
+      <div style="display:grid;grid-template-columns:130px 1fr;gap:8px">
+        <div>
+          <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:4px">품목코드</label>
+          <input type="text" id="bg-p-meta-code" placeholder="예: PROD-001" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px;font-family:monospace;background:var(--gray-50)">
+          <p id="bg-p-code-hint" style="font-size:10px;color:var(--gray-400);margin:3px 0 0">기존 항목은 PK 로 잠겨있습니다</p>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:4px">제품명</label>
+          <input type="text" id="bg-p-meta-name" placeholder="예: 비타민 답례품 30구" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
+        </div>
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:4px">브랜드</label>
+        <input type="text" id="bg-p-meta-brand" placeholder="예: 바른손" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
+      </div>
+
       <!-- 출고일 그룹 선택 -->
       <div>
         <label style="display:block;font-size:13px;font-weight:600;color:var(--gray-700);margin-bottom:6px">📅 출고일 그룹</label>
@@ -4902,6 +4919,26 @@ async function openBgProductForm(productId) {
     _bgAllStickers = (await stickersRes.json()).stickers || [];
     const groups = (await groupsRes.json()).groups || [];
     _bgSelectedStickerIds = new Set(s?.available_sticker_ids || []);
+
+    // 품목 메타데이터 (품목코드/브랜드/제품명) 입력란 채우기
+    //   기존 항목(s 가 truthy) → product_id 는 PK 라 readonly + 회색 배경
+    //   신규 항목(s 가 null) → product_id 도 편집 가능 (입력한 코드로 새로 생성)
+    const codeInput = document.getElementById('bg-p-meta-code');
+    const brandInput = document.getElementById('bg-p-meta-brand');
+    const nameInput = document.getElementById('bg-p-meta-name');
+    const codeHint = document.getElementById('bg-p-code-hint');
+    if (codeInput) {
+      codeInput.value = s?.product_id || productId;
+      const isExisting = !!s;
+      codeInput.readOnly = isExisting;
+      codeInput.style.background = isExisting ? 'var(--gray-50)' : '#fff';
+      codeInput.style.cursor = isExisting ? 'not-allowed' : 'text';
+      if (codeHint) codeHint.textContent = isExisting
+        ? '기존 항목은 PK 로 잠겨있습니다 (변경 불가)'
+        : '신규 등록 — 저장 후엔 변경 불가';
+    }
+    if (brandInput) brandInput.value = s?.brand || '';
+    if (nameInput) nameInput.value = s?.product_name || '';
     // 박스 옵션 로드 (없으면 빈 배열)
     _bgBoxOptions = Array.isArray(s?.available_box_options)
       ? s.available_box_options.map(opt => ({
@@ -5182,7 +5219,18 @@ function calcMinDate(cfg) {
 
 // 저장 (스티커 연결 + 박스 옵션)
 async function saveBgProduct() {
-  const productId = document.getElementById('bg-p-code').value;
+  // 1) 품목코드 — 신규 등록일 땐 사용자가 입력란에서 변경 가능, 기존은 readonly 라 hidden 값 그대로
+  //    bg-p-code (hidden) 는 modal 오픈 시점의 PK. 신규 등록 시 사용자가 코드를 바꿔뒀다면
+  //    bg-p-meta-code 의 값으로 갱신해서 사용 (PK 변경, 단 신규일 때만).
+  const codeInput = document.getElementById('bg-p-meta-code');
+  const isNewProduct = codeInput && !codeInput.readOnly;
+  let productId = (isNewProduct ? codeInput.value : document.getElementById('bg-p-code').value || '').trim();
+  if (!productId) { alert('품목코드를 입력해주세요.'); return; }
+
+  // 2) 메타데이터 (브랜드/제품명)
+  const brand = (document.getElementById('bg-p-meta-brand')?.value || '').trim();
+  const productName = (document.getElementById('bg-p-meta-name')?.value || '').trim();
+
   const stickerIds = [..._bgSelectedStickerIds];
 
   // 박스 옵션 검증 — code 는 필수, 빈 code 는 무시
@@ -5208,6 +5256,8 @@ async function saveBgProduct() {
   const shippingGroupId = (document.getElementById('bg-p-shipping-group')?.value || '').trim() || null;
 
   const body = {
+    brand: brand || null,
+    product_name: productName || null,
     available_sticker_ids: stickerIds,
     available_box_options: boxOptions,
     shipping_group_id: shippingGroupId,
