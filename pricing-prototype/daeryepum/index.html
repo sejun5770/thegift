@@ -269,6 +269,34 @@ nav a:hover{color:var(--gray-900)}
     </div>
   </div>
 
+  <!-- 결제대기 / 빠른출고 보조 KPI (매출 집계 정책엔 포함되지 않음) -->
+  <div class="section">
+    <div class="section-title">⏳ 결제대기 · ⚡ 빠른출고</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="card" style="padding:14px 16px;border-left:3px solid #3b82f6">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+          <span style="font-size:13px;font-weight:600;color:#1e3a8a">⏳ 결제대기 (오늘 주문)</span>
+          <span style="font-size:11px;color:var(--gray-500)">매출 집계 미포함</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+          <div><span style="color:var(--gray-500)">건수</span> <strong id="cmp-t-pending-orders" style="margin-left:4px">-</strong></div>
+          <div><span style="color:var(--gray-500)">금액</span> <strong id="cmp-t-pending-amount" style="margin-left:4px">-</strong></div>
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--gray-500)">어제: <span id="cmp-y-pending">-</span></div>
+      </div>
+      <div class="card" style="padding:14px 16px;border-left:3px solid #f59e0b">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+          <span style="font-size:13px;font-weight:600;color:#92400e">⚡ 빠른출고 채택 매출 (정보입력 완료 기준)</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+          <div><span style="color:var(--gray-500)">건수</span> <strong id="cmp-t-express-orders" style="margin-left:4px">-</strong></div>
+          <div><span style="color:var(--gray-500)">매출</span> <strong id="cmp-t-express-amount" style="margin-left:4px">-</strong></div>
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--gray-500)">어제: <span id="cmp-y-express">-</span></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Today vs Last Week Same Day -->
   <div class="section">
     <div class="section-title">📅 오늘 vs 전주 같은 요일 (WoW)</div>
@@ -2491,16 +2519,39 @@ function renderSiteBreakdown(data, prefix) {
   if (!container) return;
   const bySite = data.by_site || {};
   const sites = Object.keys(bySite).sort((a,b) => (bySite[b].total_amount||0) - (bySite[a].total_amount||0));
-  if (sites.length <= 1) { container.innerHTML = ''; return; }
+  if (sites.length === 0) { container.innerHTML = ''; return; }
+  // 사이트 1개여도 동시/단독 분리는 의미가 있어 표시 (이전엔 1개면 숨김 처리했지만 정보 손실)
   const html = sites.map(s => {
     const v = bySite[s];
     const color = SITE_COLORS[s] || '#a1a1aa';
-    return `<div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0">
-      <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
-      <span style="color:var(--gray-600);min-width:60px">${s}</span>
-      <span style="font-weight:600;margin-left:auto">${fmtKRW(v.total_amount)}</span>
-      <span style="color:var(--gray-500)">${fmtNum(v.total_qty)}개</span>
-      <span style="color:var(--gray-400)">${fmtNum(v.order_count)}건</span>
+    const co = v.copurchase || { amount: 0, orders: 0, qty: 0 };
+    const st = v.standalone || { amount: 0, orders: 0, qty: 0 };
+    // 동시구매가 0 이상이면 분리 표시. 모두 단독(ETC)이면 한줄만.
+    const hasCopurchase = (co.orders || 0) > 0 || (co.amount || 0) > 0;
+    let detail = '';
+    if (hasCopurchase) {
+      detail = `
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:1px 0 1px 14px;color:var(--gray-500)">
+          <span style="min-width:62px">├ 동시주문</span>
+          <span style="margin-left:auto">${fmtKRW(co.amount)}</span>
+          <span style="color:var(--gray-400)">${fmtNum(co.qty)}개</span>
+          <span style="color:var(--gray-400)">${fmtNum(co.orders)}건</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:11px;padding:1px 0 1px 14px;color:var(--gray-500)">
+          <span style="min-width:62px">└ 단독주문</span>
+          <span style="margin-left:auto">${fmtKRW(st.amount)}</span>
+          <span style="color:var(--gray-400)">${fmtNum(st.qty)}개</span>
+          <span style="color:var(--gray-400)">${fmtNum(st.orders)}건</span>
+        </div>`;
+    }
+    return `<div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0">
+        <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
+        <span style="color:var(--gray-700);min-width:60px;font-weight:600">${s}</span>
+        <span style="font-weight:600;margin-left:auto">${fmtKRW(v.total_amount)}</span>
+        <span style="color:var(--gray-500)">${fmtNum(v.total_qty)}개</span>
+        <span style="color:var(--gray-400)">${fmtNum(v.order_count)}건</span>
+      </div>${detail}
     </div>`;
   }).join('');
   container.innerHTML = `<div style="border-top:1px solid var(--gray-100);padding-top:6px;margin-top:6px">${html}</div>`;
@@ -2530,6 +2581,26 @@ function renderComparison(cmp) {
   document.getElementById('cmp-t-standalone-qty').textContent = fmtNum((t.standalone||{}).qty||0);
   renderSiteBreakdown(y, 'cmp-y');
   renderSiteBreakdown(t, 'cmp-t');
+
+  // 결제대기 — 매출 집계엔 미포함, 별도 보조 카드로 표시
+  const tp = t.pending || { amount: 0, orders: 0, qty: 0 };
+  const yp = y.pending || { amount: 0, orders: 0, qty: 0 };
+  const $tpoEl = document.getElementById('cmp-t-pending-orders');
+  const $tpaEl = document.getElementById('cmp-t-pending-amount');
+  const $ypEl  = document.getElementById('cmp-y-pending');
+  if ($tpoEl) $tpoEl.textContent = fmtNum(tp.orders) + '건';
+  if ($tpaEl) $tpaEl.textContent = fmtKRW(tp.amount);
+  if ($ypEl)  $ypEl.textContent  = fmtNum(yp.orders) + '건 / ' + fmtKRW(yp.amount);
+
+  // 빠른출고 채택 매출 — 정보입력 완료 후 빠른출고 옵션 선택한 주문의 원금 매출
+  const te = t.express || { amount: 0, orders: 0, qty: 0 };
+  const ye = y.express || { amount: 0, orders: 0, qty: 0 };
+  const $teoEl = document.getElementById('cmp-t-express-orders');
+  const $teaEl = document.getElementById('cmp-t-express-amount');
+  const $yeEl  = document.getElementById('cmp-y-express');
+  if ($teoEl) $teoEl.textContent = fmtNum(te.orders) + '건';
+  if ($teaEl) $teaEl.textContent = fmtKRW(te.amount);
+  if ($yeEl)  $yeEl.textContent  = fmtNum(ye.orders) + '건 / ' + fmtKRW(ye.amount);
 
   const pct = pctChange(t.total_amount, y.total_amount);
   const badge = document.getElementById('cmp-badge');

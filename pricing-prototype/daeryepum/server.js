@@ -729,9 +729,21 @@ async function apiDashboardComparison() {
   const dayNames = ['일','월','화','수','목','금','토'];
   const todayDow = dayNames[today().getDay()];
 
-  // 각 기간별 ETC+CARD 합산 헬퍼 (사이트별 분리 + 동시구매/단독주문 분리)
+  // 각 기간별 ETC+CARD 합산 헬퍼
+  //
+  // 응답 구조:
+  //   { order_count, total_amount, total_qty,
+  //     by_site: { [site_name]: {
+  //       order_count, total_amount, total_qty,
+  //       copurchase: {amount, orders, qty},   // 청첩장+답례품 동시주문 (CARD 만)
+  //       standalone: {amount, orders, qty},   // 답례품 단독주문 (CARD/ETC 모두)
+  //     } },
+  //     copurchase: {...},     // 전체 합계 (legacy 호환)
+  //     standalone: {...},
+  //     pending: {amount, orders, qty},  // 결제대기 별도 (status_seq=1, 매출 집계엔 미포함)
+  //   }
   async function getPeriodTotal(startStr, endStr) {
-    // ETC 주문 = 항상 단독주문
+    // 1) ETC 주문 = 항상 단독주문 (Q1=a 정책)
     const r = await p.request()
       .input('s', sql.VarChar, startStr)
       .input('e', sql.VarChar, endStr)
@@ -748,8 +760,7 @@ async function apiDashboardComparison() {
         WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
         GROUP BY ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
       `);
-    // CARD 주문 = 같은 주문에 A01(청첩장)이 있으면 동시구매, 없으면 단독주문
-    // CTE로 사전 계산하여 correlated subquery 회피 (성능 최적화)
+    // 2) CARD 주문 = 같은 주문에 A01(청첩장)이 있으면 동시구매, 없으면 단독주문
     const r2 = await p.request()
       .input('s', sql.VarChar, startStr)
       .input('e', sql.VarChar, endStr)
@@ -775,41 +786,95 @@ async function apiDashboardComparison() {
         GROUP BY ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
           CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
       `);
-    // 사이트별 합산
+    // 3) 결제대기 = status_seq=1 AND settle_date IS NULL — CARD/ETC 합산 (사이트별 분리는 생략)
+    const rPending = await p.request()
+      .input('s', sql.VarChar, startStr)
+      .input('e', sql.VarChar, endStr)
+      .query(`
+        SELECT amount, orders, qty FROM (
+          SELECT
+            ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)),0) AS amount,
+            COUNT(DISTINCT co.order_seq) AS orders,
+            ISNULL(SUM(coi.item_count),0) AS qty
+          FROM custom_order co WITH (NOLOCK)
+          INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+          INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+          WHERE ${D01_FILTER} AND co.order_date >= @s AND co.order_date < @e
+            AND co.status_seq = 1 AND co.settle_date IS NULL
+        ) AS card
+        UNION ALL
+        SELECT amount, orders, qty FROM (
+          SELECT
+            ISNULL(SUM(${ETC_AMOUNT_EXPR}),0) AS amount,
+            COUNT(DISTINCT o.order_seq) AS orders,
+            ISNULL(SUM(oi.order_count),0) AS qty
+          FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+          INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+          INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+          WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e
+            AND o.status_seq = 1 AND o.settle_date IS NULL
+        ) AS etc
+      `);
+    let pendingAmount = 0, pendingOrders = 0, pendingQty = 0;
+    for (const row of rPending.recordset) {
+      pendingAmount += row.amount || 0;
+      pendingOrders += row.orders || 0;
+      pendingQty += row.qty || 0;
+    }
+
+    // 4) 사이트별 + copurchase/standalone 집계
     const siteMap = {};
-    // 동시구매/단독주문 분리 집계
+    function ensureSite(sn) {
+      if (!siteMap[sn]) {
+        siteMap[sn] = {
+          order_count: 0, total_amount: 0, total_qty: 0,
+          copurchase: { amount: 0, orders: 0, qty: 0 },
+          standalone: { amount: 0, orders: 0, qty: 0 },
+        };
+      }
+      return siteMap[sn];
+    }
+    // 전체 합계용
     let copurchase_amount = 0, copurchase_orders = 0, copurchase_qty = 0;
     let standalone_amount = 0, standalone_orders = 0, standalone_qty = 0;
+
+    // ETC: 모두 standalone
     for (const row of r.recordset) {
       const sn = formatSiteName(row.site_name) || '기타';
-      if (!siteMap[sn]) siteMap[sn] = { order_count:0, total_amount:0, total_qty:0 };
-      siteMap[sn].order_count += row.order_count||0;
-      siteMap[sn].total_amount += row.total_amount||0;
-      siteMap[sn].total_qty += row.total_qty||0;
-      // ETC = 항상 단독
-      standalone_amount += row.total_amount||0;
-      standalone_orders += row.order_count||0;
-      standalone_qty += row.total_qty||0;
+      const site = ensureSite(sn);
+      site.order_count += row.order_count || 0;
+      site.total_amount += row.total_amount || 0;
+      site.total_qty += row.total_qty || 0;
+      site.standalone.amount += row.total_amount || 0;
+      site.standalone.orders += row.order_count || 0;
+      site.standalone.qty += row.total_qty || 0;
+      standalone_amount += row.total_amount || 0;
+      standalone_orders += row.order_count || 0;
+      standalone_qty += row.total_qty || 0;
     }
+    // CARD: is_copurchase 분기
     for (const row of r2.recordset) {
       const sn = formatSiteName(row.site_name) || '기타';
-      if (!siteMap[sn]) siteMap[sn] = { order_count:0, total_amount:0, total_qty:0 };
-      siteMap[sn].order_count += row.order_count||0;
-      siteMap[sn].total_amount += row.total_amount||0;
-      siteMap[sn].total_qty += row.total_qty||0;
-      // CARD: is_copurchase 플래그에 따라 분리
+      const site = ensureSite(sn);
+      site.order_count += row.order_count || 0;
+      site.total_amount += row.total_amount || 0;
+      site.total_qty += row.total_qty || 0;
+      const bucket = row.is_copurchase ? site.copurchase : site.standalone;
+      bucket.amount += row.total_amount || 0;
+      bucket.orders += row.order_count || 0;
+      bucket.qty += row.total_qty || 0;
       if (row.is_copurchase) {
-        copurchase_amount += row.total_amount||0;
-        copurchase_orders += row.order_count||0;
-        copurchase_qty += row.total_qty||0;
+        copurchase_amount += row.total_amount || 0;
+        copurchase_orders += row.order_count || 0;
+        copurchase_qty += row.total_qty || 0;
       } else {
-        standalone_amount += row.total_amount||0;
-        standalone_orders += row.order_count||0;
-        standalone_qty += row.total_qty||0;
+        standalone_amount += row.total_amount || 0;
+        standalone_orders += row.order_count || 0;
+        standalone_qty += row.total_qty || 0;
       }
     }
     // 전체 합계
-    let order_count=0, total_amount=0, total_qty=0;
+    let order_count = 0, total_amount = 0, total_qty = 0;
     for (const v of Object.values(siteMap)) {
       order_count += v.order_count;
       total_amount += v.total_amount;
@@ -820,14 +885,113 @@ async function apiDashboardComparison() {
       by_site: siteMap,
       copurchase: { amount: copurchase_amount, orders: copurchase_orders, qty: copurchase_qty },
       standalone: { amount: standalone_amount, orders: standalone_orders, qty: standalone_qty },
+      pending: { amount: pendingAmount, orders: pendingOrders, qty: pendingQty },
     };
   }
 
-  const [todayTotal, yesterdayTotal, lastWeekTotal] = await Promise.all([
+  /**
+   * 빠른출고 매출 집계 — 정보입력 완료 후 빠른출고 옵션 선택한 주문의 원금 매출 (Q2=b).
+   * Supabase bg_order_customer_info 에서 is_express=true 인 order_id 목록을 가져와
+   * MSSQL 에서 해당 주문들의 원금 매출을 합산. 기간은 order_date 기준.
+   *
+   * 실패해도 빈 결과 반환 (대시보드 전체 집계 멈추지 않게).
+   */
+  async function getExpressTotal(startStr, endStr) {
+    try {
+      const _bgStore = require('./barungift/store');
+      const allInfos = await _bgStore.getAllCustomerInfos();
+      const expressOrderIds = (allInfos || [])
+        .filter(ci => ci && ci.is_express)
+        .map(ci => String(ci.order_id || ''))
+        .filter(Boolean);
+      if (!expressOrderIds.length) {
+        return { amount: 0, orders: 0, qty: 0, express_fee: 0 };
+      }
+      // CARD/ETC 분리 — ETC- 접두어로 식별
+      const cardSeqs = [];
+      const etcSeqs = [];
+      let totalExpressFee = 0;
+      const feeByOid = {};
+      allInfos.forEach(ci => {
+        if (!ci.is_express) return;
+        const oid = String(ci.order_id || '');
+        const fee = parseInt(ci.express_fee) || 0;
+        feeByOid[oid] = fee;
+        totalExpressFee += fee;
+        if (oid.startsWith('ETC-')) {
+          const seq = parseInt(oid.slice(4));
+          if (seq) etcSeqs.push(seq);
+        } else {
+          const seq = parseInt(oid);
+          if (seq) cardSeqs.push(seq);
+        }
+      });
+
+      let amount = 0, orders = 0, qty = 0;
+      if (cardSeqs.length) {
+        const inList = cardSeqs.join(',');
+        const rc = await p.request()
+          .input('s', sql.VarChar, startStr)
+          .input('e', sql.VarChar, endStr)
+          .query(`
+            SELECT
+              COUNT(DISTINCT co.order_seq) AS orders,
+              ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)),0) AS amount,
+              ISNULL(SUM(coi.item_count),0) AS qty
+            FROM custom_order co WITH (NOLOCK)
+            INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+            INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+            WHERE ${D01_FILTER} AND co.order_seq IN (${inList})
+              AND co.order_date >= @s AND co.order_date < @e
+              AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+          `);
+        amount += rc.recordset[0].amount || 0;
+        orders += rc.recordset[0].orders || 0;
+        qty += rc.recordset[0].qty || 0;
+      }
+      if (etcSeqs.length) {
+        const inList = etcSeqs.join(',');
+        const re = await p.request()
+          .input('s', sql.VarChar, startStr)
+          .input('e', sql.VarChar, endStr)
+          .query(`
+            SELECT
+              COUNT(DISTINCT o.order_seq) AS orders,
+              ISNULL(SUM(${ETC_AMOUNT_EXPR}),0) AS amount,
+              ISNULL(SUM(oi.order_count),0) AS qty
+            FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+            INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+            INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+            WHERE ${D01_FILTER} AND o.order_seq IN (${inList})
+              AND o.order_date >= @s AND o.order_date < @e
+              AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+          `);
+        amount += re.recordset[0].amount || 0;
+        orders += re.recordset[0].orders || 0;
+        qty += re.recordset[0].qty || 0;
+      }
+      return {
+        amount: Math.round(amount), orders, qty,
+        express_fee: totalExpressFee,  // 전체 누적 추가비용 (전 기간) — 참고용
+      };
+    } catch (e) {
+      console.warn('[express] 매출 집계 실패:', e.message);
+      return { amount: 0, orders: 0, qty: 0, express_fee: 0 };
+    }
+  }
+
+  const [todayTotal, yesterdayTotal, lastWeekTotal,
+         todayExpress, yesterdayExpress, lastWeekExpress] = await Promise.all([
     getPeriodTotal(todayStr, tomorrowStr),
     getPeriodTotal(yesterdayStr, todayStr),
     getPeriodTotal(lastWeekSameDayStr, lastWeekSameDayNextStr),
+    getExpressTotal(todayStr, tomorrowStr),
+    getExpressTotal(yesterdayStr, todayStr),
+    getExpressTotal(lastWeekSameDayStr, lastWeekSameDayNextStr),
   ]);
+  todayTotal.express = todayExpress;
+  yesterdayTotal.express = yesterdayExpress;
+  lastWeekTotal.express = lastWeekExpress;
 
   return {
     today: todayTotal,
