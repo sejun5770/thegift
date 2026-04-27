@@ -112,21 +112,27 @@ function extractOrderId(raw) {
 
 /**
  * 스티커 셀 파싱 — 'TGJSD05S1(150개)' 또는 'TGJSD05S1 150' 또는 'TGJSD05S1' 형태.
+ *
+ * 강화: 영문자 1자 이상 포함된 패턴만 sticker_code 로 인정.
+ *   순수 숫자(85, 15, 10) 나 날짜(2026-04-16) 는 다른 컬럼이 잘못 매핑된 것이므로 거부.
+ *
  * @returns { code, quantity } | null
  */
 function parseStickerCell(raw) {
   if (!raw) return null;
   const text = String(raw).trim();
   if (!text) return null;
+  // 영문자 검증 — 코드 후보는 반드시 영문자 1자 이상 포함 (순수 숫자/날짜 거부)
+  const hasLetter = s => /[A-Za-z]/.test(s);
   // 'TGJSD05S1(150개)' 패턴
   const m1 = text.match(/^([A-Za-z0-9_-]+)\s*\(\s*(\d+)\s*개?\s*\)/);
-  if (m1) return { code: m1[1], quantity: parseInt(m1[2]) };
+  if (m1 && hasLetter(m1[1])) return { code: m1[1], quantity: parseInt(m1[2]) };
   // 'TGJSD05S1 150' 패턴
   const m2 = text.match(/^([A-Za-z0-9_-]+)\s+(\d+)/);
-  if (m2) return { code: m2[1], quantity: parseInt(m2[2]) };
+  if (m2 && hasLetter(m2[1])) return { code: m2[1], quantity: parseInt(m2[2]) };
   // 'TGJSD05S1' 만 있는 경우 (수량 없음)
   const m3 = text.match(/^([A-Za-z0-9_-]+)/);
-  if (m3) return { code: m3[1], quantity: null };
+  if (m3 && hasLetter(m3[1])) return { code: m3[1], quantity: null };
   return null;
 }
 
@@ -448,14 +454,38 @@ async function main() {
     });
   });
 
-  // 매칭 안 된 스티커 코드 카운트
-  const unmatchedCodes = new Set();
-  newRows.forEach(r => r.sticker_selections.forEach(s => {
-    if (s.sticker_code && !s.sticker_id) unmatchedCodes.add(s.sticker_code);
-  }));
-  if (unmatchedCodes.size) {
-    console.log(`\n⚠️  bg_stickers 에서 매칭 안 된 sticker_code (${unmatchedCodes.size}종): ${[...unmatchedCodes].join(', ')}`);
-    console.log(`    → sticker_id=null 로 저장됨. 향후 화면에서 sticker_code 텍스트만 표시.`);
+  // 매칭 안 된 스티커 코드 — 첫 등장 line + product_code 추적
+  const unmatchedTrace = new Map(); // sticker_code → { count, firstLine, firstProductCode }
+  // 1순위: groupedMap (그룹핑된 결과) 에 들어간 sticker_selections 추적
+  for (const row of groupedMap.values()) {
+    row.sticker_selections.forEach(s => {
+      if (s.sticker_code && !s.sticker_id) {
+        if (!unmatchedTrace.has(s.sticker_code)) {
+          unmatchedTrace.set(s.sticker_code, { count: 0, firstLine: '?', firstProductCode: s.product_code || '?' });
+        }
+        unmatchedTrace.get(s.sticker_code).count++;
+      }
+    });
+  }
+  // 2순위: line 번호는 transformedRows 의 _lineNumber 로부터 (첫 등장)
+  for (const r of transformedRows) {
+    for (const s of (r.sticker_selections_partial || [])) {
+      if (s.sticker_code && !s.sticker_id && unmatchedTrace.has(s.sticker_code)) {
+        const trace = unmatchedTrace.get(s.sticker_code);
+        if (trace.firstLine === '?') {
+          trace.firstLine = r._lineNumber;
+          trace.firstProductCode = s.product_code || '?';
+        }
+      }
+    }
+  }
+  if (unmatchedTrace.size) {
+    console.log(`\n⚠️  bg_stickers 에서 매칭 안 된 sticker_code (${unmatchedTrace.size}종):`);
+    [...unmatchedTrace.entries()].forEach(([code, info]) => {
+      console.log(`     '${code}' — ${info.count}건 (첫 등장 Line ${info.firstLine}, 상품 ${info.firstProductCode})`);
+    });
+    console.log(`    → sticker_id=null 로 저장됨. 화면에선 sticker_code 텍스트만 표시.`);
+    console.log(`    → 의심 코드 (단순 숫자/날짜) 는 스프레드시트 컬럼 위치 확인 필요.`);
   }
 
   if (isDryRun) {
