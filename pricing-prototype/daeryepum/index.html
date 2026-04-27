@@ -25,7 +25,20 @@ nav a:hover{color:var(--gray-900)}
 /* CARDS */
 .card{background:#fff;border:1px solid var(--gray-200);border-radius:var(--radius);padding:20px}
 .card-grid{display:grid;gap:16px;margin-bottom:20px}
+/* SKELETON LOADING — 데이터 fetch 중 빈 화면 대신 펄스 애니메이션 */
+@keyframes skel-pulse{0%,100%{opacity:1}50%{opacity:.45}}
+.skeleton{background:linear-gradient(90deg,var(--gray-100) 0%,var(--gray-200) 50%,var(--gray-100) 100%);background-size:200% 100%;border-radius:4px;display:inline-block;animation:skel-pulse 1.4s ease-in-out infinite}
+.skeleton-line{height:14px;width:100%;border-radius:4px}
+.skeleton-value{height:30px;width:70%;margin-bottom:6px}
+.skeleton-sub{height:11px;width:40%}
+.skeleton-row{height:14px;margin:6px 0}
+.skeleton-cell{height:12px;display:inline-block;background:linear-gradient(90deg,var(--gray-100) 0%,var(--gray-200) 50%,var(--gray-100) 100%);background-size:200% 100%;border-radius:3px;animation:skel-pulse 1.4s ease-in-out infinite}
+.loading-overlay{position:relative;min-height:120px}
+.loading-overlay::before{content:'';position:absolute;inset:0;background:rgba(255,255,255,.6);z-index:1;border-radius:var(--radius)}
+.loading-progress{font-size:11px;color:var(--gray-500);margin-top:8px;display:flex;align-items:center;gap:6px}
+.loading-progress::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--primary);animation:skel-pulse 1s infinite}
 .card-grid-4{grid-template-columns:repeat(4,1fr)}
+.card-grid-3{grid-template-columns:repeat(3,1fr)}
 .card-grid-2{grid-template-columns:repeat(2,1fr)}
 .card h3{font-size:12px;color:var(--gray-500);margin-bottom:4px;font-weight:500}
 .card .value{font-size:28px;font-weight:700}
@@ -125,6 +138,7 @@ nav a:hover{color:var(--gray-900)}
 /* === RESPONSIVE === */
 @media(max-width:900px){
   .card-grid-4{grid-template-columns:repeat(2,1fr)}
+  .card-grid-3{grid-template-columns:repeat(2,1fr)}
   .compare-grid{grid-template-columns:1fr}
   .compare-vs{display:none}
 }
@@ -163,6 +177,7 @@ nav a:hover{color:var(--gray-900)}
   nav{gap:4px}
   nav a{font-size:11px}
   .card-grid-4{grid-template-columns:1fr 1fr}
+  .card-grid-3{grid-template-columns:1fr}
   .card .value{font-size:18px}
   .card h3{font-size:11px}
   .toolbar{flex-direction:column;align-items:stretch}
@@ -211,12 +226,11 @@ nav a:hover{color:var(--gray-900)}
     </div>
   </div>
   <div id="dash-card-view">
-  <!-- Summary Cards -->
-  <div class="card-grid card-grid-4" id="summary-cards">
-    <div class="card"><h3>총 매출</h3><div class="value" id="s-revenue">-</div><div class="sub" id="s-revenue-sub"></div><div id="s-revenue-type-split"></div><div id="s-revenue-sites"></div></div>
-    <div class="card"><h3>총 수량</h3><div class="value" id="s-qty">-</div><div class="sub" id="s-qty-sub"></div></div>
-    <div class="card"><h3>주문 건수</h3><div class="value" id="s-orders">-</div><div class="sub" id="s-orders-sub"></div></div>
-    <div class="card"><h3>평균 리드타임</h3><div class="value" id="s-leadtime">-</div><div class="sub" id="s-leadtime-sub"></div></div>
+  <!-- Summary Cards (3-card grid, 평균 리드타임은 아래 분포 차트와 중복되어 제거) -->
+  <div class="card-grid card-grid-3" id="summary-cards">
+    <div class="card"><h3>총 매출</h3><div class="value" id="s-revenue">-</div><div class="sub" id="s-revenue-sub"></div><div id="s-revenue-breakdown"></div></div>
+    <div class="card"><h3>총 수량</h3><div class="value" id="s-qty">-</div><div class="sub" id="s-qty-sub"></div><div id="s-qty-breakdown"></div></div>
+    <div class="card"><h3>주문 건수</h3><div class="value" id="s-orders">-</div><div class="sub" id="s-orders-sub"></div><div id="s-orders-breakdown"></div></div>
   </div>
   <div class="feedback" id="summary-feedback" style="margin-top:-8px;margin-bottom:16px"></div>
   </div><!-- end dash-card-view -->
@@ -2372,7 +2386,37 @@ function downloadPsCsv() {
 }
 
 // --- Dashboard ---
+//
+// 스켈레톤 UI — fetch 시작 직전 펄스 placeholder 표시. 데이터 도착시 자연스럽게 교체.
+function showDashboardSkeleton() {
+  // KPI 3개 카드 — value 와 sub 를 skeleton 박스로
+  ['s-revenue','s-qty','s-orders'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '<span class="skeleton skeleton-value"></span>';
+    const sub = document.getElementById(id + '-sub');
+    if (sub) sub.innerHTML = '<span class="skeleton skeleton-sub"></span>';
+    const bd = document.getElementById(id + '-breakdown');
+    if (bd) bd.innerHTML = '<div style="border-top:1px solid var(--gray-100);padding-top:6px;margin-top:6px">'
+      + Array(4).fill('<div class="skeleton skeleton-row"></div>').join('')
+      + '</div>';
+  });
+  // 어제 vs 오늘 비교 — 값들에 skeleton
+  ['cmp-y-amount','cmp-t-amount','cmp-y-orders','cmp-t-orders','cmp-y-qty','cmp-t-qty'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '<span class="skeleton" style="width:80px;height:18px"></span>';
+  });
+  // 기간 매출 현황 테이블 — 임시 스켈레톤 행
+  const tbl = document.getElementById('sales-table');
+  if (tbl) {
+    const skelRows = Array(8).fill(0).map(() =>
+      '<tr>' + Array(8).fill('<td><div class="skeleton" style="width:80%;height:12px"></div></td>').join('') + '</tr>'
+    ).join('');
+    tbl.innerHTML = '<tbody>' + skelRows + '</tbody>';
+  }
+}
+
 async function loadDashboard() {
+  showDashboardSkeleton();
   try {
     const [cmp, forecast, leadtime, summary] = await Promise.all([
       fetch(`${API}/api/dashboard/comparison`).then(r=>r.json()),
@@ -2411,11 +2455,9 @@ function renderSummary(summary, lt, orderCounts) {
   let totalAmt=0, totalQty=0;
   summary.forEach(r => { totalAmt += r.total_amount||0; totalQty += r.total_qty||0; });
   const uniqueDays = [...new Set(summary.map(r=>r.order_day))].length;
-  // 주문번호 기준 건수 (order_counts에서 집계)
   const totalOrders = dashboardOrderCounts.reduce((s,r) => s + (r.distinct_order_count||0), 0);
-  document.getElementById('s-revenue').textContent = fmtKRW(totalAmt);
-  document.getElementById('s-revenue-sub').textContent = `조회 기간 내`;
-  // 동시구매/단독주문 분리 집계
+
+  // 동시구매/단독주문 분리 집계 (피드백용 — 아래 변수 그대로 사용)
   let copurchaseAmt = 0, standaloneAmt = 0, cpOrders = 0, saOrders = 0, cpQty = 0, saQty = 0;
   summary.forEach(r => {
     if (r.order_type === '동시구매') { copurchaseAmt += r.total_amount||0; cpQty += r.total_qty||0; }
@@ -2427,57 +2469,47 @@ function renderSummary(summary, lt, orderCounts) {
   });
   const cpPct = totalAmt > 0 ? Math.round(copurchaseAmt / totalAmt * 100) : 0;
   const saPct = totalAmt > 0 ? Math.round(standaloneAmt / totalAmt * 100) : 0;
-  document.getElementById('s-revenue-type-split').innerHTML = `
-    <div style="border-top:1px solid var(--gray-100);padding-top:4px;margin-top:4px">
-      <div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:1px 0">
-        <span style="width:7px;height:7px;border-radius:50%;background:#8b5cf6;flex-shrink:0"></span>
-        <span style="color:var(--gray-600)">동시구매</span>
-        <span style="font-weight:600;margin-left:auto">${fmtKRW(copurchaseAmt)}</span>
-        <span style="color:var(--gray-400)">${cpPct}% · ${fmtNum(cpOrders)}건 · ${fmtNum(cpQty)}개</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:1px 0">
-        <span style="width:7px;height:7px;border-radius:50%;background:#f59e0b;flex-shrink:0"></span>
-        <span style="color:var(--gray-600)">단독주문</span>
-        <span style="font-weight:600;margin-left:auto">${fmtKRW(standaloneAmt)}</span>
-        <span style="color:var(--gray-400)">${saPct}% · ${fmtNum(saOrders)}건 · ${fmtNum(saQty)}개</span>
-      </div>
-    </div>`;
-  // 사이트별 매출 집계
-  const siteTotals = {};
-  summary.forEach(r => {
-    const sn = r.site_name || '기타';
-    if (!siteTotals[sn]) siteTotals[sn] = { amount:0, qty:0, orders:0 };
-    siteTotals[sn].amount += r.total_amount||0;
-    siteTotals[sn].qty += r.total_qty||0;
-  });
-  // 사이트별 주문건수는 order_counts에서 집계 (주문번호 기준)
-  dashboardOrderCounts.forEach(r => {
-    const sn = r.site_name || '기타';
-    if (!siteTotals[sn]) siteTotals[sn] = { amount:0, qty:0, orders:0 };
-    siteTotals[sn].orders += r.distinct_order_count||0;
-  });
-  const siteEntries = Object.entries(siteTotals).sort((a,b) => b[1].amount - a[1].amount);
-  if (siteEntries.length > 1) {
-    document.getElementById('s-revenue-sites').innerHTML = siteEntries.map(([s, v]) => {
-      const color = SITE_COLORS[s] || '#a1a1aa';
-      const pct = totalAmt > 0 ? Math.round(v.amount / totalAmt * 100) : 0;
-      return `<div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:1px 0">
-        <span style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0"></span>
-        <span style="color:var(--gray-600)">${s}</span>
-        <span style="font-weight:600;margin-left:auto">${fmtKRW(v.amount)}</span>
-        <span style="color:var(--gray-400)">${pct}%</span>
-      </div>`;
-    }).join('');
-  } else {
-    document.getElementById('s-revenue-sites').innerHTML = '';
+
+  // === 사이트 × 동시/단독 breakdown 구축 (3개 KPI 카드 공통) ===
+  // by_site: { [site_name]: { total_amount, total_qty, order_count, copurchase, standalone } }
+  const bySite = {};
+  function ensureSite(sn) {
+    if (!bySite[sn]) {
+      bySite[sn] = {
+        total_amount: 0, total_qty: 0, order_count: 0,
+        copurchase: { amount: 0, orders: 0, qty: 0 },
+        standalone: { amount: 0, orders: 0, qty: 0 },
+      };
+    }
+    return bySite[sn];
   }
+  summary.forEach(r => {
+    const site = ensureSite(r.site_name || '기타');
+    site.total_amount += r.total_amount || 0;
+    site.total_qty += r.total_qty || 0;
+    const bucket = r.order_type === '동시구매' ? site.copurchase : site.standalone;
+    bucket.amount += r.total_amount || 0;
+    bucket.qty += r.total_qty || 0;
+  });
+  dashboardOrderCounts.forEach(r => {
+    const site = ensureSite(r.site_name || '기타');
+    site.order_count += r.distinct_order_count || 0;
+    const bucket = r.order_type === '동시구매' ? site.copurchase : site.standalone;
+    bucket.orders += r.distinct_order_count || 0;
+  });
+
+  // === 카드 메인 값 + 구분 사용시 sub ===
+  document.getElementById('s-revenue').textContent = fmtKRW(totalAmt);
+  document.getElementById('s-revenue-sub').textContent = `조회 기간 내`;
   document.getElementById('s-qty').textContent = fmtNum(totalQty);
   document.getElementById('s-qty-sub').textContent = `${uniqueDays}일간`;
   document.getElementById('s-orders').textContent = fmtNum(totalOrders);
   document.getElementById('s-orders-sub').textContent = `건`;
-  // leadtime endpoint 가 실패하면 lt = {error}/{} 가 되어 avg_days 가 undefined → 'undefined일' 출력 방지
-  document.getElementById('s-leadtime').textContent = (lt && typeof lt.avg_days === 'number') ? (lt.avg_days + '일') : '-';
-  document.getElementById('s-leadtime-sub').textContent = (lt && typeof lt.median_days === 'number') ? `중앙값 ${lt.median_days}일` : '데이터 없음';
+
+  // === 3개 카드 — 사이트×동시/단독 breakdown 공통 렌더 ===
+  renderKpiCardBreakdown('s-revenue-breakdown', bySite, 'amount', totalAmt);
+  renderKpiCardBreakdown('s-qty-breakdown', bySite, 'qty', totalQty);
+  renderKpiCardBreakdown('s-orders-breakdown', bySite, 'orders', totalOrders);
 
   // 기간 데이터 피드백
   const dailyAvg = uniqueDays > 0 ? Math.round(totalAmt / uniqueDays) : 0;
@@ -2517,6 +2549,93 @@ function renderSummary(summary, lt, orderCounts) {
   else fb += '📌 리드타임 중앙값이 <strong>3주 이상</strong>으로, 사전 준비형 고객이 많습니다. 얼리버드 할인이 효과적일 수 있습니다.';
 
   document.getElementById('summary-feedback').innerHTML = fb;
+}
+
+/**
+ * KPI 카드 (총 매출 / 총 수량 / 주문 건수) 의 breakdown 영역 렌더.
+ *   - 사이트 그룹 (바른손카드 / 바른손몰 합계 / 개별 제휴사) × 동시/단독 분리.
+ *   - 'metric' 으로 어느 지표 (amount/qty/orders) 를 표시할지 결정.
+ *   - 컴팩트 레이아웃 (font-size:11px, line-height tight) — 카드 폭 제한 대응.
+ */
+function renderKpiCardBreakdown(containerId, bySite, metric, total) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  const sites = Object.keys(bySite).sort((a,b) => (bySite[b].total_amount||0) - (bySite[a].total_amount||0));
+  if (!sites.length) { container.innerHTML = ''; return; }
+
+  const fmt = metric === 'amount' ? fmtKRW : (v => fmtNum(v) + (metric === 'orders' ? '건' : '개'));
+  const valueOf = (bucket) => bucket ? (metric === 'amount' ? bucket.amount : (metric === 'qty' ? bucket.qty : bucket.orders)) : 0;
+  const totalOf = (siteData) => metric === 'amount' ? siteData.total_amount
+    : (metric === 'qty' ? siteData.total_qty : siteData.order_count);
+
+  const affiliateSites = sites.filter(s => isAffiliateSite(s));
+  const nonAffiliateSites = sites.filter(s => !isAffiliateSite(s));
+  const hasAffiliateSummary = affiliateSites.length >= 2;
+
+  // 바른손몰 합계 (제휴사 ≥ 2 곳일 때만)
+  let affiliateSummary = null;
+  if (hasAffiliateSummary) {
+    affiliateSummary = {
+      total_amount: 0, total_qty: 0, order_count: 0,
+      copurchase: { amount: 0, orders: 0, qty: 0 },
+      standalone: { amount: 0, orders: 0, qty: 0 },
+    };
+    affiliateSites.forEach(s => {
+      const v = bySite[s];
+      if (!v) return;
+      affiliateSummary.total_amount += v.total_amount || 0;
+      affiliateSummary.total_qty   += v.total_qty   || 0;
+      affiliateSummary.order_count += v.order_count || 0;
+      ['copurchase', 'standalone'].forEach(k => {
+        affiliateSummary[k].amount += (v[k] && v[k].amount) || 0;
+        affiliateSummary[k].orders += (v[k] && v[k].orders) || 0;
+        affiliateSummary[k].qty    += (v[k] && v[k].qty)    || 0;
+      });
+    });
+  }
+
+  function rowHtml(label, color, siteData, opts = {}) {
+    const v = totalOf(siteData);
+    const pct = total > 0 ? Math.round(v / total * 100) : 0;
+    const co = valueOf(siteData.copurchase);
+    const st = valueOf(siteData.standalone);
+    const hasCp = co > 0;
+    const indent = opts.indent ? 14 : 0;
+    const bg = opts.summaryStyle ? 'background:#f0fdf4;border-radius:3px;padding-left:4px' : '';
+    const labelWeight = opts.summaryStyle ? 700 : 600;
+    let detail = '';
+    if (hasCp && (metric === 'amount' || metric === 'qty' || metric === 'orders')) {
+      detail = `
+        <div style="display:flex;align-items:center;gap:4px;font-size:10px;padding:0 0 0 ${indent + 12}px;color:var(--gray-500)">
+          <span style="min-width:46px">├ 동시</span>
+          <span style="margin-left:auto">${fmt(co)}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;font-size:10px;padding:0 0 0 ${indent + 12}px;color:var(--gray-500)">
+          <span style="min-width:46px">└ 단독</span>
+          <span style="margin-left:auto">${fmt(st)}</span>
+        </div>`;
+    }
+    return `<div style="${bg};padding-left:${indent}px">
+      <div style="display:flex;align-items:center;gap:5px;font-size:11px;padding:2px 0">
+        <span style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0"></span>
+        <span style="color:var(--gray-700);font-weight:${labelWeight};min-width:60px">${label}</span>
+        <span style="font-weight:600;margin-left:auto">${fmt(v)}</span>
+        <span style="color:var(--gray-400);font-size:10px">${pct}%</span>
+      </div>${detail}
+    </div>`;
+  }
+
+  const parts = [];
+  nonAffiliateSites.forEach(s => parts.push(rowHtml(s, SITE_COLORS[s] || '#a1a1aa', bySite[s])));
+  if (affiliateSummary) {
+    const lbl = `바른손몰 <span style="color:var(--gray-400);font-weight:400;font-size:9px">(제휴 ${affiliateSites.length}곳)</span>`;
+    parts.push(rowHtml(lbl, SITE_COLORS['바른손몰'] || '#10b981', affiliateSummary, { summaryStyle: true }));
+    affiliateSites.forEach(s => parts.push(rowHtml(s, SITE_COLORS[s] || SITE_COLORS['바른손몰'] || '#10b981', bySite[s], { indent: true })));
+  } else {
+    affiliateSites.forEach(s => parts.push(rowHtml(s, SITE_COLORS[s] || '#a1a1aa', bySite[s])));
+  }
+
+  container.innerHTML = `<div style="border-top:1px solid var(--gray-100);padding-top:6px;margin-top:6px">${parts.join('')}</div>`;
 }
 
 function renderSiteBreakdown(data, prefix) {
