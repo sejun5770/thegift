@@ -811,6 +811,7 @@ async function apiDashboardComparison() {
           FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
           INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
           INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+          LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
           WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e
             AND o.status_seq = 1 AND o.settle_date IS NULL
         ) AS etc
