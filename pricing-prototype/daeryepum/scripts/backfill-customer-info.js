@@ -360,18 +360,45 @@ async function main() {
   const transformedRows = [];
   let skipCount = 0;
   let errorCount = 0;
+  let inheritedCount = 0;
+  // 주문번호 상속 — 멀티상품 주문은 추가 행에서 D열을 비워두는 스프레드시트 패턴 대응.
+  //   직전 유효 주문번호를 보관해두고 빈 셀에 채워넣음 (그룹핑 단계에서 자연스럽게 합쳐짐).
+  let lastValidOrderId = null;
   for (let i = 0; i < dataRows.length; i++) {
     const cells = dataRows[i];
     const lineNumber = i + 2; // 1-based + header
     if (limit && transformedRows.length >= limit) break;
+
+    // D열 (주문번호) 비어있는 경우 직전 주문번호 상속
+    const dCell = cells[3];
+    const dExtracted = extractOrderId(dCell);
+    if (dExtracted) {
+      lastValidOrderId = dExtracted;
+    } else if (lastValidOrderId) {
+      cells[3] = lastValidOrderId;
+      inheritedCount++;
+    }
+    // lastValidOrderId 도 없으면 그대로 두고 transformRow 가 skip 처리
+
     try {
       const result = transformRow(cells, stickerCodeMap, lineNumber);
-      if (!result) { skipCount++; continue; }
+      if (!result) {
+        skipCount++;
+        // 진단용 — 첫 5개 skip 만 자세히 출력
+        if (skipCount <= 5) {
+          const cellPreview = (cells || []).slice(0, 6).map(c => `'${(c || '').toString().slice(0, 15)}'`).join(', ');
+          console.warn(`     상세: cells.length=${cells.length}, 처음 6셀: [${cellPreview}]`);
+        }
+        continue;
+      }
       transformedRows.push(result);
     } catch (e) {
       console.error(`  ❌ Line ${lineNumber} 변환 실패:`, e.message);
       errorCount++;
     }
+  }
+  if (inheritedCount > 0) {
+    console.log(`  ℹ️ ${inheritedCount}건 — D열 비어있어 직전 주문번호 상속 (멀티상품 추가 행)`);
   }
   console.log(`✅ 변환: ${transformedRows.length}건, skip ${skipCount}건, error ${errorCount}건`);
 
