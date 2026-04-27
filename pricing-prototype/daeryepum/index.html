@@ -1764,7 +1764,28 @@ function getSelectedCols() {
 }
 
 // --- Orders ---
+/**
+ * 주문조회 — 스켈레톤 테이블 (loadOrders 시작 시 표시).
+ * data-skeleton 속성으로 표시 → renderOrderTable 가 정상 데이터 렌더 시 자연 교체.
+ */
+function showOrderTableSkeleton() {
+  const cols = (typeof getSelectedCols === 'function') ? getSelectedCols() : [];
+  const colCount = (cols.length || 8) + 1; // +1 for checkbox col
+  const thead = document.getElementById('order-thead');
+  if (thead && cols.length) {
+    thead.innerHTML =
+      `<th style="width:36px"><input type="checkbox" disabled></th>` +
+      cols.map(c => `<th>${c.label}</th>`).join('');
+  }
+  const skelRow = '<tr>' + Array(colCount).fill(0).map((_, i) =>
+    `<td><div class="skeleton" style="width:${i === 0 ? '14px' : (60 + Math.random()*30) + '%'};height:12px"></div></td>`
+  ).join('') + '</tr>';
+  document.getElementById('order-tbody').innerHTML = Array(10).fill(skelRow).join('');
+  document.getElementById('order-count').textContent = '...';
+}
+
 async function loadOrders() {
+  showOrderTableSkeleton();
   const start = document.getElementById('ord-start').value;
   const end = document.getElementById('ord-end').value;
   const endPlus = fmt(new Date(new Date(end).getTime() + 86400000));
@@ -1788,7 +1809,14 @@ async function loadOrders() {
     });
     renderOrderTable();
     document.getElementById('order-count').textContent = ordersData.length;
-  } catch(e) { console.error(e); showToast('주문 조회 실패: ' + e.message); }
+  } catch(e) {
+    console.error(e);
+    showToast('주문 조회 실패: ' + e.message);
+    // 스켈레톤 → 에러 메시지로 교체
+    const colCount = ((typeof getSelectedCols === 'function' ? getSelectedCols() : []).length || 8) + 1;
+    document.getElementById('order-tbody').innerHTML = `<tr><td colspan="${colCount}" style="text-align:center;padding:20px;color:var(--red)">조회 실패: ${esc(e.message || '알 수 없는 오류')}</td></tr>`;
+    document.getElementById('order-count').textContent = '0';
+  }
 }
 
 function isExcludeCancel() {
@@ -6479,10 +6507,32 @@ let bgUnifiedRows = [];     // 평탄화된 렌더 행
 // 통합현황 최대 조회 범위 (일)
 const BG_UNIFIED_MAX_RANGE_DAYS = 90;
 
-async function loadBgUnified() {
+/**
+ * 정보입력현황 — 스켈레톤 영역 + 단계별 진행 표시.
+ * - 데이터 도착 전: 펄스 행 8개 + 진행 텍스트 (예: "1/3 주문 데이터 조회중...")
+ * - 도착 후: renderBgUnified 가 자연 교체.
+ */
+function showBgUnifiedSkeleton(stepText) {
   const $loading = document.getElementById('uni-loading');
   $loading.style.display = 'block';
-  $loading.textContent = '불러오는 중...';
+  // 펄스 막대 + 진행 텍스트 (단계별 갱신 가능)
+  $loading.innerHTML = `
+    <div class="loading-progress">${stepText || '데이터 조회중...'}</div>
+    <div style="margin-top:10px;display:grid;grid-template-columns:30px 100px 80px 1fr 80px 60px;gap:8px;align-items:center">
+      ${Array(8).fill(0).map(() =>
+        Array(6).fill(0).map((_, i) =>
+          `<div class="skeleton" style="height:11px;width:${i === 0 ? '16px' : (50 + Math.random()*40) + '%'}"></div>`
+        ).join('')
+      ).join('')}
+    </div>`;
+}
+function setBgUnifiedProgress(stepText) {
+  const prog = document.querySelector('#uni-loading .loading-progress');
+  if (prog) prog.textContent = stepText;
+}
+
+async function loadBgUnified() {
+  showBgUnifiedSkeleton('1/3 데이터 조회 시작...');
   document.getElementById('uni-table-wrap').style.display = 'none';
 
   // 날짜 기본값 초기화 (최초 1회)
@@ -6495,6 +6545,7 @@ async function loadBgUnified() {
 
   const start = document.getElementById('uni-start').value;
   const end = document.getElementById('uni-end').value;
+  const $loading = document.getElementById('uni-loading');
 
   // 날짜 유효성 + 최대 범위 가드
   if (!start || !end) {
@@ -6512,6 +6563,7 @@ async function loadBgUnified() {
   }
 
   const endPlus = fmt(new Date(new Date(end).getTime() + 86400000));
+  setBgUnifiedProgress('1/3 주문 데이터 조회 + 고객 입력 정보 조회 중...');
 
   // 각 API 응답을 개별적으로 포착하여 어느 쪽이 실패했는지 진단 가능
   try {
@@ -6536,6 +6588,7 @@ async function loadBgUnified() {
       $loading.textContent = '고객입력 조회 실패: ' + (ciRes.reason?.message || '알 수 없는 오류');
       return;
     }
+    setBgUnifiedProgress('2/3 주문-고객입력 매칭 중...');
 
     const rawOrders = Array.isArray(ordersRes.value) ? ordersRes.value : [];
     // order_seq 기준 중복 제거 + 상품(card_code)별 상품명/수량 보존
@@ -6571,6 +6624,7 @@ async function loadBgUnified() {
     bgUnifiedCiMap = ciMap;
 
     // 커스텀 필드 라벨 lookup 용 스티커 데이터 사전 로드 (실패해도 렌더는 진행)
+    setBgUnifiedProgress('3/3 스티커 메타데이터 로드 + 렌더링...');
     await _ensureStickersForUnified();
 
     renderBgUnified();
