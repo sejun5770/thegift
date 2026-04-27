@@ -292,6 +292,8 @@ nav a:hover{color:var(--gray-900)}
           <div><span style="color:var(--gray-500)">건수</span> <strong id="cmp-t-express-orders" style="margin-left:4px">-</strong></div>
           <div><span style="color:var(--gray-500)">매출</span> <strong id="cmp-t-express-amount" style="margin-left:4px">-</strong></div>
         </div>
+        <!-- 사이트별 동시/단독 세분화 — getPeriodTotal 의 by_site 와 동일 구조 -->
+        <div id="cmp-t-express-site-breakdown" style="margin-top:6px"></div>
         <div style="margin-top:6px;font-size:11px;color:var(--gray-500)">어제: <span id="cmp-y-express">-</span></div>
       </div>
     </div>
@@ -2592,15 +2594,17 @@ function renderComparison(cmp) {
   if ($tpaEl) $tpaEl.textContent = fmtKRW(tp.amount);
   if ($ypEl)  $ypEl.textContent  = fmtNum(yp.orders) + '건 / ' + fmtKRW(yp.amount);
 
-  // 빠른출고 채택 매출 — 정보입력 완료 후 빠른출고 옵션 선택한 주문의 원금 매출
-  const te = t.express || { amount: 0, orders: 0, qty: 0 };
-  const ye = y.express || { amount: 0, orders: 0, qty: 0 };
+  // 빠른출고 채택 매출 — 사이트별 + 동시/단독 분리 (Q1=a 정책 일관 적용)
+  const te = t.express || { amount: 0, orders: 0, qty: 0, by_site: {} };
+  const ye = y.express || { amount: 0, orders: 0, qty: 0, by_site: {} };
   const $teoEl = document.getElementById('cmp-t-express-orders');
   const $teaEl = document.getElementById('cmp-t-express-amount');
   const $yeEl  = document.getElementById('cmp-y-express');
   if ($teoEl) $teoEl.textContent = fmtNum(te.orders) + '건';
   if ($teaEl) $teaEl.textContent = fmtKRW(te.amount);
   if ($yeEl)  $yeEl.textContent  = fmtNum(ye.orders) + '건 / ' + fmtKRW(ye.amount);
+  // 빠른출고 사이트별 세분화 — by_site 를 일반 매출과 동일한 구조로 재사용
+  renderSiteBreakdown({ by_site: te.by_site || {} }, 'cmp-t-express');
 
   const pct = pctChange(t.total_amount, y.total_amount);
   const badge = document.getElementById('cmp-badge');
