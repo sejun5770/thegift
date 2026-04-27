@@ -5950,6 +5950,9 @@ async function loadBgUnified() {
     });
     bgUnifiedCiMap = ciMap;
 
+    // 커스텀 필드 라벨 lookup 용 스티커 데이터 사전 로드 (실패해도 렌더는 진행)
+    await _ensureStickersForUnified();
+
     renderBgUnified();
   } catch (e) {
     console.error('[loadBgUnified] 예상치 못한 오류:', e);
@@ -6140,14 +6143,17 @@ function renderBgUnified() {
       : '<span style="color:var(--gray-300)">-</span>';
     const stickerName = sel?.sticker_name ? esc(sel.sticker_name) : '<span style="color:var(--gray-300)">-</span>';
     const customVals = sel ? Object.entries(sel.custom_values || {}).filter(([, v]) => v) : [];
+    // field_id → field_label 매핑 (스티커별 custom_fields 정의 lookup).
+    // lookup 실패시 키 그대로 폴백 (기존 동작과 호환).
+    const fieldLabelMap = _getStickerFieldLabelMap(sel?.sticker_id);
     const customText = customVals.length
       ? customVals.map(([k, v]) => {
           // 기본 'text' 필드는 접두어 없이 값만 표시 (가독성).
-          // 다른 커스텀 키는 기존처럼 'key: value' 로 구분.
-          // XSS: k, v 모두 고객 입력 → escape 필수
-          return k === 'text'
-            ? esc(v)
-            : `<span style="color:var(--gray-500)">${esc(k)}:</span> ${esc(v)}`;
+          // 다른 커스텀 키는 'label: value' 로 구분 (label lookup → fallback to key).
+          // XSS: k, v, label 모두 escape 필수
+          if (k === 'text') return esc(v);
+          const label = fieldLabelMap.get(k) || k;
+          return `<span style="color:var(--gray-500)">${esc(label)}:</span> ${esc(v)}`;
         }).join('<br>')
       : '<span style="color:var(--gray-300)">-</span>';
     const shipDate = ci?.desired_ship_date ? esc(ci.desired_ship_date) : '<span style="color:var(--gray-300)">-</span>';
@@ -6514,6 +6520,40 @@ function openBgOrderEditByIdx(idx) {
 // 수정 모달 전역 캐시 (불필요한 재조회 방지)
 let _bgEditAllStickers = null;            // [{id, sticker_code, name, custom_fields, ...}]
 const _bgEditProductSettingsCache = new Map(); // productCode → { available_sticker_ids, available_box_options }
+
+/**
+ * 정보입력현황 — 스티커 데이터 사전 로드 (custom_fields 라벨 lookup 용).
+ * _bgEditAllStickers 가 비어있으면 한번만 fetch. 이미 로드돼있으면 즉시 반환.
+ * 실패해도 빈 배열로 폴백 (라벨 표시는 안 되지만 렌더는 정상 진행).
+ */
+async function _ensureStickersForUnified() {
+  if (_bgEditAllStickers) return _bgEditAllStickers;
+  try {
+    const r = await fetch(API + '/api/bg/stickers?active_only=false');
+    _bgEditAllStickers = (await r.json()).stickers || [];
+  } catch (e) {
+    console.warn('[unified] sticker preload 실패:', e);
+    _bgEditAllStickers = [];
+  }
+  return _bgEditAllStickers;
+}
+
+/**
+ * 특정 스티커의 커스텀 필드 라벨 매핑 반환.
+ * 입력: sticker_id (또는 falsy)
+ * 출력: Map<field_id, field_label>. 매핑 실패하면 빈 Map.
+ */
+function _getStickerFieldLabelMap(stickerId) {
+  if (!stickerId || !Array.isArray(_bgEditAllStickers)) return new Map();
+  const sticker = _bgEditAllStickers.find(s => s.id === stickerId);
+  if (!sticker || !Array.isArray(sticker.custom_fields)) return new Map();
+  const map = new Map();
+  sticker.custom_fields.forEach(f => {
+    const key = f.field_id || f.name || f.field_label;
+    if (key) map.set(key, f.field_label || f.name || key);
+  });
+  return map;
+}
 
 async function _loadBgEditStickersAndSettings(productCodes) {
   // 전체 스티커 한번만 로드
