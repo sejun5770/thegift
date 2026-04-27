@@ -2865,14 +2865,28 @@
         + '</div>';
     }).join('');
 
-    // 결제정보 (추가비용 있을 때만)
+    // 결제정보 (추가비용 있을 때만) — 빠른출고 입금 계좌도 함께 노출
+    //   재진입 고객이 입금 계좌 다시 확인할 수 있도록 (정보입력은 완료됐지만 송금은 별도)
     let paymentHtml = '';
     if (expressFee > 0) {
       const receipt = info.cash_receipt_yn
         ? (RECEIPT_TYPES[info.receipt_type] || '') + ' ' + (info.receipt_number || '')
         : '미신청';
+      const bankInfo = orderData?.bank_info || { bank_name: '신한은행', account_number: '100-013-801261', account_holder: '바른컴퍼니' };
       paymentHtml = '<div class="surface p-4 mb-2">'
         + '<h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">결제정보</h3>'
+        // 입금 계좌 안내 카드 (재진입시 다시 조회 가능)
+        + '<div class="bg-slate-50 rounded-xl p-3 mb-2.5 space-y-1.5">'
+        +   '<div class="flex justify-between text-sm"><span class="text-slate-500">은행</span><span class="font-semibold text-slate-900">' + esc(bankInfo.bank_name || '-') + '</span></div>'
+        +   '<div class="flex justify-between items-center text-sm">'
+        +     '<span class="text-slate-500">계좌번호</span>'
+        +     '<div class="flex items-center gap-2">'
+        +       '<span class="font-semibold text-slate-900 font-mono">' + esc(bankInfo.account_number || '-') + '</span>'
+        +       '<button class="pressable text-xs font-bold px-2.5 py-1 rounded-lg gradient-brand-soft transition-colors" style="color:var(--brand-600)" data-action="copyAccount">복사</button>'
+        +     '</div>'
+        +   '</div>'
+        +   '<div class="flex justify-between text-sm"><span class="text-slate-500">예금주</span><span class="font-semibold text-slate-900">' + esc(bankInfo.account_holder || '-') + '</span></div>'
+        + '</div>'
         + '<div class="space-y-1.5 text-sm">'
         +   '<div class="flex justify-between"><span class="text-slate-500">추가 결제금액</span><span class="font-bold text-amber-700">' + formatMoney(expressFee) + '</span></div>'
         +   '<div class="flex justify-between"><span class="text-slate-500">현금영수증</span><span class="text-slate-900 font-medium">' + esc(receipt) + '</span></div>'
