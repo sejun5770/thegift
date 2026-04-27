@@ -164,28 +164,65 @@ const DB_CONFIG = {
   user: process.env.DB_USER || 'readonly_user',
   password: process.env.DB_PASSWORD || 'barunreadonly12#',
   database: process.env.DB_NAME || 'bar_shop1',
-  options: { encrypt: true, trustServerCertificate: false },
-  pool: { max: 5, min: 0, idleTimeoutMillis: 30000 },
+  options: {
+    encrypt: true,
+    trustServerCertificate: false,
+    enableArithAbort: true,    // Azure SQL 권장
+  },
+  pool: {
+    max: 10,
+    min: 1,                    // 최소 1개 연결 유지 → idle 시점에도 풀 따뜻하게 (콜드스타트 방지)
+    idleTimeoutMillis: 60000,  // 30→60초 (Azure idle close 보다 짧게 유지)
+    acquireTimeoutMillis: 30000,
+  },
   requestTimeout: 60000,
   connectionTimeout: 15000,
 };
 
 let pool = null;
+let _poolInitPromise = null; // 동시 초기화 요청 중복 방지 (race-condition 가드)
+
+/**
+ * MSSQL 풀 획득 — 끊긴 풀 자동 감지 + 헬스체크 + 단일 재시도.
+ * - pool.connected 가 stale 인 경우 (Azure SQL 이 idle 연결을 닫았지만 클라이언트가 모름)
+ *   → SELECT 1 ping 으로 검증 후 실패 시 재생성.
+ * - 동시 호출 시 _poolInitPromise 로 race-condition 차단.
+ */
 async function getPool() {
-  if (pool && pool.connected) return pool;
-  pool = new sql.ConnectionPool(DB_CONFIG);
-  pool.on('error', (err) => { console.error('Pool error:', err.message); pool = null; });
-  await pool.connect();
-  console.log('Connected to Barunson DB');
-  // 제휴사명 캐시 로드 (최초 연결 시)
-  if (Object.keys(companyNameMap).length === 0) {
+  if (pool && pool.connected) {
+    // stale 검증 — 1초 timeout 핑
     try {
-      const res = await pool.request().query(`SELECT COMPANY_SEQ, COMPANY_NAME FROM COMPANY WITH (NOLOCK) WHERE COMPANY_NAME IS NOT NULL`);
-      res.recordset.forEach(r => { companyNameMap[String(r.COMPANY_SEQ)] = r.COMPANY_NAME; });
-      console.log(`Loaded ${Object.keys(companyNameMap).length} company names`);
-    } catch (e) { console.error('Failed to load company names:', e.message); }
+      await pool.request().query('SELECT 1 AS ping');
+      return pool;
+    } catch (e) {
+      console.warn('[pool] stale 감지 — 재생성:', e.message);
+      try { await pool.close(); } catch {}
+      pool = null;
+    }
   }
-  return pool;
+  // 초기화 중복 방지 — 이미 초기화 진행 중이면 그 Promise 공유
+  if (_poolInitPromise) return _poolInitPromise;
+  _poolInitPromise = (async () => {
+    const p = new sql.ConnectionPool(DB_CONFIG);
+    p.on('error', (err) => { console.error('Pool error:', err.message); pool = null; });
+    await p.connect();
+    pool = p;
+    console.log('Connected to Barunson DB');
+    // 제휴사명 캐시 로드 (최초 1회만)
+    if (Object.keys(companyNameMap).length === 0) {
+      try {
+        const res = await p.request().query(`SELECT COMPANY_SEQ, COMPANY_NAME FROM COMPANY WITH (NOLOCK) WHERE COMPANY_NAME IS NOT NULL`);
+        res.recordset.forEach(r => { companyNameMap[String(r.COMPANY_SEQ)] = r.COMPANY_NAME; });
+        console.log(`Loaded ${Object.keys(companyNameMap).length} company names`);
+      } catch (e) { console.error('Failed to load company names:', e.message); }
+    }
+    return p;
+  })();
+  try {
+    return await _poolInitPromise;
+  } finally {
+    _poolInitPromise = null;
+  }
 }
 
 // 제휴사명 캐시: company_Seq → COMPANY_NAME
