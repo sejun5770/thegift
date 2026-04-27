@@ -743,79 +743,83 @@ async function apiDashboardComparison() {
   //     pending: {amount, orders, qty},  // 결제대기 별도 (status_seq=1, 매출 집계엔 미포함)
   //   }
   async function getPeriodTotal(startStr, endStr) {
-    // 1) ETC 주문 = 항상 단독주문 (Q1=a 정책)
-    const r = await p.request()
-      .input('s', sql.VarChar, startStr)
-      .input('e', sql.VarChar, endStr)
-      .query(`
-        SELECT
-          ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
-          COUNT(DISTINCT o.order_seq) AS order_count,
-          ISNULL(SUM(${ETC_AMOUNT_EXPR}),0) AS total_amount,
-          ISNULL(SUM(oi.order_count),0) AS total_qty
-        FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-        INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-        INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-        LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
-        WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
-        GROUP BY ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
-      `);
-    // 2) CARD 주문 = 같은 주문에 A01(청첩장)이 있으면 동시구매, 없으면 단독주문
-    const r2 = await p.request()
-      .input('s', sql.VarChar, startStr)
-      .input('e', sql.VarChar, endStr)
-      .query(`
-        WITH copurchase_orders AS (
-          SELECT DISTINCT coi2.order_seq
-          FROM custom_order_item coi2 WITH (NOLOCK)
-          INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
-          WHERE c2.Card_Div = 'A01'
-        )
-        SELECT
-          ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
-          CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
-          COUNT(DISTINCT co.order_seq) AS order_count,
-          ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)),0) AS total_amount,
-          ISNULL(SUM(coi.item_count),0) AS total_qty
-        FROM custom_order co WITH (NOLOCK)
-        INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
-        INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-        LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
-        LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
-        WHERE ${D01_FILTER} AND co.order_date >= @s AND co.order_date < @e AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
-        GROUP BY ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
-          CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
-      `);
-    // 3) 결제대기 = status_seq=1 AND settle_date IS NULL — CARD/ETC 합산 (사이트별 분리는 생략)
-    const rPending = await p.request()
-      .input('s', sql.VarChar, startStr)
-      .input('e', sql.VarChar, endStr)
-      .query(`
-        SELECT amount, orders, qty FROM (
+    // 3개 쿼리(ETC 매출, CARD 매출, 결제대기)는 서로 독립 → Promise.all 로 병렬화 (CodeReview-H1).
+    //   각 쿼리에 자기만의 request 인스턴스 부여 (mssql 모듈은 동시 input 충돌 방지 위해 권장).
+    const [r, r2, rPending] = await Promise.all([
+      // 1) ETC 주문 = 항상 단독주문 (Q1=a 정책)
+      p.request()
+        .input('s', sql.VarChar, startStr)
+        .input('e', sql.VarChar, endStr)
+        .query(`
           SELECT
-            ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)),0) AS amount,
-            COUNT(DISTINCT co.order_seq) AS orders,
-            ISNULL(SUM(coi.item_count),0) AS qty
-          FROM custom_order co WITH (NOLOCK)
-          INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
-          INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-          WHERE ${D01_FILTER} AND co.order_date >= @s AND co.order_date < @e
-            AND co.status_seq = 1 AND co.settle_date IS NULL
-        ) AS card
-        UNION ALL
-        SELECT amount, orders, qty FROM (
-          SELECT
-            ISNULL(SUM(${ETC_AMOUNT_EXPR}),0) AS amount,
-            COUNT(DISTINCT o.order_seq) AS orders,
-            ISNULL(SUM(oi.order_count),0) AS qty
+            ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
+            COUNT(DISTINCT o.order_seq) AS order_count,
+            ISNULL(SUM(${ETC_AMOUNT_EXPR}),0) AS total_amount,
+            ISNULL(SUM(oi.order_count),0) AS total_qty
           FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
           INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
           INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
           LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
-          WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e
-            AND o.status_seq = 1 AND o.settle_date IS NULL
-        ) AS etc
-      `);
+          WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+          GROUP BY ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
+        `),
+      // 2) CARD 주문 = 같은 주문에 A01(청첩장)이 있으면 동시구매, 없으면 단독주문
+      p.request()
+        .input('s', sql.VarChar, startStr)
+        .input('e', sql.VarChar, endStr)
+        .query(`
+          WITH copurchase_orders AS (
+            SELECT DISTINCT coi2.order_seq
+            FROM custom_order_item coi2 WITH (NOLOCK)
+            INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+            WHERE c2.Card_Div = 'A01'
+          )
+          SELECT
+            ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
+            CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
+            COUNT(DISTINCT co.order_seq) AS order_count,
+            ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)),0) AS total_amount,
+            ISNULL(SUM(coi.item_count),0) AS total_qty
+          FROM custom_order co WITH (NOLOCK)
+          INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+          INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+          LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+          LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
+          WHERE ${D01_FILTER} AND co.order_date >= @s AND co.order_date < @e AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+          GROUP BY ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
+            CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
+        `),
+      // 3) 결제대기 = status_seq=1 AND settle_date IS NULL — CARD/ETC 합산 (사이트별 분리는 생략)
+      p.request()
+        .input('s', sql.VarChar, startStr)
+        .input('e', sql.VarChar, endStr)
+        .query(`
+          SELECT amount, orders, qty FROM (
+            SELECT
+              ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)),0) AS amount,
+              COUNT(DISTINCT co.order_seq) AS orders,
+              ISNULL(SUM(coi.item_count),0) AS qty
+            FROM custom_order co WITH (NOLOCK)
+            INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+            INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+            WHERE ${D01_FILTER} AND co.order_date >= @s AND co.order_date < @e
+              AND co.status_seq = 1 AND co.settle_date IS NULL
+          ) AS card
+          UNION ALL
+          SELECT amount, orders, qty FROM (
+            SELECT
+              ISNULL(SUM(${ETC_AMOUNT_EXPR}),0) AS amount,
+              COUNT(DISTINCT o.order_seq) AS orders,
+              ISNULL(SUM(oi.order_count),0) AS qty
+            FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+            INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+            INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+            LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+            WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e
+              AND o.status_seq = 1 AND o.settle_date IS NULL
+          ) AS etc
+        `),
+    ]);
     let pendingAmount = 0, pendingOrders = 0, pendingQty = 0;
     for (const row of rPending.recordset) {
       pendingAmount += row.amount || 0;
@@ -1094,97 +1098,98 @@ async function apiDashboardSummary(query) {
   const startDate = query.start_date || fmtDate(addDays(today(), -30));
   const endDate = query.end_date || fmtDate(addDays(today(), 1));
 
-  const result = await p.request()
-    .input('startDate', sql.VarChar, startDate)
-    .input('endDate', sql.VarChar, endDate)
-    .query(`
-      WITH copurchase_orders AS (
-        SELECT DISTINCT coi2.order_seq
-        FROM custom_order_item coi2 WITH (NOLOCK)
-        INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
-        WHERE c2.Card_Div = 'A01'
-      )
-      SELECT
-        c.Card_Name AS card_name,
-        c.Card_Code AS card_code,
-        CONVERT(varchar(10), o.order_date, 120) AS order_day,
-        ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
-        N'단독주문' AS order_type,
-        COUNT(DISTINCT o.order_seq) AS order_count,
-        SUM(oi.order_count) AS total_qty,
-        SUM(${ETC_AMOUNT_EXPR}) AS total_amount
-      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-      LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
-      WHERE ${D01_FILTER} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
-      GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
+  // 두 메인 쿼리(상품×사이트×유형 매출 + 일×사이트×유형 주문건수) 는 독립 → 병렬 실행 (CodeReview-H2).
+  const [result, countResult] = await Promise.all([
+    p.request()
+      .input('startDate', sql.VarChar, startDate)
+      .input('endDate', sql.VarChar, endDate)
+      .query(`
+        WITH copurchase_orders AS (
+          SELECT DISTINCT coi2.order_seq
+          FROM custom_order_item coi2 WITH (NOLOCK)
+          INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+          WHERE c2.Card_Div = 'A01'
+        )
+        SELECT
+          c.Card_Name AS card_name,
+          c.Card_Code AS card_code,
+          CONVERT(varchar(10), o.order_date, 120) AS order_day,
+          ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
+          N'단독주문' AS order_type,
+          COUNT(DISTINCT o.order_seq) AS order_count,
+          SUM(oi.order_count) AS total_qty,
+          SUM(${ETC_AMOUNT_EXPR}) AS total_amount
+        FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+        INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+        LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+        WHERE ${D01_FILTER} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+        GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
 
-      UNION ALL
+        UNION ALL
 
-      SELECT
-        c.Card_Name,
-        c.Card_Code,
-        CONVERT(varchar(10), co.order_date, 120) AS order_day,
-        ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
-        CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END AS order_type,
-        COUNT(DISTINCT co.order_seq),
-        SUM(coi.item_count),
-        SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1))
-      FROM custom_order co WITH (NOLOCK)
-      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
-      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
-      LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
-      WHERE ${D01_FILTER} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
-      GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
-        CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
+        SELECT
+          c.Card_Name,
+          c.Card_Code,
+          CONVERT(varchar(10), co.order_date, 120) AS order_day,
+          ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
+          CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END AS order_type,
+          COUNT(DISTINCT co.order_seq),
+          SUM(coi.item_count),
+          SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1))
+        FROM custom_order co WITH (NOLOCK)
+        INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+        LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+        LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
+        WHERE ${D01_FILTER} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+        GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
+          CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
 
-      ORDER BY order_day DESC, total_amount DESC
-    `);
+        ORDER BY order_day DESC, total_amount DESC
+      `),
+    p.request()
+      .input('startDate', sql.VarChar, startDate)
+      .input('endDate', sql.VarChar, endDate)
+      .query(`
+        WITH copurchase_orders AS (
+          SELECT DISTINCT coi2.order_seq
+          FROM custom_order_item coi2 WITH (NOLOCK)
+          INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+          WHERE c2.Card_Div = 'A01'
+        )
+        SELECT
+          CONVERT(varchar(10), o.order_date, 120) AS order_day,
+          ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
+          N'단독주문' AS order_type,
+          COUNT(DISTINCT o.order_seq) AS distinct_order_count
+        FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+        INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+        LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+        WHERE ${D01_FILTER} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+        GROUP BY CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
+
+        UNION ALL
+
+        SELECT
+          CONVERT(varchar(10), co.order_date, 120) AS order_day,
+          ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
+          CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END AS order_type,
+          COUNT(DISTINCT co.order_seq) AS distinct_order_count
+        FROM custom_order co WITH (NOLOCK)
+        INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+        LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+        LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
+        WHERE ${D01_FILTER} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+        GROUP BY CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
+          CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
+      `),
+  ]);
 
   // Clean names
   const rows = result.recordset.map(r => ({ ...r, card_name: cleanName(r.card_name), site_name: formatSiteName(r.site_name) }));
-
-  // 주문번호 기준 건수 (상품 그루핑 없이 day/site/type별 COUNT DISTINCT)
-  const countResult = await p.request()
-    .input('startDate', sql.VarChar, startDate)
-    .input('endDate', sql.VarChar, endDate)
-    .query(`
-      WITH copurchase_orders AS (
-        SELECT DISTINCT coi2.order_seq
-        FROM custom_order_item coi2 WITH (NOLOCK)
-        INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
-        WHERE c2.Card_Div = 'A01'
-      )
-      SELECT
-        CONVERT(varchar(10), o.order_date, 120) AS order_day,
-        ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
-        N'단독주문' AS order_type,
-        COUNT(DISTINCT o.order_seq) AS distinct_order_count
-      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-      LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
-      WHERE ${D01_FILTER} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
-      GROUP BY CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
-
-      UNION ALL
-
-      SELECT
-        CONVERT(varchar(10), co.order_date, 120) AS order_day,
-        ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
-        CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END AS order_type,
-        COUNT(DISTINCT co.order_seq) AS distinct_order_count
-      FROM custom_order co WITH (NOLOCK)
-      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
-      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
-      LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
-      WHERE ${D01_FILTER} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
-      GROUP BY CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
-        CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
-    `);
 
   const orderCounts = countResult.recordset.map(r => ({ ...r, site_name: formatSiteName(r.site_name) }));
 
@@ -1208,10 +1213,11 @@ async function apiDashboardSummary(query) {
           if (seq) cardSeqs.push(seq);
         }
       });
-      const expressRows = [];
+      // 빠른출고 CARD/ETC 일별 집계 — 두 쿼리 독립적이므로 병렬 실행 (CodeReview-H1 연관).
+      const exprPromises = [];
       if (cardSeqs.length) {
         const inList = cardSeqs.join(',');
-        const rc = await p.request()
+        exprPromises.push(p.request()
           .input('startDate', sql.VarChar, startDate)
           .input('endDate', sql.VarChar, endDate)
           .query(`
@@ -1229,12 +1235,11 @@ async function apiDashboardSummary(query) {
               AND co.order_date >= @startDate AND co.order_date < @endDate
               AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
             GROUP BY CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR))
-          `);
-        expressRows.push(...rc.recordset);
+          `));
       }
       if (etcSeqs.length) {
         const inList = etcSeqs.join(',');
-        const re = await p.request()
+        exprPromises.push(p.request()
           .input('startDate', sql.VarChar, startDate)
           .input('endDate', sql.VarChar, endDate)
           .query(`
@@ -1252,9 +1257,10 @@ async function apiDashboardSummary(query) {
               AND o.order_date >= @startDate AND o.order_date < @endDate
               AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
             GROUP BY CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
-          `);
-        expressRows.push(...re.recordset);
+          `));
       }
+      const exprResults = await Promise.all(exprPromises);
+      const expressRows = exprResults.flatMap(r => r.recordset);
       expressDaily = expressRows.map(r => ({
         ...r,
         site_name: formatSiteName(r.site_name),
