@@ -956,8 +956,11 @@ async function searchDaeryepumOrders(pool, sql, opts) {
   cardRequest.input('phone', sql.VarChar, phone);
   cardRequest.input('uname', sql.VarChar, uname);
   // LTRIM/RTRIM: MSSQL char 컬럼 공백 패딩 + 사용자 공백 실수 모두 흡수
+  // ⚠️ 보안: phone AND name 둘 다 일치해야 함 (이전 OR 조건은 동명이인 주문 노출 버그).
+  //   - useLike=true (로그인) — 전화번호는 LIKE '%' 매칭 (대시/형식 차이 흡수)
+  //   - useLike=false (수동검색) — 전화번호는 정규화 후 정확 매칭
   const cardWhere = useLike
-    ? "AND (co.order_hphone LIKE '%' + @phone OR LTRIM(RTRIM(co.order_name)) = LTRIM(RTRIM(@uname)))"
+    ? "AND co.order_hphone LIKE '%' + @phone AND LTRIM(RTRIM(co.order_name)) = LTRIM(RTRIM(@uname))"
     : "AND REPLACE(co.order_hphone, '-', '') = @phone AND LTRIM(RTRIM(co.order_name)) = LTRIM(RTRIM(@uname))";
   const cardResult = await cardRequest.query(`
     SELECT DISTINCT TOP 20
@@ -988,8 +991,9 @@ async function searchDaeryepumOrders(pool, sql, opts) {
   const etcRequest = pool.request();
   etcRequest.input('phone', sql.VarChar, phone);
   etcRequest.input('uname', sql.VarChar, uname);
+  // ⚠️ 보안: phone AND name 둘 다 일치해야 함 (cardWhere 와 동일 정책).
   const etcWhere = useLike
-    ? "AND (co.order_hphone LIKE '%' + @phone OR LTRIM(RTRIM(co.order_name)) = LTRIM(RTRIM(@uname)))"
+    ? "AND co.order_hphone LIKE '%' + @phone AND LTRIM(RTRIM(co.order_name)) = LTRIM(RTRIM(@uname))"
     : "AND REPLACE(co.order_hphone, '-', '') = @phone AND LTRIM(RTRIM(co.order_name)) = LTRIM(RTRIM(@uname))";
   const etcResult = await etcRequest.query(`
     SELECT DISTINCT TOP 20
