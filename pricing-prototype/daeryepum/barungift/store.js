@@ -178,8 +178,24 @@ async function updateSticker(id, data) {
   return stickers[idx];
 }
 
+/**
+ * 스티커 진짜 삭제 (DELETE).
+ *   - 기존엔 is_active=false 로 soft-delete 했지만, 사용자 요청에 따라 hard-delete 로 변경.
+ *   - 주의: bg_product_settings.available_sticker_ids 에서 참조 중이면 그쪽도 정리 필요.
+ *     → 현재는 product_settings 의 available_sticker_ids 가 단순 배열이므로 stale id 가 있어도
+ *        UI 에서 자동 무시됨 (renderBgStickerModal 등에서 lookup 실패 시 건너뜀).
+ *   - 이미 backfill / 정보입력 데이터의 sticker_selections JSONB 안에 sticker_id 가 박혀있어도
+ *     그쪽은 텍스트 sticker_code/name 도 함께 저장돼있어 표시 영향 거의 없음.
+ */
 async function deleteSticker(id) {
-  return updateSticker(id, { is_active: false });
+  if (USE_SUPABASE) {
+    await sbDelete('bg_stickers', `id=eq.${encodeURIComponent(id)}`);
+    return true;
+  }
+  const stickers = readJson(FILES.stickers, []);
+  const filtered = stickers.filter(s => s.id !== id);
+  writeJson(FILES.stickers, filtered);
+  return true;
 }
 
 // ============================================

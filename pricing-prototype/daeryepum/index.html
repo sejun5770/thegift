@@ -5420,7 +5420,7 @@ function renderBgStickers() {
     <td style="padding:6px 10px;text-align:center"><span class="badge ${s.is_active ? 'badge-up' : 'badge-neutral'}">${s.is_active ? '활성' : '비활성'}</span></td>
     <td style="padding:6px 10px;text-align:center;white-space:nowrap">
       <button class="btn btn-sm" onclick="editBgSticker('${s.id}')" title="수정">✏️</button>
-      <button class="btn btn-sm" onclick="deleteBgSticker('${s.id}')" title="비활성화" style="color:var(--red)">🗑️</button>
+      <button class="btn btn-sm" onclick="deleteBgSticker('${s.id}', '${(s.name || '').replace(/'/g, '\\\'')}', '${s.sticker_code || ''}')" title="삭제 (영구)" style="color:var(--red)">🗑️</button>
     </td>
   </tr>`;
 
@@ -5577,13 +5577,28 @@ async function saveBgSticker() {
   } catch(e) { alert(e.message); }
 }
 
-async function deleteBgSticker(id) {
-  if (!confirm('이 스티커를 비활성화하시겠습니까?')) return;
+async function deleteBgSticker(id, name, code) {
+  // 진짜 DB DELETE — 복구 불가. 강한 확인 dialog.
+  const label = code ? `${name || ''} [${code}]` : (name || id);
+  const ok = confirm(
+    `🗑️ 스티커 삭제 (영구)\n\n` +
+    `'${label}' 을(를) 삭제합니다.\n\n` +
+    `⚠️ 주의:\n` +
+    `- DB 에서 완전 제거됩니다 (복구 불가)\n` +
+    `- 상품설정에 이 스티커가 등록돼있다면 자동으로 빠집니다\n` +
+    `- 이미 입력된 정보입력 데이터의 텍스트 표시는 유지됩니다 (sticker_id 만 무효화)\n\n` +
+    `진행하시겠습니까?`
+  );
+  if (!ok) return;
   try {
-    await fetch(API + '/api/bg/stickers/' + id, { method: 'DELETE' });
-    showToast('스티커가 비활성화되었습니다.');
+    const r = await fetch(API + '/api/bg/stickers/' + id, { method: 'DELETE' });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `[${r.status}] 삭제 실패`);
+    showToast('✅ 스티커가 삭제되었습니다.');
     loadBgStickers();
-  } catch(e) { alert(e.message); }
+  } catch(e) {
+    console.error('스티커 삭제 실패:', e);
+    alert('삭제 실패: ' + e.message);
+  }
 }
 
 // ============================================
