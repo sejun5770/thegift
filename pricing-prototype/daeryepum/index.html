@@ -1429,6 +1429,9 @@ nav a:hover{color:var(--gray-900)}
       <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
         <input type="checkbox" id="uni-hide-cancel" onchange="renderBgUnified()"> 취소 제외
       </label>
+      <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px" title="결제 미완료 상태인 주문 제외 (status_seq=1, settle_date 비어있음)">
+        <input type="checkbox" id="uni-hide-pending" onchange="renderBgUnified()"> 결제대기 제외
+      </label>
       <label id="uni-hide-processed-wrap" style="font-size:13px;cursor:pointer;display:none;align-items:center;gap:4px">
         <input type="checkbox" id="uni-hide-processed" checked onchange="renderBgUnified()"> 수집완료 숨기기
       </label>
@@ -6805,14 +6808,21 @@ function switchUniTab(tab) {
 
 function renderBgUnified() {
   const hideCancel = document.getElementById('uni-hide-cancel')?.checked;
+  const hidePending = document.getElementById('uni-hide-pending')?.checked;
   // 탭 상태 = 필터 소스 (submitted / unsubmitted). 기존 '전체' 옵션은 제거됨.
   const activeTab = document.getElementById('uni-active-tab')?.value || 'unsubmitted';
 
   const receiptLabel = { personal: '소득공제', business: '지출증빙' };
 
-  // 탭별 카운트 미리 계산 (취소 제외 적용 후)
+  // 결제대기 판별 — status_seq=1 + settle_date 비어있음 (CARD/ETC 공통)
+  const isPaymentPending = o => o.status_seq === 1 && !o.settle_date;
+
+  // 탭별 카운트 미리 계산 (취소 / 결제대기 제외 적용 후)
   const isCancelled = o => o.status_seq === 3 || o.status_seq === 5;
-  const visibleBase = bgUnifiedOrders.filter(o => !hideCancel || !isCancelled(o));
+  const visibleBase = bgUnifiedOrders.filter(o =>
+    (!hideCancel  || !isCancelled(o)) &&
+    (!hidePending || !isPaymentPending(o))
+  );
   let cntSubmitted = 0, cntUnsubmitted = 0;
   visibleBase.forEach(o => {
     const ciKey = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
@@ -6929,7 +6939,10 @@ function renderBgUnified() {
   bgUnifiedRows.forEach(({ order, ci, sel, product_code, product_name, product_qty }, rowIdx) => {
     const isFirstOfOrder = rowIdx === 0 || bgUnifiedRows[rowIdx - 1].order.order_seq !== order.order_seq;
     const borderStyle = isFirstOfOrder ? 'border-top:2px solid var(--gray-200)' : '';
-    const rowClass = isCancelled(order) ? 'row-cancelled' : '';
+    // 결제대기 우선 표시 (취소가 더 강한 상태이긴 하지만 둘 다 발생할 일 거의 없음).
+    const rowClass = isCancelled(order)
+      ? 'row-cancelled'
+      : (isPaymentPending(order) ? 'row-pending' : '');
 
     const orderDateFmt = esc(order.order_date_fmt || '-');
     const recvName = esc(order.display_name || '-');
