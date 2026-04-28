@@ -2532,24 +2532,42 @@ const server = http.createServer(async (req, res) => {
           const pp = await getPool();
           // [1] S2_UserInfo
           const userInfo = await pp.request().input('uid', sql.VarChar, dbgUid).query(`
-            SELECT uid, uname, hand_phone1, hand_phone2, hand_phone3, USE_YORN
+            SELECT uid, uname, hand_phone1, hand_phone2, hand_phone3, USE_YORN, site_div
             FROM S2_UserInfo WITH (NOLOCK)
             WHERE uid = @uid
           `);
           // [2] 두 테이블 각각 시도 (해당 테이블에서만 결과 나옴)
           const etcOrder = await pp.request().input('seq', sql.Int, dbgSeq).query(`
-            SELECT order_seq, member_id, order_name, order_hphone,
-              REPLACE(REPLACE(order_hphone, '-', ''), ' ', '') AS phone_normalized,
-              order_date, status_seq
-            FROM CUSTOM_ETC_ORDER WITH (NOLOCK)
-            WHERE order_seq = @seq
+            SELECT o.order_seq, o.member_id, o.order_name, o.order_hphone,
+              REPLACE(REPLACE(o.order_hphone, '-', ''), ' ', '') AS phone_normalized,
+              o.order_date, o.status_seq, o.company_Seq,
+              ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name
+            FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+            LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+            WHERE o.order_seq = @seq
+          `);
+          // ETC 주문의 상품 카테고리 (Card_Div 별로 답례품/꽃다발/etc)
+          const etcItems = await pp.request().input('seq', sql.Int, dbgSeq).query(`
+            SELECT c.Card_Div, c.Card_Code, c.Card_Name, ei.order_count
+            FROM CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK)
+            INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
+            WHERE ei.order_seq = @seq
           `);
           const cardOrder = await pp.request().input('seq', sql.Int, dbgSeq).query(`
-            SELECT order_seq, member_id, order_name, order_hphone,
-              REPLACE(REPLACE(order_hphone, '-', ''), ' ', '') AS phone_normalized,
-              order_date, status_seq, settle_status
-            FROM custom_order WITH (NOLOCK)
-            WHERE order_seq = @seq
+            SELECT co.order_seq, co.member_id, co.order_name, co.order_hphone,
+              REPLACE(REPLACE(co.order_hphone, '-', ''), ' ', '') AS phone_normalized,
+              co.order_date, co.status_seq, co.settle_status, co.company_Seq,
+              ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name
+            FROM custom_order co WITH (NOLOCK)
+            LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+            WHERE co.order_seq = @seq
+          `);
+          // CARD 주문의 상품 카테고리
+          const cardItems = await pp.request().input('seq', sql.Int, dbgSeq).query(`
+            SELECT c.Card_Div, c.Card_Code, c.Card_Name, coi.item_count
+            FROM custom_order_item coi WITH (NOLOCK)
+            INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+            WHERE coi.order_seq = @seq
           `);
 
           // [3] 매칭 시뮬레이션 (현재 fix 적용된 로직)
@@ -2583,11 +2601,22 @@ const server = http.createServer(async (req, res) => {
             };
           }
 
+          // 답례품(D01) 매칭 여부 판별 — 답례품 admin 검색은 D01 만 노출
+          const allItems = [...etcItems.recordset, ...cardItems.recordset];
+          const hasD01 = allItems.some(it => it.Card_Div === 'D01');
+          const itemDivs = [...new Set(allItems.map(it => it.Card_Div).filter(Boolean))];
+          const categoryHint = hasD01
+            ? '✅ 답례품(D01) 항목 있음 — 답례품 입력화면에 노출 가능'
+            : `❌ 답례품(D01) 항목 없음 (실제 카테고리: ${itemDivs.join(', ') || '없음'}) — 답례품 화면에선 안 보임. 다른 카테고리(꽃다발 D02 등) 화면 확인 필요.`;
+
           data = {
             user_info: userInfo.recordset,
             etc_order: etcOrder.recordset,
+            etc_items: etcItems.recordset,
             card_order: cardOrder.recordset,
+            card_items: cardItems.recordset,
             match_simulation: matchVerdict,
+            category_check: { has_D01: hasD01, item_divs: itemDivs, hint: categoryHint },
           };
         }
       } else if (pathname === '/api/order-files') {
