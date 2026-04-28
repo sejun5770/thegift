@@ -2521,6 +2521,75 @@ const server = http.createServer(async (req, res) => {
             deliveryDetail: deliveryDetail.recordset
           };
         } else { data = { error: 'order_seq required' }; }
+      } else if (pathname === '/api/debug-login-match') {
+        // 로그인 주문조회 매칭 진단 — uid + order_seq 비교, 매칭 시뮬레이션.
+        // URL: /api/debug-login-match?uid=sweetloves20&order_seq=3244813
+        const dbgUid = (parsed.query.uid || '').trim();
+        const dbgSeq = parseInt(parsed.query.order_seq);
+        if (!dbgUid || !dbgSeq) {
+          data = { error: 'uid + order_seq 둘 다 필요. 예: /api/debug-login-match?uid=sweetloves20&order_seq=3244813' };
+        } else {
+          const pp = await getPool();
+          // [1] S2_UserInfo
+          const userInfo = await pp.request().input('uid', sql.VarChar, dbgUid).query(`
+            SELECT uid, uname, hand_phone1, hand_phone2, hand_phone3, USE_YORN
+            FROM S2_UserInfo WITH (NOLOCK)
+            WHERE uid = @uid
+          `);
+          // [2] 두 테이블 각각 시도 (해당 테이블에서만 결과 나옴)
+          const etcOrder = await pp.request().input('seq', sql.Int, dbgSeq).query(`
+            SELECT order_seq, member_id, order_name, order_hphone,
+              REPLACE(REPLACE(order_hphone, '-', ''), ' ', '') AS phone_normalized,
+              order_date, status_seq
+            FROM CUSTOM_ETC_ORDER WITH (NOLOCK)
+            WHERE order_seq = @seq
+          `);
+          const cardOrder = await pp.request().input('seq', sql.Int, dbgSeq).query(`
+            SELECT order_seq, member_id, order_name, order_hphone,
+              REPLACE(REPLACE(order_hphone, '-', ''), ' ', '') AS phone_normalized,
+              order_date, status_seq, settle_status
+            FROM custom_order WITH (NOLOCK)
+            WHERE order_seq = @seq
+          `);
+
+          // [3] 매칭 시뮬레이션 (현재 fix 적용된 로직)
+          let matchVerdict = null;
+          const userRow = userInfo.recordset[0];
+          const orderRow = etcOrder.recordset[0] || cardOrder.recordset[0];
+          if (userRow && orderRow) {
+            const userPhoneFull = ((userRow.hand_phone1 || '') + (userRow.hand_phone2 || '') + (userRow.hand_phone3 || '')).replace(/\D/g, '');
+            const userPhone8 = userPhoneFull.slice(-8);
+            const userUname = String(userRow.uname || '').trim();
+            const orderName = String(orderRow.order_name || '').trim();
+            const orderPhoneNorm = String(orderRow.phone_normalized || '');
+            const orderMemberId = String(orderRow.member_id || '').trim();
+            // 매칭 조건들 평가
+            const memberIdMatch = orderMemberId && (orderMemberId === dbgUid);
+            const phoneLikeMatch = userPhone8 && orderPhoneNorm.endsWith(userPhone8);
+            const nameStripMatch = userUname.replace(/\s+/g, '') === orderName.replace(/\s+/g, '');
+            const phoneNameMatch = phoneLikeMatch && nameStripMatch;
+            const wouldMatch = memberIdMatch || phoneNameMatch;
+            matchVerdict = {
+              would_match: wouldMatch,
+              member_id_match: memberIdMatch,
+              phone_match: phoneLikeMatch,
+              name_match: nameStripMatch,
+              user_phone_8_digits: userPhone8,
+              user_uname_stripped: userUname.replace(/\s+/g, ''),
+              order_phone_normalized: orderPhoneNorm,
+              order_name_stripped: orderName.replace(/\s+/g, ''),
+              order_member_id: orderMemberId || '(NULL/empty)',
+              dbg_uid: dbgUid,
+            };
+          }
+
+          data = {
+            user_info: userInfo.recordset,
+            etc_order: etcOrder.recordset,
+            card_order: cardOrder.recordset,
+            match_simulation: matchVerdict,
+          };
+        }
       } else if (pathname === '/api/order-files') {
         data = await apiOrderFiles(parsed.query);
       } else if (pathname === '/api/product-stats') {
