@@ -2609,6 +2609,61 @@ const server = http.createServer(async (req, res) => {
             ? '✅ 답례품(D01) 항목 있음 — 답례품 입력화면에 노출 가능'
             : `❌ 답례품(D01) 항목 없음 (실제 카테고리: ${itemDivs.join(', ') || '없음'}) — 답례품 화면에선 안 보임. 다른 카테고리(꽃다발 D02 등) 화면 확인 필요.`;
 
+          // === 실제 SQL 실행 검증 ===
+          //   현재 배포된 검색 SQL 의 핵심 WHERE 절을 그대로 실행해서
+          //   '시뮬레이션 매칭' vs '실제 SQL 결과' 일치 여부 확인.
+          let actualSqlResult = null;
+          if (userRow) {
+            try {
+              const userPhoneFull = ((userRow.hand_phone1 || '') + (userRow.hand_phone2 || '') + (userRow.hand_phone3 || '')).replace(/\D/g, '');
+              const userPhone8 = userPhoneFull.slice(-8);
+              const NORM_PHONE = "REPLACE(REPLACE(co.order_hphone, '-', ''), ' ', '')";
+              const NORM_DB_NAME = "REPLACE(LTRIM(RTRIM(co.order_name)), ' ', '')";
+              const NORM_PARAM_NAME = "REPLACE(LTRIM(RTRIM(@uname)), ' ', '')";
+              const sqlExec = await pp.request()
+                .input('phone', sql.VarChar, userPhone8)
+                .input('uname', sql.VarChar, String(userRow.uname || ''))
+                .input('memberId', sql.VarChar, dbgUid)
+                .input('seq', sql.Int, dbgSeq)
+                .query(`
+                  SELECT 'CARD' AS source, co.order_seq, co.member_id, co.order_name, co.order_hphone,
+                    co.status_seq, c.Card_Div, c.Card_Code
+                  FROM custom_order co WITH (NOLOCK)
+                  INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                  WHERE co.order_seq = @seq
+                    AND co.status_seq >= 1
+                    AND co.order_date >= DATEADD(month, -6, GETDATE())
+                    AND c.Card_Div = 'D01'
+                    AND (LTRIM(RTRIM(co.member_id)) = LTRIM(RTRIM(@memberId))
+                         OR (${NORM_PHONE} LIKE '%' + @phone AND ${NORM_DB_NAME} = ${NORM_PARAM_NAME}))
+
+                  UNION ALL
+
+                  SELECT 'ETC' AS source, co.order_seq, co.member_id, co.order_name, co.order_hphone,
+                    co.status_seq, c.Card_Div, c.Card_Code
+                  FROM CUSTOM_ETC_ORDER co WITH (NOLOCK)
+                  INNER JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON co.order_seq = ei.order_seq
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
+                  WHERE co.order_seq = @seq
+                    AND co.status_seq >= 1
+                    AND co.order_date >= DATEADD(month, -6, GETDATE())
+                    AND c.Card_Div = 'D01'
+                    AND (LTRIM(RTRIM(co.member_id)) = LTRIM(RTRIM(@memberId))
+                         OR (${NORM_PHONE} LIKE '%' + @phone AND ${NORM_DB_NAME} = ${NORM_PARAM_NAME}))
+                `);
+              actualSqlResult = {
+                rows_returned: sqlExec.recordset.length,
+                rows: sqlExec.recordset,
+                interpretation: sqlExec.recordset.length > 0
+                  ? '✅ 실제 SQL 도 매칭 — 로그인 시 정상 노출됩니다. 고객에게 재시도 안내.'
+                  : '❌ 실제 SQL 매칭 실패 — 시뮬레이션과 차이 있음, 추가 조사 필요.',
+              };
+            } catch (e) {
+              actualSqlResult = { error: e.message };
+            }
+          }
+
           data = {
             user_info: userInfo.recordset,
             etc_order: etcOrder.recordset,
@@ -2617,6 +2672,7 @@ const server = http.createServer(async (req, res) => {
             card_items: cardItems.recordset,
             match_simulation: matchVerdict,
             category_check: { has_D01: hasD01, item_divs: itemDivs, hint: categoryHint },
+            actual_sql_result: actualSqlResult,
           };
         }
       } else if (pathname === '/api/order-files') {
