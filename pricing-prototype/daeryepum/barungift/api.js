@@ -54,17 +54,23 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         return json(res, { error: '아이디와 비밀번호를 입력해주세요.' }, 400);
       }
       const pool = await getPool();
+      // S2_UserInfo 는 통합회원 1명을 site_div(SB/SS/BM) 별 3건 저장.
+      //   각 row 의 PWD 가 서로 다를 수 있음 (사용자가 일부 사이트에서만 비번 변경).
+      //   → 모든 row 중 하나라도 PWDCOMPARE = 1 이면 인증 통과.
+      //   site_div='SB' 우선 (메인 통합회원 정보) 으로 정렬 — 정보 일관성 위해.
       const result = await pool.request()
         .input('uid', sql.VarChar, uid)
         .input('pwd', sql.VarChar, password)
         .query(`
-          SELECT uid, uname, hand_phone1, hand_phone2, hand_phone3,
-                 PWDCOMPARE(@pwd, CONVERT(varbinary(200), PWD, 1)) AS pwd_match
+          SELECT TOP 1 uid, uname, hand_phone1, hand_phone2, hand_phone3
           FROM S2_UserInfo WITH (NOLOCK)
-          WHERE uid = @uid AND USE_YORN = 'Y'
+          WHERE uid = @uid
+            AND USE_YORN = 'Y'
+            AND PWDCOMPARE(@pwd, CONVERT(varbinary(200), PWD, 1)) = 1
+          ORDER BY CASE WHEN site_div = 'SB' THEN 0 ELSE 1 END
         `);
 
-      if (!result.recordset.length || !result.recordset[0].pwd_match) {
+      if (!result.recordset.length) {
         // 실패: 아이디 해시만 기록 (원문 비번/아이디 저장 금지)
         logAccess(req, 'login_fail', null, {
           status_code: 401,
