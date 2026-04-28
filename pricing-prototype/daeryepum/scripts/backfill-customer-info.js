@@ -82,6 +82,7 @@ const HEADERS = {
 const args = process.argv.slice(2);
 const filePath = args.find(a => !a.startsWith('--'));
 const isDryRun = args.includes('--dry-run');
+const isRollback = args.includes('--rollback');
 const limitArg = args.find(a => a.startsWith('--limit='));
 const limit = limitArg ? parseInt(limitArg.split('=')[1]) : null;
 
@@ -96,7 +97,10 @@ if (!fs.existsSync(filePath)) {
 }
 
 console.log(`📂 입력 파일: ${path.resolve(filePath)}`);
-console.log(`🛡️ 모드: ${isDryRun ? 'DRY-RUN (실제 insert 안 함)' : '실제 실행'}`);
+const modeLabel = isRollback ? 'ROLLBACK (TSV 의 order_id 전부 삭제)'
+                  : isDryRun ? 'DRY-RUN (실제 insert 안 함)'
+                  : '실제 실행 (UPSERT)';
+console.log(`🛡️ 모드: ${modeLabel}`);
 if (limit) console.log(`🔢 제한: 첫 ${limit} 건만 처리`);
 
 // ============================================
@@ -229,6 +233,21 @@ async function bulkUpsert(rows) {
   }
 }
 
+/** 다건 DELETE — order_id IN (...) */
+async function bulkDelete(orderIds) {
+  if (!orderIds.length) return;
+  // PostgREST 의 in() 필터 — 'in.("id1","id2",...)' 형식
+  const inList = orderIds.map(id => `"${encodeURIComponent(id)}"`).join(',');
+  const url = `${REST_BASE}/bg_order_customer_info?order_id=in.(${inList})`;
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: { ...HEADERS, Prefer: 'return=minimal' },
+  });
+  if (!res.ok) {
+    throw new Error(`DELETE [${res.status}]: ${await res.text()}`);
+  }
+}
+
 // ============================================
 // 메인 변환 로직
 // ============================================
@@ -326,6 +345,21 @@ function transformRow(cells, stickerCodeMap, lineNumber) {
     });
   }
 
+  // submitted_at fallback 우선순위:
+  //   1. 인쇄출력일 (U열) — 가장 정확한 처리 시점
+  //   2. desired_ship_date 의 7일 전 — 출고일 기준 역산 (관리자 수집 통상)
+  //   3. null — DB DEFAULT 가 now() 라서 이상하게 보일 수 있지만 데이터 없음 의미
+  let submittedAt = null;
+  if (submittedDate) {
+    submittedAt = `${submittedDate}T00:00:00Z`;
+  } else if (shipDate) {
+    const d = new Date(shipDate + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() - 7);
+    submittedAt = d.toISOString();
+  }
+  // submittedAt 이 null 이면 INSERT 시 omit 해서 schema DEFAULT (now()) 활성화 X
+  // 명시적 NULL 로 보내야 함 → 일단 null 유지, INSERT 시 처리
+
   return {
     order_id: orderId,
     is_express: isExpress,
@@ -335,7 +369,7 @@ function transformRow(cells, stickerCodeMap, lineNumber) {
     cash_receipt_yn: false,
     receipt_type: null,
     receipt_number: null,
-    submitted_at: submittedDate ? `${submittedDate}T00:00:00Z` : new Date().toISOString(),
+    submitted_at: submittedAt, // null 가능 — fallback 다 안 통하면 그대로 null
     _lineNumber: lineNumber, // 디버깅용
     _orderQty: orderQty,
   };
@@ -355,6 +389,48 @@ async function main() {
   }
   const dataRows = allCells.slice(1); // 헤더 1행 스킵
   console.log(`✅ ${dataRows.length} 행 파싱 완료 (헤더 1행 제외)`);
+
+  // === ROLLBACK 모드 — TSV 의 모든 order_id 를 bg_order_customer_info 에서 DELETE ===
+  if (isRollback) {
+    console.log('\n=== ROLLBACK 모드 ===');
+    // 주문번호 상속 적용 — 빈 행도 직전 주문번호로 채워서 모두 정리
+    let lastOrderId = null;
+    const orderIdSet = new Set();
+    for (const cells of dataRows) {
+      const oid = extractOrderId(cells[3]);
+      if (oid) { lastOrderId = oid; orderIdSet.add(oid); }
+      else if (lastOrderId) { orderIdSet.add(lastOrderId); }
+    }
+    const orderIds = [...orderIdSet];
+    console.log(`✅ 삭제 대상 order_id 수집: ${orderIds.length}건`);
+    if (!orderIds.length) {
+      console.warn('⚠️  삭제할 order_id 없음 — TSV 파일 확인 필요.');
+      return;
+    }
+    if (isDryRun) {
+      console.log('🛡️  DRY-RUN — 삭제 시뮬레이션. 처음 10개:');
+      orderIds.slice(0, 10).forEach(id => console.log(`     - ${id}`));
+      console.log('     ... 실제 실행하려면 --dry-run 빼고 다시 실행');
+      return;
+    }
+    // 안전 한번 더 — 사용자 확인
+    console.log('⚠️  실제로 DELETE 합니다 — 5초 대기 (Ctrl+C 로 중단 가능)');
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    const BATCH = 100;
+    let deleted = 0;
+    for (let i = 0; i < orderIds.length; i += BATCH) {
+      const chunk = orderIds.slice(i, i + BATCH);
+      try {
+        await bulkDelete(chunk);
+        deleted += chunk.length;
+        console.log(`  ✓ ${i+1}~${i+chunk.length} / ${orderIds.length} (delete)`);
+      } catch (e) {
+        console.error(`  ❌ ${i+1}~${i+chunk.length} 실패:`, e.message);
+      }
+    }
+    console.log(`\n✅ ROLLBACK 완료 — ${deleted}건 삭제됨.`);
+    return;
+  }
 
   console.log('\n=== Step 2: Supabase 메타 데이터 로드 ===');
   const stickerCodeMap = await loadStickerCodeMap();
