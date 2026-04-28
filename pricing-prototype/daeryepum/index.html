@@ -1474,6 +1474,7 @@ nav a:hover{color:var(--gray-900)}
       <button class="btn btn-primary" id="uni-btn-mark-processed" onclick="bulkProcessedAction(true)" style="padding:6px 12px;font-size:12px;display:none" title="선택된 주문을 주문수집 완료로 처리 (복사 없이 마킹만)">📋 <span id="uni-btn-mark-processed-label">수집처리</span></button>
       <button class="btn" id="uni-btn-unmark-processed" onclick="bulkProcessedAction(false)" style="padding:6px 12px;font-size:12px;display:none;border-color:#fbbf24;color:#92400e;background:#fef3c7" title="선택된 주문의 주문수집 상태를 되돌림">↺ <span id="uni-btn-unmark-processed-label">되돌리기</span></button>
       <button class="btn" id="uni-btn-bulk-delete" onclick="bulkDeleteCustomerInfo()" style="padding:6px 12px;font-size:12px;display:none;border-color:#dc2626;color:#dc2626;background:#fef2f2" title="선택된 주문의 정보입력 데이터를 모두 삭제 (주문 자체는 유지). 잘못 backfill 된 데이터 정리용.">🗑️ <span id="uni-btn-bulk-delete-label">선택 삭제</span></button>
+      <button class="btn" id="uni-btn-mark-manual" onclick="bulkMarkAsManualCollected()" style="padding:6px 12px;font-size:12px;display:none;border-color:#7c3aed;color:#5b21b6;background:#f5f3ff" title="출시 이전 수동 수집된 주문에 '외부 수집 완료' 마커 추가 + 입력완료 + 수집완료 상태로 이동">🏷️ <span id="uni-btn-mark-manual-label">수동 수집됨 표시</span></button>
     </div>
     <div style="overflow-x:auto">
       <table class="data-table" id="uni-table">
@@ -7077,9 +7078,11 @@ function updateBgUnifiedSelectedCount() {
   const btnMark = document.getElementById('uni-btn-mark-processed');
   const btnUnmark = document.getElementById('uni-btn-unmark-processed');
   const btnDelete = document.getElementById('uni-btn-bulk-delete');
+  const btnMarkManual = document.getElementById('uni-btn-mark-manual');
   const btnMarkLabel = document.getElementById('uni-btn-mark-processed-label');
   const btnUnmarkLabel = document.getElementById('uni-btn-unmark-processed-label');
   const btnDeleteLabel = document.getElementById('uni-btn-bulk-delete-label');
+  const btnMarkManualLabel = document.getElementById('uni-btn-mark-manual-label');
 
   // 선택 0 → 모두 숨김
   if (cnt === 0) {
@@ -7087,6 +7090,7 @@ function updateBgUnifiedSelectedCount() {
     if (btnMark) btnMark.style.display = 'none';
     if (btnUnmark) btnUnmark.style.display = 'none';
     if (btnDelete) btnDelete.style.display = 'none';
+    if (btnMarkManual) btnMarkManual.style.display = 'none';
     return;
   }
 
@@ -7134,11 +7138,28 @@ function updateBgUnifiedSelectedCount() {
       }
     }
   } else {
-    // 미입력 탭에선 수집처리/삭제 관련 버튼 표시 안 함
+    // 미입력 탭 — 수집처리/삭제 관련은 숨김, '수동 수집됨 표시' 만 노출
     btnMark.style.display = 'none';
     btnUnmark.style.display = 'none';
     if (btnDelete) btnDelete.style.display = 'none';
+    if (btnMarkManual) {
+      // ci 없는 (실제로 미입력인) 주문 — dedupe order_id 단위
+      const unsubmittedOrderIds = new Set();
+      checked.forEach(cb => {
+        const row = bgUnifiedRows[parseInt(cb.dataset.idx)];
+        if (row && !row.ci) unsubmittedOrderIds.add(row.order.order_seq);
+      });
+      const targetCnt = unsubmittedOrderIds.size;
+      if (targetCnt > 0) {
+        btnMarkManual.style.display = '';
+        btnMarkManualLabel.textContent = `수동 수집됨 표시 (${targetCnt}건)`;
+      } else {
+        btnMarkManual.style.display = 'none';
+      }
+    }
   }
+  // 입력완료 탭에선 manual 버튼 숨김 (위 분기 외 케이스)
+  if (activeTab === 'submitted' && btnMarkManual) btnMarkManual.style.display = 'none';
 }
 
 /**
@@ -7255,6 +7276,110 @@ async function bulkDeleteCustomerInfo() {
     showToast(`✅ ${success}건 정보입력 데이터 삭제 완료`);
   }
   // 화면 갱신
+  await loadBgUnified();
+}
+
+/**
+ * 선택된 미입력 주문에 '외부 수집 완료' 마커 일괄 추가.
+ *   - 출시 이전 관리자가 수동 수집한 주문 정리용
+ *   - 처리: 각 주문에 minimal customer_info row 생성 (customer_request 마커 포함)
+ *           + processed_at 일괄 마킹 (수집완료)
+ *   - 효과: 미입력 → 입력완료 + 수집완료 자동 이동
+ *   - 실제 정보 (스티커/문구) 는 비어있음 → 외부 스프레드시트 참조용
+ */
+async function bulkMarkAsManualCollected() {
+  const checked = [...document.querySelectorAll('.uni-row-check:checked')];
+  if (!checked.length) { showToast('대상 주문을 선택해주세요'); return; }
+
+  // ci 없는 (실제로 미입력인) 주문만 — dedupe
+  const orderIdSet = new Set();
+  checked.forEach(cb => {
+    const row = bgUnifiedRows[parseInt(cb.dataset.idx)];
+    if (row && !row.ci) orderIdSet.add(String(row.order.order_seq));
+  });
+  const orderIds = [...orderIdSet];
+  if (!orderIds.length) {
+    showToast('미입력 상태인 주문이 없습니다 (이미 입력된 건은 자동 제외)');
+    return;
+  }
+
+  const preview = orderIds.slice(0, 5).join(', ') + (orderIds.length > 5 ? ` 외 ${orderIds.length - 5}건` : '');
+  const ok = confirm(
+    `🏷️ 수동 수집됨으로 표시\n\n` +
+    `${orderIds.length}건의 미입력 주문에 '외부 수집 완료' 마커를 추가합니다.\n` +
+    `이 주문들은 입력완료 + 수집완료 상태로 이동합니다.\n\n` +
+    `대상 주문번호: ${preview}\n\n` +
+    `※ 스티커/문구 등 실제 정보는 빈 상태로 저장됩니다 (외부 스프레드시트 참조)\n` +
+    `※ 향후 정확한 정보가 필요하면 수정 모달에서 직접 입력 가능\n\n` +
+    `진행하시겠습니까?`
+  );
+  if (!ok) return;
+
+  // 1단계: 각 주문에 minimal customer_info 생성 (concurrency 5)
+  const MARKER = '[admin] 출시 이전 수동 수집 - 외부 자료 참조';
+  const payload = {
+    desired_ship_date: null,
+    is_express: false,
+    express_fee: 0,
+    sticker_selections: [],
+    cash_receipt_yn: false,
+    receipt_type: null,
+    receipt_number: null,
+    customer_request: MARKER,
+  };
+
+  showToast(`마킹 중... (0 / ${orderIds.length})`);
+  let success = 0, fail = 0;
+  const errors = [];
+  const successOrderIds = [];
+  const CONCURRENCY = 5;
+  for (let i = 0; i < orderIds.length; i += CONCURRENCY) {
+    const chunk = orderIds.slice(i, i + CONCURRENCY);
+    const results = await Promise.allSettled(chunk.map(oid =>
+      fetch(API + '/api/bg/orders/' + encodeURIComponent(oid) + '/customer-info', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).then(async r => {
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error(`[${r.status}] ${oid}: ${text}`);
+        }
+        return oid;
+      })
+    ));
+    results.forEach((res, idx) => {
+      if (res.status === 'fulfilled') {
+        success++;
+        successOrderIds.push(chunk[idx]);
+      } else {
+        fail++;
+        errors.push(res.reason?.message || `${chunk[idx]}: 알 수 없는 오류`);
+      }
+    });
+    showToast(`마킹 중... (${success} / ${orderIds.length})`);
+  }
+
+  // 2단계: 성공한 주문들 일괄 processed_at 마킹 (수집완료 자동 표시)
+  if (successOrderIds.length > 0) {
+    try {
+      const r = await fetch(API + '/api/bg/orders/processed-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_ids: successOrderIds, processed: true }),
+      });
+      if (!r.ok) console.warn('processed-batch 실패 (customer_info 는 정상 생성됨):', await r.text());
+    } catch (e) {
+      console.warn('processed-batch 에러 (수집완료 마킹 실패, customer_info 는 생성됨):', e);
+    }
+  }
+
+  if (fail > 0) {
+    console.warn('수동 수집 표시 부분 실패:', errors);
+    showToast(`${success}건 처리 · ${fail}건 실패 (콘솔 확인)`);
+  } else {
+    showToast(`✅ ${success}건 수동 수집됨으로 표시 완료`);
+  }
   await loadBgUnified();
 }
 
