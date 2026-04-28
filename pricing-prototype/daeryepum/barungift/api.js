@@ -79,10 +79,13 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const phone = phoneRaw.replace(/\D/g, '');
 
       // 로그인 성공 → 해당 회원의 답례품/꽃다발 주문 조회 (CARD + ETC 통합)
+      //   uid 추가 전달 — member_id 직접 매칭이 phone/name 보다 정확.
+      //   (회원 정보 변경 / 비회원 → 회원 전환 / 가족 대신 주문 등 케이스 대응)
       const orders = await searchDaeryepumOrders(pool, sql, {
         phone: phone.slice(-8),
         phoneFull: phone,
         uname: user.uname,
+        memberId: uid,
         useLike: true,
       });
 
@@ -951,24 +954,29 @@ function maskName(name) {
  *   useLike=false: REPLACE(...) = @phone (정확 매칭, 전화번호+이름 검색)
  */
 async function searchDaeryepumOrders(pool, sql, opts) {
-  const { phone, uname, useLike, maskCustomerName } = opts;
+  const { phone, uname, useLike, maskCustomerName, memberId } = opts;
 
   // 바른손카드 (custom_order) 조회
   const cardRequest = pool.request();
   cardRequest.input('phone', sql.VarChar, phone);
   cardRequest.input('uname', sql.VarChar, uname);
+  if (memberId) cardRequest.input('memberId', sql.VarChar, memberId);
   // 정규화 정책 (양쪽 일관 적용):
   //   - phone: order_hphone 의 '-' 와 ' ' 모두 제거 후 비교 (저장 형식 차이 흡수)
   //   - name : 양 끝 공백 + 중간 공백 모두 제거 후 비교 ('김 혜린' = '김혜린')
   // ⚠️ 보안: phone AND name 둘 다 일치해야 함 (OR 조건은 동명이인 주문 노출 버그).
-  //   - useLike=true (로그인): phone 은 LIKE '%' 매칭 (마지막 N자리 일치)
-  //   - useLike=false (수동검색): phone 은 정확 매칭
+  // 매칭 우선순위 (memberId 있을 때):
+  //   1순위: order.member_id = @memberId (통합회원 ID 직접 매칭 — 가장 정확)
+  //   2순위: phone AND name 매칭 (회원정보 변경 / 비회원→회원 전환 등 fallback)
+  //   둘 다 specific 이므로 OR 안전 (동명이인 노출 X — member_id 는 1:1 식별자)
   const NORM_PHONE = "REPLACE(REPLACE(co.order_hphone, '-', ''), ' ', '')";
   const NORM_DB_NAME = "REPLACE(LTRIM(RTRIM(co.order_name)), ' ', '')";
   const NORM_PARAM_NAME = "REPLACE(LTRIM(RTRIM(@uname)), ' ', '')";
-  const cardWhere = useLike
-    ? `AND ${NORM_PHONE} LIKE '%' + @phone AND ${NORM_DB_NAME} = ${NORM_PARAM_NAME}`
-    : `AND ${NORM_PHONE} = @phone AND ${NORM_DB_NAME} = ${NORM_PARAM_NAME}`;
+  const phoneOp = useLike ? `LIKE '%' + @phone` : `= @phone`;
+  const phoneNameClause = `${NORM_PHONE} ${phoneOp} AND ${NORM_DB_NAME} = ${NORM_PARAM_NAME}`;
+  const cardWhere = memberId
+    ? `AND (LTRIM(RTRIM(co.member_id)) = LTRIM(RTRIM(@memberId)) OR (${phoneNameClause}))`
+    : `AND ${phoneNameClause}`;
   const cardResult = await cardRequest.query(`
     SELECT DISTINCT TOP 20
       co.order_seq, co.order_date, co.order_name, co.order_hphone,
@@ -998,11 +1006,11 @@ async function searchDaeryepumOrders(pool, sql, opts) {
   const etcRequest = pool.request();
   etcRequest.input('phone', sql.VarChar, phone);
   etcRequest.input('uname', sql.VarChar, uname);
-  // ⚠️ 보안: phone AND name 둘 다 일치해야 함 (cardWhere 와 동일 정책).
-  // 정규화 정책도 cardWhere 와 동일 (NORM_PHONE / NORM_DB_NAME / NORM_PARAM_NAME 재사용).
-  const etcWhere = useLike
-    ? `AND ${NORM_PHONE} LIKE '%' + @phone AND ${NORM_DB_NAME} = ${NORM_PARAM_NAME}`
-    : `AND ${NORM_PHONE} = @phone AND ${NORM_DB_NAME} = ${NORM_PARAM_NAME}`;
+  if (memberId) etcRequest.input('memberId', sql.VarChar, memberId);
+  // 매칭 정책 cardWhere 와 동일 (member_id 1순위 + phone+name 2순위).
+  const etcWhere = memberId
+    ? `AND (LTRIM(RTRIM(co.member_id)) = LTRIM(RTRIM(@memberId)) OR (${phoneNameClause}))`
+    : `AND ${phoneNameClause}`;
   const etcResult = await etcRequest.query(`
     SELECT DISTINCT TOP 20
       co.order_seq, co.order_date, co.order_name, co.order_hphone, co.settle_price,
