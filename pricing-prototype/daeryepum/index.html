@@ -4238,14 +4238,16 @@ function getTopProducts(data) {
   return Object.entries(prodAmtMap).sort((a,b) => b[1]-a[1]).map(e => e[0]);
 }
 
-function getWeekMondayStr(dateStr) {
+// 주차 시작일 (일요일) 반환 — 서버 forecast/trend 도 일요일 기준이라 일관 유지.
+function getWeekStartStr(dateStr) {
   const d = new Date(dateStr);
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  const monday = new Date(d);
-  monday.setDate(d.getDate() + diff);
-  return monday.toISOString().slice(0,10);
+  const day = d.getDay(); // 0=일, ..., 6=토
+  const sunday = new Date(d);
+  sunday.setDate(d.getDate() - day);
+  return sunday.toISOString().slice(0,10);
 }
+// 레거시 별칭 — 기존 호출처가 있을 수 있어 유지하지만 신규 코드는 getWeekStartStr 사용.
+const getWeekMondayStr = getWeekStartStr;
 
 function getISOWeekFromStr(dateStr) {
   const d = new Date(dateStr);
@@ -4370,8 +4372,14 @@ function renderDailyTable(data, topProducts) {
   const maxAmt = Math.max(...days.map(d=>dayMap[d].amount), 1);
 
   // 헤더: 구분 | 날짜1 | 날짜2 | ... | 합계
+  // 주 단위 구분선: 일요일(getDay()===0) 컬럼은 nth-child 스타일을 통해 일괄 적용 (아래 weekSepStyle 참고)
   const STICKY = 'position:sticky;left:0;z-index:2;';
-  const dateThs = days.map(d => `<th class="num" style="min-width:88px;white-space:nowrap;font-weight:500">${d.slice(5)}</th>`).join('');
+  const dateThs = days.map(d => {
+    const dow = new Date(d + 'T00:00:00').getDay();
+    const dowKor = ['일','월','화','수','목','금','토'][dow];
+    const dowColor = dow === 0 ? '#dc2626' : (dow === 6 ? '#2563eb' : 'var(--gray-500)');
+    return `<th class="num" style="min-width:88px;white-space:nowrap;font-weight:500">${d.slice(5)} <span style="font-size:10px;color:${dowColor}">(${dowKor})</span></th>`;
+  }).join('');
   const thead = `<tr>
     <th style="${STICKY}background:var(--gray-50);min-width:80px">구분</th>
     ${dateThs}
@@ -4651,7 +4659,17 @@ function renderDailyTable(data, topProducts) {
     divider +
     productRows;
 
-  document.getElementById('sales-table').innerHTML = `<thead>${thead}</thead><tbody>${tbody}</tbody>`;
+  // 주 단위 구분선 — 일요일에 해당하는 컬럼(nth-child)에 dashed left border 일괄 적용.
+  //   첫번째 컬럼은 '구분'이므로 idx+2 (1-based + sticky col).
+  //   첫번째 일요일(idx===0)은 가장 좌측이라 구분선 의미 없음 → 제외.
+  const sundayCols = days
+    .map((d, i) => new Date(d + 'T00:00:00').getDay() === 0 && i > 0 ? (i + 2) : null)
+    .filter(n => n !== null);
+  const weekSepCss = sundayCols.length
+    ? `<style>${sundayCols.map(n => `#sales-table th:nth-child(${n}),#sales-table td:nth-child(${n}){border-left:1px dashed var(--gray-400)!important}`).join('')}</style>`
+    : '';
+
+  document.getElementById('sales-table').innerHTML = `${weekSepCss}<thead>${thead}</thead><tbody>${tbody}</tbody>`;
 }
 
 function renderWeeklyTable(data, topProducts) {
@@ -4737,12 +4755,12 @@ function renderWeeklyTable(data, topProducts) {
 
   const STICKY = 'position:sticky;left:0;z-index:2;';
 
-  // 헤더: 구분 | W1 | W2 | ... | 합계
+  // 헤더: 구분 | W1 | W2 | ... | 합계 (주차 = 일요일 ~ 토요일)
   const weekThs = weeks.map(wk => {
     const weekNo = getISOWeekFromStr(wk);
-    const monday = new Date(wk);
-    const sunday = new Date(wk); sunday.setDate(sunday.getDate()+6);
-    return `<th class="num" style="min-width:100px;white-space:nowrap;font-weight:500">${weekNo}주차<br><span style="font-size:10px;font-weight:400;color:var(--gray-500)">${fmtShortDate(monday)}~${fmtShortDate(sunday)}</span></th>`;
+    const sunday = new Date(wk); // 주 시작 = 일요일
+    const saturday = new Date(wk); saturday.setDate(saturday.getDate()+6); // 주 끝 = 토요일
+    return `<th class="num" style="min-width:100px;white-space:nowrap;font-weight:500">${weekNo}주차<br><span style="font-size:10px;font-weight:400;color:var(--gray-500)">${fmtShortDate(sunday)}(일)~${fmtShortDate(saturday)}(토)</span></th>`;
   }).join('');
   const thead = `<tr>
     <th style="${STICKY}background:var(--gray-50);min-width:80px">구분</th>
