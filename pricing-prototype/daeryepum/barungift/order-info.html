@@ -1286,6 +1286,24 @@
     // 진입시마다 이전 선택값을 관리자 최신 설정 기준으로 재검증 (무효하면 초기화)
     validateShipDate();
 
+    // ── 디버그 로그: 어떤 출고 그룹/설정이 적용되고 있는지 콘솔로 노출
+    //   고객 캘린더에 모든 날짜가 비활성으로 보이는 상황을 빠르게 진단하기 위함
+    try {
+      const dbgS = getSettings();
+      const dbgPS = orderData?.product_settings;
+      const dbgSh = orderData?.shipping_config;
+      console.info('[ship-debug] product_code=', (orderData?.products || []).map(p => p.product_code),
+        '| shipping_group_id=', dbgPS?.shipping_group_id || null,
+        '| shipping_config.id=', dbgSh?.id || null, 'name=', dbgSh?.name || null,
+        '| shipping_type=', dbgS.shipping_type, 'lead_time=', dbgS.lead_time_days,
+        'min_select=', dbgS.min_select_days, 'max_select=', dbgS.max_select_days,
+        'closed_weekdays=', dbgS.closed_weekdays, 'closed_dates=', (dbgS.closed_dates || []).length);
+      console.info('[ship-debug] today=', todayStr(),
+        'normalRange=', getNormalRange(),
+        'expressRange=', getExpressRange(),
+        'min=', getMinDate(), 'max=', getMaxDate());
+    } catch(e) { /* ignore */ }
+
     const minDate = getMinDate();
     const required = isDateRequired();
 
@@ -1294,12 +1312,19 @@
       calendarViewMonth = (formState.desired_ship_date || minDate).substring(0, 7);
     }
 
+    // 보조 안내문구: 빠른출고(today_shipping) + 컷오프 활성화 시에만 컷오프 안내 노출
+    // (희망출고 모드/컷오프 비활성 시 노출하지 않음 — 잘못된 안내 방지)
+    const sCfg = getSettings();
+    const cutoffHint = (sCfg.shipping_type === 'today_shipping' && sCfg.cutoff_enabled)
+      ? '빠른출고는 오전 ' + String(sCfg.cutoff_hour ?? 11).padStart(2,'0') + ':' + String(sCfg.cutoff_minute ?? 0).padStart(2,'0') + '에 마감됩니다.'
+      : '';
+
     return `
       <div class="fade-in">
         <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">희망 출고일 ${required ? '<span class="text-rose-500">*</span>' : ''}</h2>
         <div class="text-sm text-slate-500 mb-5 leading-relaxed">
           <p>출고일을 선택해 주세요.</p>
-          <p class="text-[13px] text-slate-400">당일출고는 오전 11시에 마감됩니다.</p>
+          ${cutoffHint ? `<p class="text-[13px] text-slate-400">${cutoffHint}</p>` : ''}
         </div>
 
         <!-- 인라인 캘린더 -->
