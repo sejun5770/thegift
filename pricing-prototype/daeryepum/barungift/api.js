@@ -664,13 +664,21 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     try {
       const body = await parseBody(req);
 
+      // 관리자 일괄 마킹 (예: '수동 수집됨 표시') 인지 — customer_request 에
+      // '[admin]' 프리픽스 마커가 있으면 admin 우회 모드.
+      // 일반 고객 입력 / 관리자 수정 모달은 마커 없으므로 영향 없음.
+      const isAdminBulkMark = typeof body.customer_request === 'string'
+        && /^\[admin\]/.test(body.customer_request);
+
       // 필수 필드 검증 — submitted_at 이 세팅되어 고객이 '입력완료' 로 인식하는
       // 상태가 되므로, 최소 핵심 필드는 반드시 있어야 함.
-      if (!body.desired_ship_date) {
+      // 단, admin bulk mark 는 외부 자료 참조가 목적이므로 검증 우회.
+      if (!body.desired_ship_date && !isAdminBulkMark) {
         return json(res, { error: '희망출고일은 필수입니다.' }, 400);
       }
 
       // 박스 옵션이 등록된 상품은 box_code 필수 (품절 옵션 차단)
+      // admin bulk mark 는 sticker_selections 가 빈 배열 → 자동 스킵.
       const sels = Array.isArray(body.sticker_selections) ? body.sticker_selections : [];
       for (const sel of sels) {
         if (!sel.product_code) continue;
