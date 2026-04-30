@@ -22,6 +22,38 @@ function parseBody(req) {
   });
 }
 
+/**
+ * ERP 변형 코드 (예: 'TGJSD1001_B') → base 코드 (예: 'TGJSD1001').
+ * 매칭 안 되면 null.
+ */
+function stripVariantSuffix(code) {
+  if (!code) return null;
+  const m = String(code).match(/^(.+)_[A-Za-z0-9]+$/);
+  return m ? m[1] : null;
+}
+
+/**
+ * 상품 설정 lookup with 변형 suffix fallback.
+ *   1순위: 입력 코드 그대로 (예: 'TGJSD1001_B')
+ *   2순위: '_X' 변형 suffix 제거한 base 코드 (예: 'TGJSD1001')
+ *   3순위: 그 base 의 base (이중 변형 'A_B_S' → 'A_B' → 'A', 최대 3 단계)
+ * admin 이 base 코드로 등록한 매핑이 모든 변형에 자동 적용되도록.
+ */
+async function lookupProductSettings(code) {
+  if (!code) return null;
+  let ps = await store.getProductSettings(code);
+  if (ps) return ps;
+  let cur = code;
+  for (let i = 0; i < 3; i++) {
+    const base = stripVariantSuffix(cur);
+    if (!base || base === cur) break;
+    ps = await store.getProductSettings(base);
+    if (ps) return ps;
+    cur = base;
+  }
+  return null;
+}
+
 function json(res, data, status = 200) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(data));
@@ -230,8 +262,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const row = result.recordset[0];
       const existingInfo = await store.getCustomerInfo(orderId);
 
-      // 상품코드로 product_settings 조회
-      const productSettings = row.Card_Code ? await store.getProductSettings(row.Card_Code) : null;
+      // 상품코드로 product_settings 조회 (변형 코드 fallback 적용)
+      const productSettings = row.Card_Code ? await lookupProductSettings(row.Card_Code) : null;
       const allActiveStickers = await store.getAllStickers(true);
 
       // 아이템 수집 (DELIVERY_INFO JOIN으로 인한 중복 제거: item_id 기준)
@@ -254,13 +286,15 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       // 상품별 스티커 / 박스옵션 매핑 + 합집합 계산
       // stickersByProduct: { product_code: [sticker, ...] } — 고객 화면에서 상품별 필터링에 사용
       // boxOptionsByProduct: { product_code: [{code,name,color,preview_image_url}, ...] } — 박스 패키지 선택용
+      //
+      // 매핑 lookup 은 모듈 상단 lookupProductSettings 사용 (ERP 변형 코드 fallback 자동 적용).
       const allMappedStickerIds = new Set();
       const stickersByProduct = {};
       const boxOptionsByProduct = {};
       const stickerById = new Map(allActiveStickers.map(s => [s.id, s]));
       for (const p of products) {
         if (!p.product_code) continue;
-        const ps = await store.getProductSettings(p.product_code);
+        const ps = await lookupProductSettings(p.product_code);
         const ids = ps?.available_sticker_ids || [];
         ids.forEach(id => allMappedStickerIds.add(id));
         stickersByProduct[p.product_code] = ids
@@ -679,10 +713,11 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
       // 박스 옵션이 등록된 상품은 box_code 필수 (품절 옵션 차단)
       // admin bulk mark 는 sticker_selections 가 빈 배열 → 자동 스킵.
+      // 변형 코드 fallback — 위와 동일 정책 (specific 우선, base 코드 fallback).
       const sels = Array.isArray(body.sticker_selections) ? body.sticker_selections : [];
       for (const sel of sels) {
         if (!sel.product_code) continue;
-        const ps = await store.getProductSettings(sel.product_code);
+        const ps = await lookupProductSettings(sel.product_code);
         const boxOpts = Array.isArray(ps?.available_box_options) ? ps.available_box_options : [];
         if (boxOpts.length > 0) {
           const picked = boxOpts.find(o => o.code === sel.box_code);
