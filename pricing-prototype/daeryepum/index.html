@@ -1846,7 +1846,11 @@ async function loadOrders() {
       r.item_amount_fmt = fmtKRW(r.item_amount);
       r.coupon_price_fmt = r.coupon_price > 0 ? '-' + fmtKRW(r.coupon_price) : '';
       r.settle_price_fmt = fmtKRW(r.settle_price);
-      r.order_type_label = r.order_type === 'ETC' ? '부가상품' : '청첩장+답례품';
+      // 라벨 — has_copurchase (백엔드 신규 필드) 우선, 없으면 기존 가정 fallback.
+      //   바른손몰도 이제 청첩장+답례품 동시구매 가능 → has_copurchase 1 이면 동시구매 표시.
+      r.order_type_label = r.has_copurchase
+        ? '청첩장+답례품'
+        : (r.order_type === 'ETC' ? '답례품 단독' : '답례품 단독(CARD)');
       r.status_label = (r.order_type === 'CARD' ? STATUS_MAP_CARD : STATUS_MAP)[r.status_seq] || `상태${r.status_seq ?? '?'}`;
       r.file_count_fmt = r.file_count > 0
         ? `<a href="javascript:void(0)" onclick="showOrderFiles(${r.order_seq});return false" style="color:var(--primary);text-decoration:underline;cursor:pointer">📎 ${r.file_count}건</a>`
