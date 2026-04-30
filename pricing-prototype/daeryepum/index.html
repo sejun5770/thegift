@@ -5405,9 +5405,16 @@ function renderBgStickers() {
     return `<div style="width:56px;height:56px;border-radius:6px;border:1px solid var(--gray-200);background:${s.preview_color || '#fff'};display:flex;align-items:center;justify-content:center;color:var(--gray-400);font-size:10px">이미지 없음</div>`;
   };
 
-  // 상품코드 매핑 배지 (상품명까지 툴팁으로)
+  // 상품코드 매핑 배지 (상품명까지 툴팁으로).
+  //   매핑 source 2종 합집합 표시:
+  //     A. 정방향 (sticker.product_codes): 시드 데이터로 일부 스티커만 사용
+  //     B. 역방향 (bg_product_settings.available_sticker_ids): admin 상품설정 UI 등록
   const productHtml = (s) => {
-    const codes = s.product_codes || [];
+    const directCodes = s.product_codes || [];
+    const reverseCodes = bgProductSettings
+      .filter(p => Array.isArray(p.available_sticker_ids) && p.available_sticker_ids.includes(s.id))
+      .map(p => p.product_id);
+    const codes = [...new Set([...directCodes, ...reverseCodes])];
     if (!codes.length) return '<span style="color:var(--gray-300);font-size:11px">-</span>';
     return codes.map(pc => {
       const ps = bgProductSettings.find(p => p.product_id === pc);
