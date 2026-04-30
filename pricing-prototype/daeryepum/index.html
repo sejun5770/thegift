@@ -1016,8 +1016,7 @@ nav a:hover{color:var(--gray-900)}
         <th>품목코드</th>
         <th>브랜드</th>
         <th>제품명</th>
-        <th>출고방식</th>
-        <th>리드타임</th>
+        <th>출고일 그룹</th>
         <th>스티커</th>
         <th style="width:80px">관리</th>
       </tr></thead>
@@ -5654,12 +5653,17 @@ async function deleteBgSticker(id, name, code) {
 // 바른기프트: 상품 설정 (v2)
 // ============================================
 let bgProductSettings = [];
+let bgShippingGroupsCache = []; // 출고일 그룹 목록 캐시 (목록 렌더 시 그룹명 lookup 용)
 
 async function loadBgProducts() {
   try {
-    const r = await fetch(API + '/api/bg/products/settings');
-    const d = await r.json();
-    bgProductSettings = d.settings || [];
+    // 상품 설정 + 출고일 그룹 동시 로드 (목록 렌더에 그룹명 표시 필요)
+    const [pr, gr] = await Promise.all([
+      fetch(API + '/api/bg/products/settings'),
+      fetch(API + '/api/bg/shipping-groups'),
+    ]);
+    bgProductSettings = (await pr.json()).settings || [];
+    bgShippingGroupsCache = (await gr.json()).groups || [];
     renderBgProducts();
   } catch(e) { console.error('loadBgProducts:', e); }
 }
@@ -5669,15 +5673,24 @@ function renderBgProducts() {
   const empty = document.getElementById('bg-product-empty');
   if (!bgProductSettings.length) { tbody.innerHTML = ''; empty.classList.remove('hidden'); return; }
   empty.classList.add('hidden');
-  const WDAY = ['일','월','화','수','목','금','토'];
+  // 그룹명 lookup map (shipping_group_id → name). 미지정/기본 그룹은 별도 처리.
+  const groupById = new Map(bgShippingGroupsCache.map(g => [g.id, g]));
+  const defaultGroup = bgShippingGroupsCache.find(g => g.is_default);
   tbody.innerHTML = bgProductSettings.map(s => {
-    const type = s.shipping_type === 'today_shipping' ? '오늘출발' : '희망출고';
+    // 출고일 그룹 표시:
+    //   - shipping_group_id 일치 → 해당 그룹명
+    //   - null/미지정 → '기본' 그룹명 (기본 그룹 변경 시 자동 추종)
+    const matched = s.shipping_group_id ? groupById.get(s.shipping_group_id) : defaultGroup;
+    const groupName = matched?.name || '기본 그룹';
+    const isDefault = !s.shipping_group_id || (defaultGroup && s.shipping_group_id === defaultGroup.id);
+    const groupBadge = isDefault
+      ? `<span style="display:inline-block;padding:2px 8px;background:var(--gray-100);color:var(--gray-700);border-radius:10px;font-size:11px">${escapeHtml(groupName)} <span style="color:var(--gray-400)">(기본)</span></span>`
+      : `<span style="display:inline-block;padding:2px 8px;background:#dbeafe;color:#1e40af;border-radius:10px;font-size:11px;font-weight:500">${escapeHtml(groupName)}</span>`;
     return `<tr>
       <td style="font-family:monospace;font-size:11px">${s.product_id}</td>
       <td style="font-size:12px">${s.brand || '-'}</td>
       <td style="font-size:12px;font-weight:500">${s.product_name || '-'}</td>
-      <td><span class="badge ${s.shipping_type==='today_shipping'?'badge-up':'badge-neutral'}">${type}</span></td>
-      <td>${s.lead_time_days}영업일</td>
+      <td>${groupBadge}</td>
       <td>${(s.available_sticker_ids||[]).length}개</td>
       <td>
         <button class="btn btn-sm" onclick="openBgProductForm('${s.product_id}')" title="편집">✏️</button>
