@@ -1297,6 +1297,7 @@ async function apiDashboardSummary(query) {
         }
       });
       // 빠른출고 CARD/ETC 일별 집계 — 두 쿼리 독립적이므로 병렬 실행 (CodeReview-H1 연관).
+      // 동시구매(청첩장 함께 주문) / 단독주문 분리 — copurchase CTE 적용.
       const exprPromises = [];
       if (cardSeqs.length) {
         const inList = cardSeqs.join(',');
@@ -1304,9 +1305,16 @@ async function apiDashboardSummary(query) {
           .input('startDate', sql.VarChar, startDate)
           .input('endDate', sql.VarChar, endDate)
           .query(`
+            WITH copurchase_orders AS (
+              SELECT DISTINCT coi2.order_seq
+              FROM custom_order_item coi2 WITH (NOLOCK)
+              INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+              WHERE c2.Card_Div = 'A01'
+            )
             SELECT
               CONVERT(varchar(10), co.order_date, 120) AS order_day,
               ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
+              CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
               COUNT(DISTINCT co.order_seq) AS order_count,
               ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)),0) AS total_amount,
               ISNULL(SUM(coi.item_count),0) AS total_qty
@@ -1314,10 +1322,12 @@ async function apiDashboardSummary(query) {
             INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
             INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
             LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+            LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
             WHERE ${D01_FILTER} AND co.order_seq IN (${inList})
               AND co.order_date >= @startDate AND co.order_date < @endDate
               AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
-            GROUP BY CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR))
+            GROUP BY CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
+              CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
           `));
       }
       if (etcSeqs.length) {
@@ -1326,9 +1336,16 @@ async function apiDashboardSummary(query) {
           .input('startDate', sql.VarChar, startDate)
           .input('endDate', sql.VarChar, endDate)
           .query(`
+            WITH etc_copurchase_orders AS (
+              SELECT DISTINCT ei2.order_seq
+              FROM CUSTOM_ETC_ORDER_ITEM ei2 WITH (NOLOCK)
+              INNER JOIN S2_Card c2 WITH (NOLOCK) ON ei2.card_seq = c2.Card_Seq
+              WHERE c2.Card_Div = 'A01'
+            )
             SELECT
               CONVERT(varchar(10), o.order_date, 120) AS order_day,
               ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
+              CASE WHEN ecp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
               COUNT(DISTINCT o.order_seq) AS order_count,
               ISNULL(SUM(${ETC_AMOUNT_EXPR}),0) AS total_amount,
               ISNULL(SUM(oi.order_count),0) AS total_qty
@@ -1336,10 +1353,12 @@ async function apiDashboardSummary(query) {
             INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
             INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
             LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+            LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
             WHERE ${D01_FILTER} AND o.order_seq IN (${inList})
               AND o.order_date >= @startDate AND o.order_date < @endDate
               AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
-            GROUP BY CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
+            GROUP BY CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)),
+              CASE WHEN ecp.order_seq IS NOT NULL THEN 1 ELSE 0 END
           `));
       }
       const exprResults = await Promise.all(exprPromises);

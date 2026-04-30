@@ -306,9 +306,25 @@ nav a:hover{color:var(--gray-900)}
           <div><span style="color:var(--gray-500)">건수</span> <strong id="cmp-t-express-orders" style="margin-left:4px">-</strong></div>
           <div><span style="color:var(--gray-500)">매출</span> <strong id="cmp-t-express-amount" style="margin-left:4px">-</strong></div>
         </div>
+        <!-- 오늘 빠른출고 동시/단독 분리 -->
+        <div id="cmp-t-express-copurchase-split" style="margin-top:6px;font-size:11px;color:var(--gray-500);display:none">
+          <div style="display:flex;align-items:center;gap:6px;padding:1px 0">
+            <span style="min-width:62px">├ 동시주문</span>
+            <span style="margin-left:auto" id="cmp-t-express-co-amount">-</span>
+            <span style="color:var(--gray-400)" id="cmp-t-express-co-orders">-</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;padding:1px 0">
+            <span style="min-width:62px">└ 단독주문</span>
+            <span style="margin-left:auto" id="cmp-t-express-st-amount">-</span>
+            <span style="color:var(--gray-400)" id="cmp-t-express-st-orders">-</span>
+          </div>
+        </div>
         <!-- 사이트별 동시/단독 세분화 — getPeriodTotal 의 by_site 와 동일 구조 -->
         <div id="cmp-t-express-site-breakdown" style="margin-top:6px"></div>
-        <div style="margin-top:6px;font-size:11px;color:var(--gray-500)">어제: <span id="cmp-y-express">-</span></div>
+        <div style="margin-top:6px;font-size:11px;color:var(--gray-500)">
+          어제: <span id="cmp-y-express">-</span>
+          <span id="cmp-y-express-split" style="color:var(--gray-400);margin-left:4px"></span>
+        </div>
       </div>
     </div>
   </div>
@@ -2940,14 +2956,38 @@ function renderComparison(cmp) {
   if ($ypEl)  $ypEl.textContent  = fmtNum(yp.orders) + '건 / ' + fmtKRW(yp.amount);
 
   // 빠른출고 채택 매출 — 사이트별 + 동시/단독 분리 (Q1=a 정책 일관 적용)
-  const te = t.express || { amount: 0, orders: 0, qty: 0, by_site: {} };
-  const ye = y.express || { amount: 0, orders: 0, qty: 0, by_site: {} };
+  const te = t.express || { amount: 0, orders: 0, qty: 0, by_site: {}, copurchase: {amount:0,orders:0,qty:0}, standalone: {amount:0,orders:0,qty:0} };
+  const ye = y.express || { amount: 0, orders: 0, qty: 0, by_site: {}, copurchase: {amount:0,orders:0,qty:0}, standalone: {amount:0,orders:0,qty:0} };
   const $teoEl = document.getElementById('cmp-t-express-orders');
   const $teaEl = document.getElementById('cmp-t-express-amount');
   const $yeEl  = document.getElementById('cmp-y-express');
   if ($teoEl) $teoEl.textContent = fmtNum(te.orders) + '건';
   if ($teaEl) $teaEl.textContent = fmtKRW(te.amount);
   if ($yeEl)  $yeEl.textContent  = fmtNum(ye.orders) + '건 / ' + fmtKRW(ye.amount);
+
+  // 오늘 빠른출고 동시/단독 분리 — 동시구매 1건 이상일 때만 노출 (없으면 시각적 노이즈)
+  const teCo = te.copurchase || { amount: 0, orders: 0, qty: 0 };
+  const teSt = te.standalone || { amount: 0, orders: 0, qty: 0 };
+  const $teSplit = document.getElementById('cmp-t-express-copurchase-split');
+  if ($teSplit) {
+    const hasSplit = (teCo.orders || 0) > 0 || (teCo.amount || 0) > 0;
+    $teSplit.style.display = hasSplit ? 'block' : 'none';
+    if (hasSplit) {
+      document.getElementById('cmp-t-express-co-amount').textContent = fmtKRW(teCo.amount);
+      document.getElementById('cmp-t-express-co-orders').textContent = fmtNum(teCo.orders) + '건';
+      document.getElementById('cmp-t-express-st-amount').textContent = fmtKRW(teSt.amount);
+      document.getElementById('cmp-t-express-st-orders').textContent = fmtNum(teSt.orders) + '건';
+    }
+  }
+  // 어제 빠른출고 동시/단독 분리 — 한 줄 요약
+  const yeCo = ye.copurchase || { amount: 0, orders: 0, qty: 0 };
+  const $yeSplit = document.getElementById('cmp-y-express-split');
+  if ($yeSplit) {
+    const hasYeSplit = (yeCo.orders || 0) > 0 || (yeCo.amount || 0) > 0;
+    $yeSplit.textContent = hasYeSplit
+      ? `(동시 ${fmtNum(yeCo.orders)}건 / 단독 ${fmtNum((ye.standalone||{}).orders||0)}건)`
+      : '';
+  }
   // 빠른출고 사이트별 세분화 — by_site 를 일반 매출과 동일한 구조로 재사용
   renderSiteBreakdown({ by_site: te.by_site || {} }, 'cmp-t-express');
 
@@ -4528,6 +4568,47 @@ function renderDailyTable(data, topProducts) {
     });
     return order;
   })();
+  // 빠른출고 일별×그룹×유형 매출 (정보입력 완료 + is_express=true 주문의 원금 매출).
+  //   express_daily 데이터원: { order_day, site_name, is_copurchase, order_count, total_amount, total_qty }
+  //   주문유형별 (사이트 그룹별) 섹션의 sub-row 로 표시되므로 별도 블록 없이 인라인 삽입.
+  // dayExpressGroupType[day][group][typeKey] = { amount, orders, qty }
+  const dayExpressGroupType = {};
+  (dashboardExpressDaily || []).forEach(r => {
+    const day = r.order_day;
+    const group = getSiteGroup(r.site_name || '기타');
+    const typeKey = r.is_copurchase ? 'copurchase' : 'standalone';
+    if (!dayExpressGroupType[day]) dayExpressGroupType[day] = {};
+    if (!dayExpressGroupType[day][group]) dayExpressGroupType[day][group] = {};
+    if (!dayExpressGroupType[day][group][typeKey]) dayExpressGroupType[day][group][typeKey] = { amount:0, orders:0, qty:0 };
+    const v = dayExpressGroupType[day][group][typeKey];
+    v.amount += r.total_amount || 0;
+    v.orders += r.order_count || 0;
+    v.qty    += r.total_qty || 0;
+  });
+  // 그룹×유형 빠른출고 sub-row 헬퍼 — 주문유형별 매출/건수/수량 다음에 삽입.
+  //   해당 group×type 의 빠른출고 합이 0 이면 빈 문자열 반환 (행 생략).
+  const sumExprGroupType = (group, typeKey, metric) => days.reduce((s,d) => {
+    const gt = (dayExpressGroupType[d]||{})[group];
+    return s + (gt && gt[typeKey] ? (gt[typeKey][metric] || 0) : 0);
+  }, 0);
+  function mkExpressSubRow(group, typeKey) {
+    const totalAmount = sumExprGroupType(group, typeKey, 'amount');
+    const totalOrders = sumExprGroupType(group, typeKey, 'orders');
+    if (!totalAmount && !totalOrders) return '';
+    const cells = days.map(d => {
+      const gt = (dayExpressGroupType[d]||{})[group];
+      const v = gt ? (gt[typeKey] || { amount:0, orders:0 }) : { amount:0, orders:0 };
+      if (!v.amount && !v.orders) return `<td class="num" style="font-size:11px"><span style="color:var(--gray-300)">-</span></td>`;
+      return `<td class="num" style="font-size:11px;color:#92400e">${fmtKRW(v.amount)} <span style="color:#b45309;font-size:10px">(${fmtNum(v.orders)}건)</span></td>`;
+    }).join('');
+    const totalCell = `${fmtKRW(totalAmount)} <span style="color:#b45309">(${fmtNum(totalOrders)}건)</span>`;
+    return `<tr>
+      <td style="${STICKY}background:#fffbeb;font-size:11px;color:#92400e;padding-left:28px;white-space:nowrap">└ ⚡ 빠른출고</td>
+      ${cells}
+      <td class="num" style="background:#fef9c3;font-size:11px;color:#92400e;border-left:2px solid var(--gray-200)">${totalCell}</td>
+    </tr>`;
+  }
+
   // 그룹별 행 생성 — 그룹 안의 (typeKey, metric) 6 조합 중 모두 0 인 typeKey 는 스킵
   const typeRowsParts = [];
   presentGroups.forEach(group => {
@@ -4541,11 +4622,15 @@ function renderDailyTable(data, topProducts) {
       typeRowsParts.push(mkGroupRow(group, 'copurchase', '동시구매 매출', 'amount', true));
       typeRowsParts.push(mkGroupRow(group, 'copurchase', '동시구매 건수', 'orders', false));
       typeRowsParts.push(mkGroupRow(group, 'copurchase', '동시구매 수량', 'qty', false));
+      // 동시구매 중 빠른출고 sub-row (있을 때만)
+      typeRowsParts.push(mkExpressSubRow(group, 'copurchase'));
     }
     if (hasStandalone) {
       typeRowsParts.push(mkGroupRow(group, 'standalone', '단독주문 매출', 'amount', !hasCopurchase));
       typeRowsParts.push(mkGroupRow(group, 'standalone', '단독주문 건수', 'orders', false));
       typeRowsParts.push(mkGroupRow(group, 'standalone', '단독주문 수량', 'qty', false));
+      // 단독주문 중 빠른출고 sub-row (있을 때만)
+      typeRowsParts.push(mkExpressSubRow(group, 'standalone'));
     }
   });
   const typeRows = typeRowsParts.join('');
@@ -4556,57 +4641,6 @@ function renderDailyTable(data, topProducts) {
     <td style="background:#fef9c3;border-left:2px solid var(--gray-200)"></td>
   </tr>`;
 
-  // 빠른출고 매출 행 (정보입력 완료 후 빠른출고 옵션 선택한 주문의 원금 매출).
-  //   express_daily 데이터원: { order_day, site_name, order_count, total_amount, total_qty }
-  //   사이트 그룹별 (바른손카드/바른손몰) 합산 후 행 생성.
-  const dayExpressGroup = {}; // day -> group -> {amount, orders, qty}
-  (dashboardExpressDaily || []).forEach(r => {
-    const day = r.order_day;
-    const group = getSiteGroup(r.site_name || '기타');
-    if (!dayExpressGroup[day]) dayExpressGroup[day] = {};
-    if (!dayExpressGroup[day][group]) dayExpressGroup[day][group] = { amount:0, orders:0, qty:0 };
-    dayExpressGroup[day][group].amount += r.total_amount || 0;
-    dayExpressGroup[day][group].orders += r.order_count || 0;
-    dayExpressGroup[day][group].qty    += r.total_qty || 0;
-  });
-  const expressGroups = (() => {
-    const set = new Set();
-    Object.values(dayExpressGroup).forEach(g => Object.keys(g).forEach(k => set.add(k)));
-    return [...set].sort((a, b) => {
-      const score = g => g === '바른손몰' ? 1 : (g === '기타' ? 2 : 0);
-      return score(a) - score(b);
-    });
-  })();
-  const expressTotalSum = days.reduce((s,d) => {
-    return s + Object.values(dayExpressGroup[d] || {}).reduce((a,v) => a + (v.amount||0), 0);
-  }, 0);
-  let expressBlock = '';
-  if (expressTotalSum > 0) {
-    const expressDivider = `<tr style="background:#fef3c7">
-      <td style="${STICKY}background:#fef3c7;font-size:10px;color:#92400e;padding:3px 12px;font-weight:600;letter-spacing:.5px">⚡ 빠른출고 매출 (정보입력 완료 기준)</td>
-      ${days.map(()=>`<td style="background:#fef3c7"></td>`).join('')}
-      <td style="background:#fef9c3;border-left:2px solid var(--gray-200)"></td>
-    </tr>`;
-    const expressRows = expressGroups.map(group => {
-      const cells = days.map(d => {
-        const v = (dayExpressGroup[d] || {})[group] || { amount:0, orders:0 };
-        if (!v.amount) return `<td class="num" style="font-size:12px"><span style="color:var(--gray-300)">-</span></td>`;
-        return `<td class="num" style="font-size:12px">${fmtKRW(v.amount)} <span style="color:var(--gray-500);font-size:10px">(${fmtNum(v.orders)}건)</span></td>`;
-      }).join('');
-      const total = days.reduce((s,d) => s + (((dayExpressGroup[d] || {})[group] || {amount:0}).amount), 0);
-      const totalOrders = days.reduce((s,d) => s + (((dayExpressGroup[d] || {})[group] || {orders:0}).orders), 0);
-      const dotColor = group === '바른손몰' ? '#10b981' : (SITE_COLORS[group] || '#3b82f6');
-      const label = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${dotColor};margin-right:4px"></span>${group} 빠른출고`;
-      const totalCell = total ? `${fmtKRW(total)} <span style="color:var(--gray-500)">(${fmtNum(totalOrders)}건)</span>` : '-';
-      return `<tr>
-        <td style="${STICKY}background:#fffbeb;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${label}</td>
-        ${cells}
-        <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalCell}</td>
-      </tr>`;
-    }).join('');
-    expressBlock = expressDivider + expressRows;
-  }
-
   const tbody =
     mkRow('총 매출', amtCells, fmtKRW(totalAmt)) +
     mkRow('주문건수', orderCells, fmtNum(totalOrders)+'건') +
@@ -4614,7 +4648,6 @@ function renderDailyTable(data, topProducts) {
     mkRow('객단가', avgCells, fmtKRW(totalAvg)) +
     typeDivider + typeRows +
     siteDivider + sortedSiteRows +
-    expressBlock +
     divider +
     productRows;
 
@@ -4883,6 +4916,42 @@ function renderWeeklyTable(data, topProducts) {
     });
     return order;
   })();
+  // 주별 빠른출고 주차×그룹×유형 매출 — 주문유형별 sub-row 로 표시 (renderDailyTable 동일 패턴)
+  const weekExpressGroupType = {};
+  (dashboardExpressDaily || []).forEach(r => {
+    const wk = getWeekMondayStr(r.order_day);
+    const group = getSiteGroup(r.site_name || '기타');
+    const typeKey = r.is_copurchase ? 'copurchase' : 'standalone';
+    if (!weekExpressGroupType[wk]) weekExpressGroupType[wk] = {};
+    if (!weekExpressGroupType[wk][group]) weekExpressGroupType[wk][group] = {};
+    if (!weekExpressGroupType[wk][group][typeKey]) weekExpressGroupType[wk][group][typeKey] = { amount:0, orders:0, qty:0 };
+    const v = weekExpressGroupType[wk][group][typeKey];
+    v.amount += r.total_amount || 0;
+    v.orders += r.order_count || 0;
+    v.qty    += r.total_qty || 0;
+  });
+  const sumExprGroupTypeW = (group, typeKey, metric) => weeks.reduce((s,w) => {
+    const gt = (weekExpressGroupType[w]||{})[group];
+    return s + (gt && gt[typeKey] ? (gt[typeKey][metric] || 0) : 0);
+  }, 0);
+  function mkExpressSubRowW(group, typeKey) {
+    const totalAmount = sumExprGroupTypeW(group, typeKey, 'amount');
+    const totalOrders = sumExprGroupTypeW(group, typeKey, 'orders');
+    if (!totalAmount && !totalOrders) return '';
+    const cells = weeks.map(w => {
+      const gt = (weekExpressGroupType[w]||{})[group];
+      const v = gt ? (gt[typeKey] || { amount:0, orders:0 }) : { amount:0, orders:0 };
+      if (!v.amount && !v.orders) return `<td class="num" style="font-size:11px"><span style="color:var(--gray-300)">-</span></td>`;
+      return `<td class="num" style="font-size:11px;color:#92400e">${fmtKRW(v.amount)} <span style="color:#b45309;font-size:10px">(${fmtNum(v.orders)}건)</span></td>`;
+    }).join('');
+    const totalCell = `${fmtKRW(totalAmount)} <span style="color:#b45309">(${fmtNum(totalOrders)}건)</span>`;
+    return `<tr>
+      <td style="${STICKY}background:#fffbeb;font-size:11px;color:#92400e;padding-left:28px;white-space:nowrap">└ ⚡ 빠른출고</td>
+      ${cells}
+      <td class="num" style="background:#fef9c3;font-size:11px;color:#92400e;border-left:2px solid var(--gray-200)">${totalCell}</td>
+    </tr>`;
+  }
+
   const typeRowsParts = [];
   presentGroupsW.forEach(group => {
     const hasCopurchase = sumGroupTypeW(group, 'copurchase', 'amount') > 0
@@ -4895,11 +4964,13 @@ function renderWeeklyTable(data, topProducts) {
       typeRowsParts.push(mkGroupRowW(group, 'copurchase', '동시구매 매출', 'amount', true));
       typeRowsParts.push(mkGroupRowW(group, 'copurchase', '동시구매 건수', 'orders', false));
       typeRowsParts.push(mkGroupRowW(group, 'copurchase', '동시구매 수량', 'qty', false));
+      typeRowsParts.push(mkExpressSubRowW(group, 'copurchase'));
     }
     if (hasStandalone) {
       typeRowsParts.push(mkGroupRowW(group, 'standalone', '단독주문 매출', 'amount', !hasCopurchase));
       typeRowsParts.push(mkGroupRowW(group, 'standalone', '단독주문 건수', 'orders', false));
       typeRowsParts.push(mkGroupRowW(group, 'standalone', '단독주문 수량', 'qty', false));
+      typeRowsParts.push(mkExpressSubRowW(group, 'standalone'));
     }
   });
   const typeRows = typeRowsParts.join('');
@@ -4909,55 +4980,6 @@ function renderWeeklyTable(data, topProducts) {
     <td style="background:#fef9c3;border-left:2px solid var(--gray-200)"></td>
   </tr>`;
 
-  // 빠른출고 매출 행 — 주차 단위 집계 (renderDailyTable 의 일자 버전과 동일 패턴)
-  const weekExpressGroup = {};
-  (dashboardExpressDaily || []).forEach(r => {
-    const wk = getWeekMondayStr(r.order_day);
-    const group = getSiteGroup(r.site_name || '기타');
-    if (!weekExpressGroup[wk]) weekExpressGroup[wk] = {};
-    if (!weekExpressGroup[wk][group]) weekExpressGroup[wk][group] = { amount:0, orders:0, qty:0 };
-    weekExpressGroup[wk][group].amount += r.total_amount || 0;
-    weekExpressGroup[wk][group].orders += r.order_count || 0;
-    weekExpressGroup[wk][group].qty    += r.total_qty || 0;
-  });
-  const expressGroupsW = (() => {
-    const set = new Set();
-    Object.values(weekExpressGroup).forEach(g => Object.keys(g).forEach(k => set.add(k)));
-    return [...set].sort((a, b) => {
-      const score = g => g === '바른손몰' ? 1 : (g === '기타' ? 2 : 0);
-      return score(a) - score(b);
-    });
-  })();
-  const expressTotalSumW = weeks.reduce((s,w) => {
-    return s + Object.values(weekExpressGroup[w] || {}).reduce((a,v) => a + (v.amount||0), 0);
-  }, 0);
-  let expressBlockW = '';
-  if (expressTotalSumW > 0) {
-    const expressDivider = `<tr style="background:#fef3c7">
-      <td style="${STICKY}background:#fef3c7;font-size:10px;color:#92400e;padding:3px 12px;font-weight:600;letter-spacing:.5px">⚡ 빠른출고 매출 (정보입력 완료 기준)</td>
-      ${weeks.map(()=>`<td style="background:#fef3c7"></td>`).join('')}
-      <td style="background:#fef9c3;border-left:2px solid var(--gray-200)"></td>
-    </tr>`;
-    const expressRows = expressGroupsW.map(group => {
-      const cells = weeks.map(w => {
-        const v = (weekExpressGroup[w] || {})[group] || { amount:0, orders:0 };
-        if (!v.amount) return `<td class="num" style="font-size:12px"><span style="color:var(--gray-300)">-</span></td>`;
-        return `<td class="num" style="font-size:12px">${fmtKRW(v.amount)} <span style="color:var(--gray-500);font-size:10px">(${fmtNum(v.orders)}건)</span></td>`;
-      }).join('');
-      const total = weeks.reduce((s,w) => s + (((weekExpressGroup[w] || {})[group] || {amount:0}).amount), 0);
-      const totalOrders = weeks.reduce((s,w) => s + (((weekExpressGroup[w] || {})[group] || {orders:0}).orders), 0);
-      const dotColor = group === '바른손몰' ? '#10b981' : (SITE_COLORS[group] || '#3b82f6');
-      const label = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${dotColor};margin-right:4px"></span>${group} 빠른출고`;
-      const totalCell = total ? `${fmtKRW(total)} <span style="color:var(--gray-500)">(${fmtNum(totalOrders)}건)</span>` : '-';
-      return `<tr>
-        <td style="${STICKY}background:#fffbeb;font-size:12px;color:var(--gray-700);padding-left:12px;white-space:nowrap">${label}</td>
-        ${cells}
-        <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalCell}</td>
-      </tr>`;
-    }).join('');
-    expressBlockW = expressDivider + expressRows;
-  }
-
   const tbody =
     mkRow('총 매출', amtCells, fmtKRW(totalAmt)) +
     mkRow('WoW%', wowCells, '-') +
@@ -4966,7 +4988,6 @@ function renderWeeklyTable(data, topProducts) {
     mkRow('객단가', avgCells, fmtKRW(totalAvg)) +
     typeDivider + typeRows +
     siteDivider + sortedSiteRows +
-    expressBlockW +
     divider +
     productRows;
 
