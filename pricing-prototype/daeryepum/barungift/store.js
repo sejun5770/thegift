@@ -142,6 +142,7 @@ async function createSticker(data) {
   if (USE_SUPABASE) {
     return sbInsert('bg_stickers', {
       name: data.name || '',
+      sticker_code: data.sticker_code || null,
       preview_image_url: data.preview_image_url || null,
       preview_color: data.preview_color || '#FFFFFF',
       custom_fields: data.custom_fields || [],
@@ -151,6 +152,7 @@ async function createSticker(data) {
   const stickers = readJson(FILES.stickers, []);
   const sticker = {
     id: uuid(), name: data.name || '',
+    sticker_code: data.sticker_code || null,
     preview_image_url: data.preview_image_url || null,
     preview_color: data.preview_color || '#FFFFFF',
     custom_fields: data.custom_fields || [],

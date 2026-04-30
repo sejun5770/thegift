@@ -947,16 +947,23 @@ nav a:hover{color:var(--gray-900)}
           <input type="text" id="bg-s-name" placeholder="클래식 감사 스티커" style="width:100%;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px">
         </div>
         <div>
+          <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">스티커 코드 <span style="color:var(--gray-400);font-weight:400">(상품군 자동 분류)</span></label>
+          <input type="text" id="bg-s-code" placeholder="예: TGJSD08S1" style="width:100%;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px;font-family:monospace" oninput="updateBgStickerGroupHint()">
+          <p id="bg-s-code-hint" style="font-size:10px;color:var(--gray-400);margin:3px 0 0">코드 끝의 'S&lt;숫자&gt;' 패턴으로 상품군 자동 추출 (예: TGJSD08S1 → TGJSD08)</p>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+        <div>
           <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">배경색</label>
           <div style="display:flex;gap:6px">
             <input type="color" id="bg-s-color" value="#FFFFFF" style="width:40px;height:36px;border:1px solid var(--gray-300);border-radius:var(--radius);cursor:pointer" oninput="document.getElementById('bg-s-color-hex').value=this.value">
             <input type="text" id="bg-s-color-hex" value="#FFFFFF" placeholder="#FFFFFF" style="flex:1;padding:8px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px;font-family:monospace" oninput="document.getElementById('bg-s-color').value=this.value">
           </div>
         </div>
-      </div>
-      <div style="margin-bottom:16px">
-        <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">미리보기 이미지 URL</label>
-        <input type="text" id="bg-s-image" placeholder="https://example.com/sticker.png" style="width:100%;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px">
+        <div>
+          <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px">미리보기 이미지 URL</label>
+          <input type="text" id="bg-s-image" placeholder="https://example.com/sticker.png" style="width:100%;padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px">
+        </div>
       </div>
       <div style="margin-bottom:16px">
         <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
@@ -5471,6 +5478,7 @@ function openBgStickerPreview(imgUrl, name) {
 function openBgStickerForm(sticker) {
   document.getElementById('bg-s-id').value = sticker ? sticker.id : '';
   document.getElementById('bg-s-name').value = sticker ? sticker.name : '';
+  document.getElementById('bg-s-code').value = sticker ? (sticker.sticker_code || '') : '';
   document.getElementById('bg-s-color').value = sticker ? sticker.preview_color : '#FFFFFF';
   document.getElementById('bg-s-color-hex').value = sticker ? sticker.preview_color : '#FFFFFF';
   document.getElementById('bg-s-image').value = sticker ? (sticker.preview_image_url || '') : '';
@@ -5481,7 +5489,31 @@ function openBgStickerForm(sticker) {
   fieldsEl.innerHTML = '';
   (sticker ? sticker.custom_fields || [] : []).forEach(f => addBgStickerFieldRow(f));
 
+  // 코드 → 상품군 hint 갱신 (편집 진입 시)
+  updateBgStickerGroupHint();
+
   document.getElementById('bg-sticker-modal').style.display = 'flex';
+}
+
+/** 입력 중인 sticker_code 에서 상품군(prefix) 추출해 안내문구 갱신 */
+function updateBgStickerGroupHint() {
+  const code = (document.getElementById('bg-s-code')?.value || '').trim();
+  const hintEl = document.getElementById('bg-s-code-hint');
+  if (!hintEl) return;
+  if (!code) {
+    hintEl.innerHTML = "코드 끝의 'S&lt;숫자&gt;' 패턴으로 상품군 자동 추출 (예: TGJSD08S1 → TGJSD08)";
+    hintEl.style.color = 'var(--gray-400)';
+    return;
+  }
+  // 동일 정규식 (bgStickerPrefix 와 일관)
+  const m = code.match(/^(.+?)S\d+$/);
+  if (m) {
+    hintEl.innerHTML = `→ 상품군 (자동 분류): <strong style="color:var(--primary);font-family:monospace">${m[1]}</strong>`;
+    hintEl.style.color = 'var(--gray-700)';
+  } else {
+    hintEl.innerHTML = `⚠️ '<span style="font-family:monospace">${code}</span>' — 'S&lt;숫자&gt;' 패턴 아님 → '미분류' 그룹에 표시됩니다`;
+    hintEl.style.color = '#dc2626';
+  }
 }
 
 function closeBgStickerForm() { document.getElementById('bg-sticker-modal').style.display = 'none'; }
@@ -5562,8 +5594,10 @@ function collectBgStickerFields() {
 
 async function saveBgSticker() {
   const id = document.getElementById('bg-s-id').value;
+  const stickerCode = document.getElementById('bg-s-code').value.trim();
   const body = {
     name: document.getElementById('bg-s-name').value.trim(),
+    sticker_code: stickerCode || null,
     preview_color: document.getElementById('bg-s-color-hex').value,
     preview_image_url: document.getElementById('bg-s-image').value.trim() || null,
     is_active: document.getElementById('bg-s-active').checked,
