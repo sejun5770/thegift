@@ -7731,7 +7731,52 @@ async function openBgOrderEdit(info) {
   toggleBgReceiptEdit(!!info.cash_receipt_yn);
 
   const stickerWrap = document.getElementById('bg-edit-stickers');
-  const sels = info.sticker_selections || [];
+  // 주문의 원본 상품 목록(bgUnifiedProductMap) 을 기준으로 sticker_selections 를 보강.
+  //   고객이 '입력안함' 선택 시 sticker_selections 에서 row 가 제외돼 admin 이 추가 불가했던 이슈 수정.
+  //   - 기존 customer 입력 row 는 그대로 유지 (sticker_id/box_code 등 고객이 고른 값 보존)
+  //   - 주문에 있지만 sticker_selections 에 없는 상품은 빈 row (sticker_id=null) 추가
+  //   - sticker_selections 에는 있지만 주문엔 없는 row (드물게 발생) 도 보존
+  const _editOrderSeq = info._order_seq
+    || (info.order_id && String(info.order_id).startsWith('ETC-')
+      ? parseInt(String(info.order_id).replace('ETC-', ''))
+      : parseInt(info.order_id));
+  const _pm = bgUnifiedProductMap.get(_editOrderSeq);
+  const existingSels = info.sticker_selections || [];
+  const sels = (() => {
+    if (!_pm || _pm.size === 0) return existingSels.slice(); // 주문 상품 정보 없으면 기존만 사용
+    // 1순위: 주문의 상품 순서 기준으로 row 구성. 같은 product_code 의 customer 입력 row 가 있으면 그걸 그대로 사용.
+    const usedExisting = new Set();
+    const merged = [];
+    for (const [code, pinfo] of _pm.entries()) {
+      const matches = existingSels.filter((s, i) => s.product_code === code && !usedExisting.has(i));
+      if (matches.length > 0) {
+        // 같은 상품에 복수 row 가 있을 수 있음 (멀티 스티커 수집 등) → 모두 보존
+        matches.forEach(m => {
+          merged.push(m);
+          usedExisting.add(existingSels.indexOf(m));
+        });
+      } else {
+        // 주문엔 있지만 customer 가 입력 안 한 상품 → 빈 row 추가 (admin 이 채울 수 있도록)
+        merged.push({
+          product_code: code,
+          product_name: pinfo.card_name || '',
+          quantity: pinfo.item_count || 1,
+          sticker_id: null,
+          sticker_code: null,
+          sticker_name: null,
+          custom_values: {},
+          box_code: null,
+          box_name: null,
+        });
+      }
+    }
+    // 2순위: existingSels 중 주문 상품과 매칭 안 된 row 도 보존 (데이터 안전성)
+    existingSels.forEach((s, i) => {
+      if (!usedExisting.has(i)) merged.push(s);
+    });
+    return merged;
+  })();
+
   stickerWrap.innerHTML = '<p style="color:var(--gray-400);font-size:13px">불러오는 중…</p>';
 
   // 모달 표시는 먼저 (비동기 로드 중에도 UI 보이게)
