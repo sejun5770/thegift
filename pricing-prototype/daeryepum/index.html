@@ -7488,7 +7488,7 @@ function copyBgUnified() {
 
   // 23열 구조: A='', B=택배, C=일반, D=주문번호, E=수령인, F=연락처, G='', H=배송지, I='',
   //            J=상품명, K=상품코드, L=박스코드, M=스티커코드(수량), N='', O='',
-  //            P=스티커 문구(고객 입력), Q='', R='', S='', T=주문수량,
+  //            P=스티커 문구(고객 입력), Q=배송메세지(MSSQL recv_msg), R='', S='', T=주문수량,
   //            U='', V=희망출고일(빠른출고시 짙은빨강), W=희망출고일
   const buildCells = ({ order, ci, sel, product_code, product_name, product_qty }) => {
     const cells = Array(23).fill('');
@@ -7516,6 +7516,11 @@ function copyBgUnified() {
         .map(v => (v == null ? '' : String(v)).replace(/[\t\r\n]+/g, ' ').trim())
         .filter(v => v);
       if (vals.length) cells[15] = vals.join(' / ');
+    }
+    // Q열(index 16) = 배송메세지 (MSSQL recv_msg — ETC: o.recv_msg / CARD: di.DELIVERY_MEMO)
+    //   TSV 안전: 탭/개행 → 공백으로 치환.
+    if (order.recv_msg) {
+      cells[16] = String(order.recv_msg).replace(/[\t\r\n]+/g, ' ').trim();
     }
     cells[19] = sel?.quantity || product_qty || '';  // T: 주문수량
     if (ci?.is_express) cells[21] = ci.desired_ship_date || '';
