@@ -576,9 +576,12 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   }
 
   // GET /api/bg/products/:productId/settings
+  //   ERP 변형 코드 (예: TGJSD0104_B) 가 들어와도 base 코드 (TGJSD0104) 로 fallback.
+  //   고객 엔드포인트와 동일 정책 — admin 수정 모달도 변형 주문에 base 설정을 적용해
+  //   스티커/박스 드롭다운이 정상 노출되도록 함.
   const productSettingsMatch = pathname.match(/^\/api\/bg\/products\/([^/]+)\/settings$/);
   if (productSettingsMatch && method === 'GET') {
-    const settings = await store.getProductSettings(decodeURIComponent(productSettingsMatch[1]));
+    const settings = await lookupProductSettings(decodeURIComponent(productSettingsMatch[1]));
     return json(res, { settings });
   }
 
