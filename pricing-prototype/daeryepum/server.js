@@ -1481,7 +1481,11 @@ async function apiForecast() {
   const FUTURE_WINDOW = 7;
   const BASE_WEEKS = 4; // 이동평균 기준: 최근 완료 4주
 
-  // 1) 예식일별 건수 (실제 청첩장 주문의 예식정보 기준, 주문번호 중복 제거)
+  // 1) 예식일별 건수 — 통합회원(S2_UserInfo) 의 wedd_year/wedd_month/wedd_day 기준
+  //    가입사이트(REFERER_SALES_GUBUN) 무관, 청첩장 주문 여부 무관 — 회원이 입력한 예식일
+  //    이면 모두 카운트. site_div='SB' 로 통합회원 중복 제거 (한 uid 당 SB/SS/BM 3행 존재).
+  //    이전 모델(custom_order_WeddInfo) 은 청첩장 주문 있는 사람만 잡혀서 '단독 답례품'
+  //    구매자의 결혼식이 분모에서 누락 → 전환율 과대 평가 → 회원정보 기반으로 전환.
   //    DB 조회 범위 — 윈도우 양 끝 (가장 보수적인 PAST 사용)
   const weddStart = fmtDate(addDays(thisSunday, -7 * 8 - PAST_WINDOW));
   const weddEnd = fmtDate(addDays(thisSunday, 7 * 12 + 7 + FUTURE_WINDOW));
@@ -1492,14 +1496,13 @@ async function apiForecast() {
     .query(`
       SELECT wedd_date, COUNT(*) AS wedding_count
       FROM (
-        SELECT DISTINCT co.order_seq,
-          CONVERT(varchar(10), TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date), 120) AS wedd_date
-        FROM custom_order co WITH (NOLOCK)
-        INNER JOIN custom_order_WeddInfo w WITH (NOLOCK) ON co.order_seq = w.order_seq
-        WHERE co.status_seq >= 1
-          AND w.event_year IS NOT NULL AND LEN(w.event_year) = 4
-          AND TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) >= @ws
-          AND TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) < @we
+        SELECT DISTINCT u.uid,
+          CONVERT(varchar(10), TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date), 120) AS wedd_date
+        FROM S2_UserInfo u WITH (NOLOCK)
+        WHERE u.site_div = 'SB'
+          AND u.wedd_year IS NOT NULL AND LEN(u.wedd_year) = 4
+          AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) >= @ws
+          AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) < @we
       ) t
       GROUP BY wedd_date
       ORDER BY wedd_date

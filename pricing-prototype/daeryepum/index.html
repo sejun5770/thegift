@@ -411,13 +411,15 @@ nav a:hover{color:var(--gray-900)}
           <strong style="color:#60a5fa">📐 예식일 기반 전환율 모델</strong><br><br>
           <strong>예상 매출 = 예식건수 × 전환율 × 객단가</strong><br><br>
           <strong style="color:#fbbf24">주차 기준:</strong> 일요일 시작 ~ 토요일 종료 (Sun-Sat)<br>
+          <strong style="color:#fbbf24">예식건수:</strong> 통합회원(S2_UserInfo) 의 예식일 입력 건수 — 가입사이트·청첩장 주문 여부 무관<br>
+          <span style="color:#94a3b8;font-size:11px">└ site_div='SB' 로 통합회원 중복 제거 (한 uid 당 SB/SS/BM 3행 중 1행만)</span><br>
           <strong style="color:#fbbf24">예식 윈도우:</strong> 본주 시작 −14일 ~ 본주 끝 +7일 (28일, 비대칭 4주)<br>
           <span style="color:#94a3b8;font-size:11px">└ 예: 본주 4/26~5/2 → 예식 윈도우 4/12~5/9</span><br>
           <span style="color:#94a3b8;font-size:11px">└ 답례품은 예식 전 주문이 대부분이라 미래쪽 1주, 과거쪽 2주(늦은 주문 반영)</span><br>
           <strong style="color:#fbbf24">전환율:</strong> 최근 4주간(일~토) 답례품 주문건수 ÷ 예식 윈도우 건수<br>
           <strong style="color:#fbbf24">객단가:</strong> 최근 4주간(일~토) 답례품 매출 ÷ 답례품 주문건수<br>
           <strong style="color:#fbbf24">가중치:</strong> 가장 최근 주가 가장 큰 가중치 (선형: 1, 2, 3, 4)<br><br>
-          <strong>한계:</strong> 최근 4주 실적 기반이라 시즌 전환·마케팅 캠페인 효과는 후행 반영됩니다.
+          <strong>한계:</strong> 최근 4주 실적 기반이라 시즌 전환·마케팅 캠페인 효과는 후행 반영됩니다. 회원이 예식일을 입력하지 않은 경우 분모에서 제외됩니다.
         </span>
       </span></span>
     </div>
