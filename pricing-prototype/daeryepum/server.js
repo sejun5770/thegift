@@ -1604,15 +1604,17 @@ async function apiForecast() {
         -- ETC: 동시구매(청첩장+답례품) 주문에서 답례품(D01) 매출만 추출.
         --   이전엔 o.settle_price (주문 전체 결제금액) 를 그대로 사용해 청첩장 매출까지
         --   forecast actual_weekly_revenue 에 포함되는 버그 (H2). ETC_AMOUNT_EXPR 와 동일
-        --   산식의 D01 한정 서브쿼리로 교체. (쿠폰 다중 차감 H1 은 별개로 처리)
+        --   산식의 D01 한정 서브쿼리로 교체.
+        --   F1 fix: 쿠폰 차감을 SUM() 안에서 빼서 N개 아이템에 N회 차감되던 H1-pattern 제거.
+        --   SUM(gross) 밖에서 coupon 1회만 차감 → 주문당 실제 결제액에 정확히 일치.
         SELECT DISTINCT o.order_seq, CONVERT(varchar(10), o.order_date, 120) AS order_day,
           (SELECT ISNULL(SUM(
             CASE
               WHEN si2.SiteName IS NULL
-              THEN CAST(oi2.card_sale_price AS float) * oi2.order_count / ISNULL(NULLIF(c2.Unit_Value, 0), 1) - ISNULL(o.coupon_price, 0)
-              ELSE CAST(oi2.card_sale_price AS float) - ISNULL(o.coupon_price, 0)
+              THEN CAST(oi2.card_sale_price AS float) * oi2.order_count / ISNULL(NULLIF(c2.Unit_Value, 0), 1)
+              ELSE CAST(oi2.card_sale_price AS float)
             END
-          ), 0)
+          ), 0) - ISNULL(o.coupon_price, 0)
           FROM CUSTOM_ETC_ORDER_ITEM oi2 WITH (NOLOCK)
           INNER JOIN S2_Card c2 WITH (NOLOCK) ON oi2.card_seq = c2.Card_Seq
           LEFT JOIN SiteInfo si2 WITH (NOLOCK) ON o.company_Seq = si2.CompayCode
