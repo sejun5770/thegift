@@ -1471,12 +1471,20 @@ async function apiForecast() {
   const dayOfWeek = todayDate.getDay();
   const thisSunday = addDays(todayDate, -dayOfWeek);
 
-  const WINDOW = 14; // 예식일 ±14일 (앞뒤 2주)
+  // 예식 윈도우 (본주 기준 비대칭 4주 = 28일):
+  //   PAST  = 14일 (본주 시작 이전 2주)
+  //   FUTURE= 7일  (본주 종료 이후 1주)
+  //   예) 본주 4/26(일)~5/2(토) → 윈도우 4/12(일)~5/9(토)
+  //   답례품은 예식 전 주문이 대부분이라 미래쪽은 1주만 보고, 과거쪽은 2주까지 봐서
+  //   예식 후 늦은 주문(post-wedding) 도 일부 반영. 기존 ±14일 대칭 모델에서 변경.
+  const PAST_WINDOW = 14;
+  const FUTURE_WINDOW = 7;
   const BASE_WEEKS = 4; // 이동평균 기준: 최근 완료 4주
 
   // 1) 예식일별 건수 (실제 청첩장 주문의 예식정보 기준, 주문번호 중복 제거)
-  const weddStart = fmtDate(addDays(thisSunday, -7 * 8 - WINDOW));
-  const weddEnd = fmtDate(addDays(thisSunday, 7 * 12 + 7 + WINDOW));
+  //    DB 조회 범위 — 윈도우 양 끝 (가장 보수적인 PAST 사용)
+  const weddStart = fmtDate(addDays(thisSunday, -7 * 8 - PAST_WINDOW));
+  const weddEnd = fmtDate(addDays(thisSunday, 7 * 12 + 7 + FUTURE_WINDOW));
 
   const weddingsByDate = await p.request()
     .input('ws', sql.VarChar, weddStart)
@@ -1506,9 +1514,10 @@ async function apiForecast() {
     const weekStart = addDays(thisSunday, w * 7);
     const weekEnd = addDays(thisSunday, w * 7 + 6);
 
-    // 예식 윈도우: [weekStart - 14일, weekEnd + 14일] 범위의 예식 건수
+    // 예식 윈도우: [weekStart - 14일, weekEnd + 7일] = 28일 비대칭 윈도우
+    //   d 범위: -14 ~ 13 (= 6 + 7) 포함, 총 28일
     let weddingPool = 0;
-    for (let d = -WINDOW; d <= 6 + WINDOW; d++) {
+    for (let d = -PAST_WINDOW; d <= 6 + FUTURE_WINDOW; d++) {
       const key = fmtDate(addDays(weekStart, d));
       weddingPool += weddingDailyMap[key] || 0;
     }
@@ -1672,7 +1681,9 @@ async function apiForecast() {
   return {
     model: {
       type: 'weighted_moving_average',
-      window_days: WINDOW,
+      window_past_days: PAST_WINDOW,    // 본주 시작 이전 윈도우 (일)
+      window_future_days: FUTURE_WINDOW, // 본주 종료 이후 윈도우 (일)
+      window_total_days: PAST_WINDOW + 7 + FUTURE_WINDOW, // 28
       base_weeks: BASE_WEEKS,
       conversion_rate: Math.round(conversionRate * 10000) / 100, // % 단위 (소수점 2자리)
       avg_order_value: Math.round(avgOrderValue),

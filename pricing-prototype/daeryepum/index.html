@@ -405,18 +405,19 @@ nav a:hover{color:var(--gray-900)}
   <!-- Forecast: 예식일 기반 이동평균 -->
   <div class="section">
     <div class="section-title">
-      <span>🔮 답례품 매출 예측 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(예식일 ±2주 가중이동평균 · 주차 기준 일~토)</span> <span class="tooltip-wrap" style="position:relative;cursor:help;vertical-align:middle;margin-left:4px">
+      <span>🔮 답례품 매출 예측 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(예식 4주 윈도우 가중이동평균 · 주차 기준 일~토)</span> <span class="tooltip-wrap" style="position:relative;cursor:help;vertical-align:middle;margin-left:4px">
         <span style="font-size:12px;color:var(--primary);border:1px solid var(--primary);border-radius:50%;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center">?</span>
-        <span class="tooltip-content" style="display:none;position:absolute;right:0;top:28px;width:380px;max-width:90vw;background:#1e293b;color:#f1f5f9;padding:16px;border-radius:8px;font-size:12px;line-height:1.7;z-index:50;box-shadow:0 4px 20px rgba(0,0,0,.3)">
+        <span class="tooltip-content" style="display:none;position:absolute;right:0;top:28px;width:400px;max-width:90vw;background:#1e293b;color:#f1f5f9;padding:16px;border-radius:8px;font-size:12px;line-height:1.7;z-index:50;box-shadow:0 4px 20px rgba(0,0,0,.3)">
           <strong style="color:#60a5fa">📐 예식일 기반 전환율 모델</strong><br><br>
           <strong>예상 매출 = 예식건수 × 전환율 × 객단가</strong><br><br>
           <strong style="color:#fbbf24">주차 기준:</strong> 일요일 시작 ~ 토요일 종료 (Sun-Sat)<br>
-          <strong style="color:#fbbf24">예식건수:</strong> 청첩장 주문 제작정보(order_seq 기준) 예식일 ±14일 범위 집계<br>
-          <strong style="color:#fbbf24">전환율:</strong> 최근 4주간(일-토 기준) 답례품 주문건수 ÷ 예식 윈도우 건수<br>
-          <strong style="color:#fbbf24">객단가:</strong> 최근 4주간(일-토 기준) 답례품 매출 ÷ 답례품 주문건수<br>
+          <strong style="color:#fbbf24">예식 윈도우:</strong> 본주 시작 −14일 ~ 본주 끝 +7일 (28일, 비대칭 4주)<br>
+          <span style="color:#94a3b8;font-size:11px">└ 예: 본주 4/26~5/2 → 예식 윈도우 4/12~5/9</span><br>
+          <span style="color:#94a3b8;font-size:11px">└ 답례품은 예식 전 주문이 대부분이라 미래쪽 1주, 과거쪽 2주(늦은 주문 반영)</span><br>
+          <strong style="color:#fbbf24">전환율:</strong> 최근 4주간(일~토) 답례품 주문건수 ÷ 예식 윈도우 건수<br>
+          <strong style="color:#fbbf24">객단가:</strong> 최근 4주간(일~토) 답례품 매출 ÷ 답례품 주문건수<br>
           <strong style="color:#fbbf24">가중치:</strong> 가장 최근 주가 가장 큰 가중치 (선형: 1, 2, 3, 4)<br><br>
-          <strong>원리:</strong> 예식일 전후 2주가 답례품 주문이 집중되는 구간. 전환율과 객단가를 분리하여 매출 변동 요인을 파악할 수 있습니다.<br><br>
-          <strong>한계:</strong> 최근 4주 실적 기반이므로 시즌 전환, 마케팅 캠페인 효과는 후행 반영됩니다.
+          <strong>한계:</strong> 최근 4주 실적 기반이라 시즌 전환·마케팅 캠페인 효과는 후행 반영됩니다.
         </span>
       </span></span>
     </div>
@@ -435,7 +436,7 @@ nav a:hover{color:var(--gray-900)}
       <table class="forecast-table">
         <thead><tr>
           <th>주차</th><th>기간 <span style="font-size:10px;font-weight:400;color:var(--gray-500)">(일~토)</span></th>
-          <th>예식건수<br><span style="font-size:10px;font-weight:400">(D-14 ~ D+14)</span></th>
+          <th>예식건수<br><span style="font-size:10px;font-weight:400">(본주 −14일 ~ 본주 끝 +7일, 28일)</span></th>
           <th>예상 건수</th>
           <th>예상 매출</th>
           <th>실제 매출</th>
