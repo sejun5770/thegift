@@ -7578,17 +7578,27 @@ async function bulkSendAlimtalkViaSp() {
 }
 
 /**
- * 주문 상품코드(ERP 변형 포함) → 상품설정에 매핑된 product_id 로 resolve.
- *   서버 lookupProductSettings 와 동일 정책 — 정확 일치 우선, 실패하면 _suffix 를
- *   최대 3회 떼면서 재탐색. 끝까지 매칭 안 되면 원본 코드 반환.
- *   bgProductSettings 가 비어있으면 (로드 실패 등) 원본 그대로.
+ * 주문 상품코드 → 상품설정에 매핑된 product_id 로 resolve (bidirectional).
+ *
+ * 두 케이스 모두 대응:
+ *   A. 고객 주문이 변형 코드 (TGJSD1001_B), admin 이 base (TGJSD1001) 만 등록
+ *        → suffix 떼고 검색 (서버 lookupProductSettings 와 동일 정책)
+ *   B. 고객 주문이 base 코드 (TGJSD01O4), admin 이 변형 (TGJSD01O4_B) 으로 등록
+ *        → product_id 의 suffix 떼면 rawCode 와 매칭되는 설정 검색
+ *
+ *   해결 우선순위: 정확 일치 → A 케이스 → B 케이스 → 원본 그대로 (fallback)
+ *   bgProductSettings 가 비어있으면 (로드 실패 등) 원본 반환.
  */
 function resolveBgMappedProductCode(rawCode) {
   if (!rawCode) return rawCode || '';
   if (!Array.isArray(bgProductSettings) || bgProductSettings.length === 0) return rawCode;
   const findById = (code) => bgProductSettings.find(p => p.product_id === code);
+
+  // 1) 정확 일치
   const direct = findById(rawCode);
   if (direct) return direct.product_id;
+
+  // 2) A 케이스: rawCode 의 suffix 를 떼면서 base 매칭 시도 (최대 3회)
   let cur = rawCode;
   for (let i = 0; i < 3; i++) {
     const m = String(cur).match(/^(.+)_[A-Za-z0-9]+$/);
@@ -7599,6 +7609,21 @@ function resolveBgMappedProductCode(rawCode) {
     if (hit) return hit.product_id;
     cur = base;
   }
+
+  // 3) B 케이스: 설정 중 product_id 의 suffix 를 떼면 rawCode 와 일치하는 항목 탐색.
+  //    여러 변형이 있으면 첫 매칭 사용 (운영상 동일 base 에 변형 다중 등록은 드물 것).
+  const stripVariant = (code) => {
+    let c = String(code);
+    for (let i = 0; i < 3; i++) {
+      const m = c.match(/^(.+)_[A-Za-z0-9]+$/);
+      if (!m || m[1] === c) break;
+      c = m[1];
+    }
+    return c;
+  };
+  const variantHit = bgProductSettings.find(p => stripVariant(p.product_id) === rawCode);
+  if (variantHit) return variantHit.product_id;
+
   return rawCode;
 }
 
