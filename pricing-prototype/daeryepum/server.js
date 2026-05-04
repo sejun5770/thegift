@@ -851,15 +851,26 @@ async function apiProductStats(query) {
 
 async function apiDashboardComparison() {
   const p = await getPool();
-  const todayStr = fmtDate(today());
-  const tomorrowStr = fmtDate(addDays(today(), 1));
-  const yesterdayStr = fmtDate(addDays(today(), -1));
-  const lastWeekSameDayStr = fmtDate(addDays(today(), -7));
-  const lastWeekSameDayNextStr = fmtDate(addDays(today(), -6));
+  const todayDate = today();
+  const todayStr = fmtDate(todayDate);
+  const tomorrowStr = fmtDate(addDays(todayDate, 1));
+  const yesterdayStr = fmtDate(addDays(todayDate, -1));
+  const lastWeekSameDayStr = fmtDate(addDays(todayDate, -7));
+  const lastWeekSameDayNextStr = fmtDate(addDays(todayDate, -6));
 
   // 요일 이름
   const dayNames = ['일','월','화','수','목','금','토'];
-  const todayDow = dayNames[today().getDay()];
+  const todayDow = dayNames[todayDate.getDay()];
+
+  // WoW 동기간 비교: 이번주 일요일~오늘 vs 지난주 일요일~지난주 같은 요일
+  //   오늘=수: thisWeek = [Sun, Wed], lastWeek = [last Sun, last Wed] (각 4일)
+  //   오늘=일: thisWeek = [Sun], lastWeek = [last Sun] (각 1일, 단일일자와 동일)
+  const dayOfWeek = todayDate.getDay();
+  const thisWeekStartDate = addDays(todayDate, -dayOfWeek);
+  const thisWeekStartStr = fmtDate(thisWeekStartDate);
+  const lastWeekStartStr = fmtDate(addDays(thisWeekStartDate, -7));
+  // 지난주 동기간 끝(exclusive) = 이번주 동기간 끝(exclusive) - 7일 = today - 6
+  const lastWeekPeriodEndExclusiveStr = fmtDate(addDays(todayDate, -6));
 
   // 각 기간별 ETC+CARD 합산 헬퍼
   //
@@ -1218,10 +1229,13 @@ async function apiDashboardComparison() {
   }
 
   const [todayTotal, yesterdayTotal, lastWeekTotal,
+         thisWeekToDateTotal, lastWeekSamePeriodTotal,
          todayExpress, yesterdayExpress, lastWeekExpress] = await Promise.all([
     getPeriodTotal(todayStr, tomorrowStr),
     getPeriodTotal(yesterdayStr, todayStr),
     getPeriodTotal(lastWeekSameDayStr, lastWeekSameDayNextStr),
+    getPeriodTotal(thisWeekStartStr, tomorrowStr),
+    getPeriodTotal(lastWeekStartStr, lastWeekPeriodEndExclusiveStr),
     getExpressTotal(todayStr, tomorrowStr, expressInfos),
     getExpressTotal(yesterdayStr, todayStr, expressInfos),
     getExpressTotal(lastWeekSameDayStr, lastWeekSameDayNextStr, expressInfos),
@@ -1234,10 +1248,14 @@ async function apiDashboardComparison() {
     today: todayTotal,
     yesterday: yesterdayTotal,
     last_week_same_day: lastWeekTotal,
+    this_week_to_date: thisWeekToDateTotal,
+    last_week_same_period: lastWeekSamePeriodTotal,
     date: {
       today: todayStr,
       yesterday: yesterdayStr,
       last_week_same_day: lastWeekSameDayStr,
+      this_week_start: thisWeekStartStr,
+      last_week_start: lastWeekStartStr,
       today_dow: todayDow,
     },
   };

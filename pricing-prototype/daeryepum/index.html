@@ -365,9 +365,9 @@ nav a:hover{color:var(--gray-900)}
     </div>
   </div>
 
-  <!-- Today vs Last Week Same Day -->
+  <!-- WoW: 이번주 누적 vs 지난주 동기간 -->
   <div class="section">
-    <div class="section-title">📅 오늘 vs 전주 같은 요일 (WoW)</div>
+    <div class="section-title">📅 이번주 누적 vs 지난주 동기간 (WoW)</div>
     <div class="card" style="padding:0;overflow:hidden">
       <div class="compare-grid">
         <div class="compare-col yesterday">
@@ -3042,11 +3042,19 @@ function renderComparison(cmp) {
 
   document.getElementById('cmp-feedback').innerHTML = feedback;
 
-  // --- WoW: 오늘 vs 전주 같은 요일 ---
-  const lw = cmp.last_week_same_day;
+  // --- WoW: 이번주 누적 vs 지난주 동기간 ---
+  //   동기간 비교: 이번주 일~오늘(N일) vs 지난주 일~지난주 같은요일(N일).
+  //   요일별 편차 + 단일일자 노이즈를 줄이고 주간 트렌드를 더 정확히 표현.
+  const lw = cmp.last_week_same_period || cmp.last_week_same_day || {};  // fallback: 구버전 응답
+  const tw = cmp.this_week_to_date || t;                                  // fallback: 오늘 단일
   const dow = cmp.date.today_dow;
-  document.getElementById('wow-last-date').textContent = `전주 ${dow}요일 (${cmp.date.last_week_same_day})`;
-  document.getElementById('wow-today-date').textContent = `오늘 ${dow}요일 (${cmp.date.today})`;
+  const fmtMD = s => { const [, m, d] = (s||'').split('-'); return m && d ? `${parseInt(m)}/${parseInt(d)}` : (s || ''); };
+  const lwStart = fmtMD(cmp.date.last_week_start || cmp.date.last_week_same_day);
+  const lwEnd = fmtMD(cmp.date.last_week_same_day);
+  const twStart = fmtMD(cmp.date.this_week_start || cmp.date.today);
+  const twEnd = fmtMD(cmp.date.today);
+  document.getElementById('wow-last-date').textContent = `지난주 일~${dow} (${lwStart} ~ ${lwEnd})`;
+  document.getElementById('wow-today-date').textContent = `이번주 일~${dow} 누적 (${twStart} ~ ${twEnd})`;
   document.getElementById('wow-l-amount').textContent = fmtKRW(lw.total_amount);
   document.getElementById('wow-l-copurchase').textContent = fmtKRW((lw.copurchase||{}).amount||0);
   document.getElementById('wow-l-standalone').textContent = fmtKRW((lw.standalone||{}).amount||0);
@@ -3056,42 +3064,44 @@ function renderComparison(cmp) {
   document.getElementById('wow-l-qty').textContent = fmtNum(lw.total_qty);
   document.getElementById('wow-l-copurchase-qty').textContent = fmtNum((lw.copurchase||{}).qty||0);
   document.getElementById('wow-l-standalone-qty').textContent = fmtNum((lw.standalone||{}).qty||0);
-  document.getElementById('wow-t-amount').textContent = fmtKRW(t.total_amount);
-  document.getElementById('wow-t-copurchase').textContent = fmtKRW((t.copurchase||{}).amount||0);
-  document.getElementById('wow-t-standalone').textContent = fmtKRW((t.standalone||{}).amount||0);
-  document.getElementById('wow-t-orders').textContent = fmtNum(t.order_count) + '건';
-  document.getElementById('wow-t-copurchase-orders').textContent = fmtNum((t.copurchase||{}).orders||0) + '건';
-  document.getElementById('wow-t-standalone-orders').textContent = fmtNum((t.standalone||{}).orders||0) + '건';
-  document.getElementById('wow-t-qty').textContent = fmtNum(t.total_qty);
-  document.getElementById('wow-t-copurchase-qty').textContent = fmtNum((t.copurchase||{}).qty||0);
-  document.getElementById('wow-t-standalone-qty').textContent = fmtNum((t.standalone||{}).qty||0);
+  document.getElementById('wow-t-amount').textContent = fmtKRW(tw.total_amount);
+  document.getElementById('wow-t-copurchase').textContent = fmtKRW((tw.copurchase||{}).amount||0);
+  document.getElementById('wow-t-standalone').textContent = fmtKRW((tw.standalone||{}).amount||0);
+  document.getElementById('wow-t-orders').textContent = fmtNum(tw.order_count) + '건';
+  document.getElementById('wow-t-copurchase-orders').textContent = fmtNum((tw.copurchase||{}).orders||0) + '건';
+  document.getElementById('wow-t-standalone-orders').textContent = fmtNum((tw.standalone||{}).orders||0) + '건';
+  document.getElementById('wow-t-qty').textContent = fmtNum(tw.total_qty);
+  document.getElementById('wow-t-copurchase-qty').textContent = fmtNum((tw.copurchase||{}).qty||0);
+  document.getElementById('wow-t-standalone-qty').textContent = fmtNum((tw.standalone||{}).qty||0);
   renderSiteBreakdown(lw, 'wow-l');
-  renderSiteBreakdown(t, 'wow-t');
+  renderSiteBreakdown(tw, 'wow-t');
 
-  const wowPct = pctChange(t.total_amount, lw.total_amount);
+  const wowPct = pctChange(tw.total_amount, lw.total_amount);
   const wowBadge = document.getElementById('wow-badge');
   if (wowPct > 0) wowBadge.innerHTML = `<span class="badge badge-up">▲ ${wowPct}%</span>`;
   else if (wowPct < 0) wowBadge.innerHTML = `<span class="badge badge-down">▼ ${Math.abs(wowPct)}%</span>`;
   else wowBadge.innerHTML = `<span class="badge badge-neutral">- 0%</span>`;
 
-  let wowFeedback = '';
-  if (lw.total_amount === 0 && t.total_amount === 0) {
-    wowFeedback = `전주 ${dow}요일과 오늘 모두 매출이 없습니다.`;
-  } else if (lw.total_amount === 0) {
-    wowFeedback = `전주 ${dow}요일에는 매출이 없었으나, 오늘은 <strong>${fmtKRW(t.total_amount)}</strong>이 발생했습니다.`;
-  } else {
-    wowFeedback = `같은 ${dow}요일 기준 WoW <strong>${wowPct > 0 ? wowPct+'% 성장' : Math.abs(wowPct)+'% 감소'}</strong>. `;
-    if (wowPct > 20) wowFeedback += '전주 대비 큰 폭의 성장세로, 시즌 진입 또는 마케팅 효과가 반영된 것으로 보입니다. ';
-    else if (wowPct > 0) wowFeedback += '소폭 성장 중입니다. 웨딩 시즌 진행에 따른 자연 증가로 판단됩니다. ';
-    else if (wowPct > -20) wowFeedback += '소폭 하락이나 정상 변동 범위입니다. 요일별 편차가 ±15% 이내이면 안정적입니다. ';
-    else wowFeedback += '전주 대비 큰 폭의 감소입니다. 시즌 전환기이거나 외부 요인(연휴, 날씨 등)을 확인해보세요. ';
-  }
-  // 요일별 특성 코멘트
+  // 동기간 일수 (오늘이 일요일이면 1, 토요일이면 7)
   const dowIdx = new Date().getDay();
-  if (dowIdx === 0 || dowIdx === 6) wowFeedback += '📌 주말은 예식 당일이 집중되어 답례품 주문보다 <strong>예식 전 사전주문</strong>이 더 중요한 지표입니다.';
-  else if (dowIdx === 1) wowFeedback += '📌 월요일은 주말 예식 후 후속 주문이 몰리는 패턴이 있어 WoW 변동이 클 수 있습니다.';
-  else if (dowIdx >= 2 && dowIdx <= 4) wowFeedback += '📌 화~목은 주중 안정 구간으로, WoW 비교의 신뢰도가 가장 높은 요일대입니다.';
-  else wowFeedback += '📌 금요일은 주말 예식 직전 마감 주문이 발생하는 시점입니다.';
+  const periodDays = dowIdx + 1;
+
+  let wowFeedback = '';
+  if (lw.total_amount === 0 && tw.total_amount === 0) {
+    wowFeedback = `지난주/이번주 동기간(일~${dow}, ${periodDays}일) 모두 매출이 없습니다.`;
+  } else if (lw.total_amount === 0) {
+    wowFeedback = `지난주 동기간엔 매출이 없었으나, 이번주 누적은 <strong>${fmtKRW(tw.total_amount)}</strong>입니다.`;
+  } else {
+    wowFeedback = `이번주 일~${dow}(${periodDays}일) 누적 기준 WoW <strong>${wowPct > 0 ? wowPct+'% 성장' : Math.abs(wowPct)+'% 감소'}</strong>. `;
+    if (wowPct > 20) wowFeedback += '지난주 대비 큰 폭의 성장세로, 시즌 진입 또는 마케팅 효과가 반영된 것으로 보입니다. ';
+    else if (wowPct > 0) wowFeedback += '소폭 성장 중입니다. 웨딩 시즌 진행에 따른 자연 증가로 판단됩니다. ';
+    else if (wowPct > -20) wowFeedback += '소폭 하락이나 정상 변동 범위입니다. 동기간 편차가 ±15% 이내이면 안정적입니다. ';
+    else wowFeedback += '지난주 대비 큰 폭의 감소입니다. 시즌 전환기이거나 외부 요인(연휴, 날씨 등)을 확인해보세요. ';
+  }
+  // 주중 위치 코멘트 (누적이라 의미 약간 다름)
+  if (periodDays <= 2) wowFeedback += '📌 주 초반(1~2일)은 표본이 작아 변동성이 큽니다. 주 중후반에 트렌드가 명확해집니다.';
+  else if (periodDays <= 5) wowFeedback += '📌 주 중반은 동기간 비교의 신뢰도가 높아지는 시점입니다.';
+  else wowFeedback += '📌 주말 누적은 주중 예약 마감 + 당일 예식 주문이 합산돼 WoW 변동폭이 가장 큽니다.';
 
   document.getElementById('wow-feedback').innerHTML = wowFeedback;
 }
