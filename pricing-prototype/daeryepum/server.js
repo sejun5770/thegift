@@ -416,9 +416,11 @@ async function apiOrders(query) {
   const startDate = query.start_date || fmtDate(addDays(today(), -7));
   const endDate = query.end_date || fmtDate(addDays(today(), 1));
   const categoryFilter = getCategoryFilter(query.category);
-  // 카테고리별 cardDiv — ETC item_amount 의 쿠폰 분배 분모로 사용 (H1 fix v2).
+  // 카테고리별 cardDiv — ETC coupon 분배 분모로 사용.
+  // 주문조회 화면: item_amount 는 gross(쿠폰 X), coupon_price 는 ecd.item_count 로 분배 표시.
+  // (Dashboard 등 집계 쿼리는 별도로 etcAmountExpr 사용)
   const categoryCfg = CATEGORY_FILTERS[query.category] || CATEGORY_FILTERS.daeryepum;
-  const etcAmountForCategory = etcAmountExpr(categoryCfg.cardDiv);
+  const etcAmountGross = etcAmountGrossExpr();
   const etcCouponDivisorForCategory = etcCouponDivisorJoin(categoryCfg.cardDiv);
 
   const result = await p.request()
@@ -455,9 +457,9 @@ async function apiOrders(query) {
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
         oi.order_count AS item_count,
-        ${etcAmountForCategory} AS item_amount,
+        ${etcAmountGross} AS item_amount,
         o.settle_price AS settle_price,
-        ISNULL(o.coupon_price, 0) AS coupon_price,
+        ISNULL(o.coupon_price, 0) * 1.0 / ISNULL(NULLIF(ecd.item_count, 0), 1) AS coupon_price,
         o.status_seq AS status_seq,
         cw.event_year + '-' + RIGHT('0'+cw.event_month,2) + '-' + RIGHT('0'+cw.event_Day,2) AS wedding_date,
         ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
@@ -620,6 +622,20 @@ function etcAmountExpr(cardDiv = 'D01') {
          - ISNULL(o.coupon_price, 0) * 1.0 / NULLIF(ecd.item_count, 0)
     ELSE CAST(oi.card_sale_price AS float)
          - ISNULL(o.coupon_price, 0) * 1.0 / NULLIF(ecd.item_count, 0)
+  END`;
+}
+
+/**
+ * ETC 행 단위 정가 식 (쿠폰 분배 X) — 주문조회 화면 표시용.
+ *   주문조회 결제금액 컬럼은 정가만 표시하고, 쿠폰할인은 별도 컬럼에서 ecd.item_count 로 분배 표시.
+ *   (집계 쿼리는 etcAmountExpr 사용 — coupon 1회 차감 정확성 유지)
+ */
+function etcAmountGrossExpr() {
+  return `
+  CASE
+    WHEN si.SiteName IS NULL
+    THEN CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+    ELSE CAST(oi.card_sale_price AS float)
   END`;
 }
 
