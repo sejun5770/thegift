@@ -6815,7 +6815,13 @@ async function loadBgUnified() {
 
   // 각 API 응답을 개별적으로 포착하여 어느 쪽이 실패했는지 진단 가능
   try {
-    const [ordersRes, ciRes] = await Promise.allSettled([
+    // 상품설정도 함께 fetch (수집복사 시 ERP 변형 코드 → 매핑된 base 코드로 치환용).
+    //   이미 로드돼 있으면 재요청 안 함.
+    const productSettingsPromise = bgProductSettings.length
+      ? Promise.resolve(null)
+      : fetch(`${API}/api/bg/products/settings`).then(r => r.ok ? r.json() : { settings: [] });
+
+    const [ordersRes, ciRes, psRes] = await Promise.allSettled([
       fetch(`${API}/api/orders?start_date=${start}&end_date=${endPlus}&category=daeryepum`).then(r => {
         if (!r.ok) throw new Error(`orders API ${r.status}`);
         return r.json();
@@ -6824,7 +6830,13 @@ async function loadBgUnified() {
         if (!r.ok) throw new Error(`customer-infos API ${r.status}`);
         return r.json();
       }),
+      productSettingsPromise,
     ]);
+    if (psRes.status === 'fulfilled' && psRes.value) {
+      bgProductSettings = psRes.value.settings || [];
+    } else if (psRes.status === 'rejected') {
+      console.warn('[loadBgUnified] product settings 로드 실패 (수집복사 시 원본 코드 사용):', psRes.reason);
+    }
 
     if (ordersRes.status === 'rejected') {
       console.error('[loadBgUnified] orders 실패:', ordersRes.reason);
@@ -7565,6 +7577,31 @@ async function bulkSendAlimtalkViaSp() {
   }
 }
 
+/**
+ * 주문 상품코드(ERP 변형 포함) → 상품설정에 매핑된 product_id 로 resolve.
+ *   서버 lookupProductSettings 와 동일 정책 — 정확 일치 우선, 실패하면 _suffix 를
+ *   최대 3회 떼면서 재탐색. 끝까지 매칭 안 되면 원본 코드 반환.
+ *   bgProductSettings 가 비어있으면 (로드 실패 등) 원본 그대로.
+ */
+function resolveBgMappedProductCode(rawCode) {
+  if (!rawCode) return rawCode || '';
+  if (!Array.isArray(bgProductSettings) || bgProductSettings.length === 0) return rawCode;
+  const findById = (code) => bgProductSettings.find(p => p.product_id === code);
+  const direct = findById(rawCode);
+  if (direct) return direct.product_id;
+  let cur = rawCode;
+  for (let i = 0; i < 3; i++) {
+    const m = String(cur).match(/^(.+)_[A-Za-z0-9]+$/);
+    if (!m) break;
+    const base = m[1];
+    if (base === cur) break;
+    const hit = findById(base);
+    if (hit) return hit.product_id;
+    cur = base;
+  }
+  return rawCode;
+}
+
 function copyBgUnified() {
   const checked = [...document.querySelectorAll('.uni-row-check:checked')];
   if (!checked.length) { showToast('복사할 행을 선택해주세요'); return; }
@@ -7572,7 +7609,7 @@ function copyBgUnified() {
   const selectedRows = checked.map(cb => bgUnifiedRows[parseInt(cb.dataset.idx)]);
 
   // 23열 구조: A='', B=택배, C=일반, D=주문번호, E=수령인, F=연락처, G='', H=배송지, I='',
-  //            J=상품명, K=상품코드, L=박스코드, M=스티커코드(수량), N='', O='',
+  //            J=상품명, K=품목코드(상품설정 매핑 후), L=박스코드, M=스티커코드(수량), N='', O='',
   //            P=스티커 문구(고객 입력), Q=배송메세지(MSSQL recv_msg), R='', S='', T=주문수량,
   //            U='', V=희망출고일(빠른출고시 짙은빨강), W=희망출고일
   const buildCells = ({ order, ci, sel, product_code, product_name, product_qty }) => {
@@ -7585,7 +7622,11 @@ function copyBgUnified() {
     cells[7] = order.recv_address || '';
     // 상품명/코드/수량: 행 단위로 이미 제공됨 (상품별 분리)
     cells[9] = sel?.product_name || product_name || '';
-    cells[10] = sel?.product_code || product_code || '';
+    // K열 = 품목코드 — 고객 주문 ERP 코드(변형 포함)를 상품설정 매핑된 product_id 로 치환.
+    //   예) 고객 주문 'TGJSD0104_B' → 상품설정에 'TGJSD0104' 등록돼 있으면 'TGJSD0104' 출력.
+    //   매칭 실패 또는 상품설정 미로드 시 원본 코드 그대로.
+    const rawCode = sel?.product_code || product_code || '';
+    cells[10] = resolveBgMappedProductCode(rawCode);
     // L열(index 11) = 박스 코드 (수량 미포함)
     if (sel?.box_code) cells[11] = sel.box_code;
     if (sel?.sticker_code) {
