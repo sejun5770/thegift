@@ -1658,6 +1658,17 @@ async function apiForecast() {
     avg_order_value: w.actual_orders > 0 ? Math.round(w.actual_weekly_revenue / w.actual_orders) : 0,
   }));
 
+  // 이동평균에 실제 사용된 기간 (일-토 기준) — 프론트엔드에서 카드/툴팁에 명시 노출
+  const basePeriodStart = baseWeeks.length ? baseWeeks[0].week_start : null;       // 가장 오래된 주의 일요일
+  const basePeriodEnd   = baseWeeks.length ? baseWeeks[baseWeeks.length - 1].week_end : null; // 가장 최근 주의 토요일
+  const basePeriodLabel = (basePeriodStart && basePeriodEnd)
+    ? (() => {
+        // 'M/D ~ M/D' 형식 (일-토 기준임을 명시)
+        const fmtMD = (s) => { const [y,m,d] = s.split('-'); return `${parseInt(m)}/${parseInt(d)}`; };
+        return `${fmtMD(basePeriodStart)} ~ ${fmtMD(basePeriodEnd)}`;
+      })()
+    : null;
+
   return {
     model: {
       type: 'weighted_moving_average',
@@ -1667,6 +1678,9 @@ async function apiForecast() {
       avg_order_value: Math.round(avgOrderValue),
       base_active_weeks: baseWeeks.length,
       base_week_labels: baseWeeks.map(w => w.week_no + '주차'),
+      base_period_start: basePeriodStart,    // 'YYYY-MM-DD' (일요일)
+      base_period_end:   basePeriodEnd,      // 'YYYY-MM-DD' (토요일)
+      base_period_label: basePeriodLabel,    // 'M/D ~ M/D' (한글 카드 표기용)
       base_total_revenue: baseTotalRevenue,
       base_total_orders: baseTotalOrders,
       base_total_weddings: baseTotalWeddings,
