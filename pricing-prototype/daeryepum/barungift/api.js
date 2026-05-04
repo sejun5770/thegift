@@ -410,9 +410,10 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
   }
 
-  // GET /api/bg/debug/card-divs - S2_Card 의 Card_Div 분포 조회 (카테고리 식별용, 인증 불필요)
-  //   query.code (선택): 특정 Card_Code 의 Card_Div 단일 조회. 예) ?code=photo_print
-  //   인증 게이트(아래 약 line 467) 앞에 위치 — 운영팀이 admin 로그인 없이 콘솔에서 빠르게 진단 가능.
+  // GET /api/bg/debug/card-divs - S2_Card 의 카테고리 컬럼 진단 (인증 불필요)
+  //   query.code (선택): 특정 Card_Code 매칭 행의 *모든* 컬럼 반환 (S2_Card 의 어떤 컬럼이
+  //     데코소품을 식별하는지 모르므로 SELECT *).
+  //   query.code 없으면 Card_Div 별 카운트 + 샘플 (분포).
   if (pathname === '/api/bg/debug/card-divs' && method === 'GET') {
     try {
       const pool = await getPool();
@@ -421,11 +422,19 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         const r = await pool.request()
           .input('code', sql.VarChar, code)
           .query(`
-            SELECT TOP 5 Card_Code, Card_Name, Card_Div, Sub_Div
+            SELECT TOP 3 *
             FROM S2_Card WITH (NOLOCK)
             WHERE Card_Code LIKE '%' + @code + '%'
           `);
-        return json(res, { matches: r.recordset });
+        // 운영팀 진단 편의 — 빈 값/null 컬럼 제거해 응답 가독성 향상
+        const cleaned = r.recordset.map(row => {
+          const out = {};
+          for (const [k, v] of Object.entries(row)) {
+            if (v !== null && v !== '' && v !== 0) out[k] = v;
+          }
+          return out;
+        });
+        return json(res, { matches: cleaned });
       }
       // Card_Div 별 샘플 + 건수 (D01/D02 외 무엇이 있는지 확인)
       const r = await pool.request().query(`
