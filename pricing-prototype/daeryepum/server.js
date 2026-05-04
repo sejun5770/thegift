@@ -39,6 +39,17 @@ function getSession(signedId) {
   return session;
 }
 
+/**
+ * 관리자 debug/PII 라우트 감사 로그 — Docker 로그(stdout)로 기록.
+ * 누가(이메일) 어떤 endpoint 를 어떤 파라미터로 호출했는지 추적용.
+ * 외부 audit log DB 와 별개 (daeryepum admin 컨텍스트, bg_customer_access_log 와 분리).
+ */
+function logAdminAccess(session, req, action, params = {}) {
+  const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket?.remoteAddress || '?';
+  const admin = session?.email || 'unknown';
+  console.log(`[ADMIN_AUDIT] ${new Date().toISOString()} email=${admin} ip=${ip} action=${action} params=${JSON.stringify(params)}`);
+}
+
 function destroySession(signedId) {
   if (!signedId || !signedId.includes('.')) return;
   sessions.delete(signedId.split('.')[0]);
@@ -416,6 +427,18 @@ async function apiOrders(query) {
   const startDate = query.start_date || fmtDate(addDays(today(), -7));
   const endDate = query.end_date || fmtDate(addDays(today(), 1));
   const categoryFilter = getCategoryFilter(query.category);
+  // L5: 호출자가 status 필터를 SQL 단에서 적용하도록 옵션 제공.
+  //   기본 빈배열 → 모든 status 반환 (주문조회 UI 호환).
+  //   /api/export/orders 는 [3,5] 전달 → cancelled/draft 미전송 (네트워크 절약).
+  const excludeRaw = query.exclude_status_seq || '';
+  const excludeStatusList = String(excludeRaw)
+    .split(',').map(s => parseInt(s.trim(), 10)).filter(n => Number.isInteger(n));
+  const statusExcludeClause = excludeStatusList.length
+    ? `AND o.status_seq NOT IN (${excludeStatusList.join(',')})`
+    : '';
+  const statusExcludeClauseCo = excludeStatusList.length
+    ? `AND co.status_seq NOT IN (${excludeStatusList.join(',')})`
+    : '';
   // 카테고리별 cardDiv — ETC coupon 분배 분모로 사용.
   // 주문조회 화면: item_amount 는 gross(쿠폰 X), coupon_price 는 ecd.item_count 로 분배 표시.
   // (Dashboard 등 집계 쿼리는 별도로 etcAmountExpr 사용)
@@ -481,6 +504,7 @@ async function apiOrders(query) {
       WHERE ${categoryFilter}
         AND o.order_date >= @startDate AND o.order_date < @endDate
         AND o.status_seq >= 1
+        ${statusExcludeClause}
 
       UNION ALL
 
@@ -535,6 +559,7 @@ async function apiOrders(query) {
       WHERE ${categoryFilter}
         AND co.order_date >= @startDate AND co.order_date < @endDate
         AND co.status_seq >= 1
+        ${statusExcludeClauseCo}
 
       ORDER BY order_date DESC, order_seq DESC
     `);
@@ -1032,7 +1057,8 @@ async function apiDashboardComparison() {
       let totalExpressFee = 0;
       expressInfos.forEach(ci => {
         const oid = String(ci.order_id || '');
-        totalExpressFee += parseInt(ci.express_fee) || 0;
+        // L7: 음수/NaN 가드 — 잘못된 입력으로 매출 차감 방지
+        totalExpressFee += Math.max(0, parseInt(ci.express_fee) || 0);
         if (oid.startsWith('ETC-')) {
           const seq = parseInt(oid.slice(4));
           if (seq) etcSeqs.push(seq);
@@ -1478,7 +1504,8 @@ async function apiExpressAnalysis(query) {
     const total = inRange.length;
     const expressInfos = inRange.filter(ci => ci.is_express);
     const expressCount = expressInfos.length;
-    const totalExpressFee = expressInfos.reduce((s, ci) => s + (parseInt(ci.express_fee) || 0), 0);
+    // L7: 음수/NaN 가드 — 잘못된 입력으로 매출 차감 방지
+    const totalExpressFee = expressInfos.reduce((s, ci) => s + Math.max(0, parseInt(ci.express_fee) || 0), 0);
     const adoptionRate = total > 0 ? (expressCount / total * 100) : 0;
     const avgExpressFee = expressCount > 0 ? Math.round(totalExpressFee / expressCount) : 0;
 
@@ -2609,10 +2636,10 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     try {
-      const data = await apiOrders(parsed.query);
-      const filtered = data.filter(r => r.status_seq !== 3 && r.status_seq !== 5);
+      // L5: status 3/5 제외를 SQL WHERE 로 푸시 — 네트워크/메모리 절약.
+      const data = await apiOrders({ ...parsed.query, exclude_status_seq: '3,5' });
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify(filtered));
+      res.end(JSON.stringify(data));
     } catch (err) {
       console.error('Export API Error:', err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -2654,6 +2681,7 @@ const server = http.createServer(async (req, res) => {
       } else if (pathname === '/api/debug-order') {
         // 주문 원시 데이터 확인용 (order_seq 파라미터)
         const seq = parseInt(parsed.query.order_seq);
+        logAdminAccess(session, req, 'debug-order', { order_seq: seq });
         if (seq) {
           const pp = await getPool();
           const etc = await pp.request().input('seq', sql.Int, seq).query(`
@@ -2701,6 +2729,7 @@ const server = http.createServer(async (req, res) => {
         // URL: /api/debug-login-match?uid=sweetloves20&order_seq=3244813
         const dbgUid = (parsed.query.uid || '').trim();
         const dbgSeq = parseInt(parsed.query.order_seq);
+        logAdminAccess(session, req, 'debug-login-match', { uid: dbgUid, order_seq: dbgSeq });
         if (!dbgUid || !dbgSeq) {
           data = { error: 'uid + order_seq 둘 다 필요. 예: /api/debug-login-match?uid=sweetloves20&order_seq=3244813' };
         } else {

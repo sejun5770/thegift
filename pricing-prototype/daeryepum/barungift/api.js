@@ -460,6 +460,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   //   admin 게이트 뒤로 이동. 어떤 frontend 에서도 호출하지 않는 순수 디버그 라우트.
   if (pathname === '/api/bg/debug/schema' && method === 'GET') {
     const tableName = query.table || 'custom_order';
+    // L6: admin 감사 로그 — 누가 어떤 테이블 schema 를 조회했는지 추적
+    logAccess(req, 'debug_schema', null, { metadata: { table: tableName } });
     try {
       const pool = await getPool();
       const result = await pool.request()
@@ -943,12 +945,23 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   //   - template_name 은 body 로 override 가능 (기본 '답례품_주문완료')
   //   본 admin alimtalk.js 발송과 달리 발송 이력은 SP 측 시스템에 기록됨.
   if (pathname === '/api/bg/alimtalk/send-via-sp' && method === 'POST') {
+    // M7: rate limit — SMS 비용 폭증 가드 (5분당 5회)
+    const rlAlim = rlCheck(req, 'alimtalk_send', RL_LIMITS.alimtalk_send);
+    if (!rlAlim.allowed) {
+      logAccess(req, 'rate_limited', null, { status_code: 429, metadata: { action: 'alimtalk_send', retry_after: rlAlim.retryAfterSec } });
+      return rateLimitResponse(res, rlAlim);
+    }
     try {
       const body = await parseBody(req);
       const orderIds = Array.isArray(body.order_ids) ? body.order_ids : [];
       const templateName = (body.template_name || '답례품_주문완료').trim();
       if (orderIds.length === 0) return json(res, { error: '발송할 주문을 선택해주세요.' }, 400);
       if (orderIds.length > 200) return json(res, { error: '한 번에 최대 200건까지 가능합니다.' }, 400);
+
+      // M7: 발송 시작 시점 audit log — 누가 어떤 템플릿으로 몇 건 발송 시도했는지 추적
+      logAccess(req, 'alimtalk_send_start', null, {
+        metadata: { template: templateName, order_count: orderIds.length },
+      });
 
       const pool = await getPool();
       const results = [];
@@ -985,9 +998,16 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         failed: results.filter(r => !r.success).length,
         template: templateName,
       };
+      // M7: 발송 결과 audit log — sent/failed 수 추적
+      logAccess(req, 'alimtalk_send_done', null, {
+        metadata: { ...summary },
+      });
       return json(res, { summary, results });
     } catch (err) {
       console.error('alimtalk send-via-sp error:', err.message);
+      logAccess(req, 'alimtalk_send_error', null, {
+        status_code: 500, metadata: { error: err.message },
+      });
       return json(res, { error: 'SP 발송 실패: ' + err.message }, 500);
     }
   }

@@ -416,7 +416,7 @@ nav a:hover{color:var(--gray-900)}
           <strong style="color:#fbbf24">예식 윈도우:</strong> 본주 시작 −14일 ~ 본주 끝 +7일 (28일, 비대칭 4주)<br>
           <span style="color:#94a3b8;font-size:11px">└ 예: 본주 4/26~5/2 → 예식 윈도우 4/12~5/9</span><br>
           <span style="color:#94a3b8;font-size:11px">└ 답례품은 예식 전 주문이 대부분이라 미래쪽 1주, 과거쪽 2주(늦은 주문 반영)</span><br>
-          <strong style="color:#fbbf24">전환율:</strong> 최근 4주간(일~토) 답례품 주문건수 ÷ 예식 윈도우 건수<br>
+          <strong style="color:#fbbf24">전환율:</strong> 최근 4주간(일~토) 답례품 주문건수 ÷ 비대칭 예식 윈도우(−14~+7일) 건수<br>
           <strong style="color:#fbbf24">객단가:</strong> 최근 4주간(일~토) 답례품 매출 ÷ 답례품 주문건수<br>
           <strong style="color:#fbbf24">가중치:</strong> 가장 최근 주가 가장 큰 가중치 (선형: 1, 2, 3, 4)<br><br>
           <strong>한계:</strong> 최근 4주 실적 기반이라 시즌 전환·마케팅 캠페인 효과는 후행 반영됩니다. 회원이 예식일을 입력하지 않은 경우 분모에서 제외됩니다.
@@ -2995,9 +2995,13 @@ function renderComparison(cmp) {
   const $yeSplit = document.getElementById('cmp-y-express-split');
   if ($yeSplit) {
     const hasYeSplit = (yeCo.orders || 0) > 0 || (yeCo.amount || 0) > 0;
-    $yeSplit.textContent = hasYeSplit
-      ? `(동시 ${fmtNum(yeCo.orders)}건 / 단독 ${fmtNum((ye.standalone||{}).orders||0)}건)`
-      : '';
+    if (hasYeSplit) {
+      $yeSplit.textContent = `(동시 ${fmtNum(yeCo.orders)}건 / 단독 ${fmtNum((ye.standalone||{}).orders||0)}건)`;
+      $yeSplit.style.display = '';
+    } else {
+      $yeSplit.textContent = '';
+      $yeSplit.style.display = 'none';
+    }
   }
   // 빠른출고 사이트별 세분화 — by_site 를 일반 매출과 동일한 구조로 재사용
   renderSiteBreakdown({ by_site: te.by_site || {} }, 'cmp-t-express');
@@ -4283,8 +4287,6 @@ function getWeekStartStr(dateStr) {
   sunday.setDate(d.getDate() - day);
   return sunday.toISOString().slice(0,10);
 }
-// 레거시 별칭 — 기존 호출처가 있을 수 있어 유지하지만 신규 코드는 getWeekStartStr 사용.
-const getWeekMondayStr = getWeekStartStr;
 
 function getISOWeekFromStr(dateStr) {
   const d = new Date(dateStr);
@@ -4726,7 +4728,7 @@ function renderWeeklyTable(data, topProducts) {
     return weekGroupTypeMap[wk][group];
   }
   data.forEach(r => {
-    const wk = getWeekMondayStr(r.order_day);
+    const wk = getWeekStartStr(r.order_day);
     const name = (r.card_name||'').replace(/^\[.*?\]\s*/g,'');
     const sn = r.site_name || '기타';
     const group = getSiteGroup(sn);
@@ -4759,7 +4761,7 @@ function renderWeeklyTable(data, topProducts) {
   });
   // 주문번호 기준 건수 (dashboardOrderCounts에서 집계)
   dashboardOrderCounts.forEach(r => {
-    const wk = getWeekMondayStr(r.order_day);
+    const wk = getWeekStartStr(r.order_day);
     const sn = r.site_name || '기타';
     const group = getSiteGroup(sn);
     if (!weekMap[wk]) weekMap[wk] = { amount:0, qty:0, orders:0, products:{} };
@@ -4974,7 +4976,7 @@ function renderWeeklyTable(data, topProducts) {
   // 주별 빠른출고 주차×그룹×유형 매출 — 주문유형별 sub-row 로 표시 (renderDailyTable 동일 패턴)
   const weekExpressGroupType = {};
   (dashboardExpressDaily || []).forEach(r => {
-    const wk = getWeekMondayStr(r.order_day);
+    const wk = getWeekStartStr(r.order_day);
     const group = getSiteGroup(r.site_name || '기타');
     const typeKey = r.is_copurchase ? 'copurchase' : 'standalone';
     if (!weekExpressGroupType[wk]) weekExpressGroupType[wk] = {};
@@ -6815,7 +6817,13 @@ function setBgUnifiedProgress(stepText) {
   if (prog) prog.textContent = stepText;
 }
 
+// 활성 fetch 들의 AbortController — 중첩 호출 시 이전 응답 무시 (race condition 방지).
+let _bgUnifiedAbort = null;
 async function loadBgUnified() {
+  if (_bgUnifiedAbort) _bgUnifiedAbort.abort();
+  _bgUnifiedAbort = new AbortController();
+  const signal = _bgUnifiedAbort.signal;
+
   showBgUnifiedSkeleton('1/3 데이터 조회 시작...');
   document.getElementById('uni-table-wrap').style.display = 'none';
 
@@ -6855,19 +6863,20 @@ async function loadBgUnified() {
     //   이미 로드돼 있으면 재요청 안 함.
     const productSettingsPromise = bgProductSettings.length
       ? Promise.resolve(null)
-      : fetch(`${API}/api/bg/products/settings`).then(r => r.ok ? r.json() : { settings: [] });
+      : fetch(`${API}/api/bg/products/settings`, { signal }).then(r => r.ok ? r.json() : { settings: [] });
 
     const [ordersRes, ciRes, psRes] = await Promise.allSettled([
-      fetch(`${API}/api/orders?start_date=${start}&end_date=${endPlus}&category=daeryepum`).then(r => {
+      fetch(`${API}/api/orders?start_date=${start}&end_date=${endPlus}&category=daeryepum`, { signal }).then(r => {
         if (!r.ok) throw new Error(`orders API ${r.status}`);
         return r.json();
       }),
-      fetch(`${API}/api/bg/customer-infos`).then(r => {
+      fetch(`${API}/api/bg/customer-infos`, { signal }).then(r => {
         if (!r.ok) throw new Error(`customer-infos API ${r.status}`);
         return r.json();
       }),
       productSettingsPromise,
     ]);
+    if (signal.aborted) return; // 새 호출이 시작됐으면 이전 응답 무시
     if (psRes.status === 'fulfilled' && psRes.value) {
       bgProductSettings = psRes.value.settings || [];
     } else if (psRes.status === 'rejected') {
@@ -6925,6 +6934,7 @@ async function loadBgUnified() {
 
     renderBgUnified();
   } catch (e) {
+    if (e.name === 'AbortError' || signal.aborted) return; // 새 호출에 의해 취소됨 — 무시
     console.error('[loadBgUnified] 예상치 못한 오류:', e);
     $loading.textContent = '불러오기 실패: ' + e.message;
   }

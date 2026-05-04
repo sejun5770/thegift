@@ -312,10 +312,13 @@ async function saveCustomerInfo(orderId, data) {
   const existing = await getCustomerInfo(orderId);
   if (existing) throw new Error('ALREADY_SUBMITTED');
 
+  // L7: express_fee 음수/NaN 가드 — 입력 검증으로 잘못된 데이터 저장 방지
+  const sanitizedExpressFee = Math.max(0, parseInt(data.express_fee, 10) || 0);
+
   const info = {
     order_id: orderId,
     is_express: data.is_express || false,
-    express_fee: data.express_fee || 0,
+    express_fee: sanitizedExpressFee,
     desired_ship_date: data.desired_ship_date,
     sticker_selections: data.sticker_selections || [],
     cash_receipt_yn: data.cash_receipt_yn || false,
@@ -377,6 +380,8 @@ async function updateCustomerInfo(orderId, data) {
   const allowed = ['desired_ship_date', 'is_express', 'express_fee', 'sticker_selections', 'cash_receipt_yn', 'receipt_type', 'receipt_number', 'customer_request'];
   const patch = {};
   for (const k of allowed) { if (k in data) patch[k] = data[k]; }
+  // L7: express_fee 음수/NaN 가드
+  if ('express_fee' in patch) patch.express_fee = Math.max(0, parseInt(patch.express_fee, 10) || 0);
   patch.updated_at = now();
 
   const existing = await getCustomerInfo(orderId);
