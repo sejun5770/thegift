@@ -1539,6 +1539,7 @@ async function apiForecast() {
           CONVERT(varchar(10), TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date), 120) AS wedd_date
         FROM S2_UserInfo u WITH (NOLOCK)
         WHERE u.site_div = 'SB'
+          AND u.USE_YORN = 'Y'  -- H4 fix: 탈퇴 회원 제외 (활성 회원만 분모에 포함)
           AND u.wedd_year IS NOT NULL AND LEN(u.wedd_year) = 4
           AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) >= @ws
           AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) < @we
@@ -1931,6 +1932,7 @@ async function apiConversion() {
         FROM S2_UserInfo u WITH (NOLOCK)
         LEFT JOIN SiteInfo si ON u.REFERER_SALES_GUBUN = si.SiteCode
         WHERE u.site_div = 'SB'
+          AND u.USE_YORN = 'Y'  -- H4 fix: 탈퇴 회원 제외 (활성 회원만 분모에 포함)
           AND u.wedd_year IS NOT NULL AND LEN(u.wedd_year) = 4
           AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) >= @ws
           AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) < @we
