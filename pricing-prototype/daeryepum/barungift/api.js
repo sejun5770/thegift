@@ -410,8 +410,9 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
   }
 
-  // GET /api/bg/debug/card-divs - S2_Card 의 Card_Div 분포 조회 (카테고리 식별용)
-  //   query.code (선택): 특정 Card_Code 의 Card_Div 단일 조회. 예) ?code=photo_print_07
+  // GET /api/bg/debug/card-divs - S2_Card 의 Card_Div 분포 조회 (카테고리 식별용, 인증 불필요)
+  //   query.code (선택): 특정 Card_Code 의 Card_Div 단일 조회. 예) ?code=photo_print
+  //   인증 게이트(아래 약 line 467) 앞에 위치 — 운영팀이 admin 로그인 없이 콘솔에서 빠르게 진단 가능.
   if (pathname === '/api/bg/debug/card-divs' && method === 'GET') {
     try {
       const pool = await getPool();
