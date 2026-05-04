@@ -238,9 +238,13 @@ function formatSiteName(siteName) {
 }
 
 // 카테고리 필터 정의
+//   Card_Div 코드 (S2_Card 테이블):
+//     D01 = 답례품, D02 = 꽃다발, C29 = 데코소품(웨딩포스터/스티커/아크릴/photo_print 등)
+//   이전 deco 필터는 'Card_Code LIKE 2026_%' prefix 였으나 photo_print_* 등 누락 발생 →
+//   Card_Div 기준으로 정정 (C29 는 운영 진단으로 확인).
 const CATEGORY_FILTERS = {
   daeryepum: { label: '답례품', filter: `c.Card_Div = 'D01'` },
-  deco:      { label: '데코소품', filter: `c.Card_Code LIKE '2026_%'` },
+  deco:      { label: '데코소품', filter: `c.Card_Div = 'C29'` },
   flower:    { label: '꽃다발', filter: `c.Card_Div = 'D02'` },
 };
 // D01 category = 답례품 (기본, 대시보드용)
