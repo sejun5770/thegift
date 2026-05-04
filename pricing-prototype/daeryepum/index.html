@@ -1493,6 +1493,7 @@ nav a:hover{color:var(--gray-900)}
       <div style="flex:1"></div>
       <!-- 액션 버튼들 — 선택 상태에 따라 지능적으로 show/hide -->
       <button class="btn" id="uni-btn-copy" onclick="copyBgUnified()" style="padding:6px 12px;font-size:12px;display:none">📋 수집복사</button>
+      <button class="btn" id="uni-btn-send-alimtalk" onclick="bulkSendAlimtalkViaSp()" style="padding:6px 12px;font-size:12px;display:none;border-color:#fbbf24;color:#92400e;background:#fef9c3" title="선택된 미입력 주문에 답례품 정보 입력 안내 알림톡 발송 (SP_GIFT_ORDER_BIZTALK_PROC)">💬 <span id="uni-btn-send-alimtalk-label">알림톡 발송</span></button>
       <button class="btn btn-primary" id="uni-btn-mark-processed" onclick="bulkProcessedAction(true)" style="padding:6px 12px;font-size:12px;display:none" title="선택된 주문을 주문수집 완료로 처리 (복사 없이 마킹만)">📋 <span id="uni-btn-mark-processed-label">수집처리</span></button>
       <button class="btn" id="uni-btn-unmark-processed" onclick="bulkProcessedAction(false)" style="padding:6px 12px;font-size:12px;display:none;border-color:#fbbf24;color:#92400e;background:#fef3c7" title="선택된 주문의 주문수집 상태를 되돌림">↺ <span id="uni-btn-unmark-processed-label">되돌리기</span></button>
       <button class="btn" id="uni-btn-bulk-delete" onclick="bulkDeleteCustomerInfo()" style="padding:6px 12px;font-size:12px;display:none;border-color:#dc2626;color:#dc2626;background:#fef2f2" title="선택된 주문의 정보입력 데이터를 모두 삭제 (주문 자체는 유지). 잘못 backfill 된 데이터 정리용.">🗑️ <span id="uni-btn-bulk-delete-label">선택 삭제</span></button>
@@ -7176,10 +7177,12 @@ function updateBgUnifiedSelectedCount() {
   const btnUnmark = document.getElementById('uni-btn-unmark-processed');
   const btnDelete = document.getElementById('uni-btn-bulk-delete');
   const btnMarkManual = document.getElementById('uni-btn-mark-manual');
+  const btnSendAlimtalk = document.getElementById('uni-btn-send-alimtalk');
   const btnMarkLabel = document.getElementById('uni-btn-mark-processed-label');
   const btnUnmarkLabel = document.getElementById('uni-btn-unmark-processed-label');
   const btnDeleteLabel = document.getElementById('uni-btn-bulk-delete-label');
   const btnMarkManualLabel = document.getElementById('uni-btn-mark-manual-label');
+  const btnSendAlimtalkLabel = document.getElementById('uni-btn-send-alimtalk-label');
 
   // 선택 0 → 모두 숨김
   if (cnt === 0) {
@@ -7188,6 +7191,7 @@ function updateBgUnifiedSelectedCount() {
     if (btnUnmark) btnUnmark.style.display = 'none';
     if (btnDelete) btnDelete.style.display = 'none';
     if (btnMarkManual) btnMarkManual.style.display = 'none';
+    if (btnSendAlimtalk) btnSendAlimtalk.style.display = 'none';
     return;
   }
 
@@ -7235,18 +7239,18 @@ function updateBgUnifiedSelectedCount() {
       }
     }
   } else {
-    // 미입력 탭 — 수집처리/삭제 관련은 숨김, '수동 수집됨 표시' 만 노출
+    // 미입력 탭 — 수집처리/삭제 관련은 숨김, '수동 수집됨 표시' + '알림톡 발송' 노출
     btnMark.style.display = 'none';
     btnUnmark.style.display = 'none';
     if (btnDelete) btnDelete.style.display = 'none';
+    // ci 없는 (실제로 미입력인) 주문 — dedupe order_id 단위
+    const unsubmittedOrderIds = new Set();
+    checked.forEach(cb => {
+      const row = bgUnifiedRows[parseInt(cb.dataset.idx)];
+      if (row && !row.ci) unsubmittedOrderIds.add(row.order.order_seq);
+    });
+    const targetCnt = unsubmittedOrderIds.size;
     if (btnMarkManual) {
-      // ci 없는 (실제로 미입력인) 주문 — dedupe order_id 단위
-      const unsubmittedOrderIds = new Set();
-      checked.forEach(cb => {
-        const row = bgUnifiedRows[parseInt(cb.dataset.idx)];
-        if (row && !row.ci) unsubmittedOrderIds.add(row.order.order_seq);
-      });
-      const targetCnt = unsubmittedOrderIds.size;
       if (targetCnt > 0) {
         btnMarkManual.style.display = '';
         btnMarkManualLabel.textContent = `수동 수집됨 표시 (${targetCnt}건)`;
@@ -7254,9 +7258,21 @@ function updateBgUnifiedSelectedCount() {
         btnMarkManual.style.display = 'none';
       }
     }
+    // 알림톡 발송 (SP_GIFT_ORDER_BIZTALK_PROC) — 미입력 주문이 1건 이상일 때만 노출
+    if (btnSendAlimtalk) {
+      if (targetCnt > 0) {
+        btnSendAlimtalk.style.display = '';
+        btnSendAlimtalkLabel.textContent = `알림톡 발송 (${targetCnt}건)`;
+      } else {
+        btnSendAlimtalk.style.display = 'none';
+      }
+    }
   }
-  // 입력완료 탭에선 manual 버튼 숨김 (위 분기 외 케이스)
-  if (activeTab === 'submitted' && btnMarkManual) btnMarkManual.style.display = 'none';
+  // 입력완료 탭에선 manual / alimtalk 버튼 숨김 (위 분기 외 케이스)
+  if (activeTab === 'submitted') {
+    if (btnMarkManual) btnMarkManual.style.display = 'none';
+    if (btnSendAlimtalk) btnSendAlimtalk.style.display = 'none';
+  }
 }
 
 /**
@@ -7478,6 +7494,75 @@ async function bulkMarkAsManualCollected() {
     showToast(`✅ ${success}건 수동 수집됨으로 표시 완료`);
   }
   await loadBgUnified();
+}
+
+/**
+ * 미입력 주문에 정보입력 안내 알림톡 발송 (SP_GIFT_ORDER_BIZTALK_PROC).
+ *
+ *   백엔드 SP 호출 방식 — 바른손 백엔드의 기존 알림톡 디스패처 재사용.
+ *   - ETC- 접두 → 'E' (CUSTOM_ETC_ORDER), 그 외 → 'W' (custom_order)
+ *   - 템플릿: '답례품_주문완료'
+ *   - 선택된 행 중 ci 없는 (미입력) 주문만 대상 — order_id 단위 dedupe
+ */
+async function bulkSendAlimtalkViaSp() {
+  const checked = [...document.querySelectorAll('.uni-row-check:checked')];
+  if (!checked.length) { showToast('대상 주문을 선택해주세요'); return; }
+
+  // 미입력 주문만 추출 (ci 없는 행) + order_id dedupe
+  const seen = new Set();
+  const orderIds = [];
+  checked.forEach(cb => {
+    const row = bgUnifiedRows[parseInt(cb.dataset.idx)];
+    if (!row || row.ci) return; // ci 있으면 입력완료 → 제외
+    const oid = row.order.order_type === 'ETC' ? `ETC-${row.order.order_seq}` : String(row.order.order_seq);
+    if (seen.has(oid)) return;
+    seen.add(oid);
+    orderIds.push(oid);
+  });
+
+  if (!orderIds.length) {
+    showToast('미입력 주문이 없습니다 (이미 입력된 주문은 제외됨)');
+    return;
+  }
+
+  const preview = orderIds.slice(0, 5).join(', ') + (orderIds.length > 5 ? ` 외 ${orderIds.length - 5}건` : '');
+  const ok = confirm(
+    `💬 알림톡 발송\n\n` +
+    `${orderIds.length}건의 미입력 주문에 정보입력 안내 알림톡을 발송합니다.\n` +
+    `(SP_GIFT_ORDER_BIZTALK_PROC · 템플릿: 답례품_주문완료)\n\n` +
+    `대상 주문번호: ${preview}\n\n` +
+    `※ 발송 이력은 바른손 백엔드 시스템에 기록됩니다\n` +
+    `※ 동일 고객에게 중복 발송될 수 있으니 주의하세요\n\n` +
+    `진행하시겠습니까?`
+  );
+  if (!ok) return;
+
+  showToast(`발송 중... (0 / ${orderIds.length})`);
+  try {
+    const res = await fetch(API + '/api/bg/alimtalk/send-via-sp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ids: orderIds }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+    const s = data.summary || {};
+    if ((s.failed || 0) > 0) {
+      const failedSamples = (data.results || [])
+        .filter(r => !r.success)
+        .slice(0, 3)
+        .map(r => `${r.order_id}: ${r.error || '?'}`)
+        .join('\n');
+      console.warn('[alimtalk-sp] 실패 샘플:', failedSamples);
+      showToast(`${s.sent}건 발송 · ${s.failed}건 실패 (콘솔 확인)`);
+    } else {
+      showToast(`✅ ${s.sent}건 알림톡 발송 완료`);
+    }
+  } catch (e) {
+    console.error('[alimtalk-sp] 호출 실패:', e);
+    alert('알림톡 발송 실패: ' + e.message);
+  }
 }
 
 function copyBgUnified() {

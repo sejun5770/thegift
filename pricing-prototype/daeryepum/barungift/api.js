@@ -934,6 +934,62 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
   }
 
+  // POST /api/bg/alimtalk/send-via-sp - 백엔드 SP 호출 발송 (SP_GIFT_ORDER_BIZTALK_PROC)
+  //   바른손 백엔드의 기존 알림톡 디스패치 SP 를 직접 EXEC.
+  //   - ETC- 접두어 → 'E' (CUSTOM_ETC_ORDER 테이블, 부가상품 단독)
+  //   - 그 외       → 'W' (custom_order 테이블, 청첩장+답례품 동시구매 포함)
+  //   - template_name 은 body 로 override 가능 (기본 '답례품_주문완료')
+  //   본 admin alimtalk.js 발송과 달리 발송 이력은 SP 측 시스템에 기록됨.
+  if (pathname === '/api/bg/alimtalk/send-via-sp' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const orderIds = Array.isArray(body.order_ids) ? body.order_ids : [];
+      const templateName = (body.template_name || '답례품_주문완료').trim();
+      if (orderIds.length === 0) return json(res, { error: '발송할 주문을 선택해주세요.' }, 400);
+      if (orderIds.length > 200) return json(res, { error: '한 번에 최대 200건까지 가능합니다.' }, 400);
+
+      const pool = await getPool();
+      const results = [];
+      // 동시 호출은 SP/디스패처 부담 + 외부 알림톡 API rate-limit 고려해 직렬 처리.
+      for (const rawId of orderIds) {
+        const oid = String(rawId || '').trim();
+        if (!oid) {
+          results.push({ order_id: rawId, success: false, error: '빈 order_id' });
+          continue;
+        }
+        const isEtc = oid.startsWith('ETC-');
+        const seq = parseInt(isEtc ? oid.slice(4) : oid);
+        const orderType = isEtc ? 'E' : 'W';
+        if (!seq || isNaN(seq)) {
+          results.push({ order_id: oid, success: false, error: 'order_seq 파싱 실패' });
+          continue;
+        }
+        try {
+          await pool.request()
+            .input('order_seq', sql.Int, seq)
+            .input('order_type', sql.Char(1), orderType)
+            .input('template_name', sql.NVarChar, templateName)
+            .execute('SP_GIFT_ORDER_BIZTALK_PROC');
+          results.push({ order_id: oid, order_seq: seq, order_type: orderType, success: true });
+        } catch (e) {
+          console.warn('[send-via-sp] SP 호출 실패', oid, '-', e.message);
+          results.push({ order_id: oid, order_seq: seq, order_type: orderType, success: false, error: e.message });
+        }
+      }
+
+      const summary = {
+        total: results.length,
+        sent: results.filter(r => r.success).length,
+        failed: results.filter(r => !r.success).length,
+        template: templateName,
+      };
+      return json(res, { summary, results });
+    } catch (err) {
+      console.error('alimtalk send-via-sp error:', err.message);
+      return json(res, { error: 'SP 발송 실패: ' + err.message }, 500);
+    }
+  }
+
   // GET /api/bg/alimtalk/preview?orderId=... - 메시지 미리보기
   if (pathname === '/api/bg/alimtalk/preview' && method === 'GET') {
     try {
