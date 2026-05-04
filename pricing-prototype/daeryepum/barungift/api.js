@@ -410,6 +410,39 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
   }
 
+  // GET /api/bg/debug/card-divs - S2_Card 의 Card_Div 분포 조회 (카테고리 식별용)
+  //   query.code (선택): 특정 Card_Code 의 Card_Div 단일 조회. 예) ?code=photo_print_07
+  if (pathname === '/api/bg/debug/card-divs' && method === 'GET') {
+    try {
+      const pool = await getPool();
+      const code = query.code;
+      if (code) {
+        const r = await pool.request()
+          .input('code', sql.VarChar, code)
+          .query(`
+            SELECT TOP 5 Card_Code, Card_Name, Card_Div, Sub_Div
+            FROM S2_Card WITH (NOLOCK)
+            WHERE Card_Code LIKE '%' + @code + '%'
+          `);
+        return json(res, { matches: r.recordset });
+      }
+      // Card_Div 별 샘플 + 건수 (D01/D02 외 무엇이 있는지 확인)
+      const r = await pool.request().query(`
+        SELECT TOP 100
+          Card_Div,
+          COUNT(*) AS cnt,
+          MIN(Card_Code) AS sample_code,
+          MIN(Card_Name) AS sample_name
+        FROM S2_Card WITH (NOLOCK)
+        GROUP BY Card_Div
+        ORDER BY cnt DESC
+      `);
+      return json(res, { divs: r.recordset });
+    } catch (err) {
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
   // POST /api/bg/orders/:orderId/customer-info - 고객 입력 저장
   const customerInfoMatch = pathname.match(/^\/api\/bg\/orders\/([^/]+)\/customer-info$/);
   if (customerInfoMatch && method === 'POST') {
