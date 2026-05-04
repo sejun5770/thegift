@@ -1855,10 +1855,12 @@ async function apiLeadtime() {
     const etcOrders = etcOrdersRes.recordset;
     const memberIds = [...new Set(etcOrders.map(r => r.member_id).filter(Boolean))];
 
-    // === Step 2: member_id chunk 단위로 최신 청첩장 정보 lookup ===
-    //   member_id → wedding_date map. 한번에 너무 많으면 SQL parameter limit (max 2100) 초과 가능 → 500 chunk
+    // === Step 2: member_id chunk 단위로 청첩장 후보 lookup ===
+    //   이전: ROW_NUMBER로 회원당 최신 청첩장 1건만 선택 → 옛날 결혼식이 매칭돼 lead_days 음수
+    //         (예식후 주문) 비중이 과대 평가되는 데이터 정합성 문제 발생.
+    //   수정: 회원당 모든 청첩장 후보를 수집 → Step 3 JS 에서 주문일 기준 최적 매칭.
     const CHUNK = 500;
-    const memberWeddingMap = new Map(); // member_id → wedding_date (Date object or null)
+    const memberWeddingsMap = new Map(); // member_id → Array<Date> (해당 회원의 모든 결혼식 후보)
     for (let i = 0; i < memberIds.length; i += CHUNK) {
       const chunk = memberIds.slice(i, i + CHUNK);
       const req = p.request();
@@ -1867,35 +1869,49 @@ async function apiLeadtime() {
         req.input(name, sql.VarChar, String(chunk[idx]));
         return `@${name}`;
       }).join(',');
-      // ROW_NUMBER 로 회원당 최신 청첩장 1개 picking — CROSS APPLY 보다 훨씬 빠름
       const r = await req.query(`
-        SELECT member_id, wedding_date FROM (
-          SELECT
-            co2.member_id,
-            TRY_CAST(w2.event_year+'-'+RIGHT('0'+w2.event_month,2)+'-'+RIGHT('0'+w2.event_Day,2) AS date) AS wedding_date,
-            ROW_NUMBER() OVER (PARTITION BY co2.member_id ORDER BY co2.order_seq DESC) AS rn
-          FROM custom_order co2 WITH (NOLOCK)
-          INNER JOIN custom_order_WeddInfo w2 WITH (NOLOCK) ON co2.order_seq = w2.order_seq
-          WHERE co2.member_id IN (${placeholders})
-            AND co2.status_seq >= 1
-            AND w2.event_year IS NOT NULL AND LEN(w2.event_year) = 4
-        ) t WHERE rn = 1 AND wedding_date IS NOT NULL
+        SELECT DISTINCT
+          co2.member_id,
+          TRY_CAST(w2.event_year+'-'+RIGHT('0'+w2.event_month,2)+'-'+RIGHT('0'+w2.event_Day,2) AS date) AS wedding_date
+        FROM custom_order co2 WITH (NOLOCK)
+        INNER JOIN custom_order_WeddInfo w2 WITH (NOLOCK) ON co2.order_seq = w2.order_seq
+        WHERE co2.member_id IN (${placeholders})
+          AND co2.status_seq >= 1
+          AND w2.event_year IS NOT NULL AND LEN(w2.event_year) = 4
+          AND TRY_CAST(w2.event_year+'-'+RIGHT('0'+w2.event_month,2)+'-'+RIGHT('0'+w2.event_Day,2) AS date) IS NOT NULL
       `);
-      r.recordset.forEach(row => { memberWeddingMap.set(row.member_id, row.wedding_date); });
+      r.recordset.forEach(row => {
+        const arr = memberWeddingsMap.get(row.member_id) || [];
+        arr.push(row.wedding_date);
+        memberWeddingsMap.set(row.member_id, arr);
+      });
     }
 
     // === Step 3: ETC 주문에 wedding_date join → lead_days 계산 ===
+    //   매칭 정책: 주문일 이후의 결혼식 중 가장 가까운 것을 선택 (정상 답례품 패턴).
+    //   주문일 이후 결혼식이 없으면 -14일 이내 과거 결혼식 허용 (늦은 답례품 케이스).
+    //   둘 다 없으면 skip — 옛날 결혼식 매칭으로 인한 노이즈 제거.
+    const POST_WEDDING_GRACE_DAYS = 14;
     for (const o of etcOrders) {
-      const wd = memberWeddingMap.get(o.member_id);
-      if (!wd) continue;
+      const candidates = memberWeddingsMap.get(o.member_id);
+      if (!candidates || !candidates.length) continue;
       const orderDt = new Date(o.order_date);
-      const weddingDt = new Date(wd);
-      const leadDays = Math.round((weddingDt - orderDt) / 86400000);
+      // 후보별 lead_days 계산 후 정책에 맞는 최적 매칭 picking
+      const ranked = candidates.map(wd => {
+        const weddingDt = new Date(wd);
+        return { wd, leadDays: Math.round((weddingDt - orderDt) / 86400000) };
+      });
+      // 우선순위: lead_days >= 0 (미래 결혼식) 중 가장 작은 값 → 없으면 -14 ~ -1 중 가장 큰 값
+      const future = ranked.filter(c => c.leadDays >= 0).sort((a, b) => a.leadDays - b.leadDays);
+      const recentPast = ranked.filter(c => c.leadDays < 0 && c.leadDays >= -POST_WEDDING_GRACE_DAYS)
+        .sort((a, b) => b.leadDays - a.leadDays);
+      const picked = future[0] || recentPast[0];
+      if (!picked) continue;
       allRows.push({
         order_key: 'E' + o.order_seq,
         order_date: o.order_date,
-        wedding_date: wd,
-        lead_days: leadDays,
+        wedding_date: picked.wd,
+        lead_days: picked.leadDays,
       });
     }
 

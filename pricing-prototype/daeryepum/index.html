@@ -3264,7 +3264,18 @@ function renderLeadtime(lt) {
     return `<div class="leadtime-bar" style="height:${h}px;background:${colors[i]}"><span class="count">${count}</span><span class="label">${label}</span></div>`;
   }).join('');
 
-  let feedback = `답례품 주문의 <strong>${lt.median_days}일(중앙값)</strong>은 예식 약 ${Math.round(lt.median_days/7)}주 전에 주문이 집중된다는 의미입니다. `;
+  // 분포에서 가장 비중 큰 bucket 식별 (텍스트 동적 생성용)
+  const distEntries = Object.entries(dist);
+  const topBucket = distEntries.reduce((max, cur) => cur[1] > max[1] ? cur : max, ['', 0]);
+  const totalCnt = distEntries.reduce((s, [, n]) => s + n, 0);
+  const topPct = totalCnt > 0 ? Math.round(topBucket[1] / totalCnt * 100) : 0;
+  // 예식전 주문(양수 lead) 합계 — 평균/중앙값 기준 데이터
+  const preWeddingLabels = ['0-7일','8-14일','15-21일','22-30일','31-60일','60일+'];
+  const preWeddingCnt = preWeddingLabels.reduce((s, k) => s + (dist[k] || 0), 0);
+  const preWeddingPct = totalCnt > 0 ? Math.round(preWeddingCnt / totalCnt * 100) : 0;
+
+  let feedback = `예식 전 주문 기준 중앙값 <strong>${lt.median_days}일</strong>(평균 <strong>${lt.avg_days}일</strong>) — 답례품은 평균적으로 예식 약 ${Math.round(lt.median_days/7)}주 전에 주문됩니다. `;
+  feedback += `전체 ${fmtNum(totalCnt)}건 중 예식 전 주문이 ${fmtNum(preWeddingCnt)}건(${preWeddingPct}%)이며, 가장 비중 큰 구간은 <strong>${topBucket[0]}</strong>(${fmtNum(topBucket[1])}건, ${topPct}%) 입니다.<br>`;
   if (lt.median_days <= 14) feedback += '리드타임이 짧아 <strong>급주문 비율</strong>이 높습니다. 재고 관리에 주의가 필요합니다.';
   else if (lt.median_days <= 30) feedback += '웨딩업계 평균(2~4주)에 부합하는 건강한 리드타임입니다. 청첩장 발송 시점과 맞물리는 패턴입니다.';
   else feedback += '리드타임이 길어 <strong>사전 계획형 주문</strong>이 많습니다. 조기 주문 할인 프로모션이 효과적일 수 있습니다.';
