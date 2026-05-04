@@ -1545,7 +1545,23 @@ async function apiForecast() {
     .query(`
       SELECT order_day, COUNT(*) AS order_count, SUM(settle_price) AS total_amount, SUM(total_qty) AS total_qty
       FROM (
-        SELECT DISTINCT o.order_seq, CONVERT(varchar(10), o.order_date, 120) AS order_day, o.settle_price,
+        -- ETC: 동시구매(청첩장+답례품) 주문에서 답례품(D01) 매출만 추출.
+        --   이전엔 o.settle_price (주문 전체 결제금액) 를 그대로 사용해 청첩장 매출까지
+        --   forecast actual_weekly_revenue 에 포함되는 버그 (H2). ETC_AMOUNT_EXPR 와 동일
+        --   산식의 D01 한정 서브쿼리로 교체. (쿠폰 다중 차감 H1 은 별개로 처리)
+        SELECT DISTINCT o.order_seq, CONVERT(varchar(10), o.order_date, 120) AS order_day,
+          (SELECT ISNULL(SUM(
+            CASE
+              WHEN si2.SiteName IS NULL
+              THEN CAST(oi2.card_sale_price AS float) * oi2.order_count / ISNULL(NULLIF(c2.Unit_Value, 0), 1) - ISNULL(o.coupon_price, 0)
+              ELSE CAST(oi2.card_sale_price AS float) - ISNULL(o.coupon_price, 0)
+            END
+          ), 0)
+          FROM CUSTOM_ETC_ORDER_ITEM oi2 WITH (NOLOCK)
+          INNER JOIN S2_Card c2 WITH (NOLOCK) ON oi2.card_seq = c2.Card_Seq
+          LEFT JOIN SiteInfo si2 WITH (NOLOCK) ON o.company_Seq = si2.CompayCode
+          WHERE oi2.order_seq = o.order_seq AND ${D01_FILTER.replace(/c\./g, 'c2.')}
+          ) AS settle_price,
           (SELECT SUM(oi2.order_count) FROM CUSTOM_ETC_ORDER_ITEM oi2 WITH (NOLOCK) INNER JOIN S2_Card c2 WITH (NOLOCK) ON oi2.card_seq=c2.Card_Seq WHERE oi2.order_seq=o.order_seq AND ${D01_FILTER.replace(/c\./g,'c2.')}) AS total_qty
         FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
         INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
@@ -1557,6 +1573,7 @@ async function apiForecast() {
 
       SELECT order_day, COUNT(*) AS order_count, SUM(settle_price) AS total_amount, SUM(total_qty) AS total_qty
       FROM (
+        -- CARD: 이전부터 D01 한정 서브쿼리 사용 — 정상 동작.
         SELECT DISTINCT co.order_seq, CONVERT(varchar(10), co.order_date, 120) AS order_day,
           (SELECT ISNULL(SUM(CAST(coi2.item_sale_price AS float) * coi2.item_count / ISNULL(NULLIF(c2.Unit_Value, 0), 1)), 0) FROM custom_order_item coi2 WITH (NOLOCK) INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq=c2.Card_Seq WHERE coi2.order_seq=co.order_seq AND ${D01_FILTER.replace(/c\./g,'c2.')}) AS settle_price,
           (SELECT SUM(coi2.item_count) FROM custom_order_item coi2 WITH (NOLOCK) INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq=c2.Card_Seq WHERE coi2.order_seq=co.order_seq AND ${D01_FILTER.replace(/c\./g,'c2.')}) AS total_qty
