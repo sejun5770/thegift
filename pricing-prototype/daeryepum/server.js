@@ -351,6 +351,7 @@ async function getDailyMetricsSnapshot(dateStr) {
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+      ${ETC_COUPON_DIVISOR_JOIN_D01}
       WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
         AND CAST(o.order_date AS date) = @targetDate
     `);
@@ -366,6 +367,7 @@ async function getDailyMetricsSnapshot(dateStr) {
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+      ${ETC_COUPON_DIVISOR_JOIN_D01}
       WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
         AND CAST(o.order_date AS date) = @targetDate
       GROUP BY c.Card_Name
@@ -414,6 +416,10 @@ async function apiOrders(query) {
   const startDate = query.start_date || fmtDate(addDays(today(), -7));
   const endDate = query.end_date || fmtDate(addDays(today(), 1));
   const categoryFilter = getCategoryFilter(query.category);
+  // 카테고리별 cardDiv — ETC item_amount 의 쿠폰 분배 분모로 사용 (H1 fix v2).
+  const categoryCfg = CATEGORY_FILTERS[query.category] || CATEGORY_FILTERS.daeryepum;
+  const etcAmountForCategory = etcAmountExpr(categoryCfg.cardDiv);
+  const etcCouponDivisorForCategory = etcCouponDivisorJoin(categoryCfg.cardDiv);
 
   const result = await p.request()
     .input('startDate', sql.VarChar, startDate)
@@ -449,7 +455,7 @@ async function apiOrders(query) {
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
         oi.order_count AS item_count,
-        ${ETC_AMOUNT_EXPR} AS item_amount,
+        ${etcAmountForCategory} AS item_amount,
         o.settle_price AS settle_price,
         ISNULL(o.coupon_price, 0) AS coupon_price,
         o.status_seq AS status_seq,
@@ -461,6 +467,7 @@ async function apiOrders(query) {
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
       LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
+      ${etcCouponDivisorForCategory}
       OUTER APPLY (
         SELECT TOP 1 w2.event_year, w2.event_month, w2.event_Day
         FROM custom_order co2 WITH (NOLOCK)
@@ -583,14 +590,41 @@ function mergeNames(recvName, orderName) {
 // ETC 결제금액 계산: 바른손카드(SiteInfo 매칭) vs 바른손몰(제휴사, SiteInfo 미매칭)
 // 바른손카드: card_sale_price = 총액(단가×수량) → 그대로 사용
 // 바른손몰:   card_sale_price = 단가 → × 수량 / 판매단위 = 총액
-// 쿠폰 할인: coupon_price를 차감하여 실결제금액 반영
+// 쿠폰 할인 (H1 fix v2): coupon_price 를 같은 Card_Div 아이템 수로 나눠 분배 → SUM 시 정확히 1회 차감.
+//   이전엔 행마다 전체 쿠폰 차감으로 N×coupon 다중 차감 버그.
+//   v1(correlated scalar 서브쿼리) 은 행마다 실행돼 dashboard timeout → 폐기.
+//   v2: derived table 로 주문당 1행 미리 집계 → JOIN. 1회 집계 후 hash join 으로 빠름.
+//   사용 쿼리는 etcCouponDivisorJoin() 도 함께 LEFT JOIN 추가해야 함 (ecd alias).
 // Unit_Value: S2_Card.Unit_Value (판매단위 수량, 예: 소프트터치=50개 단위)
-const ETC_AMOUNT_EXPR = `
+
+/**
+ * 같은 주문 내 같은 Card_Div 아이템 수를 미리 집계하는 derived table JOIN 절.
+ *   GROUP BY 로 주문당 1행 → outer 행마다 재계산 X (성능).
+ */
+function etcCouponDivisorJoin(cardDiv = 'D01') {
+  return `LEFT JOIN (
+    SELECT order_seq, COUNT(*) AS item_count
+    FROM CUSTOM_ETC_ORDER_ITEM oi_cpd WITH (NOLOCK)
+    INNER JOIN S2_Card c_cpd WITH (NOLOCK) ON oi_cpd.card_seq = c_cpd.Card_Seq
+    WHERE c_cpd.Card_Div = '${cardDiv}'
+    GROUP BY order_seq
+  ) ecd ON o.order_seq = ecd.order_seq`;
+}
+
+/** ETC 행 단위 매출 식 — outer 에 ecd.item_count alias (etcCouponDivisorJoin 결과) 가 있어야 함. */
+function etcAmountExpr(cardDiv = 'D01') {
+  return `
   CASE
     WHEN si.SiteName IS NULL
-    THEN CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1) - ISNULL(o.coupon_price, 0)
-    ELSE CAST(oi.card_sale_price AS float) - ISNULL(o.coupon_price, 0)
+    THEN CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+         - ISNULL(o.coupon_price, 0) * 1.0 / NULLIF(ecd.item_count, 0)
+    ELSE CAST(oi.card_sale_price AS float)
+         - ISNULL(o.coupon_price, 0) * 1.0 / NULLIF(ecd.item_count, 0)
   END`;
+}
+
+const ETC_AMOUNT_EXPR = etcAmountExpr('D01');
+const ETC_COUPON_DIVISOR_JOIN_D01 = etcCouponDivisorJoin('D01');
 
 /**
  * 상품별 판매 통계 — 단일/다중 상품 + 기간 + (선택)전기대비
@@ -826,6 +860,7 @@ async function apiDashboardComparison() {
           INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
           LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
           LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
+          ${ETC_COUPON_DIVISOR_JOIN_D01}
           WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
           GROUP BY ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)),
             CASE WHEN ecp.order_seq IS NOT NULL THEN 1 ELSE 0 END
@@ -882,6 +917,7 @@ async function apiDashboardComparison() {
             INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
             INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
             LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+            ${ETC_COUPON_DIVISOR_JOIN_D01}
             WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e
               AND o.status_seq = 1 AND o.settle_date IS NULL
           ) AS etc
@@ -1080,6 +1116,7 @@ async function apiDashboardComparison() {
             INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
             LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
             LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
+            ${ETC_COUPON_DIVISOR_JOIN_D01}
             WHERE ${D01_FILTER} AND o.order_seq IN (${inList})
               AND o.order_date >= @s AND o.order_date < @e
               AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
@@ -1201,6 +1238,7 @@ async function apiDashboardSummary(query) {
         INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
         LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
+        ${ETC_COUPON_DIVISOR_JOIN_D01}
         WHERE ${D01_FILTER} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
         GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)),
           CASE WHEN ecp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
@@ -1358,6 +1396,7 @@ async function apiDashboardSummary(query) {
             INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
             LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
             LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
+            ${ETC_COUPON_DIVISOR_JOIN_D01}
             WHERE ${D01_FILTER} AND o.order_seq IN (${inList})
               AND o.order_date >= @startDate AND o.order_date < @endDate
               AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
@@ -2395,6 +2434,7 @@ async function apiMarketing(query = {}) {
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+      ${ETC_COUPON_DIVISOR_JOIN_D01}
       WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
         AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
       UNION ALL
@@ -2427,6 +2467,7 @@ async function apiMarketing(query = {}) {
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+      ${ETC_COUPON_DIVISOR_JOIN_D01}
       WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
         AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
       UNION ALL
