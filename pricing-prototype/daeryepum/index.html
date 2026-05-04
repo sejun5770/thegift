@@ -7578,53 +7578,27 @@ async function bulkSendAlimtalkViaSp() {
 }
 
 /**
- * 주문 상품코드 → 상품설정에 매핑된 product_id 로 resolve (bidirectional).
+ * 주문 상품코드(변형 포함) → BASE ERP 코드로 resolve.
  *
- * 두 케이스 모두 대응:
- *   A. 고객 주문이 변형 코드 (TGJSD1001_B), admin 이 base (TGJSD1001) 만 등록
- *        → suffix 떼고 검색 (서버 lookupProductSettings 와 동일 정책)
- *   B. 고객 주문이 base 코드 (TGJSD01O4), admin 이 변형 (TGJSD01O4_B) 으로 등록
- *        → product_id 의 suffix 떼면 rawCode 와 매칭되는 설정 검색
+ * 운영 정책 (메이플 호두정과 사례):
+ *   - ERP 코드 = TGJSD01O4 (base, 동일 상품)
+ *   - 상품코드 = TGJSD01O4_A / _B / _C (가격 tier 변형 — 정상가/할인가/특가)
+ *   고객은 변형 상품코드로 주문하지만 수집복사 K열에는 BASE ERP 코드만 들어가야 함.
+ *   (downstream 인쇄/포장/물류는 변형과 무관하게 동일 상품으로 처리)
  *
- *   해결 우선순위: 정확 일치 → A 케이스 → B 케이스 → 원본 그대로 (fallback)
- *   bgProductSettings 가 비어있으면 (로드 실패 등) 원본 반환.
+ * 알고리즘: '_suffix' 를 최대 3회까지 떼면서 base 코드 추출.
+ *   admin 의 bg_product_settings 등록 여부와 무관하게 일관 동작 (settings 미등록 케이스도 안전).
+ *   suffix 가 없으면 원본 그대로.
  */
 function resolveBgMappedProductCode(rawCode) {
   if (!rawCode) return rawCode || '';
-  if (!Array.isArray(bgProductSettings) || bgProductSettings.length === 0) return rawCode;
-  const findById = (code) => bgProductSettings.find(p => p.product_id === code);
-
-  // 1) 정확 일치
-  const direct = findById(rawCode);
-  if (direct) return direct.product_id;
-
-  // 2) A 케이스: rawCode 의 suffix 를 떼면서 base 매칭 시도 (최대 3회)
-  let cur = rawCode;
+  let cur = String(rawCode);
   for (let i = 0; i < 3; i++) {
-    const m = String(cur).match(/^(.+)_[A-Za-z0-9]+$/);
-    if (!m) break;
-    const base = m[1];
-    if (base === cur) break;
-    const hit = findById(base);
-    if (hit) return hit.product_id;
-    cur = base;
+    const m = cur.match(/^(.+)_[A-Za-z0-9]+$/);
+    if (!m || m[1] === cur) break;
+    cur = m[1];
   }
-
-  // 3) B 케이스: 설정 중 product_id 의 suffix 를 떼면 rawCode 와 일치하는 항목 탐색.
-  //    여러 변형이 있으면 첫 매칭 사용 (운영상 동일 base 에 변형 다중 등록은 드물 것).
-  const stripVariant = (code) => {
-    let c = String(code);
-    for (let i = 0; i < 3; i++) {
-      const m = c.match(/^(.+)_[A-Za-z0-9]+$/);
-      if (!m || m[1] === c) break;
-      c = m[1];
-    }
-    return c;
-  };
-  const variantHit = bgProductSettings.find(p => stripVariant(p.product_id) === rawCode);
-  if (variantHit) return variantHit.product_id;
-
-  return rawCode;
+  return cur;
 }
 
 function copyBgUnified() {
