@@ -243,9 +243,9 @@ function formatSiteName(siteName) {
 //   이전 deco 필터는 'Card_Code LIKE 2026_%' prefix 였으나 photo_print_* 등 누락 발생 →
 //   Card_Div 기준으로 정정 (C29 는 운영 진단으로 확인).
 const CATEGORY_FILTERS = {
-  daeryepum: { label: '답례품',   cardDiv: 'D01', filter: `c.Card_Div = 'D01'` },
-  deco:      { label: '데코소품', cardDiv: 'C29', filter: `c.Card_Div = 'C29'` },
-  flower:    { label: '꽃다발',   cardDiv: 'D02', filter: `c.Card_Div = 'D02'` },
+  daeryepum: { label: '답례품', filter: `c.Card_Div = 'D01'` },
+  deco:      { label: '데코소품', filter: `c.Card_Div = 'C29'` },
+  flower:    { label: '꽃다발', filter: `c.Card_Div = 'D02'` },
 };
 // D01 category = 답례품 (기본, 대시보드용)
 const D01_FILTER = `c.Card_Div = 'D01'`;
@@ -414,10 +414,6 @@ async function apiOrders(query) {
   const startDate = query.start_date || fmtDate(addDays(today(), -7));
   const endDate = query.end_date || fmtDate(addDays(today(), 1));
   const categoryFilter = getCategoryFilter(query.category);
-  // 카테고리별 cardDiv — ETC item_amount 의 쿠폰 분배 분모로 사용 (H1 fix).
-  //   D01/D02/C29 각각 같은 카테고리 아이템 수로 쿠폰 나눔.
-  const categoryCfg = CATEGORY_FILTERS[query.category] || CATEGORY_FILTERS.daeryepum;
-  const etcAmountForCategory = etcAmountExpr(categoryCfg.cardDiv);
 
   const result = await p.request()
     .input('startDate', sql.VarChar, startDate)
@@ -453,7 +449,7 @@ async function apiOrders(query) {
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
         oi.order_count AS item_count,
-        ${etcAmountForCategory} AS item_amount,
+        ${ETC_AMOUNT_EXPR} AS item_amount,
         o.settle_price AS settle_price,
         ISNULL(o.coupon_price, 0) AS coupon_price,
         o.status_seq AS status_seq,
@@ -587,41 +583,14 @@ function mergeNames(recvName, orderName) {
 // ETC 결제금액 계산: 바른손카드(SiteInfo 매칭) vs 바른손몰(제휴사, SiteInfo 미매칭)
 // 바른손카드: card_sale_price = 총액(단가×수량) → 그대로 사용
 // 바른손몰:   card_sale_price = 단가 → × 수량 / 판매단위 = 총액
-// 쿠폰 할인: coupon_price 를 같은 Card_Div 아이템 수로 나눠 분배 → SUM 시 쿠폰 정확히 1회만 차감.
-//   이전엔 행마다 전체 쿠폰을 빼서 N개 D01 아이템이면 N×coupon 다중 차감 (H1 버그).
-//   분모 서브쿼리는 outer query 의 o (CUSTOM_ETC_ORDER) 를 correlated 참조 → 모든
-//   기존 사용처에서 그대로 동작 (alias o 가 outer 에 항상 존재).
+// 쿠폰 할인: coupon_price를 차감하여 실결제금액 반영
 // Unit_Value: S2_Card.Unit_Value (판매단위 수량, 예: 소프트터치=50개 단위)
-
-/**
- * 같은 주문 내 같은 Card_Div 아이템 수 (쿠폰 분배 분모용 scalar 서브쿼리).
- * Window function 은 SUM 안에서 사용 불가하므로 correlated 서브쿼리로 구현.
- */
-function etcSameDivItemCountSubquery(cardDiv) {
-  return `(
-    SELECT COUNT(*)
-    FROM CUSTOM_ETC_ORDER_ITEM oix WITH (NOLOCK)
-    INNER JOIN S2_Card cix WITH (NOLOCK) ON oix.card_seq = cix.Card_Seq
-    WHERE oix.order_seq = o.order_seq AND cix.Card_Div = '${cardDiv}'
-  )`;
-}
-
-/** ETC 행 단위 매출 식 — cardDiv 별 쿠폰 분배 적용. 기본값 'D01'. */
-function etcAmountExpr(cardDiv = 'D01') {
-  const divisor = `NULLIF(${etcSameDivItemCountSubquery(cardDiv)}, 0)`;
-  return `
+const ETC_AMOUNT_EXPR = `
   CASE
     WHEN si.SiteName IS NULL
-    THEN CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)
-         - ISNULL(o.coupon_price, 0) * 1.0 / ${divisor}
-    ELSE CAST(oi.card_sale_price AS float)
-         - ISNULL(o.coupon_price, 0) * 1.0 / ${divisor}
+    THEN CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1) - ISNULL(o.coupon_price, 0)
+    ELSE CAST(oi.card_sale_price AS float) - ISNULL(o.coupon_price, 0)
   END`;
-}
-
-// 기존 호환 — 대부분 사용처가 D01_FILTER 와 함께 쓰므로 D01 기본값.
-//   apiOrders (line ~452) 만 카테고리 동적이라 etcAmountExpr(category.cardDiv) 직접 사용.
-const ETC_AMOUNT_EXPR = etcAmountExpr('D01');
 
 /**
  * 상품별 판매 통계 — 단일/다중 상품 + 기간 + (선택)전기대비
