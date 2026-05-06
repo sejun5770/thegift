@@ -2913,6 +2913,93 @@ const server = http.createServer(async (req, res) => {
             actual_sql_result: actualSqlResult,
           };
         }
+      } else if (pathname === '/api/debug-bg-copurchase') {
+        // 바른손몰(ETC) 동시구매 진단 — D01 답례품 + 다른 Card_Div 가 같은 order_seq 에 있는지.
+        // URL: /api/debug-bg-copurchase?start_date=2026-04-29&end_date=2026-05-07
+        const dbgS = parsed.query.start_date || fmtDate(addDays(today(), -7));
+        const dbgE = parsed.query.end_date || fmtDate(addDays(today(), 1));
+        logAdminAccess(session, req, 'debug-bg-copurchase', { start: dbgS, end: dbgE });
+        const pp = await getPool();
+        // ETC 주문 중 D01 가 있는 order_seq 들의 같은 주문 내 모든 Card_Div 분포
+        const r = await pp.request()
+          .input('s', sql.VarChar, dbgS).input('e', sql.VarChar, dbgE)
+          .query(`
+            WITH d01_orders AS (
+              SELECT DISTINCT o.order_seq, o.order_date, o.company_Seq,
+                ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name
+              FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+              INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+              INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+              LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+              WHERE c.Card_Div = 'D01'
+                AND o.order_date >= @s AND o.order_date < @e
+                AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+            )
+            SELECT
+              CONVERT(varchar(10), d.order_date, 120) AS order_day,
+              d.order_seq,
+              d.site_name,
+              c.Card_Div,
+              c.Card_Name,
+              oi.order_count
+            FROM d01_orders d
+            INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON d.order_seq = oi.order_seq
+            INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+            ORDER BY d.order_seq DESC, c.Card_Div
+          `);
+        // 같은 회원이 별도 order 로 청첩장(custom_order)+답례품(CUSTOM_ETC_ORDER) 산 케이스도 체크
+        const memberLink = await pp.request()
+          .input('s', sql.VarChar, dbgS).input('e', sql.VarChar, dbgE)
+          .query(`
+            SELECT DISTINCT
+              o.order_seq AS etc_order_seq,
+              CONVERT(varchar(10), o.order_date, 120) AS etc_order_day,
+              o.member_id,
+              ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS etc_site,
+              co.order_seq AS card_order_seq,
+              CONVERT(varchar(10), co.order_date, 120) AS card_order_day
+            FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+            INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+            INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+            LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+            INNER JOIN custom_order co WITH (NOLOCK) ON co.member_id = o.member_id
+            INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+            INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi.card_seq = c2.Card_Seq
+            WHERE c.Card_Div = 'D01'
+              AND c2.Card_Div = 'A01'
+              AND o.order_date >= @s AND o.order_date < @e
+              AND ABS(DATEDIFF(day, o.order_date, co.order_date)) <= 30
+              AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+              AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+          `);
+        // 집계: order_seq 당 distinct Card_Div 수, 사이트별 분포
+        const byOrder = {};
+        r.recordset.forEach(row => {
+          const k = row.order_seq;
+          if (!byOrder[k]) byOrder[k] = { order_day: row.order_day, site_name: row.site_name, divs: {} };
+          byOrder[k].divs[row.Card_Div] = (byOrder[k].divs[row.Card_Div] || 0) + 1;
+        });
+        const summary = { same_order_multi_div: 0, only_d01: 0, by_site: {} };
+        Object.values(byOrder).forEach(o => {
+          const divKeys = Object.keys(o.divs);
+          if (divKeys.length > 1 || (divKeys[0] && divKeys[0] !== 'D01')) summary.same_order_multi_div++;
+          else summary.only_d01++;
+          const s = o.site_name;
+          summary.by_site[s] = summary.by_site[s] || { d01_orders: 0, multi_div_orders: 0, divs_seen: {} };
+          summary.by_site[s].d01_orders++;
+          if (divKeys.length > 1) summary.by_site[s].multi_div_orders++;
+          divKeys.forEach(dv => { summary.by_site[s].divs_seen[dv] = (summary.by_site[s].divs_seen[dv]||0)+1; });
+        });
+        data = {
+          period: { start: dbgS, end: dbgE },
+          summary,
+          same_order_examples: r.recordset.slice(0, 50),
+          cross_table_member_link: {
+            count: memberLink.recordset.length,
+            note: '같은 member_id 가 ETC(D01) 와 custom_order(A01) 에 동시에 있는 케이스 (별도 주문)',
+            samples: memberLink.recordset.slice(0, 20),
+          },
+        };
       } else if (pathname === '/api/order-files') {
         data = await apiOrderFiles(parsed.query);
       } else if (pathname === '/api/product-stats') {
