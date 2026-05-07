@@ -8003,13 +8003,33 @@ async function markOrdersProcessedBatch(orderIds, processed) {
 }
 
 // rowIdx로 bgUnifiedRows에서 info를 재구성 후 수정 모달 오픈 (XSS 안전)
+/**
+ * 주문 1건의 모든 배송지에 걸친 상품 합산 — admin 모달용 (입력은 주문 단위 1번이라 통합 view 필요).
+ * bgUnifiedProductMap 은 composite key(${order_seq}::${delivery_seq}) 라 raw order_seq 로 직접 lookup 불가능.
+ * 같은 order_seq prefix 의 모든 entries 를 머지해 한 주문의 상품×수량 통합본 반환.
+ */
+function _bgGetProductsForOrderSeq(orderSeq) {
+  const merged = new Map();
+  const prefix = `${orderSeq}::`;
+  for (const [compositeKey, pm] of bgUnifiedProductMap.entries()) {
+    if (!compositeKey.startsWith(prefix)) continue;
+    for (const [code, info] of pm.entries()) {
+      if (!merged.has(code)) {
+        merged.set(code, { card_name: info.card_name, item_count: 0 });
+      }
+      merged.get(code).item_count += info.item_count || 0;
+    }
+  }
+  return merged;
+}
+
 function openBgOrderEditByIdx(idx) {
   const row = bgUnifiedRows[parseInt(idx)];
   if (!row) { console.warn('openBgOrderEditByIdx: row not found', idx); return; }
   const { order, ci } = row;
-  const _pm = bgUnifiedProductMap.get(order.order_seq);
+  const _pm = _bgGetProductsForOrderSeq(order.order_seq);
   // productMap 값은 {card_name, item_count} 객체. 모달에 넘길 때는 {code: name} 딕셔너리로 변환
-  const _productNames = _pm
+  const _productNames = _pm.size
     ? Object.fromEntries([..._pm.entries()].map(([code, info]) => [code, info.card_name]))
     : {};
 
@@ -8023,7 +8043,7 @@ function openBgOrderEditByIdx(idx) {
   //   각 상품에 대해 product_code/product_name 만 채운 placeholder row 생성 →
   //   관리자가 모달에서 박스/스티커 타입을 직접 선택 가능
   const order_id = order.order_type === 'ETC' ? `ETC-${order.order_seq}` : String(order.order_seq);
-  const sticker_selections = _pm
+  const sticker_selections = _pm.size
     ? [..._pm.entries()].map(([code, info]) => ({
         product_code: code,
         product_name: info.card_name || '',
@@ -8137,7 +8157,8 @@ async function openBgOrderEdit(info) {
     || (info.order_id && String(info.order_id).startsWith('ETC-')
       ? parseInt(String(info.order_id).replace('ETC-', ''))
       : parseInt(info.order_id));
-  const _pm = bgUnifiedProductMap.get(_editOrderSeq);
+  // composite key 변경 대응 — 같은 order_seq 의 모든 배송지 상품 통합 (admin 모달은 주문 단위)
+  const _pm = _bgGetProductsForOrderSeq(_editOrderSeq);
   const existingSels = info.sticker_selections || [];
   const sels = (() => {
     if (!_pm || _pm.size === 0) return existingSels.slice(); // 주문 상품 정보 없으면 기존만 사용
@@ -8200,7 +8221,7 @@ function renderBgEditStickers() {
     || (info.order_id && String(info.order_id).startsWith('ETC-')
       ? parseInt(String(info.order_id).replace('ETC-', ''))
       : parseInt(info.order_id));
-  const _editPm = bgUnifiedProductMap.get(_editOrderSeq);
+  const _editPm = _bgGetProductsForOrderSeq(_editOrderSeq);
 
   if (!sels.length) {
     stickerWrap.innerHTML = '<p style="color:var(--gray-400);font-size:13px">스티커 선택 없음</p>';
