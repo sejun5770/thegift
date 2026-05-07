@@ -836,6 +836,7 @@ module.exports = {
   saveCustomerInfo,
   getAllCustomerInfos,
   getExpressCustomerInfos,
+  getCustomerInfosWithShipDate,
   updateCustomerInfo,
   deleteCustomerInfo,
   setProcessed,
