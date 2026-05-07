@@ -372,6 +372,19 @@ async function getExpressCustomerInfos() {
 }
 
 /**
+ * 희망출고일이 지정된(= desired_ship_date IS NOT NULL) 고객 입력 정보만 fetch — 출고일별 매출 집계용.
+ *   대시보드 "희망출고일별 매출" 카드의 데이터원.
+ *   Supabase 서버측 필터로 미입력/미설정 row 사전 제외 — 페이로드/네트워크 절약.
+ */
+async function getCustomerInfosWithShipDate() {
+  if (USE_SUPABASE) {
+    return sbGet('bg_order_customer_info', 'desired_ship_date=not.is.null');
+  }
+  const infos = readJson(FILES.customerInfo, []);
+  return infos.filter(ci => ci.desired_ship_date);
+}
+
+/**
  * 관리자 upsert. 기존 레코드 있으면 PATCH, 없으면 INSERT (고객이 아직 입력 안 한
  * 주문에 관리자가 수동 입력할 때 사용). 고객이 직접 제출하는 POST 경로와 달리
  * ALREADY_SUBMITTED 체크 없이 덮어쓰기.

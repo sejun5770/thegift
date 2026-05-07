@@ -1484,6 +1484,161 @@ async function apiDashboardSummary(query) {
 }
 
 /**
+ * 희망출고일별 매출 집계 — 정보입력 완료 + desired_ship_date 지정된 주문 한정.
+ *
+ * 용도: 출고 작업 일정 계획 — "5/8 에 출고할 매출 N원" 같은 미래 출고 부하 가시성.
+ *
+ * 데이터 흐름:
+ *   1) Supabase bg_order_customer_info 에서 desired_ship_date 지정된 row 가져옴
+ *   2) order_id 를 ETC/CARD 로 split → MSSQL 에서 매출/수량/사이트 lookup
+ *   3) desired_ship_date 별 그룹핑 + 동시/단독 분리, 빠른출고/일반 분리
+ *
+ * 응답:
+ *   {
+ *     period: { start, end },
+ *     ship_dates: [
+ *       { date, amount, orders, qty,
+ *         express: {amount, orders, qty}, regular: {amount, orders, qty},
+ *         copurchase: {amount, orders, qty}, standalone: {amount, orders, qty} }
+ *     ],
+ *     total: { amount, orders, qty }
+ *   }
+ *
+ * 기간 차원: desired_ship_date 기준 (apiDashboardSummary 의 order_date 기준과 다름).
+ */
+async function apiDashboardByShipDate(query) {
+  const p = await getPool();
+  // 기본 윈도우: 오늘 ~ 30일 후
+  const startDate = query.start_date || fmtDate(today());
+  const endDate = query.end_date || fmtDate(addDays(today(), 31)); // exclusive
+
+  const empty = { period: { start: startDate, end: endDate }, ship_dates: [], total: { amount: 0, orders: 0, qty: 0 } };
+  let cInfos = [];
+  try {
+    const _bgStore = require('./barungift/store');
+    cInfos = await _bgStore.getCustomerInfosWithShipDate();
+  } catch (e) {
+    console.warn('[by-ship-date] customer-infos fetch 실패:', e.message);
+    return { ...empty, error: 'customer_info: ' + e.message };
+  }
+
+  // 기간 필터 (JS 측, ship_date 는 'YYYY-MM-DD' 문자열)
+  const inWindow = cInfos.filter(ci => {
+    const d = String(ci.desired_ship_date || '').slice(0, 10);
+    return d && d >= startDate && d < endDate;
+  });
+  if (!inWindow.length) return empty;
+
+  // order_id → ci 매핑 (ETC-/raw 접두어 분리)
+  const ciByCardSeq = new Map();   // CARD: order_seq → ci
+  const ciByEtcSeq = new Map();    // ETC: order_seq → ci
+  inWindow.forEach(ci => {
+    const oid = String(ci.order_id || '');
+    if (oid.startsWith('ETC-')) {
+      const seq = parseInt(oid.slice(4));
+      if (seq) ciByEtcSeq.set(seq, ci);
+    } else {
+      const seq = parseInt(oid);
+      if (seq) ciByCardSeq.set(seq, ci);
+    }
+  });
+
+  const queries = [];
+  if (ciByCardSeq.size) {
+    const inList = [...ciByCardSeq.keys()].join(',');
+    queries.push(p.request().query(`
+      WITH copurchase_orders AS (
+        SELECT DISTINCT coi2.order_seq
+        FROM custom_order_item coi2 WITH (NOLOCK)
+        INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+        WHERE c2.Card_Div = 'A01'
+      )
+      SELECT
+        co.order_seq,
+        CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
+        ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)), 0) AS amount,
+        ISNULL(SUM(coi.item_count), 0) AS qty
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
+      WHERE ${D01_FILTER} AND co.order_seq IN (${inList})
+        AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+      GROUP BY co.order_seq, CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
+    `).then(r => r.recordset.map(row => ({ ...row, _src: 'CARD' }))));
+  }
+  if (ciByEtcSeq.size) {
+    const inList = [...ciByEtcSeq.keys()].join(',');
+    queries.push(p.request().query(`
+      WITH etc_copurchase_orders AS (
+        SELECT DISTINCT ei2.order_seq
+        FROM CUSTOM_ETC_ORDER_ITEM ei2 WITH (NOLOCK)
+        INNER JOIN S2_Card c2 WITH (NOLOCK) ON ei2.card_seq = c2.Card_Seq
+        WHERE c2.Card_Div = 'A01'
+      )
+      SELECT
+        o.order_seq,
+        CASE WHEN ecp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
+        ISNULL(SUM(${ETC_AMOUNT_EXPR}), 0) AS amount,
+        ISNULL(SUM(oi.order_count), 0) AS qty
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
+      ${ETC_COUPON_DIVISOR_JOIN_D01}
+      WHERE ${D01_FILTER} AND o.order_seq IN (${inList})
+        AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+      GROUP BY o.order_seq, CASE WHEN ecp.order_seq IS NOT NULL THEN 1 ELSE 0 END
+    `).then(r => r.recordset.map(row => ({ ...row, _src: 'ETC' }))));
+  }
+  let salesRows = [];
+  try {
+    const results = await Promise.all(queries);
+    salesRows = results.flat();
+  } catch (e) {
+    console.warn('[by-ship-date] MSSQL lookup 실패:', e.message);
+    return { ...empty, error: 'mssql: ' + e.message };
+  }
+
+  // 출고일별 그룹핑
+  const buckets = {}; // date → { amount, orders, qty, express, regular, copurchase, standalone }
+  function ensureBucket(date) {
+    if (!buckets[date]) {
+      buckets[date] = {
+        date, amount: 0, orders: 0, qty: 0,
+        express: { amount: 0, orders: 0, qty: 0 },
+        regular: { amount: 0, orders: 0, qty: 0 },
+        copurchase: { amount: 0, orders: 0, qty: 0 },
+        standalone: { amount: 0, orders: 0, qty: 0 },
+      };
+    }
+    return buckets[date];
+  }
+  let totalAmount = 0, totalOrders = 0, totalQty = 0;
+  salesRows.forEach(r => {
+    const ci = r._src === 'ETC' ? ciByEtcSeq.get(r.order_seq) : ciByCardSeq.get(r.order_seq);
+    if (!ci) return;
+    const date = String(ci.desired_ship_date).slice(0, 10);
+    const b = ensureBucket(date);
+    const amount = Math.round(r.amount || 0);
+    const qty = r.qty || 0;
+    b.amount += amount; b.qty += qty; b.orders += 1;
+    const expressBucket = ci.is_express ? b.express : b.regular;
+    expressBucket.amount += amount; expressBucket.qty += qty; expressBucket.orders += 1;
+    const cpBucket = r.is_copurchase ? b.copurchase : b.standalone;
+    cpBucket.amount += amount; cpBucket.qty += qty; cpBucket.orders += 1;
+    totalAmount += amount; totalOrders += 1; totalQty += qty;
+  });
+
+  const ship_dates = Object.values(buckets).sort((a, b) => a.date.localeCompare(b.date));
+  return {
+    period: { start: startDate, end: endDate },
+    ship_dates,
+    total: { amount: totalAmount, orders: totalOrders, qty: totalQty },
+  };
+}
+
+/**
  * 빠른출고 추가 분석 — 채택율(전환율) + 시간대/요일 분포 + 누적 추가비용.
  *
  * 데이터원: Supabase bg_order_customer_info (정보입력 완료 데이터)
@@ -2706,6 +2861,8 @@ const server = http.createServer(async (req, res) => {
         data = await apiDashboardSummary(parsed.query);
       } else if (pathname === '/api/dashboard/express-analysis') {
         data = await apiExpressAnalysis(parsed.query);
+      } else if (pathname === '/api/dashboard/by-ship-date') {
+        data = await apiDashboardByShipDate(parsed.query);
       } else if (pathname === '/api/dashboard/forecast') {
         data = await apiForecast();
       } else if (pathname === '/api/dashboard/leadtime') {
