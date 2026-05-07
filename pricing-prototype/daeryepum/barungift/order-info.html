@@ -2955,13 +2955,22 @@
       // 고객 입력 문구. 기본 fallback 키 'text' 는 '스티커 문구' 로 치환해서 보여줌.
       const FIELD_LABEL = { text: '스티커 문구' };
       const customVals = Object.entries(s.custom_values || {}).filter(function(pair){ return pair[1]; });
-      const customHtml = customVals.length
-        ? '<div class="mt-2 p-3 bg-slate-50 rounded-xl space-y-1.5">' + customVals.map(function(pair){
+      // 스티커 선택됐는데 입력값 없음(= 입력안함 모드 or 비어있음) → '입력안함' 명시
+      let customHtml;
+      if (customVals.length) {
+        customHtml = '<div class="mt-2 p-3 bg-slate-50 rounded-xl space-y-1.5">' + customVals.map(function(pair){
             const label = FIELD_LABEL[pair[0]] || pair[0];
             // XSS: label/value 모두 사용자 입력 가능성 → escape
             return '<div class="flex justify-between text-xs"><span class="text-slate-500">' + esc(label) + '</span><span class="text-slate-900 font-medium">' + esc(pair[1]) + '</span></div>';
-          }).join('') + '</div>'
-        : '';
+          }).join('') + '</div>';
+      } else if (s.sticker_id) {
+        // 스티커 선택했으나 입력값이 없음 — 입력안함(샘플 문구 출력) 으로 노출
+        customHtml = '<div class="mt-2 p-3 bg-slate-50 rounded-xl">'
+          + '<div class="flex justify-between text-xs"><span class="text-slate-500">스티커 문구</span><span class="text-slate-400">입력안함</span></div>'
+          + '</div>';
+      } else {
+        customHtml = '';
+      }
 
       return '<div class="surface p-4 mb-2">'
         + '<h4 class="text-[14px] font-bold text-slate-900 mb-2">' + esc(p.product_name || '상품') + ' <span class="text-[11px] font-medium text-slate-400">(수량 ' + (Number(p.quantity) || 1) + ')</span></h4>'
