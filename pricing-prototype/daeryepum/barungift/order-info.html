@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>바른손더기프트 - 주문정보 입력</title>
   <script src="https://cdn.tailwindcss.com/3.4.1"></script>
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
@@ -566,15 +566,20 @@
 
 </div>
 
-<!-- ======= 스티커 라이트박스 모달 ======= -->
-<div id="stickerModal" class="fixed inset-0 z-[100]" style="display:none">
+<!-- ======= 스티커 라이트박스 모달 =======
+       모바일 (특히 갤럭시 제스처바 / iPhone 홈 인디케이터) safe-area 대응:
+         - 외곽: 100dvh 로 동적 viewport 사용 (URL 바 토글 시 100vh 가 부정확한 문제 회피)
+         - 하단 액션바: padding-bottom 에 env(safe-area-inset-bottom) + 여유 16px 적용
+         - 이미지 max-h 도 65vh → 50dvh 로 낮춰 좁은 화면에서 하단 영역 가리지 않게.
+  -->
+<div id="stickerModal" class="fixed inset-0 z-[100]" style="display:none;height:100dvh">
   <!-- 배경 딤 -->
   <div class="absolute inset-0 bg-black bg-opacity-80" data-action="closeStickerModal"></div>
 
   <!-- 콘텐츠 -->
-  <div class="relative h-full flex flex-col pointer-events-none">
-    <!-- 상단: 닫기 -->
-    <div class="flex justify-between items-center p-4 pointer-events-auto">
+  <div class="relative flex flex-col pointer-events-none" style="height:100dvh">
+    <!-- 상단: 닫기 — 노치/상단 영역 safe-area-inset-top 적용 -->
+    <div class="flex justify-between items-center p-4 pointer-events-auto" style="padding-top:max(1rem, env(safe-area-inset-top))">
       <span id="stickerModalCounter" class="text-white text-sm opacity-75">1 / 1</span>
       <button type="button" data-action="closeStickerModal" class="text-white text-3xl w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/10 transition">
         ✕
@@ -582,21 +587,21 @@
     </div>
 
     <!-- 중앙: 이미지 + 좌우 버튼 -->
-    <div id="stickerModalSwipeArea" class="flex-1 flex items-center justify-center relative px-2 pointer-events-auto">
+    <div id="stickerModalSwipeArea" class="flex-1 flex items-center justify-center relative px-2 pointer-events-auto" style="min-height:0">
       <button type="button" data-action="stickerModalPrev" id="stickerModalPrev" class="absolute left-2 text-white text-4xl w-12 h-12 flex items-center justify-center rounded-full bg-black/30 hover:bg-black/50 transition z-10">
         ‹
       </button>
       <div class="max-w-full max-h-full flex items-center justify-center">
-        <img id="stickerModalImg" alt="" class="max-h-[65vh] max-w-[90vw] object-contain select-none pointer-events-none" draggable="false" />
+        <img id="stickerModalImg" alt="" class="max-w-[90vw] object-contain select-none pointer-events-none" style="max-height:50dvh" draggable="false" />
       </div>
       <button type="button" data-action="stickerModalNext" id="stickerModalNext" class="absolute right-2 text-white text-4xl w-12 h-12 flex items-center justify-center rounded-full bg-black/30 hover:bg-black/50 transition z-10">
         ›
       </button>
     </div>
 
-    <!-- 하단: 이름 + 입력 + 선택 버튼 -->
+    <!-- 하단: 이름 + 입력 + 선택 버튼 — safe-area 대응으로 제스처바 영역 침범 방지 -->
     <div class="pt-6 bg-gradient-to-t from-black/95 via-black/80 to-transparent pointer-events-auto">
-      <div class="max-w-lg mx-auto px-4 pb-4">
+      <div class="max-w-lg mx-auto px-4" style="padding-bottom:max(1rem, env(safe-area-inset-bottom))">
         <div id="stickerModalName" class="text-white text-center text-base font-semibold mb-3"></div>
 
         <!-- 입력 영역 (스티커 문구 직접 입력) -->
@@ -2065,6 +2070,45 @@
         + '<div class="mt-1">' + input + '</div>'
         + '</label>';
     }).join('');
+    updateStickerModalSelectBtn();
+  }
+
+  /**
+   * 스티커 모달 "선택" 버튼 활성화 상태 갱신.
+   *   기존 inline 카드의 isStepValid 규칙과 동일:
+   *     - 입력안함(mode='none')  → 항상 활성
+   *     - 직접입력(mode='custom') + 필수 필드 모두 채워짐 → 활성
+   *     - 직접입력 + 필수 필드 비어있음 → 비활성
+   */
+  function updateStickerModalSelectBtn() {
+    const btn = document.getElementById('stickerModalSelectBtn');
+    if (!btn) return;
+    const { stickers, currentIndex } = stickerModalState;
+    const st = stickers[currentIndex];
+    if (!st) return;
+    const noInputCb = document.getElementById('stickerModalNoInput');
+    const isNone = !!(noInputCb && noInputCb.checked);
+    let valid = true;
+    if (!isNone) {
+      // 직접입력 모드 — 필수 필드 모두 채워졌는지 검사 (DOM 의 현재 입력값 기준)
+      const fields = getStickerCustomFields(st);
+      const wrap = document.getElementById('stickerModalInputs');
+      for (const f of fields) {
+        if (!f.required) continue;
+        const key = f.field_id || f.name || f.field_label;
+        const el = wrap ? wrap.querySelector('[data-field="' + key + '"]') : null;
+        const val = el ? String(el.value || '').trim() : '';
+        if (!val) { valid = false; break; }
+      }
+    }
+    btn.disabled = !valid;
+    if (valid) {
+      btn.classList.remove('opacity-50', 'cursor-not-allowed');
+      btn.removeAttribute('aria-disabled');
+    } else {
+      btn.classList.add('opacity-50', 'cursor-not-allowed');
+      btn.setAttribute('aria-disabled', 'true');
+    }
   }
 
   function renderStickerModalContent() {
@@ -2138,6 +2182,9 @@
   }
 
   function selectStickerFromModal() {
+    // 비활성 상태에서 호출되면 무시 (data-action 클릭이 disabled 도 통과하므로 가드)
+    const btn = document.getElementById('stickerModalSelectBtn');
+    if (btn && btn.disabled) return;
     collectStickerModalInputs();
     const { productIdx, stickers, currentIndex } = stickerModalState;
     const st = stickers[currentIndex];
@@ -2162,13 +2209,14 @@
     else if (a === 'selectStickerFromModal') selectStickerFromModal();
   });
 
-  // 입력 영역: input/textarea 값 변경 시 pending 업데이트
+  // 입력 영역: input/textarea 값 변경 시 pending 업데이트 + 선택 버튼 활성화 갱신
   document.getElementById('stickerModalInputs').addEventListener('input', function(e) {
     const el = e.target.closest('[data-field]');
     if (!el) return;
     const st = stickerModalState.stickers[stickerModalState.currentIndex];
     if (!st) return;
     getStickerPending(st.id).fields[el.dataset.field] = el.value;
+    updateStickerModalSelectBtn();
   });
 
   // 입력안함 토글
@@ -2176,7 +2224,7 @@
     const st = stickerModalState.stickers[stickerModalState.currentIndex];
     if (!st) return;
     getStickerPending(st.id).mode = e.target.checked ? 'none' : 'custom';
-    // 입력 필드 disable 상태 반영 위해 재렌더
+    // 입력 필드 disable 상태 반영 위해 재렌더 (renderStickerModalInputs 가 updateStickerModalSelectBtn 호출)
     renderStickerModalInputs();
   });
 
