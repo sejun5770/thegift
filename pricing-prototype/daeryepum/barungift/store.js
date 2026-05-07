@@ -374,14 +374,11 @@ async function getExpressCustomerInfos() {
 /**
  * 희망출고일이 지정된(= desired_ship_date IS NOT NULL) 고객 입력 정보만 fetch — 출고일별 매출 집계용.
  *   대시보드 "희망출고일별 매출" 카드의 데이터원.
- *   Supabase 서버측 필터로 미입력/미설정 row 사전 제외 — 페이로드/네트워크 절약.
+ *   PostgREST 'not.is.null' 필터 호환성 이슈 가능성으로 클라 측 필터로 단순화 (row 수 ~수백건 수준이라 성능 영향 미미).
  */
 async function getCustomerInfosWithShipDate() {
-  if (USE_SUPABASE) {
-    return sbGet('bg_order_customer_info', 'desired_ship_date=not.is.null');
-  }
-  const infos = readJson(FILES.customerInfo, []);
-  return infos.filter(ci => ci.desired_ship_date);
+  const all = await getAllCustomerInfos();
+  return all.filter(ci => ci.desired_ship_date);
 }
 
 /**

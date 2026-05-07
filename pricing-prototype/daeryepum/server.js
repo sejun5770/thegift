@@ -1563,7 +1563,7 @@ async function apiDashboardByShipDate(query) {
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
       WHERE ${D01_FILTER} AND co.order_seq IN (${inList})
-        AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
+        AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5, 14)
       GROUP BY co.order_seq, CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
     `).then(r => r.recordset.map(row => ({ ...row, _src: 'CARD' }))));
   }
@@ -1587,7 +1587,7 @@ async function apiDashboardByShipDate(query) {
       LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
       ${ETC_COUPON_DIVISOR_JOIN_D01}
       WHERE ${D01_FILTER} AND o.order_seq IN (${inList})
-        AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+        AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5, 14, 15)
       GROUP BY o.order_seq, CASE WHEN ecp.order_seq IS NOT NULL THEN 1 ELSE 0 END
     `).then(r => r.recordset.map(row => ({ ...row, _src: 'ETC' }))));
   }
@@ -1635,6 +1635,13 @@ async function apiDashboardByShipDate(query) {
     period: { start: startDate, end: endDate },
     ship_dates,
     total: { amount: totalAmount, orders: totalOrders, qty: totalQty },
+    diag: {
+      customer_info_total: cInfos.length,
+      customer_info_in_window: inWindow.length,
+      sql_card_orders: ciByCardSeq.size,
+      sql_etc_orders: ciByEtcSeq.size,
+      sql_matched_rows: salesRows.length,
+    },
   };
 }
 
