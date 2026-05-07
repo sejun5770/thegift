@@ -1481,10 +1481,35 @@
       );
     }).join('');
 
+    // 나눔배송 안내 — 답례품을 여러 배송지로 나눠 받는 케이스
+    const deliveries = orderData?.deliveries || [];
+    let splitNoticeHtml = '';
+    if (deliveries.length > 1) {
+      const totalQty = deliveries.reduce((s, d) => s + (Number(d.qty) || 0), 0);
+      const itemRows = deliveries.map(d => (
+        '<li class="flex items-baseline gap-2 leading-relaxed">'
+        + '<span class="text-[11px] font-semibold flex-shrink-0" style="color:var(--brand-700)">배송지 ' + (d.seq || '') + '</span>'
+        + '<span class="text-slate-700 flex-1">' + esc(d.recv_addr || '-') + '</span>'
+        + '<span class="text-[12px] font-bold text-slate-900 flex-shrink-0">' + (Number(d.qty) || 0).toLocaleString() + '개</span>'
+        + '</li>'
+      )).join('');
+      splitNoticeHtml = ''
+        + '<div class="rounded-2xl mb-4 p-4" style="background:linear-gradient(135deg,rgba(99,102,241,0.08),rgba(139,92,246,0.05));border:1px solid rgba(99,102,241,0.2)">'
+        +   '<div class="flex items-center gap-2 mb-2">'
+        +     '<span class="text-base">📦</span>'
+        +     '<p class="text-[13px] font-bold text-slate-800">나눔배송 안내 — 총 ' + totalQty.toLocaleString() + '개가 ' + deliveries.length + '개 배송지로 분리됩니다</p>'
+        +   '</div>'
+        +   '<ul class="space-y-1 text-[12.5px] mb-2">' + itemRows + '</ul>'
+        +   '<p class="text-[11.5px] text-slate-500 mt-2 leading-relaxed">※ 입력하신 출고일/스티커/박스 정보는 모든 배송지에 동일하게 적용됩니다.</p>'
+        + '</div>';
+    }
+
     return `
       <div class="fade-in">
         <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">스티커 선택</h2>
         <p class="text-sm text-slate-500 mb-5">각 상품의 스티커를 선택해주세요.</p>
+
+        ${splitNoticeHtml}
 
         ${products.length > 0 ? `
           <!-- 스티커 안내 FAQ (접기/펼치기, 기본 펼침) -->

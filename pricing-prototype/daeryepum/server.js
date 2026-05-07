@@ -486,7 +486,8 @@ async function apiOrders(query) {
         o.status_seq AS status_seq,
         cw.event_year + '-' + RIGHT('0'+cw.event_month,2) + '-' + RIGHT('0'+cw.event_Day,2) AS wedding_date,
         ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
-        0 AS file_count
+        0 AS file_count,
+        1 AS delivery_seq  -- ETC 주문은 단일 배송지
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
@@ -530,7 +531,8 @@ async function apiOrders(query) {
         co.status_seq,
         w.event_year + '-' + RIGHT('0'+w.event_month,2) + '-' + RIGHT('0'+w.event_Day,2) AS wedding_date,
         ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
-        ISNULL((SELECT COUNT(*) FROM custom_order_plist p WITH (NOLOCK) INNER JOIN custom_order_plist_files f WITH (NOLOCK) ON p.id = f.pid WHERE p.order_seq = co.order_seq), 0) AS file_count
+        ISNULL((SELECT COUNT(*) FROM custom_order_plist p WITH (NOLOCK) INNER JOIN custom_order_plist_files f WITH (NOLOCK) ON p.id = f.pid WHERE p.order_seq = co.order_seq), 0) AS file_count,
+        ISNULL(di.DELIVERY_SEQ, 1) AS delivery_seq  -- 배송지별 행 구분 (나눔배송 대응)
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
@@ -538,14 +540,16 @@ async function apiOrders(query) {
       LEFT JOIN card_copurchase_orders cp ON co.order_seq = cp.order_seq
       INNER JOIN (
         -- 배송지별 답례품 수량: DELIVERY_INFO_DETAIL 있으면 배송지별, 없으면 첫 배송지 1건
-        SELECT di.ORDER_SEQ, di.NAME, di.HPHONE, di.PHONE, di.ADDR, di.ADDR_DETAIL,
+        --   delivery_seq 노출 — 같은 order_seq 에 여러 배송지가 있을 때 frontend 가
+        --   (order_seq, delivery_seq) 복합키로 행 식별 가능 (정보입력현황 분리 표시).
+        SELECT di.ORDER_SEQ, di.DELIVERY_SEQ, di.NAME, di.HPHONE, di.PHONE, di.ADDR, di.ADDR_DETAIL,
                di.DELIVERY_MEMO, dd.item_count AS dd_count
         FROM DELIVERY_INFO di WITH (NOLOCK)
         INNER JOIN DELIVERY_INFO_DETAIL dd WITH (NOLOCK)
           ON dd.delivery_id = di.ID AND dd.item_title = N'답례품' AND dd.item_count > 0
         UNION ALL
         -- DELIVERY_INFO_DETAIL에 답례품 기록이 없는 주문: 첫 배송지만
-        SELECT di.ORDER_SEQ, di.NAME, di.HPHONE, di.PHONE, di.ADDR, di.ADDR_DETAIL,
+        SELECT di.ORDER_SEQ, di.DELIVERY_SEQ, di.NAME, di.HPHONE, di.PHONE, di.ADDR, di.ADDR_DETAIL,
                di.DELIVERY_MEMO, NULL AS dd_count
         FROM DELIVERY_INFO di WITH (NOLOCK)
         WHERE di.DELIVERY_SEQ = 1

@@ -6922,17 +6922,23 @@ async function loadBgUnified() {
     setBgUnifiedProgress('2/3 주문-고객입력 매칭 중...');
 
     const rawOrders = Array.isArray(ordersRes.value) ? ordersRes.value : [];
-    // order_seq 기준 중복 제거 + 상품(card_code)별 상품명/수량 보존
-    // productMap 구조: Map(order_seq → Map(card_code → {card_name, item_count}))
+    // (order_seq, delivery_seq) 복합키 기준 행 분리 — 나눔배송으로 같은 주문에 배송지가 N개면 N행 표시.
+    //   customer_info 입력은 여전히 order_seq 단위 1개 (모든 배송지에 동일 출고일/스티커 적용).
+    //   productMap 도 배송지별 분리 — 각 행은 그 배송지의 답례품 수량만 표시.
     const orderMap = new Map();
     const productMap = new Map();
     rawOrders.forEach(r => {
       r.order_date_fmt = r.order_date ? r.order_date.replace('T', ' ').slice(0, 10) : '';
-      if (!orderMap.has(r.order_seq)) orderMap.set(r.order_seq, r);
-      // 상품 상세 (동일 card_code 중복 행이면 수량 합산)
+      // 복합키 — ETC 는 항상 delivery_seq=1, CARD 는 SQL 에서 di.DELIVERY_SEQ 값
+      const dseq = r.delivery_seq || 1;
+      const compositeKey = `${r.order_seq}::${dseq}`;
+      r._composite_key = compositeKey;
+      if (!orderMap.has(compositeKey)) orderMap.set(compositeKey, r);
+      // 상품 상세 — 각 배송지(composite key)별 상품×수량 분리.
+      //   같은 (order_seq, delivery_seq) 의 같은 card_code 중복 행이면 수량 합산.
       if (r.card_code && r.card_name) {
-        if (!productMap.has(r.order_seq)) productMap.set(r.order_seq, new Map());
-        const pm = productMap.get(r.order_seq);
+        if (!productMap.has(compositeKey)) productMap.set(compositeKey, new Map());
+        const pm = productMap.get(compositeKey);
         if (!pm.has(r.card_code)) {
           pm.set(r.card_code, { card_name: r.card_name, item_count: 0 });
         }
@@ -7006,8 +7012,12 @@ function renderBgUnified() {
     (!hideCancel  || !isCancelled(o)) &&
     (!hidePending || !isPaymentPending(o))
   );
+  // 탭 카운트는 주문 단위 (배송지 분리로 한 주문이 여러 행이어도 1번만 카운트)
+  const seenForCount = new Set();
   let cntSubmitted = 0, cntUnsubmitted = 0;
   visibleBase.forEach(o => {
+    if (seenForCount.has(o.order_seq)) return;
+    seenForCount.add(o.order_seq);
     const ciKey = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
     if (bgUnifiedCiMap.get(ciKey)) cntSubmitted++; else cntUnsubmitted++;
   });
@@ -7029,16 +7039,17 @@ function renderBgUnified() {
   });
 
   // 입력완료 탭 요약 카드 업데이트 (전체 ci 중 처리 대기/완료 카운트)
+  //   배송지 분리로 같은 주문이 여러 행이어도 주문 단위로 1번만 카운트.
   if (activeTab === 'submitted') {
-    const submittedAll = visibleBase.filter(o => {
-      const k = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
-      return !!bgUnifiedCiMap.get(k);
-    });
+    const seenSubmitted = new Set();
     let processedCnt = 0, pendingCnt = 0;
-    submittedAll.forEach(o => {
+    visibleBase.forEach(o => {
+      if (seenSubmitted.has(o.order_seq)) return;
+      seenSubmitted.add(o.order_seq);
       const k = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
       const c = bgUnifiedCiMap.get(k);
-      if (c?.processed_at) processedCnt++; else pendingCnt++;
+      if (!c) return;
+      if (c.processed_at) processedCnt++; else pendingCnt++;
     });
     const sum = document.getElementById('uni-processed-summary');
     if (sum) {
@@ -7068,7 +7079,8 @@ function renderBgUnified() {
     const ciKey = order.order_type === 'ETC' ? `ETC-${order.order_seq}` : String(order.order_seq);
     const ci = bgUnifiedCiMap.get(ciKey) || null;
     const sels = ci?.sticker_selections || [];
-    const pm = bgUnifiedProductMap.get(order.order_seq);
+    // 배송지별 상품 매칭 — 복합키 사용 (order_seq + delivery_seq)
+    const pm = bgUnifiedProductMap.get(order._composite_key || `${order.order_seq}::${order.delivery_seq||1}`);
 
     if (pm && pm.size > 0) {
       // 주문의 각 상품에 대해 1행씩
@@ -7114,14 +7126,24 @@ function renderBgUnified() {
 
   document.getElementById('uni-loading').style.display = 'none';
   document.getElementById('uni-table-wrap').style.display = 'block';
-  document.getElementById('uni-row-count').textContent = `총 ${filtered.length}건 / ${bgUnifiedRows.length}행`;
+  // 주문/배송지/행 카운트 분리 표시 — 나눔배송 시 주문 1건이 여러 배송지·행으로 노출됨.
+  const uniqueOrderSeqs = new Set(filtered.map(o => o.order_seq));
+  const orderCountText = uniqueOrderSeqs.size === filtered.length
+    ? `총 ${filtered.length}건 / ${bgUnifiedRows.length}행`
+    : `주문 ${uniqueOrderSeqs.size}건 / 배송지 ${filtered.length}건 / ${bgUnifiedRows.length}행`;
+  document.getElementById('uni-row-count').textContent = orderCountText;
 
   // isCancelled 는 함수 상단 (카운트 계산) 에서 이미 선언됨 — 재선언 금지
   let html = '';
 
   bgUnifiedRows.forEach(({ order, ci, sel, product_code, product_name, product_qty }, rowIdx) => {
-    const isFirstOfOrder = rowIdx === 0 || bgUnifiedRows[rowIdx - 1].order.order_seq !== order.order_seq;
-    const borderStyle = isFirstOfOrder ? 'border-top:2px solid var(--gray-200)' : '';
+    const prev = rowIdx > 0 ? bgUnifiedRows[rowIdx - 1].order : null;
+    const isFirstOfOrder = rowIdx === 0 || (prev && prev.order_seq !== order.order_seq);
+    // 같은 주문이지만 다른 배송지 (나눔배송) — 미세 dashed separator
+    const isFirstOfDelivery = !isFirstOfOrder && prev && (prev.delivery_seq || 1) !== (order.delivery_seq || 1);
+    const borderStyle = isFirstOfOrder
+      ? 'border-top:2px solid var(--gray-200)'
+      : (isFirstOfDelivery ? 'border-top:1px dashed var(--gray-300)' : '');
     // 결제대기 우선 표시 (취소가 더 강한 상태이긴 하지만 둘 다 발생할 일 거의 없음).
     const rowClass = isCancelled(order)
       ? 'row-cancelled'

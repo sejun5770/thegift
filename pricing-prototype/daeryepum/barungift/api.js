@@ -321,6 +321,41 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         else paymentStatus = 'unknown'; // 0 또는 알 수 없는 값 (대개 결제 전 임시 주문)
       }
 
+      // 나눔배송 — 답례품을 여러 배송지로 나눠 보내는 케이스 (CARD 주문만 가능, ETC 는 단일).
+      //   배송지별 답례품 수량을 클라이언트에서 안내문구로 노출 (입력은 주문 단위 1번 그대로).
+      let deliveries = [];
+      if (!isEtc) {
+        try {
+          const delRes = await pool.request()
+            .input('seq', sql.Int, seq)
+            .query(`
+              SELECT
+                di.DELIVERY_SEQ AS delivery_seq,
+                di.NAME AS recv_name,
+                CONCAT(ISNULL(di.ADDR,''), ' ', ISNULL(di.ADDR_DETAIL,'')) AS recv_addr,
+                ISNULL((
+                  SELECT TOP 1 dd.item_count
+                  FROM DELIVERY_INFO_DETAIL dd WITH (NOLOCK)
+                  WHERE dd.delivery_id = di.ID AND dd.item_title = N'답례품' AND dd.item_count > 0
+                ), 0) AS qty
+              FROM DELIVERY_INFO di WITH (NOLOCK)
+              WHERE di.ORDER_SEQ = @seq
+              ORDER BY di.DELIVERY_SEQ
+            `);
+            // qty 가 0 인 배송지(답례품 미포함)는 제외 — 실제 답례품 받는 배송지만 노출
+            deliveries = delRes.recordset
+              .filter(d => (d.qty || 0) > 0)
+              .map(d => ({
+                seq: d.delivery_seq,
+                recv_name: maskName(d.recv_name || ''),
+                recv_addr: d.recv_addr || '',
+                qty: d.qty || 0,
+              }));
+        } catch (e) {
+          console.warn('[orders/:id] deliveries 조회 실패:', e.message);
+        }
+      }
+
       // 결제대기 상태일 때만 toss_vaccount 조회
       // toss_vaccount.order_type: 'C'=CARD, 'E'=ETC
       let virtualAccount = null;
@@ -379,6 +414,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         stickers_by_product: stickersByProduct,
         box_options_by_product: boxOptionsByProduct, // { product_code: [{code,name,color,preview_image_url}] }
         existing_info: existingInfo,
+        deliveries,  // 배송지별 답례품 수량 (나눔배송 안내용, 입력엔 영향 없음)
         virtual_account: virtualAccount,  // 주문 결제용 가상계좌 (결제대기 상태일 때만)
         bank_info: {                       // 오늘출발 추가비용용 고정 계좌 (항상)
           bank_name: '신한은행',
