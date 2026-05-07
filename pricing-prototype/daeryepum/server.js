@@ -1584,6 +1584,7 @@ async function apiDashboardByShipDate(query) {
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
       LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
       ${ETC_COUPON_DIVISOR_JOIN_D01}
       WHERE ${D01_FILTER} AND o.order_seq IN (${inList})
