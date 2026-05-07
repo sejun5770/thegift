@@ -452,17 +452,44 @@ nav a:hover{color:var(--gray-900)}
     </div>
   </div>
 
-  <!-- 희망출고일별 매출 (정보입력 완료 기준) -->
+  <!-- Lead Time Distribution -->
   <div class="section">
-    <div class="section-title">
-      <span>📅 희망출고일별 매출 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(고객 정보입력 완료된 주문 기준 · 향후 30일)</span></span>
+    <div class="section-title">⏱️ 주문~예식 리드타임 분포</div>
+    <div class="card">
+      <div style="display:flex;gap:24px;margin-bottom:12px">
+        <div><span style="font-size:12px;color:var(--gray-500)">평균</span><br><strong id="lt-avg">-</strong></div>
+        <div><span style="font-size:12px;color:var(--gray-500)">중앙값</span><br><strong id="lt-median">-</strong></div>
+        <div><span style="font-size:12px;color:var(--gray-500)">표본 수</span><br><strong id="lt-samples">-</strong></div>
+      </div>
+      <div class="leadtime-bars" id="lt-bars"></div>
+      <div style="height:24px"></div>
+      <div class="feedback" id="lt-feedback"></div>
+    </div>
+  </div>
+
+  <!-- 희망출고일별 매출 (정보입력 완료 기준) — 매출 데이터와 기간 차원이 다름 (order_date vs desired_ship_date) -->
+  <div class="section">
+    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span>📅 희망출고일별 매출 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(고객 정보입력 완료된 주문 기준)</span></span>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;font-weight:400">
+        <button class="btn btn-sm bsd-preset" onclick="setBsdPreset('this-week', this)">이번주</button>
+        <button class="btn btn-sm bsd-preset" onclick="setBsdPreset('next-7', this)">향후 7일</button>
+        <button class="btn btn-sm bsd-preset btn-primary" onclick="setBsdPreset('next-30', this)">향후 30일</button>
+        <button class="btn btn-sm bsd-preset" onclick="setBsdPreset('past-30', this)">지난 30일</button>
+      </div>
     </div>
     <div class="card">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <input type="date" id="bsd-start" style="padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+        <span style="color:var(--gray-400)">~</span>
+        <input type="date" id="bsd-end" style="padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+        <button class="btn btn-primary" style="padding:6px 14px;font-size:13px" onclick="loadByShipDate()">조회</button>
+        <span id="bsd-loading" style="color:var(--gray-500);font-size:12px;margin-left:8px"></span>
+      </div>
       <div style="display:flex;gap:24px;margin-bottom:12px;flex-wrap:wrap">
         <div><span style="font-size:12px;color:var(--gray-500)">총 매출</span><br><strong id="bsd-total-amount" style="font-size:16px">-</strong></div>
         <div><span style="font-size:12px;color:var(--gray-500)">총 주문</span><br><strong id="bsd-total-orders">-</strong></div>
         <div><span style="font-size:12px;color:var(--gray-500)">총 수량</span><br><strong id="bsd-total-qty">-</strong></div>
-        <div><span style="font-size:12px;color:var(--gray-500)">조회 기간</span><br><strong id="bsd-period" style="font-size:13px;font-weight:500">-</strong></div>
       </div>
       <div style="overflow-x:auto">
         <table id="bsd-table" style="width:100%;border-collapse:collapse;font-size:13px">
@@ -480,21 +507,6 @@ nav a:hover{color:var(--gray-900)}
         </table>
       </div>
       <div class="feedback" id="bsd-feedback"></div>
-    </div>
-  </div>
-
-  <!-- Lead Time Distribution -->
-  <div class="section">
-    <div class="section-title">⏱️ 주문~예식 리드타임 분포</div>
-    <div class="card">
-      <div style="display:flex;gap:24px;margin-bottom:12px">
-        <div><span style="font-size:12px;color:var(--gray-500)">평균</span><br><strong id="lt-avg">-</strong></div>
-        <div><span style="font-size:12px;color:var(--gray-500)">중앙값</span><br><strong id="lt-median">-</strong></div>
-        <div><span style="font-size:12px;color:var(--gray-500)">표본 수</span><br><strong id="lt-samples">-</strong></div>
-      </div>
-      <div class="leadtime-bars" id="lt-bars"></div>
-      <div style="height:24px"></div>
-      <div class="feedback" id="lt-feedback"></div>
     </div>
   </div>
 
@@ -2598,8 +2610,8 @@ async function loadDashboard() {
     // 전환율 + 샘플 (별도 로드)
     fetch(`${API}/api/dashboard/conversion`).then(r=>r.json()).then(renderConversion).catch(e=>console.warn('Conversion load failed:', e));
     fetch(`${API}/api/dashboard/samples`).then(r=>r.json()).then(renderSamples).catch(e=>console.warn('Samples load failed:', e));
-    // 희망출고일별 매출 (정보입력 완료 기준, 향후 30일) — 별도 로드 (Supabase + MSSQL JOIN 작업)
-    fetch(`${API}/api/dashboard/by-ship-date`).then(r=>r.json()).then(renderByShipDate).catch(e=>console.warn('ByShipDate load failed:', e));
+    // 희망출고일별 매출 — 기본 향후 30일 프리셋으로 초기 로드 (사용자가 별도 변경 가능)
+    setBsdPreset('next-30');
   } catch(e) { console.error(e); showToast('대시보드 로딩 실패: ' + e.message); }
 }
 
@@ -3326,9 +3338,67 @@ function renderLeadtime(lt) {
 }
 
 /**
+ * 희망출고일별 매출 — 프리셋 (이번주/향후 7일/향후 30일/지난 30일).
+ *   shouldLoad=false 면 input 값만 세팅하고 자동 조회 X (사용자가 직접 조회 버튼 누름).
+ */
+function setBsdPreset(preset, btn) {
+  const $start = document.getElementById('bsd-start');
+  const $end = document.getElementById('bsd-end');
+  const today = new Date();
+  let start, end;
+  if (preset === 'this-week') {
+    const day = today.getDay();
+    start = new Date(today.getTime() - day * 86400000);          // 이번주 일요일
+    end = new Date(start.getTime() + 6 * 86400000);              // 이번주 토요일
+  } else if (preset === 'next-7') {
+    start = today;
+    end = new Date(today.getTime() + 6 * 86400000);
+  } else if (preset === 'past-30') {
+    start = new Date(today.getTime() - 30 * 86400000);
+    end = new Date(today.getTime() - 1 * 86400000);              // 어제까지
+  } else {
+    // next-30 (default)
+    start = today;
+    end = new Date(today.getTime() + 29 * 86400000);
+  }
+  $start.value = fmt(start);
+  $end.value = fmt(end);
+  // 프리셋 버튼 active 토글
+  document.querySelectorAll('.bsd-preset').forEach(b => b.classList.remove('btn-primary'));
+  if (btn) btn.classList.add('btn-primary');
+  loadByShipDate();
+}
+
+/** 희망출고일별 매출 조회 — input 의 start/end 로 fetch. */
+async function loadByShipDate() {
+  const start = document.getElementById('bsd-start').value;
+  const end = document.getElementById('bsd-end').value;
+  const $loading = document.getElementById('bsd-loading');
+  if (!start || !end) {
+    if ($loading) $loading.textContent = '시작일과 종료일을 선택하세요.';
+    return;
+  }
+  if (start > end) {
+    if ($loading) $loading.textContent = '시작일이 종료일보다 늦을 수 없습니다.';
+    return;
+  }
+  // end+1 day = exclusive (서버는 end 를 exclusive 로 받음)
+  const endPlus = fmt(new Date(new Date(end).getTime() + 86400000));
+  if ($loading) $loading.textContent = '조회 중...';
+  try {
+    const data = await fetch(`${API}/api/dashboard/by-ship-date?start_date=${start}&end_date=${endPlus}`).then(r => r.json());
+    if ($loading) $loading.textContent = '';
+    renderByShipDate(data);
+  } catch (e) {
+    console.warn('[byShipDate] 조회 실패:', e);
+    if ($loading) $loading.textContent = '조회 실패: ' + (e.message || '오류');
+  }
+}
+
+/**
  * 희망출고일별 매출 카드 렌더 — apiDashboardByShipDate 응답.
  *   고객 정보입력 완료 + desired_ship_date 지정된 주문만 집계.
- *   향후 출고 부하 가시성 + 일별 작업량 사전 파악 목적.
+ *   사용자 지정 기간 내 일별 출고 부하 가시성 목적.
  */
 function renderByShipDate(data) {
   const safe = data || {};
@@ -3338,12 +3408,7 @@ function renderByShipDate(data) {
   document.getElementById('bsd-total-amount').textContent = fmtKRW(total.amount);
   document.getElementById('bsd-total-orders').textContent = fmtNum(total.orders) + '건';
   document.getElementById('bsd-total-qty').textContent = fmtNum(total.qty);
-  const period = safe.period || {};
-  if (period.start && period.end) {
-    // end 는 exclusive 라 -1 일로 표시
-    const dispEnd = fmt(new Date(new Date(period.end).getTime() - 86400000));
-    document.getElementById('bsd-period').textContent = `${period.start} ~ ${dispEnd}`;
-  }
+  // 기간은 입력 필드(bsd-start/end)에 이미 표시되므로 별도 표시 X
 
   const tbody = document.getElementById('bsd-tbody');
   if (!dates.length) {
@@ -3385,19 +3450,18 @@ function renderByShipDate(data) {
   }).join('');
   tbody.innerHTML = rows;
 
-  // 피드백: 가장 부하 큰 날 + 익주 vs 차차주
+  // 피드백: 가장 부하 큰 날 + 빠른출고 비중
   const topDay = dates.reduce((max, cur) => cur.amount > (max?.amount || 0) ? cur : max, null);
-  const next7 = dates.filter(d => d.date < fmt(new Date(Date.now() + 7 * 86400000)));
-  const next7Amt = next7.reduce((s, d) => s + (d.amount || 0), 0);
-  const next7Ord = next7.reduce((s, d) => s + (d.orders || 0), 0);
-  let fb = `정보입력 완료된 주문 <strong>${fmtNum(total.orders)}건 / 매출 ${fmtKRW(total.amount)}</strong> 의 출고 일정이 잡혀있습니다. `;
-  if (next7.length) {
-    fb += `향후 7일 내 출고 예정: <strong>${fmtNum(next7Ord)}건 / ${fmtKRW(next7Amt)}</strong>. `;
-  }
+  const totalExpressOrders = dates.reduce((s, d) => s + (d.express?.orders || 0), 0);
+  const expressPct = total.orders > 0 ? Math.round(totalExpressOrders / total.orders * 100) : 0;
+  let fb = `조회 기간 내 정보입력 완료된 주문 <strong>${fmtNum(total.orders)}건 / 매출 ${fmtKRW(total.amount)}</strong> 의 출고 일정이 확인됩니다. `;
   if (topDay) {
-    fb += `가장 부하가 큰 날은 <strong>${topDay.date}</strong> (${fmtKRW(topDay.amount)}, ${fmtNum(topDay.orders)}건) 입니다. `;
+    fb += `가장 부하가 큰 날은 <strong>${topDay.date}</strong> (${fmtKRW(topDay.amount)}, ${fmtNum(topDay.orders)}건). `;
   }
-  fb += '📌 미입력 주문은 포함되지 않으므로 실제 작업량은 더 클 수 있습니다.';
+  if (totalExpressOrders > 0) {
+    fb += `이 중 <strong>⚡ 빠른출고 ${fmtNum(totalExpressOrders)}건(${expressPct}%)</strong> 입니다. `;
+  }
+  fb += '📌 정보 미입력 주문은 포함되지 않으므로 실제 작업량은 더 클 수 있습니다.';
   document.getElementById('bsd-feedback').innerHTML = fb;
 }
 
