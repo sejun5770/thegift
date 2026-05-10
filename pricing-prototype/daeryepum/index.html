@@ -7896,8 +7896,10 @@ function copyBgUnified() {
     // L열(index 11) = 박스 코드 (수량 미포함)
     if (sel?.box_code) cells[11] = sel.box_code;
     if (sel?.sticker_code) {
-      const qty = sel.quantity ? `(${sel.quantity}개)` : '';
-      cells[12] = `${sel.sticker_code}${qty}`;
+      // 나눔배송 대응 — product_qty(배송지별 수량) 우선, 없으면 sel.quantity(주문 전체) 폴백
+      const qty = product_qty || sel.quantity;
+      const qtyStr = qty ? `(${qty}개)` : '';
+      cells[12] = `${sel.sticker_code}${qtyStr}`;
     }
     // P열(index 15) = 고객이 입력한 스티커 문구 (custom_values)
     //   - sticker_input='custom' 일 때만 값 존재. 'none'/'선택안함'이면 빈 문자열.
@@ -7914,7 +7916,8 @@ function copyBgUnified() {
     if (order.recv_msg) {
       cells[16] = String(order.recv_msg).replace(/[\t\r\n]+/g, ' ').trim();
     }
-    cells[19] = sel?.quantity || product_qty || '';  // T: 주문수량
+    // T열 = 주문수량 — 나눔배송 대응 (product_qty 우선, sel.quantity 는 주문 전체라 폴백용)
+    cells[19] = product_qty || sel?.quantity || '';
     if (ci?.is_express) cells[21] = ci.desired_ship_date || '';
     cells[22] = ci?.desired_ship_date || '';
     return cells;
