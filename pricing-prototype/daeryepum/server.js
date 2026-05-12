@@ -3091,16 +3091,18 @@ const server = http.createServer(async (req, res) => {
         logAdminAccess(session, req, 'debug-settle-method-stats', { days: parsed.query.days });
         const pp = await getPool();
         const days = parseInt(parsed.query.days) || 30;
-        // CARD 측 분포
+        // CARD 측 분포 — toss_vaccount 매칭 여부는 derived table 로 사전 집계 후 LEFT JOIN
+        //   (MSSQL 은 SUM 안에 EXISTS 서브쿼리 직접 사용 불가)
         const cardDist = await pp.request().input('days', sql.Int, days).query(`
+          WITH card_vbank AS (
+            SELECT DISTINCT order_seq FROM toss_vaccount WITH (NOLOCK) WHERE order_type = 'C'
+          )
           SELECT
             co.settle_method,
             COUNT(*) AS cnt,
-            SUM(CASE WHEN EXISTS (
-              SELECT 1 FROM toss_vaccount tv WITH (NOLOCK)
-              WHERE tv.order_seq = co.order_seq AND tv.order_type = 'C'
-            ) THEN 1 ELSE 0 END) AS has_toss_vbank_cnt
+            SUM(CASE WHEN cv.order_seq IS NOT NULL THEN 1 ELSE 0 END) AS has_toss_vbank_cnt
           FROM custom_order co WITH (NOLOCK)
+          LEFT JOIN card_vbank cv ON cv.order_seq = co.order_seq
           WHERE co.order_date >= DATEADD(day, -@days, GETDATE())
             AND co.status_seq NOT IN (3, 5, 14)
           GROUP BY co.settle_method
@@ -3108,14 +3110,15 @@ const server = http.createServer(async (req, res) => {
         `);
         // ETC 측 분포
         const etcDist = await pp.request().input('days', sql.Int, days).query(`
+          WITH etc_vbank AS (
+            SELECT DISTINCT order_seq FROM toss_vaccount WITH (NOLOCK) WHERE order_type = 'E'
+          )
           SELECT
             o.settle_method,
             COUNT(*) AS cnt,
-            SUM(CASE WHEN EXISTS (
-              SELECT 1 FROM toss_vaccount tv WITH (NOLOCK)
-              WHERE tv.order_seq = o.order_seq AND tv.order_type = 'E'
-            ) THEN 1 ELSE 0 END) AS has_toss_vbank_cnt
+            SUM(CASE WHEN ev.order_seq IS NOT NULL THEN 1 ELSE 0 END) AS has_toss_vbank_cnt
           FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+          LEFT JOIN etc_vbank ev ON ev.order_seq = o.order_seq
           WHERE o.order_date >= DATEADD(day, -@days, GETDATE())
             AND o.status_seq NOT IN (3, 5, 14, 15)
           GROUP BY o.settle_method
@@ -3123,17 +3126,18 @@ const server = http.createServer(async (req, res) => {
         `);
         // 코드별 샘플 order_seq 3개씩 (검증용)
         const cardSamples = await pp.request().input('days', sql.Int, days).query(`
+          WITH card_vbank AS (
+            SELECT DISTINCT order_seq FROM toss_vaccount WITH (NOLOCK) WHERE order_type = 'C'
+          )
           SELECT t.settle_method, t.order_seq, t.order_date, t.has_toss_vbank
           FROM (
             SELECT
               co.settle_method, co.order_seq,
               CONVERT(varchar(19), co.order_date, 120) AS order_date,
-              CASE WHEN EXISTS (
-                SELECT 1 FROM toss_vaccount tv WITH (NOLOCK)
-                WHERE tv.order_seq = co.order_seq AND tv.order_type = 'C'
-              ) THEN 1 ELSE 0 END AS has_toss_vbank,
+              CASE WHEN cv.order_seq IS NOT NULL THEN 1 ELSE 0 END AS has_toss_vbank,
               ROW_NUMBER() OVER (PARTITION BY co.settle_method ORDER BY co.order_date DESC) AS rn
             FROM custom_order co WITH (NOLOCK)
+            LEFT JOIN card_vbank cv ON cv.order_seq = co.order_seq
             WHERE co.order_date >= DATEADD(day, -@days, GETDATE())
               AND co.status_seq NOT IN (3, 5, 14)
           ) t WHERE t.rn <= 3
