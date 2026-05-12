@@ -3083,6 +3083,79 @@ const server = http.createServer(async (req, res) => {
             actual_sql_result: actualSqlResult,
           };
         }
+      } else if (pathname === '/api/debug-payment-discovery') {
+        // 결제수단 컬럼/테이블 자동 탐색 — MSSQL 스키마에서 payment 관련 의심 컬럼+테이블 식별.
+        //   주문조회 엑셀에 결제수단 추가 위해 어디 컬럼인지 모를 때 사용.
+        // URL: /api/debug-payment-discovery?order_seq=4736584  (sample row 검사용, 선택)
+        logAdminAccess(session, req, 'debug-payment-discovery', { order_seq: parsed.query.order_seq });
+        const pp = await getPool();
+        // 1) 두 주문 테이블의 결제 관련 의심 컬럼
+        const colsRes = await pp.request().query(`
+          SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+          FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_NAME IN ('custom_order', 'CUSTOM_ETC_ORDER')
+            AND (
+              COLUMN_NAME LIKE '%settle%' OR
+              COLUMN_NAME LIKE '%pay%' OR
+              COLUMN_NAME LIKE '%payment%' OR
+              COLUMN_NAME LIKE '%vbank%' OR
+              COLUMN_NAME LIKE '%card%' OR
+              COLUMN_NAME LIKE '%bank%' OR
+              COLUMN_NAME LIKE '%kakao%' OR
+              COLUMN_NAME LIKE '%inicis%' OR
+              COLUMN_NAME LIKE '%niceps%' OR
+              COLUMN_NAME LIKE '%toss%' OR
+              COLUMN_NAME LIKE '%kind%' OR
+              COLUMN_NAME LIKE '%method%'
+            )
+          ORDER BY TABLE_NAME, ORDINAL_POSITION
+        `);
+        // 2) 결제 관련 의심 테이블
+        const tblRes = await pp.request().query(`
+          SELECT TABLE_NAME, TABLE_TYPE
+          FROM INFORMATION_SCHEMA.TABLES
+          WHERE TABLE_NAME LIKE '%toss%' OR TABLE_NAME LIKE '%pg_%' OR TABLE_NAME LIKE '%pay%'
+            OR TABLE_NAME LIKE '%payment%' OR TABLE_NAME LIKE '%settle%'
+            OR TABLE_NAME LIKE '%inicis%' OR TABLE_NAME LIKE '%niceps%' OR TABLE_NAME LIKE '%kakao%'
+            OR TABLE_NAME LIKE '%vbank%' OR TABLE_NAME LIKE '%vacct%'
+          ORDER BY TABLE_NAME
+        `);
+        // 3) 샘플 주문 검사 (order_seq 파라미터 있으면)
+        let sampleData = null;
+        const sampleSeq = parseInt(parsed.query.order_seq);
+        if (sampleSeq) {
+          try {
+            // custom_order 전체 컬럼
+            const co = await pp.request().input('seq', sql.Int, sampleSeq).query(`
+              SELECT TOP 1 * FROM custom_order WITH (NOLOCK) WHERE order_seq = @seq
+            `);
+            const etc = await pp.request().input('seq', sql.Int, sampleSeq).query(`
+              SELECT TOP 1 * FROM CUSTOM_ETC_ORDER WITH (NOLOCK) WHERE order_seq = @seq
+            `);
+            // payment 의심 컬럼만 추출
+            const filterCols = obj => {
+              if (!obj) return null;
+              const filtered = {};
+              for (const k of Object.keys(obj)) {
+                if (/settle|pay|vbank|kind|method|bank|card|kakao|toss|inicis|niceps/i.test(k)) {
+                  filtered[k] = obj[k];
+                }
+              }
+              return filtered;
+            };
+            sampleData = {
+              order_seq: sampleSeq,
+              custom_order_payment_cols: filterCols(co.recordset[0]),
+              etc_order_payment_cols: filterCols(etc.recordset[0]),
+            };
+          } catch (e) { sampleData = { error: e.message }; }
+        }
+        data = {
+          suspect_columns: colsRes.recordset,
+          suspect_tables: tblRes.recordset,
+          sample_data: sampleData,
+          hint: 'sample_data 의 *_payment_cols 에서 신용카드/무통장/가상계좌 등을 구분 가능한 컬럼을 찾으세요. order_seq 파라미터로 sample 주문 지정 가능 (예: ?order_seq=4736584).',
+        };
       } else if (pathname === '/api/debug-bg-copurchase') {
         // 바른손몰(affiliate) 동시구매 진단 — D01 답례품 + 다른 Card_Div(특히 A01 청첩장) 같은 order_seq 케이스.
         // 두 테이블 모두 점검: CUSTOM_ETC_ORDER(ETC) + custom_order(CARD).
