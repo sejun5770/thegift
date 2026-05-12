@@ -3085,6 +3085,67 @@ const server = http.createServer(async (req, res) => {
             actual_sql_result: actualSqlResult,
           };
         }
+      } else if (pathname === '/api/debug-settle-method-stats') {
+        // settle_method 코드 분포 + toss_vaccount 매칭 여부로 가상계좌 코드 식별 진단.
+        // URL: /api/debug-settle-method-stats?days=30
+        logAdminAccess(session, req, 'debug-settle-method-stats', { days: parsed.query.days });
+        const pp = await getPool();
+        const days = parseInt(parsed.query.days) || 30;
+        // CARD 측 분포
+        const cardDist = await pp.request().input('days', sql.Int, days).query(`
+          SELECT
+            co.settle_method,
+            COUNT(*) AS cnt,
+            SUM(CASE WHEN EXISTS (
+              SELECT 1 FROM toss_vaccount tv WITH (NOLOCK)
+              WHERE tv.order_seq = co.order_seq AND tv.order_type = 'C'
+            ) THEN 1 ELSE 0 END) AS has_toss_vbank_cnt
+          FROM custom_order co WITH (NOLOCK)
+          WHERE co.order_date >= DATEADD(day, -@days, GETDATE())
+            AND co.status_seq NOT IN (3, 5, 14)
+          GROUP BY co.settle_method
+          ORDER BY cnt DESC
+        `);
+        // ETC 측 분포
+        const etcDist = await pp.request().input('days', sql.Int, days).query(`
+          SELECT
+            o.settle_method,
+            COUNT(*) AS cnt,
+            SUM(CASE WHEN EXISTS (
+              SELECT 1 FROM toss_vaccount tv WITH (NOLOCK)
+              WHERE tv.order_seq = o.order_seq AND tv.order_type = 'E'
+            ) THEN 1 ELSE 0 END) AS has_toss_vbank_cnt
+          FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+          WHERE o.order_date >= DATEADD(day, -@days, GETDATE())
+            AND o.status_seq NOT IN (3, 5, 14, 15)
+          GROUP BY o.settle_method
+          ORDER BY cnt DESC
+        `);
+        // 코드별 샘플 order_seq 3개씩 (검증용)
+        const cardSamples = await pp.request().input('days', sql.Int, days).query(`
+          SELECT t.settle_method, t.order_seq, t.order_date, t.has_toss_vbank
+          FROM (
+            SELECT
+              co.settle_method, co.order_seq,
+              CONVERT(varchar(19), co.order_date, 120) AS order_date,
+              CASE WHEN EXISTS (
+                SELECT 1 FROM toss_vaccount tv WITH (NOLOCK)
+                WHERE tv.order_seq = co.order_seq AND tv.order_type = 'C'
+              ) THEN 1 ELSE 0 END AS has_toss_vbank,
+              ROW_NUMBER() OVER (PARTITION BY co.settle_method ORDER BY co.order_date DESC) AS rn
+            FROM custom_order co WITH (NOLOCK)
+            WHERE co.order_date >= DATEADD(day, -@days, GETDATE())
+              AND co.status_seq NOT IN (3, 5, 14)
+          ) t WHERE t.rn <= 3
+          ORDER BY t.settle_method, t.order_date DESC
+        `);
+        data = {
+          period_days: days,
+          hint: 'toss_vbank 매칭률 높은 코드 = 가상계좌. 비중 가장 높은 코드 = 신용카드일 가능성 높음.',
+          card_distribution: cardDist.recordset,
+          etc_distribution: etcDist.recordset,
+          card_samples_per_method: cardSamples.recordset,
+        };
       } else if (pathname === '/api/debug-payment-discovery') {
         // 결제수단 컬럼/테이블 자동 탐색 — MSSQL 스키마에서 payment 관련 의심 컬럼+테이블 식별.
         //   주문조회 엑셀에 결제수단 추가 위해 어디 컬럼인지 모를 때 사용.
