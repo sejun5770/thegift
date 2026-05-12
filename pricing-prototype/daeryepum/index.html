@@ -1704,6 +1704,7 @@ const ALL_COLS = [
   {key:'item_amount_fmt',label:'결제금액',default:true,num:true},
   {key:'coupon_price_fmt',label:'쿠폰할인',default:false,num:true},
   {key:'settle_price_fmt',label:'주문총액',default:false,num:true},
+  {key:'settle_method_label',label:'결제수단',default:false},
   {key:'wedding_date',label:'예식일',default:false},
   {key:'lead_days',label:'리드타임(일)',default:false,num:true},
   {key:'site_name',label:'주문사이트',default:true},
@@ -1762,6 +1763,22 @@ const STATUS_MAP_CARD = {
   '-1':'임시저장', 0:'주문접수', 1:'결제대기', 3:'결제취소',
   5:'주문취소', 6:'제작준비', 7:'인쇄대기', 8:'인쇄중',
   9:'제본중', 10:'포장중', 11:'배송준비', 12:'배송완료', 15:'발송완료'
+};
+// 결제수단 코드 매핑 (FirstMall 컨벤션) — settle_method (char(1))
+//   운영 중 알 수 없는 코드 발견 시 raw 값을 그대로 노출하므로 즉시 보정 가능.
+const SETTLE_METHOD_MAP = {
+  '0': '미설정',
+  '1': '신용카드',
+  '2': '가상계좌',
+  '3': '계좌이체',
+  '4': '휴대폰결제',
+  '5': '적립금',
+  '6': '간편결제',
+  '7': '네이버페이',
+  '8': '카카오페이',
+  '9': '토스페이',
+  'A': '해외카드',
+  'B': '페이코',
 };
 // 수집 제외 상태: 3=결제취소, 5=주문취소, 또는 status_seq=1 이면서 settle_date 없는 미결제 주문
 // status_seq=1 이어도 settle_date 가 있으면 실제로는 결제 완료된 것이므로 수집 대상에 포함
@@ -1921,6 +1938,10 @@ async function loadOrders() {
         ? '청첩장+답례품'
         : (r.order_type === 'ETC' ? '답례품 단독' : '답례품 단독(CARD)');
       r.status_label = (r.order_type === 'CARD' ? STATUS_MAP_CARD : STATUS_MAP)[r.status_seq] || `상태${r.status_seq ?? '?'}`;
+      // 결제수단 라벨 — 매핑 없으면 raw 코드 그대로 노출 (운영 중 신규 코드 추가 시 즉시 보임)
+      r.settle_method_label = r.settle_method
+        ? (SETTLE_METHOD_MAP[String(r.settle_method)] || `코드${r.settle_method}`)
+        : '';
       r.file_count_fmt = r.file_count > 0
         ? `<a href="javascript:void(0)" onclick="showOrderFiles(${r.order_seq});return false" style="color:var(--primary);text-decoration:underline;cursor:pointer">📎 ${r.file_count}건</a>`
         : '';

@@ -485,6 +485,7 @@ async function apiOrders(query) {
         o.settle_price AS settle_price,
         ISNULL(o.coupon_price, 0) * 1.0 / ISNULL(NULLIF(ecd.item_count, 0), 1) AS coupon_price,
         o.status_seq AS status_seq,
+        o.settle_method AS settle_method,  -- 결제수단 코드 (FirstMall: 1=카드/2=가상계좌/3=계좌이체/4=휴대폰/...)
         cw.event_year + '-' + RIGHT('0'+cw.event_month,2) + '-' + RIGHT('0'+cw.event_Day,2) AS wedding_date,
         ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
         0 AS file_count,
@@ -530,6 +531,7 @@ async function apiOrders(query) {
         co.settle_price,
         0 AS coupon_price,
         co.status_seq,
+        co.settle_method AS settle_method,  -- 결제수단 코드 (FirstMall: 1=카드/2=가상계좌/3=계좌이체/4=휴대폰/...)
         w.event_year + '-' + RIGHT('0'+w.event_month,2) + '-' + RIGHT('0'+w.event_Day,2) AS wedding_date,
         ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
         ISNULL((SELECT COUNT(*) FROM custom_order_plist p WITH (NOLOCK) INNER JOIN custom_order_plist_files f WITH (NOLOCK) ON p.id = f.pid WHERE p.order_seq = co.order_seq), 0) AS file_count,
