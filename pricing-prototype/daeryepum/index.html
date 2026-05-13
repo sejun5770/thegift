@@ -7456,18 +7456,14 @@ function renderBgUnified() {
       ? `<span style="font-family:monospace;font-size:12px">${esc(sel.sticker_code)}</span>`
       : '<span style="color:var(--gray-300)">-</span>';
     const stickerName = sel?.sticker_name ? esc(sel.sticker_name) : '<span style="color:var(--gray-300)">-</span>';
-    const customVals = sel ? Object.entries(sel.custom_values || {}).filter(([, v]) => v) : [];
-    // field_id → field_label 매핑 (스티커별 custom_fields 정의 lookup).
-    // lookup 실패시 키 그대로 폴백 (기존 동작과 호환).
-    const fieldLabelMap = _getStickerFieldLabelMap(sel?.sticker_id);
-    const customText = customVals.length
-      ? customVals.map(([k, v]) => {
-          // 기본 'text' 필드는 접두어 없이 값만 표시 (가독성).
-          // 다른 커스텀 키는 'label: value' 로 구분 (label lookup → fallback to key).
-          // XSS: k, v, label 모두 escape 필수
-          if (k === 'text') return esc(v);
-          const label = fieldLabelMap.get(k) || k;
-          return `<span style="color:var(--gray-500)">${esc(label)}:</span> ${esc(v)}`;
+    // 스티커 custom_fields 정의 순서대로 (시그니처 허니 기프트 등 다중 필드 스티커 대응).
+    //   default 'text' 단일 필드는 라벨 생략, 그 외엔 'label: value' 로 표시.
+    const fieldEntries = _getStickerFieldEntries(sel);
+    const customText = fieldEntries.length
+      ? fieldEntries.map(e => {
+          // XSS: label/value 모두 escape 필수
+          if (e.key === 'text' && fieldEntries.length === 1) return esc(String(e.value));
+          return `<span style="color:var(--gray-500)">${esc(e.label)}:</span> ${esc(String(e.value))}`;
         }).join('<br>')
       : '<span style="color:var(--gray-300)">-</span>';
     const shipDate = ci?.desired_ship_date ? esc(ci.desired_ship_date) : '<span style="color:var(--gray-300)">-</span>';
@@ -8009,13 +8005,20 @@ function copyBgUnified() {
     }
     // P열(index 15) = 고객이 입력한 스티커 문구 (custom_values)
     //   - sticker_input='custom' 일 때만 값 존재. 'none'/'선택안함'이면 빈 문자열.
-    //   - 여러 필드가 있으면 ' / ' 구분자로 연결.
+    //   - 스티커 custom_fields 정의 순서대로, '필드라벨: 값' 형태로 연결 (' / ' 구분).
+    //   - default 단일 'text' 필드는 라벨 없이 값만 (기존 동작 유지, 가독성).
     //   - TSV/HTML 브레이크 방지: 탭/개행은 공백으로 치환.
     if (sel?.custom_values) {
-      const vals = Object.values(sel.custom_values)
-        .map(v => (v == null ? '' : String(v)).replace(/[\t\r\n]+/g, ' ').trim())
-        .filter(v => v);
-      if (vals.length) cells[15] = vals.join(' / ');
+      const entries = _getStickerFieldEntries(sel);
+      if (entries.length) {
+        const safeStr = v => String(v).replace(/[\t\r\n]+/g, ' ').trim();
+        const parts = entries.map(e => {
+          const v = safeStr(e.value);
+          if (entries.length === 1 && e.key === 'text') return v;
+          return `${e.label}: ${v}`;
+        }).filter(Boolean);
+        if (parts.length) cells[15] = parts.join(' / ');
+      }
     }
     // Q열(index 16) = 배송메세지 (MSSQL recv_msg — ETC: o.recv_msg / CARD: di.DELIVERY_MEMO)
     //   TSV 안전: 탭/개행 → 공백으로 치환.
@@ -8217,6 +8220,35 @@ function _getStickerFieldLabelMap(stickerId) {
     if (key) map.set(key, f.field_label || f.name || key);
   });
   return map;
+}
+
+/**
+ * sticker_selection 의 custom_values 를 sticker.custom_fields 정의 순서대로 정렬해 반환.
+ *   정의가 없으면 (default 'text' fallback) custom_values 키 순서.
+ *   값이 빈 entry 는 제외.
+ *
+ * 출력: [{ key, label, value }, ...]
+ *   - key: field_id (또는 raw value 키)
+ *   - label: field_label (없으면 key)
+ *   - value: 문자열
+ */
+function _getStickerFieldEntries(sel) {
+  if (!sel || !sel.custom_values || typeof sel.custom_values !== 'object') return [];
+  const sticker = sel.sticker_id && Array.isArray(_bgEditAllStickers)
+    ? _bgEditAllStickers.find(s => s.id === sel.sticker_id) : null;
+  const fields = sticker && Array.isArray(sticker.custom_fields) && sticker.custom_fields.length > 0
+    ? sticker.custom_fields : null;
+  if (fields) {
+    // 정의 순서대로 — 값 있는 row 만 노출
+    return fields.map(f => {
+      const key = f.field_id || f.name || f.field_label;
+      return { key, label: f.field_label || f.name || key, value: sel.custom_values[key] };
+    }).filter(e => e.value !== undefined && e.value !== null && String(e.value) !== '');
+  }
+  // fallback: custom_values 키 순서 (default 'text' 단일 필드 케이스 포함)
+  return Object.entries(sel.custom_values)
+    .filter(([, v]) => v !== undefined && v !== null && String(v) !== '')
+    .map(([k, v]) => ({ key: k, label: k === 'text' ? '스티커 문구' : k, value: v }));
 }
 
 async function _loadBgEditStickersAndSettings(productCodes) {
