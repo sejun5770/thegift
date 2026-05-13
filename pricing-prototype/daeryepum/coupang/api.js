@@ -115,13 +115,20 @@ const ORDER_STATUSES = [
  *   - parcelPrintMessage (배송메모), paymentMethod (결제수단 코드)
  */
 /**
- * epoch ms → KST 기준 'YYYY-MM-DDTHH:mm:ss' (timezone 표기 없음).
- *   Docker 컨테이너는 일반적으로 UTC 라 new Date().getHours() 등이 UTC 반환.
- *   쿠팡 API 는 timezone 없는 입력을 KST 로 해석 → 9시간 어긋남 방지 위해 명시적으로 KST 변환.
+ * epoch ms → KST 기준 'YYYY-MM-DD' (날짜만, /ordersheets endpoint 가 요구하는 포맷).
+ *   timeFrame 변형 endpoint 는 datetime 가능하지만 기본 endpoint 는 yyyy-MM-dd 한정.
+ *   Docker 컨테이너는 일반적으로 UTC 라 명시적으로 KST(UTC+9) 로 변환.
  */
+function fmtKstDate(ms) {
+  const d = typeof ms === 'number' ? new Date(ms) : ms;
+  const kst = new Date(d.getTime() + 9 * 3600 * 1000);
+  const pad = n => String(n).padStart(2, '0');
+  return `${kst.getUTCFullYear()}-${pad(kst.getUTCMonth() + 1)}-${pad(kst.getUTCDate())}`;
+}
+
+// 호환성: 기존 export 명 유지 (datetime 필요한 경우 별도 함수)
 function fmtKstDateTime(ms) {
   const d = typeof ms === 'number' ? new Date(ms) : ms;
-  // KST = UTC + 9시간. UTC 기준 컴포넌트 + 9h 더해서 포맷.
   const kst = new Date(d.getTime() + 9 * 3600 * 1000);
   const pad = n => String(n).padStart(2, '0');
   return `${kst.getUTCFullYear()}-${pad(kst.getUTCMonth() + 1)}-${pad(kst.getUTCDate())}T${pad(kst.getUTCHours())}:${pad(kst.getUTCMinutes())}:${pad(kst.getUTCSeconds())}`;
@@ -130,8 +137,9 @@ function fmtKstDateTime(ms) {
 async function listOrders({ startMs, endMs, status, maxPerPage = 50, nextToken } = {}) {
   if (!status) throw new Error('listOrders: status 는 필수 (Coupang spec). ORDER_STATUSES 참고.');
   const params = new URLSearchParams();
-  params.set('createdAtFrom', fmtKstDateTime(startMs));
-  params.set('createdAtTo', fmtKstDateTime(endMs));
+  // /ordersheets endpoint 는 yyyy-MM-dd 만 허용 (datetime 보내면 400)
+  params.set('createdAtFrom', fmtKstDate(startMs));
+  params.set('createdAtTo', fmtKstDate(endMs));
   params.set('status', status);
   params.set('maxPerPage', String(maxPerPage));
   if (nextToken) params.set('nextToken', nextToken);
@@ -191,6 +199,7 @@ module.exports = {
   isConfigured,
   buildAuthHeader,
   buildDatetime,
+  fmtKstDate,
   fmtKstDateTime,
   callCoupang,
   listOrders,

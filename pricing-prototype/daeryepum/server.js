@@ -3224,8 +3224,8 @@ const server = http.createServer(async (req, res) => {
             data = {
               query: {
                 status, days_back: daysBack,
-                start_kst: coupangApi.fmtKstDateTime ? coupangApi.fmtKstDateTime(startMs) : new Date(startMs).toISOString(),
-                end_kst: coupangApi.fmtKstDateTime ? coupangApi.fmtKstDateTime(endMs) : new Date(endMs).toISOString(),
+                start_kst: coupangApi.fmtKstDate ? coupangApi.fmtKstDate(startMs) : new Date(startMs).toISOString().slice(0, 10),
+                end_kst: coupangApi.fmtKstDate ? coupangApi.fmtKstDate(endMs) : new Date(endMs).toISOString().slice(0, 10),
                 vendor_id: coupangApi.VENDOR_ID,
               },
               response_top_keys: keys,

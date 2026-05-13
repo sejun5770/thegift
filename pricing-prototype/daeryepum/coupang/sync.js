@@ -154,12 +154,7 @@ async function syncRecent({ daysBack = 7, status } = {}) {
     last_synced_order_count: upserted,
     last_error: null,
   });
-  // KST 기준 query 윈도우 (진단용 — Coupang API 가 실제로 받은 값)
-  const kstFmt = ms => {
-    const d = new Date(ms + 9 * 3600 * 1000);
-    const pad = n => String(n).padStart(2, '0');
-    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
-  };
+  // Coupang API 가 실제 받은 KST 날짜 (yyyy-MM-dd, /ordersheets endpoint 포맷)
   return {
     fetched: sheets.length,
     upserted,
@@ -168,9 +163,8 @@ async function syncRecent({ daysBack = 7, status } = {}) {
     filter_disabled: FILTER_DISABLED,
     window: {
       start_ms: startMs, end_ms: endMs, days: daysBack,
-      // Coupang API 에 실제 전송된 KST 시각 (timezone 진단용)
-      start_kst: kstFmt(startMs),
-      end_kst: kstFmt(endMs),
+      start_kst: api.fmtKstDate(startMs),
+      end_kst: api.fmtKstDate(endMs),
     },
     pages: res.pages,
     per_status: res.perStatus,
