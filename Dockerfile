@@ -9,6 +9,7 @@ RUN npm init -y && npm install mssql
 COPY pricing-prototype/daeryepum/server.js ./
 COPY pricing-prototype/daeryepum/index.html ./
 COPY pricing-prototype/daeryepum/barungift/ ./barungift/
+COPY pricing-prototype/daeryepum/coupang/ ./coupang/
 
 RUN mkdir -p /app/data
 
