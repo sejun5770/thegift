@@ -3085,6 +3085,25 @@ const server = http.createServer(async (req, res) => {
             actual_sql_result: actualSqlResult,
           };
         }
+      } else if (pathname === '/api/coupang/sync' && req.method === 'POST') {
+        // 쿠팡 주문 수동 동기화 trigger — Wing API → Supabase upsert.
+        //   body: { days_back: 7, status: 'ACCEPT' } (옵션, 기본 7일/전체상태)
+        logAdminAccess(session, req, 'coupang-sync', {});
+        const body = await new Promise((resolve) => {
+          let raw = ''; req.on('data', c => raw += c);
+          req.on('end', () => {
+            try { resolve(raw ? JSON.parse(raw) : {}); } catch { resolve({}); }
+          });
+        });
+        const coupangSync = require('./coupang/sync');
+        data = await coupangSync.syncRecent({
+          daysBack: parseInt(body.days_back) || 7,
+          status: body.status || undefined,
+        });
+      } else if (pathname === '/api/coupang/sync-state') {
+        // 마지막 동기화 메타 조회 (관리자 UI 표시용)
+        const coupangStore = require('./coupang/store');
+        data = await coupangStore.getSyncState();
       } else if (pathname === '/api/admin/server-ip') {
         // 서버 outbound IP 확인 — 쿠팡 등 외부 API 키 발급 시 IP 화이트리스트 등록용.
         //   외부 echo 서비스 두 곳에 호출해서 일관된 IP 반환.
