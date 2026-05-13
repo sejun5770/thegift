@@ -7260,6 +7260,10 @@ function renderBgUnified() {
     (!hideCancel  || !isCancelled(o)) &&
     (!hidePending || !isPaymentPending(o))
   );
+  // 쿠팡 주문은 고객 정보입력이 불필요한 채널 → 자동 '입력완료' 처리.
+  //   미입력 탭에 안 나오고, 입력완료 탭에 ci 없는 채로 노출됨.
+  const isCoupang = o => o.order_type === 'COUPANG';
+
   // 탭 카운트는 주문 단위 (배송지 분리로 한 주문이 여러 행이어도 1번만 카운트)
   const seenForCount = new Set();
   let cntSubmitted = 0, cntUnsubmitted = 0;
@@ -7267,7 +7271,8 @@ function renderBgUnified() {
     if (seenForCount.has(o.order_seq)) return;
     seenForCount.add(o.order_seq);
     const ciKey = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
-    if (bgUnifiedCiMap.get(ciKey)) cntSubmitted++; else cntUnsubmitted++;
+    if (isCoupang(o) || bgUnifiedCiMap.get(ciKey)) cntSubmitted++;
+    else cntUnsubmitted++;
   });
   const cntSubEl = document.getElementById('uni-count-submitted');
   const cntUnsubEl = document.getElementById('uni-count-unsubmitted');
@@ -7275,13 +7280,15 @@ function renderBgUnified() {
   if (cntUnsubEl) cntUnsubEl.textContent = '(' + cntUnsubmitted + ')';
 
   // 필터링 — 활성 탭에 따라
+  //   쿠팡: 미입력 탭에서 제외 / 입력완료 탭에 항상 노출 (ci 유무 무관)
   const hideProcessed = document.getElementById('uni-hide-processed')?.checked;
   let filtered = visibleBase.filter(o => {
     const ciKey = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
     const ci = bgUnifiedCiMap.get(ciKey);
-    if (activeTab === 'submitted' && !ci) return false;
-    if (activeTab === 'unsubmitted' && ci) return false;
-    // 입력완료 탭에서 '처리완료 숨기기' 체크시 processed_at 있는 주문 제외
+    const submittedLike = isCoupang(o) || !!ci;
+    if (activeTab === 'submitted' && !submittedLike) return false;
+    if (activeTab === 'unsubmitted' && submittedLike) return false;
+    // 입력완료 탭에서 '처리완료 숨기기' 체크시 processed_at 있는 주문 제외 (쿠팡은 ci 없으므로 영향 X)
     if (activeTab === 'submitted' && hideProcessed && ci?.processed_at) return false;
     return true;
   });
@@ -7404,6 +7411,8 @@ function renderBgUnified() {
     const itemCount = Number(product_qty) || 1;
 
     // 입력 셀 — 완료시 제출(또는 관리자 저장) 일시 표시, 미입력시 '미입력' 뱃지
+    //   쿠팡: 정보입력 불필요 채널이므로 ci 없이 '✅ 쿠팡 자동' 으로 노출.
+    const orderIsCoupang = order.order_type === 'COUPANG';
     const submittedAt = ci?.updated_at || ci?.submitted_at;
     const fmtSubmittedAt = (() => {
       if (!submittedAt) return '';
@@ -7415,9 +7424,11 @@ function renderBgUnified() {
       } catch { return ''; }
     })();
     const hasInput = !!ci;
-    const inputBadge = hasInput
-      ? '<span style="color:#16a34a;font-size:11px;font-weight:600;white-space:nowrap">' + (fmtSubmittedAt || '✅ 완료') + '</span>'
-      : '<span style="color:var(--gray-300);font-size:11px">미입력</span>';
+    const inputBadge = orderIsCoupang
+      ? '<span style="color:#dc2626;font-size:11px;font-weight:600;white-space:nowrap" title="쿠팡 주문은 고객 정보입력 불필요 — 동기화 시 자동 입력완료 처리">✅ 쿠팡 자동</span>'
+      : (hasInput
+        ? '<span style="color:#16a34a;font-size:11px;font-weight:600;white-space:nowrap">' + (fmtSubmittedAt || '✅ 완료') + '</span>'
+        : '<span style="color:var(--gray-300);font-size:11px">미입력</span>');
 
     // 박스선택 — 아이콘/수량 제거, 코드만 표시 (스티커코드 컬럼과 일관)
     // XSS: 스티커/박스 코드는 sticker_code/box_code DB 에서 옴 → escape 적용
@@ -7458,11 +7469,14 @@ function renderBgUnified() {
     //  · ci 있음 → '수정' (기존)
     //  · ci 없고 취소 아님 → '추가' (관리자가 고객 대신 수동 입력)
     //  · 취소 → 버튼 없음
-    const editBtn = ci
-      ? `<button class="btn" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">수정</button>`
-      : (isCancelled(order)
-        ? ''
-        : `<button class="btn btn-primary" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">+ 추가</button>`);
+    //  · 쿠팡 → 버튼 없음 (정보입력 자체가 불필요한 채널)
+    const editBtn = orderIsCoupang
+      ? ''
+      : (ci
+        ? `<button class="btn" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">수정</button>`
+        : (isCancelled(order)
+          ? ''
+          : `<button class="btn btn-primary" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">+ 추가</button>`));
 
     // 주문수집 셀 — 입력완료 탭에서만 렌더 (미입력엔 의미 없음)
     const showProcessedCol = (activeTab === 'submitted');

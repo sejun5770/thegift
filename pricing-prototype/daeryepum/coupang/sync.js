@@ -43,6 +43,18 @@ const STATUS_LABEL = {
 };
 
 /**
+ * 상품명에서 세트 수량 추출 — '10세트', '5세트' 등 정수 매칭.
+ *   쿠팡 판매단위가 N세트 묶음일 경우 cart 수량 × N = 실제 출고 개수.
+ *   매칭 없으면 1 (× 1 → 영향 X). 첫 매칭 사용.
+ */
+function extractSetSize(name) {
+  const m = String(name || '').match(/(\d+)\s*세트/);
+  if (!m) return 1;
+  const n = parseInt(m[1], 10);
+  return n > 0 ? n : 1;
+}
+
+/**
  * 한 orderSheet → 정규화된 row 배열 (orderItems 펼침).
  *   분리배송 / 다상품 케이스에서 row 가 여러 개 생성됨.
  *   답례품 카테고리 필터 적용 — 해당 안 되는 row 는 제외.
@@ -68,8 +80,14 @@ function normalizeOrderSheet(sheet) {
       return false;
     })
     .map(item => {
-      const qty = Number(item.shippingCount || item.cancelCount || 0) || 0;
+      const cartQty = Number(item.shippingCount || item.cancelCount || 0) || 0;
       const unit = Number(item.salesPrice || 0) || 0;
+      // 세트 단위 판매 대응 — '10세트' 같은 상품명에서 추출해 실제 출고 개수 산정.
+      //   cart_qty(고객 주문 단위) × set_size(세트당 개수) = item_count(실제 개수).
+      //   매출(item_total_price)은 unit × cart_qty 그대로 (price 는 set 단가, qty 는 cart 수).
+      const productNameForSet = item.vendorItemName || item.sellerProductName || '';
+      const setSize = extractSetSize(productNameForSet);
+      const effectiveCount = cartQty * setSize;
       return {
         coupang_order_id: orderId,
         shipment_box_id: shipmentBoxId,
@@ -80,9 +98,10 @@ function normalizeOrderSheet(sheet) {
         product_name: item.vendorItemName || item.sellerProductName || '쿠팡 답례품',
         product_code: item.sellerProductId ? String(item.sellerProductId) : null,
         external_vendor_sku: item.externalVendorSku || null,
-        item_count: qty,
+        // item_count: 실제 출고 개수 (cart × setSize) — 주문조회 '수량' 컬럼이 표시할 값
+        item_count: effectiveCount,
         item_sale_price: unit,
-        item_total_price: unit * qty,
+        item_total_price: unit * cartQty, // 매출은 set 단가 × cart 수 (변경 없음)
         recv_name: receiver.name || null,
         recv_hphone: receiver.receiverNumber || receiver.safeNumber || null,
         recv_address: [receiver.addr1, receiver.addr2].filter(Boolean).join(' ') || null,
@@ -92,7 +111,8 @@ function normalizeOrderSheet(sheet) {
         settle_method: sheet.payment?.paymentMethod || sheet.paymentMethod || null,
         status,
         status_label: statusLabel,
-        raw_payload: { sheet_keys: Object.keys(sheet), item },
+        // raw_payload: 진단용 — set_size/cart_qty 보존 (재처리 가능)
+        raw_payload: { sheet_keys: Object.keys(sheet), item, _cart_qty: cartQty, _set_size: setSize },
         synced_at: new Date().toISOString(),
       };
     });
