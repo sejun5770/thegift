@@ -581,6 +581,59 @@ async function apiOrders(query) {
     display_name: mergeNames(r.recv_name, r.order_name),
   }));
 
+  // 쿠팡 주문 UNION — Supabase coupang_orders 에서 같은 기간 조회 후 MSSQL row 와 동일 schema 로 정규화.
+  //   카테고리가 'daeryepum' 일 때만 포함 (deco/flower 는 쿠팡 미운영 가정).
+  //   실패해도 MSSQL 결과는 유지 (코어 운영 중단 방지).
+  if (query.category === 'daeryepum' || !query.category) {
+    try {
+      const coupangStore = require('./coupang/store');
+      const coupangRows = await coupangStore.listCoupangOrders({
+        startStr: startDate,
+        endStr: endDate,
+        byPaid: false, // order_date 기준 (MSSQL 과 일관)
+      });
+      if (coupangRows && coupangRows.length) {
+        const normalized = coupangRows.map(r => ({
+          order_seq: r.coupang_order_id, // 쿠팡 orderId (BIGINT)
+          member_id: null,
+          order_type: 'COUPANG',
+          has_copurchase: 0,
+          order_date: r.ordered_at,
+          settle_date: r.paid_at,
+          order_name: r.recv_name || '',
+          recv_name: r.recv_name || '',
+          recv_hphone: r.recv_hphone || '',
+          recv_address: r.recv_address || '',
+          recv_msg: r.recv_message || '',
+          card_name: r.product_name || '',
+          card_code: r.product_code || '',
+          item_count: r.item_count || 0,
+          item_amount: r.item_total_price || 0,
+          settle_price: r.settle_price || 0,
+          coupon_price: 0,
+          status_seq: null, // 쿠팡은 별도 status 체계 (status_label 사용)
+          status_label: r.status_label || r.status || '',
+          settle_method: r.settle_method || null,
+          wedding_date: null,
+          site_name: '쿠팡',
+          file_count: 0,
+          delivery_seq: 1,
+          // 마킹: 프론트가 쿠팡 row 임을 구분할 수 있도록
+          source: 'coupang',
+          coupang_status: r.status,
+          coupang_shipment_box_id: r.shipment_box_id,
+          // 주문자명/받는사람 — 쿠팡은 받는사람만 있음
+          display_name: r.recv_name || '',
+        }));
+        rows.push(...normalized);
+        // 정렬 재적용 (order_date DESC)
+        rows.sort((a, b) => String(b.order_date || '').localeCompare(String(a.order_date || '')));
+      }
+    } catch (e) {
+      console.warn('[apiOrders] 쿠팡 주문 UNION 실패 (무시):', e.message);
+    }
+  }
+
   return rows;
 }
 
@@ -1481,6 +1534,57 @@ async function apiDashboardSummary(query) {
     }
   } catch (e) {
     console.warn('[summary] expressDaily 실패 (빠른출고 행 빈값):', e.message);
+  }
+
+  // 쿠팡 주문 일별 합산 — 답례품 카테고리 한정. 대시보드 사이트별 매출에 '쿠팡' 그룹 노출.
+  //   apiDashboardSummary 의 summary/orderCounts 와 동일 schema 로 정규화해 push.
+  try {
+    const coupangStore = require('./coupang/store');
+    const coupangRows = await coupangStore.listCoupangOrders({
+      startStr: startDate, endStr: endDate, byPaid: false,
+    });
+    if (coupangRows && coupangRows.length) {
+      // (order_day, product) 키로 묶어 일×상품 단위 합산 → MSSQL summary 와 동일 단위
+      const byDayProduct = new Map();
+      const byDayForCount = new Map();
+      for (const r of coupangRows) {
+        const day = String(r.ordered_at || '').slice(0, 10);
+        if (!day) continue;
+        const name = r.product_name || '쿠팡 답례품';
+        const code = r.product_code || '';
+        const key = `${day}|${code}|${name}`;
+        if (!byDayProduct.has(key)) {
+          byDayProduct.set(key, {
+            card_name: name, card_code: code,
+            order_day: day, site_name: '쿠팡',
+            order_type: '단독주문',
+            order_count: 0, total_qty: 0, total_amount: 0,
+            _orderIds: new Set(),
+          });
+        }
+        const bucket = byDayProduct.get(key);
+        bucket.total_qty += r.item_count || 0;
+        bucket.total_amount += r.item_total_price || 0;
+        bucket._orderIds.add(`${r.coupang_order_id}::${r.shipment_box_id}`);
+        // 일별 distinct order count
+        const ck = `${day}|쿠팡|단독주문`;
+        if (!byDayForCount.has(ck)) byDayForCount.set(ck, { order_day: day, site_name: '쿠팡', order_type: '단독주문', _orderIds: new Set() });
+        byDayForCount.get(ck)._orderIds.add(`${r.coupang_order_id}::${r.shipment_box_id}`);
+      }
+      // order_count = distinct orderId|shipmentBoxId 수
+      for (const v of byDayProduct.values()) {
+        v.order_count = v._orderIds.size;
+        delete v._orderIds;
+        rows.push(v);
+      }
+      for (const v of byDayForCount.values()) {
+        const distinct_order_count = v._orderIds.size;
+        delete v._orderIds;
+        orderCounts.push({ order_day: v.order_day, site_name: v.site_name, order_type: v.order_type, distinct_order_count });
+      }
+    }
+  } catch (e) {
+    console.warn('[summary] 쿠팡 주문 머지 실패 (무시):', e.message);
   }
 
   return { summary: rows, order_counts: orderCounts, express_daily: expressDaily };

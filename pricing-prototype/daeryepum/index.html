@@ -823,6 +823,7 @@ nav a:hover{color:var(--gray-900)}
     <button class="btn" id="ord-btn-unmark" onclick="unmarkCollected()" style="display:none;background:#fef3c7;border-color:#fcd34d;padding:5px 12px;font-size:12px" title="선택된 주문의 수집완료 상태를 해제">↩️ <span id="ord-btn-unmark-label">수집해제</span></button>
     <button class="btn" onclick="copySelected()" style="padding:5px 12px;font-size:12px" title="선택된 주문 (없으면 전체) 을 클립보드로 복사">📋 복사</button>
     <button class="btn" onclick="downloadExcel()" style="padding:5px 12px;font-size:12px" title="선택된 주문 (없으면 전체) 을 엑셀로 다운로드">📥 엑셀</button>
+    <button class="btn" id="ord-btn-coupang-sync" onclick="syncCoupangOrders(this)" style="padding:5px 12px;font-size:12px;background:#fef2f2;border-color:#fecaca" title="쿠팡 Wing API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟥 쿠팡 동기화 <span id="ord-coupang-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
   </div>
 
   <div class="card" style="padding:0;overflow-x:auto">
@@ -1847,6 +1848,7 @@ function init() {
     loadDashboard();
     loadChart();
     loadOrders();
+    refreshCoupangSyncMeta();
   });
 
   // URL hash 기반 페이지 전환
@@ -2189,6 +2191,56 @@ function downloadExcel() {
   a.download = `답례품_주문_${document.getElementById('ord-start').value}.tsv`;
   a.click();
   showToast(`${data.length}건 다운로드 완료`);
+}
+
+/** 쿠팡 주문 수동 동기화 — Wing API → Supabase coupang_orders upsert. */
+async function syncCoupangOrders(btn) {
+  if (!confirm('쿠팡 Wing API 에서 최근 7일치 주문을 가져와 Supabase 에 저장합니다.\n동기화 후 조회 버튼을 다시 눌러야 화면이 갱신됩니다. 진행할까요?')) return;
+  const origText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ 동기화 중...';
+  try {
+    const res = await fetch(`${API}/api/coupang/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days_back: 7 }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert('쿠팡 동기화 실패:\n' + data.error);
+    } else {
+      const msg = `✅ 동기화 완료\n\n조회 주문: ${data.fetched}건 (페이지 ${data.pages || 1})\n저장 row: ${data.upserted}개\n필터 제외: ${data.filtered_out}개`
+        + (data.filter_disabled ? '\n\n⚠️ 카테고리 필터 미설정 — 전체 주문 저장됨. 답례품 카테고리 코드 확인 후 환경변수 설정 권장.' : '');
+      alert(msg);
+      loadOrders();
+      refreshCoupangSyncMeta();
+    }
+  } catch (e) {
+    alert('쿠팡 동기화 오류: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origText;
+  }
+}
+
+/** 마지막 동기화 시각 — 버튼 옆 작은 텍스트로 표시. */
+async function refreshCoupangSyncMeta() {
+  try {
+    const res = await fetch(`${API}/api/coupang/sync-state`);
+    if (!res.ok) return;
+    const s = await res.json();
+    const el = document.getElementById('ord-coupang-sync-meta');
+    if (!el) return;
+    if (s?.last_synced_at) {
+      const d = new Date(s.last_synced_at);
+      const pad = n => String(n).padStart(2, '0');
+      const dispDate = `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      el.textContent = `(${dispDate} · ${s.last_synced_order_count || 0}건)`;
+      if (s.last_error) el.title = '마지막 에러: ' + s.last_error;
+    } else {
+      el.textContent = '(미실행)';
+    }
+  } catch { /* ignore */ }
 }
 
 // ============================================
@@ -4070,7 +4122,7 @@ function renderSampleTable() {
 
 // --- 전환율 차트 ---
 let conversionChart = null;
-const SITE_COLORS = {'바른손카드':'#3b82f6','바른손몰':'#10b981','바른손M카드':'#f59e0b','기타':'#a1a1aa'};
+const SITE_COLORS = {'바른손카드':'#3b82f6','바른손몰':'#10b981','바른손M카드':'#f59e0b','쿠팡':'#ef4444','기타':'#a1a1aa'};
 function renderConversion(data) {
   _conversionData = data;
   const weeks = data.weeks;
@@ -4824,7 +4876,7 @@ function renderDailyTable(data, topProducts) {
       <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${totalCell}</td>
     </tr>`;
   }
-  // 데이터에 등장한 사이트 그룹 추출 — 등장 순서: 바른손카드/바른손M카드 → 바른손몰 → 기타
+  // 데이터에 등장한 사이트 그룹 추출 — 등장 순서: 바른손카드/바른손M카드 → 바른손몰 → 쿠팡 → 기타
   const presentGroups = (() => {
     const set = new Set();
     Object.values(dayGroupTypeMap).forEach(byGroup => {
@@ -4832,7 +4884,7 @@ function renderDailyTable(data, topProducts) {
     });
     const order = [...set];
     order.sort((a, b) => {
-      const score = g => g === '바른손몰' ? 1 : (g === '기타' ? 2 : 0);
+      const score = g => g === '바른손몰' ? 1 : (g === '쿠팡' ? 2 : (g === '기타' ? 3 : 0));
       return score(a) - score(b);
     });
     return order;
@@ -5190,7 +5242,7 @@ function renderWeeklyTable(data, topProducts) {
     });
     const order = [...set];
     order.sort((a, b) => {
-      const score = g => g === '바른손몰' ? 1 : (g === '기타' ? 2 : 0);
+      const score = g => g === '바른손몰' ? 1 : (g === '쿠팡' ? 2 : (g === '기타' ? 3 : 0));
       return score(a) - score(b);
     });
     return order;
