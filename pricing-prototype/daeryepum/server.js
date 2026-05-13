@@ -3085,6 +3085,29 @@ const server = http.createServer(async (req, res) => {
             actual_sql_result: actualSqlResult,
           };
         }
+      } else if (pathname === '/api/admin/server-ip') {
+        // 서버 outbound IP 확인 — 쿠팡 등 외부 API 키 발급 시 IP 화이트리스트 등록용.
+        //   외부 echo 서비스 두 곳에 호출해서 일관된 IP 반환.
+        logAdminAccess(session, req, 'server-ip', {});
+        try {
+          const results = await Promise.allSettled([
+            fetch('https://api.ipify.org?format=json').then(r => r.json()),
+            fetch('https://ifconfig.me/ip').then(r => r.text()),
+          ]);
+          const ipify = results[0].status === 'fulfilled' ? results[0].value.ip : null;
+          const ifconfig = results[1].status === 'fulfilled' ? results[1].value.trim() : null;
+          data = {
+            outbound_ip: ipify || ifconfig || null,
+            sources: {
+              ipify: ipify,
+              ifconfig_me: ifconfig,
+              match: ipify === ifconfig,
+            },
+            hint: 'outbound_ip 를 쿠팡 OPEN API 키 발급 화면의 IP 주소 칸에 입력. 두 source 가 다르면 NAT/Proxy 환경 — DBA/인프라팀에 확인 필요.',
+          };
+        } catch (e) {
+          data = { error: 'IP 조회 실패: ' + e.message };
+        }
       } else if (pathname === '/api/debug-settle-method-stats') {
         // settle_method 코드 분포 + toss_vaccount 매칭 여부로 가상계좌 코드 식별 진단.
         // URL: /api/debug-settle-method-stats?days=30
