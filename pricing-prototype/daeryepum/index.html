@@ -7243,6 +7243,19 @@ function switchUniTab(tab) {
   renderBgUnified();
 }
 
+/**
+ * 주문의 customer_info order_id key 생성 — 채널별 prefix 규칙 통일.
+ *   ETC (바른손몰)     → 'ETC-{order_seq}'
+ *   COUPANG (쿠팡)     → 'CP-{order_seq}'   (stub ci row 동일 prefix)
+ *   CARD (바른손카드)  → '{order_seq}' (raw)
+ */
+function bgCiKey(order) {
+  if (!order) return '';
+  if (order.order_type === 'ETC') return `ETC-${order.order_seq}`;
+  if (order.order_type === 'COUPANG') return `CP-${order.order_seq}`;
+  return String(order.order_seq);
+}
+
 function renderBgUnified() {
   const hideCancel = document.getElementById('uni-hide-cancel')?.checked;
   const hidePending = document.getElementById('uni-hide-pending')?.checked;
@@ -7270,7 +7283,7 @@ function renderBgUnified() {
   visibleBase.forEach(o => {
     if (seenForCount.has(o.order_seq)) return;
     seenForCount.add(o.order_seq);
-    const ciKey = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
+    const ciKey = bgCiKey(o);
     if (isCoupang(o) || bgUnifiedCiMap.get(ciKey)) cntSubmitted++;
     else cntUnsubmitted++;
   });
@@ -7283,7 +7296,7 @@ function renderBgUnified() {
   //   쿠팡: 미입력 탭에서 제외 / 입력완료 탭에 항상 노출 (ci 유무 무관)
   const hideProcessed = document.getElementById('uni-hide-processed')?.checked;
   let filtered = visibleBase.filter(o => {
-    const ciKey = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
+    const ciKey = bgCiKey(o);
     const ci = bgUnifiedCiMap.get(ciKey);
     const submittedLike = isCoupang(o) || !!ci;
     if (activeTab === 'submitted' && !submittedLike) return false;
@@ -7301,7 +7314,7 @@ function renderBgUnified() {
     visibleBase.forEach(o => {
       if (seenSubmitted.has(o.order_seq)) return;
       seenSubmitted.add(o.order_seq);
-      const k = o.order_type === 'ETC' ? `ETC-${o.order_seq}` : String(o.order_seq);
+      const k = bgCiKey(o);
       const c = bgUnifiedCiMap.get(k);
       if (!c) return;
       if (c.processed_at) processedCnt++; else pendingCnt++;
@@ -7316,8 +7329,8 @@ function renderBgUnified() {
   //   관리자 추가/수정으로 updated_at 이 최신이면 그것 기준, 아니면 submitted_at
   if (activeTab === 'submitted') {
     filtered.sort((a, b) => {
-      const ciKeyA = a.order_type === 'ETC' ? `ETC-${a.order_seq}` : String(a.order_seq);
-      const ciKeyB = b.order_type === 'ETC' ? `ETC-${b.order_seq}` : String(b.order_seq);
+      const ciKeyA = bgCiKey(a);
+      const ciKeyB = bgCiKey(b);
       const ciA = bgUnifiedCiMap.get(ciKeyA);
       const ciB = bgUnifiedCiMap.get(ciKeyB);
       const tA = Math.max(Date.parse(ciA?.updated_at || 0) || 0, Date.parse(ciA?.submitted_at || 0) || 0);
@@ -7331,7 +7344,7 @@ function renderBgUnified() {
   // - 입력완료: 각 상품마다 매칭되는 sticker_selection을 찾아 붙이고, 없으면 null
   bgUnifiedRows = [];
   filtered.forEach(order => {
-    const ciKey = order.order_type === 'ETC' ? `ETC-${order.order_seq}` : String(order.order_seq);
+    const ciKey = bgCiKey(order);
     const ci = bgUnifiedCiMap.get(ciKey) || null;
     const sels = ci?.sticker_selections || [];
     // 배송지별 상품 매칭 — 복합키 사용 (order_seq + delivery_seq)
@@ -7480,7 +7493,7 @@ function renderBgUnified() {
 
     // 주문수집 셀 — 입력완료 탭에서만 렌더 (미입력엔 의미 없음)
     const showProcessedCol = (activeTab === 'submitted');
-    const ciKeyForProc = order.order_type === 'ETC' ? `ETC-${order.order_seq}` : String(order.order_seq);
+    const ciKeyForProc = bgCiKey(order);
     const processedAt = ci?.processed_at;
     let processedCellHtml = '';
     if (showProcessedCol) {
@@ -7664,7 +7677,7 @@ async function bulkProcessedAction(processed) {
     const isCurrentlyProcessed = !!row.ci.processed_at;
     if (processed && isCurrentlyProcessed) return;   // 이미 처리됨 → 건너뜀
     if (!processed && !isCurrentlyProcessed) return; // 이미 미처리 → 건너뜀
-    const id = row.order.order_type === 'ETC' ? ('ETC-' + row.order.order_seq) : String(row.order.order_seq);
+    const id = bgCiKey(row.order);
     if (!seen.has(id)) { seen.add(id); orderIds.push(id); }
   });
   if (!orderIds.length) {
@@ -7882,7 +7895,7 @@ async function bulkSendAlimtalkViaSp() {
   checked.forEach(cb => {
     const row = bgUnifiedRows[parseInt(cb.dataset.idx)];
     if (!row || row.ci) return; // ci 있으면 입력완료 → 제외
-    const oid = row.order.order_type === 'ETC' ? `ETC-${row.order.order_seq}` : String(row.order.order_seq);
+    const oid = bgCiKey(row.order);
     if (seen.has(oid)) return;
     seen.add(oid);
     orderIds.push(oid);
@@ -8033,7 +8046,7 @@ function copyBgUnified() {
     const orderIds = [...new Set(
       selectedRows
         .filter(r => r.ci) // 입력된 주문만
-        .map(r => r.order.order_type === 'ETC' ? ('ETC-' + r.order.order_seq) : String(r.order.order_seq))
+        .map(r => bgCiKey(r.order))
     )];
     if (!orderIds.length) return;
     markOrdersProcessedBatch(orderIds, true);
@@ -8134,7 +8147,7 @@ function openBgOrderEditByIdx(idx) {
   // ci 없음: '추가' 경로 — 주문의 상품 목록을 기반으로 빈 sticker_selections 초기화해 오픈
   //   각 상품에 대해 product_code/product_name 만 채운 placeholder row 생성 →
   //   관리자가 모달에서 박스/스티커 타입을 직접 선택 가능
-  const order_id = order.order_type === 'ETC' ? `ETC-${order.order_seq}` : String(order.order_seq);
+  const order_id = bgCiKey(order);
   const sticker_selections = _pm.size
     ? [..._pm.entries()].map(([code, info]) => ({
         product_code: code,

@@ -158,7 +158,7 @@ async function syncRecent({ daysBack = 7, status } = {}) {
     rows.push(...normalized);
     filteredOut += Math.max(0, itemsBefore - normalized.length);
   }
-  // upsert
+  // upsert coupang_orders
   let upserted = 0;
   if (rows.length) {
     try {
@@ -167,6 +167,39 @@ async function syncRecent({ daysBack = 7, status } = {}) {
     } catch (e) {
       await store.updateSyncState({ last_error: e.message, last_synced_at: new Date().toISOString() });
       return { fetched: sheets.length, upserted: 0, filtered_out: filteredOut, error: e.message };
+    }
+  }
+
+  // 정보입력현황 자동 입력완료 처리 — coupang_order_id 단위로 stub customer_info row 생성.
+  //   ignore-duplicates 라 이미 있으면 skip → 수집처리/processed_at 등 보존.
+  //   같은 주문(coupang_order_id) 에 여러 row 가 있어도 ci 는 1개.
+  let stubUpserted = 0;
+  if (rows.length) {
+    try {
+      const seen = new Set();
+      const stubs = [];
+      for (const r of rows) {
+        const order_id = `CP-${r.coupang_order_id}`;
+        if (seen.has(order_id)) continue;
+        seen.add(order_id);
+        stubs.push({
+          order_id,
+          is_express: false,
+          express_fee: 0,
+          desired_ship_date: null,
+          sticker_selections: [],
+          cash_receipt_yn: false,
+          receipt_type: null,
+          receipt_number: null,
+          customer_request: null,
+          // 주문일을 입력일로 — '✅ 쿠팡 자동' 라벨 보존이지만 timestamp 도 의미 있게
+          submitted_at: r.ordered_at || new Date().toISOString(),
+        });
+      }
+      const r = await store.upsertCoupangStubCustomerInfos(stubs);
+      stubUpserted = r.upserted || 0;
+    } catch (e) {
+      console.warn('[coupang sync] customer_info stub upsert 실패 (수집처리 버튼 동작 안 할 수 있음):', e.message);
     }
   }
   await store.updateSyncState({
@@ -178,6 +211,7 @@ async function syncRecent({ daysBack = 7, status } = {}) {
   return {
     fetched: sheets.length,
     upserted,
+    stub_ci_upserted: stubUpserted,
     filtered_out: filteredOut,
     items: rows.length,
     filter_disabled: FILTER_DISABLED,

@@ -63,6 +63,28 @@ async function listCoupangOrders({ startStr, endStr, byPaid = false } = {}) {
 }
 
 /**
+ * 쿠팡 주문용 stub customer_info 일괄 upsert — 정보입력현황 자동 입력완료 처리용.
+ *   order_id 'CP-{coupang_order_id}' 로 bg_order_customer_info 에 빈 row 생성.
+ *   이미 있으면 skip (processed_at 등 사용자 설정 상태 보존).
+ *   → 수집처리 버튼 / 처리완료 추적이 기존 ci 로직 그대로 작동.
+ */
+async function upsertCoupangStubCustomerInfos(stubs) {
+  if (!USE_SUPABASE || !stubs.length) return { upserted: 0 };
+  const url = `${REST_BASE}/bg_order_customer_info?on_conflict=order_id`;
+  const res = await fetch(url, {
+    method: 'POST',
+    // ignore-duplicates: 기존 row 가 있으면 skip — processed_at / submitted_at 보존
+    headers: { ...HEADERS, Prefer: 'resolution=ignore-duplicates,return=minimal' },
+    body: JSON.stringify(stubs),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase upsert bg_order_customer_info stub [${res.status}]: ${text.slice(0, 300)}`);
+  }
+  return { upserted: stubs.length };
+}
+
+/**
  * 마지막 동기화 메타 조회.
  */
 async function getSyncState() {
@@ -93,6 +115,7 @@ async function updateSyncState(patch) {
 module.exports = {
   USE_SUPABASE,
   upsertCoupangOrders,
+  upsertCoupangStubCustomerInfos,
   listCoupangOrders,
   getSyncState,
   updateSyncState,
