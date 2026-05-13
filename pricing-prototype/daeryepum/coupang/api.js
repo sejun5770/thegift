@@ -95,7 +95,8 @@ const ORDER_STATUSES = [
   'DEPARTURE',       // 배송지시
   'DELIVERING',      // 배송중
   'FINAL_DELIVERY',  // 배송완료
-  // NONE_TRACKING, CANCEL 등은 우선 제외 (확장 필요시 추가)
+  'NONE_TRACKING',   // 배송중(추적불가) — 일부 운송사 자동추적 미지원 케이스
+  // CANCEL/RETURNS 는 매출 집계 의도에서 제외
 ];
 
 /**
@@ -113,17 +114,24 @@ const ORDER_STATUSES = [
  *                     vendorItemPackageId, shippingCount, salesPrice, displayCategoryCode, ... }
  *   - parcelPrintMessage (배송메모), paymentMethod (결제수단 코드)
  */
+/**
+ * epoch ms → KST 기준 'YYYY-MM-DDTHH:mm:ss' (timezone 표기 없음).
+ *   Docker 컨테이너는 일반적으로 UTC 라 new Date().getHours() 등이 UTC 반환.
+ *   쿠팡 API 는 timezone 없는 입력을 KST 로 해석 → 9시간 어긋남 방지 위해 명시적으로 KST 변환.
+ */
+function fmtKstDateTime(ms) {
+  const d = typeof ms === 'number' ? new Date(ms) : ms;
+  // KST = UTC + 9시간. UTC 기준 컴포넌트 + 9h 더해서 포맷.
+  const kst = new Date(d.getTime() + 9 * 3600 * 1000);
+  const pad = n => String(n).padStart(2, '0');
+  return `${kst.getUTCFullYear()}-${pad(kst.getUTCMonth() + 1)}-${pad(kst.getUTCDate())}T${pad(kst.getUTCHours())}:${pad(kst.getUTCMinutes())}:${pad(kst.getUTCSeconds())}`;
+}
+
 async function listOrders({ startMs, endMs, status, maxPerPage = 50, nextToken } = {}) {
   if (!status) throw new Error('listOrders: status 는 필수 (Coupang spec). ORDER_STATUSES 참고.');
-  const fmt = ms => {
-    const d = typeof ms === 'number' ? new Date(ms) : ms;
-    // 쿠팡은 KST 기준 ISO-like 'YYYY-MM-DDTHH:mm:ss' 받음 (timezone 표기 없음)
-    const pad = n => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  };
   const params = new URLSearchParams();
-  params.set('createdAtFrom', fmt(startMs));
-  params.set('createdAtTo', fmt(endMs));
+  params.set('createdAtFrom', fmtKstDateTime(startMs));
+  params.set('createdAtTo', fmtKstDateTime(endMs));
   params.set('status', status);
   params.set('maxPerPage', String(maxPerPage));
   if (nextToken) params.set('nextToken', nextToken);
