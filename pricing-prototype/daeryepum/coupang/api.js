@@ -88,25 +88,33 @@ async function callCoupang(method, path, query = '', body = null) {
   return parsed;
 }
 
+/** 쿠팡 주요 주문 상태 (ordersheets endpoint 에서 status 는 필수 — 전체 합집합용) */
+const ORDER_STATUSES = [
+  'ACCEPT',          // 결제완료
+  'INSTRUCT',        // 상품준비중
+  'DEPARTURE',       // 배송지시
+  'DELIVERING',      // 배송중
+  'FINAL_DELIVERY',  // 배송완료
+  // NONE_TRACKING, CANCEL 등은 우선 제외 (확장 필요시 추가)
+];
+
 /**
- * 주문 목록 조회 (timeFrame 기준) — 최대 7일 윈도우.
- *   startMs / endMs: Date.now() 같은 epoch ms (또는 Date 객체)
- *   options:
- *     status: 'ACCEPT' | 'INSTRUCT' | 'DEPARTURE' | 'DELIVERING' | 'FINAL_DELIVERY' | 'NONE_TRACKING' | 'CANCEL' (옵션)
- *     maxPerPage: default 50 (max 50)
- *     searchType: 'timeFrame'
- *     nextToken: 페이지네이션
+ * 주문 목록 조회 — /ordersheets endpoint.
+ *   ⚠️ Coupang spec: createdAtFrom/createdAtTo/status 모두 필수.
+ *   startMs / endMs: epoch ms (또는 Date)
+ *   status: 단일 상태 (ORDER_STATUSES 중 하나) — 필수
+ *   maxPerPage: default 50 (max 50)
+ *   nextToken: 페이지네이션
  *
  * 응답 핵심 필드 (orderSheet):
  *   - orderId, shipmentBoxId, orderedAt, paidAt
- *   - status (ACCEPT/INSTRUCT/DEPARTURE/DELIVERING/FINAL_DELIVERY/CANCEL...)
- *   - receiver: { name, receiverNumber, addr1, addr2, postCode }
+ *   - status, receiver{ name, receiverNumber, addr1, addr2, postCode }
  *   - orderItems[]: { sellerProductId, sellerProductName, vendorItemId, vendorItemName,
  *                     vendorItemPackageId, shippingCount, salesPrice, displayCategoryCode, ... }
- *   - parcelPrintMessage (배송메모)
- *   - paymentMethod (결제수단 코드)
+ *   - parcelPrintMessage (배송메모), paymentMethod (결제수단 코드)
  */
 async function listOrders({ startMs, endMs, status, maxPerPage = 50, nextToken } = {}) {
+  if (!status) throw new Error('listOrders: status 는 필수 (Coupang spec). ORDER_STATUSES 참고.');
   const fmt = ms => {
     const d = typeof ms === 'number' ? new Date(ms) : ms;
     // 쿠팡은 KST 기준 ISO-like 'YYYY-MM-DDTHH:mm:ss' 받음 (timezone 표기 없음)
@@ -116,29 +124,59 @@ async function listOrders({ startMs, endMs, status, maxPerPage = 50, nextToken }
   const params = new URLSearchParams();
   params.set('createdAtFrom', fmt(startMs));
   params.set('createdAtTo', fmt(endMs));
+  params.set('status', status);
   params.set('maxPerPage', String(maxPerPage));
-  if (status) params.set('status', status);
   if (nextToken) params.set('nextToken', nextToken);
   const path = `/v2/providers/openapi/apis/api/v4/vendors/${VENDOR_ID}/ordersheets`;
   return callCoupang('GET', path, params.toString());
 }
 
 /**
- * 페이지네이션 자동 처리 — 모든 페이지 합쳐 반환.
- *   결과: { items: [...], pages: N, totalCount: N }
+ * 단일 status 의 페이지네이션 자동 처리 — 모든 페이지 합쳐 반환.
  */
-async function listAllOrders({ startMs, endMs, status } = {}) {
+async function listOrdersForStatus({ startMs, endMs, status, maxPerPage = 50 } = {}) {
   let items = [];
   let nextToken = null;
   let pages = 0;
   while (true) {
-    const res = await listOrders({ startMs, endMs, status, nextToken });
+    const res = await listOrders({ startMs, endMs, status, maxPerPage, nextToken });
     pages++;
     if (Array.isArray(res.data)) items = items.concat(res.data);
     nextToken = res.nextToken || null;
-    if (!nextToken || pages >= 50) break; // 안전장치 50페이지
+    if (!nextToken || pages >= 50) break; // 안전장치
   }
-  return { items, pages, totalCount: items.length };
+  return { items, pages };
+}
+
+/**
+ * 전 상태 순회 + 페이지네이션 통합 — 같은 (orderId, shipmentBoxId) 는 dedupe.
+ *   options.statuses: 순회할 상태 배열 (기본 ORDER_STATUSES). 'CANCEL' 등 추가 가능.
+ *   결과: { items: [...dedupe], pages: 총합, perStatus: {status: count} }
+ */
+async function listAllOrders({ startMs, endMs, statuses } = {}) {
+  const list = Array.isArray(statuses) && statuses.length ? statuses : ORDER_STATUSES;
+  const seen = new Set(); // `${orderId}::${shipmentBoxId}`
+  const items = [];
+  let pages = 0;
+  const perStatus = {};
+  for (const status of list) {
+    try {
+      const r = await listOrdersForStatus({ startMs, endMs, status });
+      pages += r.pages;
+      let added = 0;
+      for (const sheet of r.items) {
+        const k = `${sheet.orderId}::${sheet.shipmentBoxId}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        items.push(sheet);
+        added++;
+      }
+      perStatus[status] = added;
+    } catch (e) {
+      perStatus[status] = `error: ${e.message.slice(0, 100)}`;
+    }
+  }
+  return { items, pages, totalCount: items.length, perStatus };
 }
 
 module.exports = {
@@ -147,6 +185,8 @@ module.exports = {
   buildDatetime,
   callCoupang,
   listOrders,
+  listOrdersForStatus,
   listAllOrders,
+  ORDER_STATUSES,
   VENDOR_ID, // for log/debug only
 };

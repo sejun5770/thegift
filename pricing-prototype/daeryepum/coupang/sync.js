@@ -119,7 +119,11 @@ async function syncRecent({ daysBack = 7, status } = {}) {
   const startMs = endMs - daysBack * 86400000;
   let res;
   try {
-    res = await api.listAllOrders({ startMs, endMs, status });
+    // status 가 명시되면 그것만, 없으면 ORDER_STATUSES 전체 순회 (dedupe)
+    res = await api.listAllOrders({
+      startMs, endMs,
+      statuses: status ? [status] : undefined,
+    });
   } catch (e) {
     await store.updateSyncState({ last_error: e.message, last_synced_at: new Date().toISOString() });
     return { fetched: 0, upserted: 0, filtered_out: 0, error: e.message };
@@ -158,6 +162,7 @@ async function syncRecent({ daysBack = 7, status } = {}) {
     filter_disabled: FILTER_DISABLED,
     window: { start_ms: startMs, end_ms: endMs, days: daysBack },
     pages: res.pages,
+    per_status: res.perStatus,
   };
 }
 
