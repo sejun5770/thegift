@@ -7325,17 +7325,21 @@ function renderBgUnified() {
     }
   }
 
-  // 입력완료 탭은 submitted_at / updated_at 기준 최신순 정렬
-  //   관리자 추가/수정으로 updated_at 이 최신이면 그것 기준, 아니면 submitted_at
+  // 입력완료 탭 정렬:
+  //   1순위: 쿠팡 주문 먼저 (별도 채널 — 운영팀이 우선 처리하도록 상단 노출)
+  //   2순위: 같은 채널 내에서는 submitted_at / updated_at DESC (최신 입력 위)
   if (activeTab === 'submitted') {
     filtered.sort((a, b) => {
+      const aCp = a.order_type === 'COUPANG' ? 0 : 1;
+      const bCp = b.order_type === 'COUPANG' ? 0 : 1;
+      if (aCp !== bCp) return aCp - bCp;
       const ciKeyA = bgCiKey(a);
       const ciKeyB = bgCiKey(b);
       const ciA = bgUnifiedCiMap.get(ciKeyA);
       const ciB = bgUnifiedCiMap.get(ciKeyB);
       const tA = Math.max(Date.parse(ciA?.updated_at || 0) || 0, Date.parse(ciA?.submitted_at || 0) || 0);
       const tB = Math.max(Date.parse(ciB?.updated_at || 0) || 0, Date.parse(ciB?.submitted_at || 0) || 0);
-      return tB - tA; // DESC (최신순)
+      return tB - tA;
     });
   }
 
