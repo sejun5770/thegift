@@ -483,10 +483,35 @@ async function setProcessed(orderId, data) {
   const patch = wantProcessed
     ? { processed_at: now(), processed_by: data.processed_by || null }
     : { processed_at: null, processed_by: null };
+  const isCoupang = String(orderId).startsWith('CP-');
 
   if (USE_SUPABASE) {
     const existing = await sbGet('bg_order_customer_info', `order_id=eq.${encodeURIComponent(orderId)}`);
-    if (!existing || !existing.length) throw new Error('NOT_FOUND');
+    if (!existing || !existing.length) {
+      // 쿠팡 주문 ci stub 자동 생성 안전망 — 동기화 전 처리해도 자동으로 만들어 줌.
+      //   (sync.js 가 normally 만들지만 이전 동기화/배포 격차로 누락된 row 에 대비)
+      if (isCoupang) {
+        try {
+          await sbInsert('bg_order_customer_info', {
+            order_id: orderId,
+            is_express: false,
+            express_fee: 0,
+            desired_ship_date: null,
+            sticker_selections: [],
+            cash_receipt_yn: false,
+            receipt_type: null,
+            receipt_number: null,
+            customer_request: null,
+            submitted_at: now(),
+          });
+        } catch (e) {
+          // 동시성 race 등으로 이미 생긴 경우 무시하고 update 시도
+          console.warn(`[setProcessed] 쿠팡 stub 자동 생성 실패 (재시도 무시): ${e.message}`);
+        }
+      } else {
+        throw new Error('NOT_FOUND');
+      }
+    }
     try {
       return await sbUpdate('bg_order_customer_info', `order_id=eq.${encodeURIComponent(orderId)}`, patch);
     } catch (err) {
@@ -499,8 +524,22 @@ async function setProcessed(orderId, data) {
     }
   }
   const infos = readJson(FILES.customerInfo, []);
-  const idx = infos.findIndex(i => i.order_id === orderId);
-  if (idx === -1) throw new Error('NOT_FOUND');
+  let idx = infos.findIndex(i => i.order_id === orderId);
+  if (idx === -1) {
+    if (isCoupang) {
+      // 파일 폴백 환경에서도 stub 자동 생성
+      infos.push({
+        id: uuid(), order_id: orderId,
+        is_express: false, express_fee: 0,
+        desired_ship_date: null, sticker_selections: [],
+        cash_receipt_yn: false, receipt_type: null, receipt_number: null,
+        customer_request: null, submitted_at: now(), created_at: now(),
+      });
+      idx = infos.length - 1;
+    } else {
+      throw new Error('NOT_FOUND');
+    }
+  }
   infos[idx] = { ...infos[idx], ...patch };
   writeJson(FILES.customerInfo, infos);
   return infos[idx];
