@@ -3204,6 +3204,43 @@ const server = http.createServer(async (req, res) => {
           daysBack: parseInt(body.days_back) || 7,
           status: body.status || undefined,
         });
+      } else if (pathname === '/api/coupang/debug-raw') {
+        // 쿠팡 API raw 응답 직접 확인 — 단일 상태/기간으로 호출 후 응답 그대로 반환.
+        // URL: /api/coupang/debug-raw?status=DEPARTURE&days_back=30
+        logAdminAccess(session, req, 'coupang-debug-raw', parsed.query);
+        const coupangApi = require('./coupang/api');
+        if (!coupangApi.isConfigured()) {
+          data = { error: 'Coupang API 키 미설정' };
+        } else {
+          const status = parsed.query.status || 'DEPARTURE';
+          const daysBack = parseInt(parsed.query.days_back) || 30;
+          const endMs = Date.now();
+          const startMs = endMs - daysBack * 86400000;
+          try {
+            const res = await coupangApi.listOrders({ startMs, endMs, status, maxPerPage: 5 });
+            // 응답 구조 진단 — 어떤 필드가 있는지 보기 위해 keys + 샘플 1개만 노출
+            const keys = res && typeof res === 'object' ? Object.keys(res) : [];
+            const dataArr = Array.isArray(res?.data) ? res.data : null;
+            data = {
+              query: {
+                status, days_back: daysBack,
+                start_kst: coupangApi.fmtKstDateTime ? coupangApi.fmtKstDateTime(startMs) : new Date(startMs).toISOString(),
+                end_kst: coupangApi.fmtKstDateTime ? coupangApi.fmtKstDateTime(endMs) : new Date(endMs).toISOString(),
+                vendor_id: coupangApi.VENDOR_ID,
+              },
+              response_top_keys: keys,
+              response_code: res?.code,
+              response_message: res?.message,
+              has_next_token: !!res?.nextToken,
+              data_is_array: Array.isArray(res?.data),
+              data_length: dataArr ? dataArr.length : null,
+              first_data_item: dataArr && dataArr.length > 0 ? dataArr[0] : null,
+              raw_response: res, // 전체 raw — 큰 경우 frontend 가 truncate
+            };
+          } catch (e) {
+            data = { error: e.message, vendor_id: coupangApi.VENDOR_ID };
+          }
+        }
       } else if (pathname === '/api/coupang/sync-state') {
         // 마지막 동기화 메타 조회 (관리자 UI 표시용)
         const coupangStore = require('./coupang/store');

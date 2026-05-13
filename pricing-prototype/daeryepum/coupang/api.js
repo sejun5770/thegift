@@ -191,6 +191,7 @@ module.exports = {
   isConfigured,
   buildAuthHeader,
   buildDatetime,
+  fmtKstDateTime,
   callCoupang,
   listOrders,
   listOrdersForStatus,
