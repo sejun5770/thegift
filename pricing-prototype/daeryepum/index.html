@@ -796,11 +796,15 @@ nav a:hover{color:var(--gray-900)}
 
 <!-- ========== MONTHLY REPORT ========== -->
 <div id="page-monthly-report" class="page">
-  <div class="toolbar" style="margin-bottom:20px;align-items:center">
+  <div class="toolbar" style="margin-bottom:20px;align-items:center;flex-wrap:wrap">
     <label style="font-weight:600">📊 월간 보고서 — </label>
     <input type="month" id="mr-month" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:14px" />
     <button class="btn btn-primary" onclick="loadMonthlyReport()">조회</button>
-    <button class="btn" onclick="window.print()" style="margin-left:auto">🖨️ 인쇄 / PDF 저장</button>
+    <span style="margin-left:auto;display:inline-flex;gap:6px;flex-wrap:wrap">
+      <button class="btn" id="mr-btn-copy" onclick="copyMonthlyReportTsv()" title="모든 섹션을 TSV 로 클립보드에 복사 — 스프레드시트 빈 셀에 붙여넣기">📋 TSV 복사</button>
+      <button class="btn" id="mr-btn-download" onclick="downloadMonthlyReportTsv()" title="UTF-8 BOM 포함 .tsv 파일 — Excel/구글시트에서 바로 열림">📥 엑셀 다운로드</button>
+      <button class="btn" onclick="window.print()">🖨️ 인쇄 / PDF</button>
+    </span>
   </div>
 
   <!-- 헤더 KPI -->
@@ -3307,6 +3311,138 @@ function renderMonthlyReport() {
       </tr>`;
     }).join('')}</tbody>
   `;
+}
+
+/**
+ * 월간 보고서 TSV 생성 — 7개 섹션을 빈 줄로 구분해 단일 텍스트로.
+ *   Excel/구글시트는 TSV 를 정상 인식 → 각 섹션이 별도 표로 노출.
+ *   UTF-8 BOM 포함 → 한글 깨짐 방지 (Excel).
+ */
+function buildMonthlyReportTsv() {
+  if (!_mrData) return null;
+  const { month, target, prev, yoy } = _mrData;
+  const aov = target.totalOrders > 0 ? target.totalAmount / target.totalOrders : 0;
+  const aovPrev = prev.totalOrders > 0 ? prev.totalAmount / prev.totalOrders : 0;
+  const aovYoY = yoy.totalOrders > 0 ? yoy.totalAmount / yoy.totalOrders : 0;
+  const pctStr = (cur, base) => base ? ((cur - base) / base * 100).toFixed(1) + '%' : 'N/A';
+
+  const lines = [];
+  const push = (...cols) => lines.push(cols.map(c => {
+    if (c == null) return '';
+    return String(c).replace(/[\t\r\n]+/g, ' ').trim();
+  }).join('\t'));
+
+  // 헤더
+  push(`월간 보고서: ${month}`);
+  push(`전월: ${prevMonth(month)} / 작년동월: ${yoyMonth(month)}`);
+  push(`생성일시: ${new Date().toISOString().slice(0, 19).replace('T', ' ')}`);
+  push('');
+
+  // 1) 핵심 KPI
+  push('[1. 핵심 KPI]');
+  push('지표', month, prevMonth(month), 'MoM', yoyMonth(month), 'YoY');
+  push('총 매출', target.totalAmount, prev.totalAmount, pctStr(target.totalAmount, prev.totalAmount), yoy.totalAmount, pctStr(target.totalAmount, yoy.totalAmount));
+  push('주문수', target.totalOrders, prev.totalOrders, pctStr(target.totalOrders, prev.totalOrders), yoy.totalOrders, pctStr(target.totalOrders, yoy.totalOrders));
+  push('판매수량', target.totalQty, prev.totalQty, pctStr(target.totalQty, prev.totalQty), yoy.totalQty, pctStr(target.totalQty, yoy.totalQty));
+  push('객단가(AOV)', Math.round(aov), Math.round(aovPrev), pctStr(aov, aovPrev), Math.round(aovYoY), pctStr(aov, aovYoY));
+  push('');
+
+  // 2) 사이트(채널) 별
+  push('[2. 사이트(채널) 별 매출 분포]');
+  push('사이트', '매출', '비중', '주문수', '판매수량', '전월매출', '전월비교');
+  const siteRows = [...target.bySite.entries()].sort((a, b) => b[1].amount - a[1].amount);
+  for (const [s, d] of siteRows) {
+    const pct = target.totalAmount ? (d.amount / target.totalAmount * 100).toFixed(1) + '%' : '0%';
+    const prevSite = prev.bySite.get(s);
+    push(s, d.amount, pct, target.bySiteOrders.get(s) || 0, d.qty, prevSite?.amount || 0, prevSite ? pctStr(d.amount, prevSite.amount) : '신규');
+  }
+  push('');
+
+  // 3) 동시구매/단독주문
+  push('[3. 동시구매 vs 단독주문]');
+  push('주문유형', '매출', '비중', '주문수', '판매수량', '객단가');
+  const typeRows = [...target.byType.entries()].sort((a, b) => b[1].amount - a[1].amount);
+  for (const [t, d] of typeRows) {
+    const orders = target.byTypeOrders.get(t) || 0;
+    const aovT = orders ? d.amount / orders : 0;
+    const pct = target.totalAmount ? (d.amount / target.totalAmount * 100).toFixed(1) + '%' : '0%';
+    push(t, d.amount, pct, orders, d.qty, Math.round(aovT));
+  }
+  push('');
+
+  // 4) 일별
+  push('[4. 일별 매출]');
+  push('일자', '요일', '매출', '판매수량', '주문수');
+  const dayKeys = [...target.byDay.keys()].sort();
+  for (const d of dayKeys) {
+    const data = target.byDay.get(d);
+    const dt = new Date(d + 'T00:00:00Z');
+    const dow = ['일','월','화','수','목','금','토'][dt.getUTCDay()];
+    push(d, dow, data.amount, data.qty, target.byDayOrders.get(d) || 0);
+  }
+  push('');
+
+  // 5) 주차별
+  push('[5. 주차별 매출]');
+  push('주차', '매출', '판매수량', '주문수', '일평균 매출');
+  const weekKeys = [...target.byWeek.keys()].sort();
+  for (const w of weekKeys) {
+    const data = target.byWeek.get(w);
+    const orders = target.byWeekOrders.get(w) || 0;
+    const daysInWeek = dayKeys.filter(d => weekKey(d) === w).length;
+    const avg = daysInWeek ? data.amount / daysInWeek : 0;
+    push(w, data.amount, data.qty, orders, Math.round(avg));
+  }
+  push('');
+
+  // 6) 상품 Top 50 (export 는 좀 더 많이)
+  push('[6. 상품별 베스트 Top 50]');
+  push('순위', '상품코드', '상품명', '매출', '판매수량', '판매일수', '전월매출', 'MoM');
+  const products = [...target.byProduct.entries()]
+    .map(([k, v]) => ({ ...v, key: k }))
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 50);
+  products.forEach((p, i) => {
+    const prevP = prev.byProduct.get(p.key);
+    const prevAmount = prevP ? prevP.amount : 0;
+    push(i + 1, p.code || '-', p.name || '-', p.amount, p.qty, p.orderDays.size, prevAmount, prevAmount ? pctStr(p.amount, prevAmount) : '신규');
+  });
+  push('');
+
+  // 7) 전월 / 작년동월 요약 (참고)
+  push('[7. 전월 / 작년동월 요약 (참고)]');
+  push('지표', '전월', '작년동월');
+  push('총 매출', prev.totalAmount, yoy.totalAmount);
+  push('주문수', prev.totalOrders, yoy.totalOrders);
+  push('판매수량', prev.totalQty, yoy.totalQty);
+  push('객단가', Math.round(aovPrev), Math.round(aovYoY));
+
+  return lines.join('\n');
+}
+
+function copyMonthlyReportTsv() {
+  const tsv = buildMonthlyReportTsv();
+  if (!tsv) { showToast('먼저 조회를 실행해주세요'); return; }
+  navigator.clipboard.writeText(tsv).then(
+    () => showToast('TSV 클립보드 복사 완료 — 스프레드시트에 paste'),
+    () => alert('클립보드 복사 실패 — 다운로드 버튼을 이용해주세요')
+  );
+}
+
+function downloadMonthlyReportTsv() {
+  const tsv = buildMonthlyReportTsv();
+  if (!tsv) { showToast('먼저 조회를 실행해주세요'); return; }
+  const { month } = _mrData;
+  // Excel 한글 깨짐 방지 — UTF-8 BOM (U+FEFF) 명시적 prepend
+  const blob = new Blob(['﻿' + tsv], { type: 'text/tab-separated-values;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `월간보고서_${month}.tsv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  showToast(`월간보고서_${month}.tsv 다운로드 완료`);
 }
 
 async function loadDashboard() {
