@@ -3520,18 +3520,22 @@ const server = http.createServer(async (req, res) => {
         }
       } else if (pathname === '/api/naver/debug-raw') {
         // 네이버 API raw 응답 진단 — 0건 또는 에러 원인 식별용
+        // 기본 hours_back=24 (오늘 주문 잡히는지), days_back 도 옵션
         logAdminAccess(session, req, 'naver-debug-raw', parsed.query);
         const naverApi = require('./naver/api');
         if (!naverApi.isConfigured()) {
           data = { error: 'Naver API 키 미설정 (NAVER_CLIENT_ID/CLIENT_SECRET)' };
         } else {
-          const daysBack = parseInt(parsed.query.days_back) || 30;
+          const hoursBack = parsed.query.hours_back
+            ? parseInt(parsed.query.hours_back)
+            : (parsed.query.days_back ? parseInt(parsed.query.days_back) * 24 : 24);
           const endMs = Date.now();
-          const startMs = endMs - daysBack * 86400000;
+          const startMs = endMs - hoursBack * 3600000;
           try {
-            const changed = await naverApi.listChangedStatuses({ fromMs: startMs });
+            // start ~ end 명시 (24h 이하 안전)
+            const changed = await naverApi.listChangedStatuses({ fromMs: startMs, toMs: endMs });
             const lcStatuses = changed.data?.lastChangeStatuses || changed.data || [];
-            const ids = Array.isArray(lcStatuses) ? lcStatuses.map(r => r?.productOrderId).filter(Boolean).slice(0, 5) : [];
+            const ids = Array.isArray(lcStatuses) ? lcStatuses.map(r => r?.productOrderId).filter(Boolean).slice(0, 10) : [];
             let detail = null;
             if (ids.length) {
               try { detail = await naverApi.queryProductOrders(ids.map(String)); }
@@ -3539,12 +3543,13 @@ const server = http.createServer(async (req, res) => {
             }
             data = {
               query: {
-                days_back: daysBack,
+                hours_back: hoursBack,
                 start_kst: naverApi.fmtKstIso(startMs),
+                end_kst: naverApi.fmtKstIso(endMs),
                 client_id: naverApi.CLIENT_ID,
               },
+              raw_response: changed,  // 전체 응답 노출 (진단용)
               changed_response_keys: changed && typeof changed === 'object' ? Object.keys(changed) : [],
-              changed_data_keys: changed?.data && typeof changed.data === 'object' ? Object.keys(changed.data) : [],
               changed_count: Array.isArray(lcStatuses) ? lcStatuses.length : null,
               sample_changed_ids: ids,
               detail_response: detail,
