@@ -1939,6 +1939,12 @@ async function loadOrders() {
     const res = await fetch(`${API}/api/orders?start_date=${start}&end_date=${endPlus}&category=${currentCategory}`);
     const jsonData = await res.json();
     ordersData = Array.isArray(jsonData) ? jsonData : [];
+    // 주문일시 DESC 정렬 — 채널 무관 일관 (이전엔 마켓플레이스가 상단 고정되어 운영팀 혼선)
+    ordersData.sort((a, b) => {
+      const tA = a.order_date ? Date.parse(a.order_date) : 0;
+      const tB = b.order_date ? Date.parse(b.order_date) : 0;
+      return (tB || 0) - (tA || 0);
+    });
     ordersData.forEach(r => {
       r.order_date_fmt = r.order_date ? r.order_date.replace('T',' ').slice(0,16) : '';
       r.item_amount_fmt = fmtKRW(r.item_amount);
