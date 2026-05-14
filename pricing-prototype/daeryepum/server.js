@@ -82,6 +82,70 @@ async function _supabaseDeleteSession(sessionId) {
   });
 }
 
+// ============================================
+// Super Admin 권한 — GNB 설정 등 시스템 설정 변경 가능
+// ============================================
+//   현재 sejun.song@barunn.net 만 (env 로 override 가능: SUPER_ADMIN_EMAILS=a@b.com,c@d.com)
+const SUPER_ADMIN_EMAILS = (process.env.SUPER_ADMIN_EMAILS || 'sejun.song@barunn.net')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+
+function isSuperAdmin(session) {
+  if (!session || !session.email) return false;
+  return SUPER_ADMIN_EMAILS.includes(String(session.email).toLowerCase());
+}
+
+// ============================================
+// GNB 메뉴 설정 — Supabase nav_menu_settings (id=1 단일행)
+// ============================================
+async function getNavMenuConfig() {
+  if (!USE_SUPABASE_AUTH) return [];
+  const res = await fetch(`${AUTH_REST_BASE}/nav_menu_settings?id=eq.1&select=config`, {
+    headers: AUTH_HEADERS,
+  });
+  if (!res.ok) return [];
+  const rows = await res.json();
+  if (!rows.length) return [];
+  return Array.isArray(rows[0].config) ? rows[0].config : [];
+}
+
+async function setNavMenuConfig(config, updatedBy) {
+  if (!USE_SUPABASE_AUTH) throw new Error('Supabase 미설정 — GNB 설정 저장 불가');
+  if (!Array.isArray(config)) throw new Error('config must be array');
+  // 정규화 — 허용 필드만
+  const clean = config.map((it, idx) => ({
+    id: String(it.id || '').trim(),
+    visible: it.visible !== false,
+    order: Number.isFinite(it.order) ? Number(it.order) : idx,
+  })).filter(it => it.id);
+  const body = {
+    config: clean,
+    updated_at: new Date().toISOString(),
+    updated_by: updatedBy || null,
+  };
+  const res = await fetch(`${AUTH_REST_BASE}/nav_menu_settings?id=eq.1`, {
+    method: 'PATCH',
+    headers: { ...AUTH_HEADERS, Prefer: 'return=representation' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    // 행이 아예 없으면 INSERT 시도 (마이그레이션 누락 케이스 자가복구)
+    if (res.status === 404 || /no rows/i.test(text)) {
+      const ins = await fetch(`${AUTH_REST_BASE}/nav_menu_settings`, {
+        method: 'POST',
+        headers: { ...AUTH_HEADERS, Prefer: 'return=representation' },
+        body: JSON.stringify({ id: 1, ...body }),
+      });
+      if (!ins.ok) throw new Error(`Supabase insert nav_menu_settings [${ins.status}]: ${(await ins.text()).slice(0,300)}`);
+      const inserted = await ins.json();
+      return inserted[0]?.config || clean;
+    }
+    throw new Error(`Supabase patch nav_menu_settings [${res.status}]: ${text.slice(0,300)}`);
+  }
+  const rows = await res.json();
+  return rows[0]?.config || clean;
+}
+
 async function createSession(userData) {
   const sessionId = crypto.randomBytes(32).toString('hex');
   const hmac = crypto.createHmac('sha256', SESSION_SECRET).update(sessionId).digest('hex');
@@ -3565,6 +3629,31 @@ const server = http.createServer(async (req, res) => {
           } catch (e) {
             data = { error: e.message, client_id: naverApi.CLIENT_ID };
           }
+        }
+      } else if (pathname === '/api/admin/nav-menu' && req.method === 'GET') {
+        // GNB 메뉴 설정 조회 — 모든 로그인 사용자 허용 (페이지 init 에서 호출)
+        const config = await getNavMenuConfig();
+        data = { config, is_super_admin: isSuperAdmin(session), super_admin_emails: SUPER_ADMIN_EMAILS };
+      } else if (pathname === '/api/admin/nav-menu' && req.method === 'PUT') {
+        // GNB 메뉴 설정 저장 — super admin 전용
+        if (!isSuperAdmin(session)) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'forbidden', message: '권한 없음 (super admin 만 변경 가능)' }));
+          return;
+        }
+        logAdminAccess(session, req, 'nav-menu-update', {});
+        const body = await new Promise((resolve) => {
+          let raw = '';
+          req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+        });
+        try {
+          const saved = await setNavMenuConfig(body.config, session.email);
+          data = { ok: true, config: saved };
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'save_failed', message: e.message }));
+          return;
         }
       } else if (pathname === '/api/admin/server-ip') {
         // 서버 outbound IP 확인 — 쿠팡 등 외부 API 키 발급 시 IP 화이트리스트 등록용.

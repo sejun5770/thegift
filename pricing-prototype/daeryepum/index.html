@@ -217,6 +217,7 @@ nav a:hover{color:var(--gray-900)}
   <a href="#bg-products" onclick="showPage('bg-products')">⚙️ 상품설정</a>
   <a href="#bg-shipping" onclick="showPage('bg-shipping')">📅 출고일설정</a>
   <a href="#bg-alimtalk" onclick="showPage('bg-alimtalk')">📨 알림톡 발송</a>
+  <a href="#admin-nav-settings" onclick="showPage('admin-nav-settings')" id="nav-link-admin-nav-settings" style="display:none">⚙️ GNB 설정</a>
   <div class="user-area" id="user-area"></div>
 </nav>
 
@@ -862,6 +863,44 @@ nav a:hover{color:var(--gray-900)}
       <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">🏆 상품별 베스트 (Top 20)</div>
       <div style="overflow-x:auto;max-height:560px;overflow-y:auto">
         <table class="data-table" id="mr-product-table" style="width:100%"></table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== ADMIN: GNB 설정 ========== -->
+<div id="page-admin-nav-settings" class="page">
+  <div class="card" style="margin-bottom:16px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <div style="font-weight:700;font-size:16px">⚙️ GNB 메뉴 설정</div>
+      <span id="ans-permission-tag" style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--gray-100);color:var(--gray-500)">권한 확인 중...</span>
+    </div>
+    <div style="font-size:13px;color:var(--gray-500)">
+      상단 네비게이션 메뉴의 <b>표시/숨김</b> 과 <b>순서</b> 를 변경합니다.
+      변경 사항은 모든 사용자에게 즉시 적용됩니다 (페이지 새로고침 시).
+      권한은 <code>sejun.song@barunn.net</code> 계정만 보유.
+    </div>
+  </div>
+
+  <div id="ans-not-allowed" class="card" style="display:none;border:1px solid #fecaca;background:#fef2f2">
+    <div style="color:#dc2626;font-weight:600">⛔ 권한이 없습니다</div>
+    <div style="font-size:13px;color:var(--gray-500);margin-top:6px">
+      이 페이지는 super admin (<span id="ans-allowed-emails"></span>) 만 접근 가능합니다.
+      문의: 운영팀
+    </div>
+  </div>
+
+  <div id="ans-editor" style="display:none">
+    <div class="card" style="margin-bottom:16px">
+      <div style="font-size:13px;color:var(--gray-500);margin-bottom:8px">
+        ▲ / ▼ 버튼으로 순서 변경, 체크박스로 표시/숨김. 변경 후 <b>저장</b> 클릭.
+      </div>
+      <div id="ans-list" style="display:flex;flex-direction:column;gap:6px;margin-top:8px"></div>
+      <div style="display:flex;gap:8px;margin-top:14px;align-items:center">
+        <button class="btn btn-primary" onclick="saveAdminNavSettings()">💾 저장</button>
+        <button class="btn" onclick="resetAdminNavSettings()">↺ 기본값으로 초기화</button>
+        <button class="btn" onclick="loadAdminNavSettings()">🔄 다시 불러오기</button>
+        <span id="ans-status" style="margin-left:8px;font-size:12px;color:var(--gray-500)"></span>
       </div>
     </div>
   </div>
@@ -1932,6 +1971,8 @@ function init() {
   initMkDates(90);
 
   buildColSelector();
+  // GNB 설정 적용 — 페이지 로드 직후 (네비 깜빡임 최소화). 실패해도 페이지 진행.
+  fetchAndApplyNavConfig().catch(() => {});
   loadCollectedFromServer().catch(() => {}).finally(() => {
     loadDashboard();
     loadChart();
@@ -1942,7 +1983,7 @@ function init() {
 
   // URL hash 기반 페이지 전환
   const hash = location.hash.replace('#', '') || 'dashboard';
-  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-alimtalk', 'bg-unified', 'monthly-report'].includes(hash)) showPage(hash);
+  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-alimtalk', 'bg-unified', 'monthly-report', 'admin-nav-settings'].includes(hash)) showPage(hash);
 }
 
 function fmt(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -1983,6 +2024,7 @@ function showPage(name) {
   // 탭 전환 시마다 해당 탭 데이터 리로드 (딥링크/왕복 일관성 보장)
   if (name === 'dashboard') loadDashboard();
   if (name === 'monthly-report') initMonthlyReport();
+  if (name === 'admin-nav-settings') loadAdminNavSettings();
   if (name === 'orders') loadOrders();
   if (name === 'sns') loadSnsInsight();
   if (name === 'worklog') loadWorklog();
@@ -3443,6 +3485,195 @@ function downloadMonthlyReportTsv() {
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   showToast(`월간보고서_${month}.tsv 다운로드 완료`);
+}
+
+// ============================================
+// GNB 설정 (admin-nav-settings 페이지)
+// ============================================
+//   서버: GET/PUT /api/admin/nav-menu
+//   권한: super admin (sejun.song@barunn.net) 만 PUT, GET 은 모든 로그인 사용자
+//   효과: 변경 시 nav 요소들의 display/order 가 즉시 갱신 (페이지 새로고침 후)
+
+let _navConfigCache = null;
+let _navEditDraft = null;
+let _navIsSuperAdmin = false;
+
+/** 현재 DOM 의 nav 에서 menu item 메타 추출 — fallback / merge 용 기준. */
+function _collectDomNavItems() {
+  const items = [];
+  document.querySelectorAll('nav a[href^="#"]').forEach(a => {
+    const id = a.getAttribute('href').replace('#', '');
+    if (!id) return;
+    items.push({ id, label: a.textContent.trim() });
+  });
+  return items;
+}
+
+/** 서버 설정 + DOM 메뉴를 머지해 최종 적용. */
+function _applyNavConfigToDom(config) {
+  const domItems = _collectDomNavItems();
+  // 머지: 서버 config 우선, 새 메뉴 추가는 뒤에 붙음
+  const seen = new Set(config.map(c => c.id));
+  const merged = [...config];
+  domItems.forEach(d => {
+    if (!seen.has(d.id)) merged.push({ id: d.id, visible: true, order: merged.length });
+  });
+  // 순서별 정렬
+  merged.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+  // 적용 — display + DOM 순서 재정렬
+  const nav = document.querySelector('nav');
+  if (!nav) return;
+  const links = {};
+  nav.querySelectorAll('a[href^="#"]').forEach(a => {
+    links[a.getAttribute('href').replace('#', '')] = a;
+  });
+  // user-area 직전 위치 기준
+  const userArea = nav.querySelector('.user-area');
+  // visibility
+  merged.forEach(item => {
+    const a = links[item.id];
+    if (!a) return;
+    // GNB 설정 메뉴는 super admin 일 때만 — visibility 와 별개로 권한 우선
+    if (item.id === 'admin-nav-settings') {
+      a.style.display = _navIsSuperAdmin ? '' : 'none';
+    } else {
+      a.style.display = item.visible === false ? 'none' : '';
+    }
+    // 순서 재배치 (userArea 직전)
+    if (userArea) nav.insertBefore(a, userArea);
+    else nav.appendChild(a);
+  });
+}
+
+async function fetchAndApplyNavConfig() {
+  try {
+    const r = await fetch(`${API}/api/admin/nav-menu`);
+    if (!r.ok) return;
+    const j = await r.json();
+    _navConfigCache = j.config || [];
+    _navIsSuperAdmin = !!j.is_super_admin;
+    _applyNavConfigToDom(_navConfigCache);
+  } catch (e) {
+    console.warn('[nav config] fetch 실패:', e.message);
+  }
+}
+
+async function loadAdminNavSettings() {
+  // 권한 / 데이터 동시 조회
+  const tag = document.getElementById('ans-permission-tag');
+  const notAllowed = document.getElementById('ans-not-allowed');
+  const editor = document.getElementById('ans-editor');
+  try {
+    const r = await fetch(`${API}/api/admin/nav-menu`);
+    if (!r.ok) throw new Error('fetch failed: ' + r.status);
+    const j = await r.json();
+    _navConfigCache = j.config || [];
+    _navIsSuperAdmin = !!j.is_super_admin;
+    document.getElementById('ans-allowed-emails').textContent = (j.super_admin_emails || []).join(', ');
+    if (!_navIsSuperAdmin) {
+      tag.textContent = '권한 없음';
+      tag.style.background = '#fee2e2'; tag.style.color = '#dc2626';
+      notAllowed.style.display = 'block';
+      editor.style.display = 'none';
+      return;
+    }
+    tag.textContent = '✅ Super Admin';
+    tag.style.background = '#dcfce7'; tag.style.color = '#16a34a';
+    notAllowed.style.display = 'none';
+    editor.style.display = 'block';
+    // editing draft 생성 (DOM merge)
+    _navEditDraft = _buildEditDraft(_navConfigCache);
+    _renderNavEditList();
+    document.getElementById('ans-status').textContent = '';
+  } catch (e) {
+    tag.textContent = '조회 실패';
+    document.getElementById('ans-status').textContent = '에러: ' + e.message;
+  }
+}
+
+function _buildEditDraft(config) {
+  const domItems = _collectDomNavItems().filter(d => d.id !== 'admin-nav-settings');
+  // 서버 config 의 id 들 — DOM 에 없는 id 는 제외 (stale)
+  const domIds = new Set(domItems.map(d => d.id));
+  const validServer = config.filter(c => domIds.has(c.id));
+  const validIds = new Set(validServer.map(c => c.id));
+  // DOM 에 새로 추가된 메뉴
+  const newOnes = domItems.filter(d => !validIds.has(d.id));
+  const merged = [
+    ...validServer.map(s => ({ ...s, label: domItems.find(d => d.id === s.id)?.label || s.id })),
+    ...newOnes.map((d, i) => ({ id: d.id, label: d.label, visible: true, order: validServer.length + i })),
+  ];
+  // 순서 정규화
+  merged.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+  merged.forEach((it, i) => it.order = i);
+  return merged;
+}
+
+function _renderNavEditList() {
+  const root = document.getElementById('ans-list');
+  if (!_navEditDraft) { root.innerHTML = ''; return; }
+  root.innerHTML = _navEditDraft.map((item, idx) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--gray-200);border-radius:var(--radius);background:${item.visible === false ? '#fafafa' : '#fff'}">
+      <span style="color:var(--gray-400);font-family:monospace;width:30px">${idx + 1}.</span>
+      <label style="display:inline-flex;align-items:center;gap:6px;min-width:90px;font-size:13px">
+        <input type="checkbox" ${item.visible !== false ? 'checked' : ''} onchange="_toggleNavVisible(${idx}, this.checked)" />
+        표시
+      </label>
+      <span style="flex:1;font-weight:500;${item.visible === false ? 'color:var(--gray-400);text-decoration:line-through' : ''}">${esc(item.label || item.id)}</span>
+      <span style="font-size:11px;color:var(--gray-400);font-family:monospace">#${esc(item.id)}</span>
+      <button class="btn" style="padding:3px 10px" onclick="_moveNavItem(${idx}, -1)" ${idx === 0 ? 'disabled' : ''}>▲</button>
+      <button class="btn" style="padding:3px 10px" onclick="_moveNavItem(${idx}, 1)" ${idx === _navEditDraft.length - 1 ? 'disabled' : ''}>▼</button>
+    </div>
+  `).join('');
+}
+
+function _toggleNavVisible(idx, checked) {
+  if (!_navEditDraft || !_navEditDraft[idx]) return;
+  _navEditDraft[idx].visible = !!checked;
+  _renderNavEditList();
+}
+
+function _moveNavItem(idx, dir) {
+  if (!_navEditDraft) return;
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= _navEditDraft.length) return;
+  const t = _navEditDraft[idx];
+  _navEditDraft[idx] = _navEditDraft[newIdx];
+  _navEditDraft[newIdx] = t;
+  _navEditDraft.forEach((it, i) => it.order = i);
+  _renderNavEditList();
+}
+
+async function saveAdminNavSettings() {
+  if (!_navEditDraft) return;
+  const status = document.getElementById('ans-status');
+  status.textContent = '저장 중...';
+  try {
+    const payload = _navEditDraft.map(it => ({ id: it.id, visible: it.visible !== false, order: it.order }));
+    const r = await fetch(`${API}/api/admin/nav-menu`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: payload }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.message || j.error || ('status ' + r.status));
+    _navConfigCache = j.config || payload;
+    _applyNavConfigToDom(_navConfigCache);
+    status.textContent = '✅ 저장 완료 — 모든 사용자에게 즉시 적용됨';
+    status.style.color = '#16a34a';
+  } catch (e) {
+    status.textContent = '❌ 저장 실패: ' + e.message;
+    status.style.color = '#dc2626';
+  }
+}
+
+function resetAdminNavSettings() {
+  if (!confirm('모든 GNB 메뉴를 기본값(전부 표시 + 원래 순서)으로 초기화합니다. 계속할까요?')) return;
+  const domItems = _collectDomNavItems().filter(d => d.id !== 'admin-nav-settings');
+  _navEditDraft = domItems.map((d, i) => ({ id: d.id, label: d.label, visible: true, order: i }));
+  _renderNavEditList();
+  document.getElementById('ans-status').textContent = '※ 기본값으로 리셋됨. 저장 버튼을 눌러야 반영됩니다.';
+  document.getElementById('ans-status').style.color = 'var(--gray-500)';
 }
 
 async function loadDashboard() {
