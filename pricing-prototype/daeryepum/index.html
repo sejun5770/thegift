@@ -96,6 +96,10 @@ nav a:hover{color:var(--gray-900)}
 .data-table tr.row-pending{background:#f0f9ff}
 .data-table tr.row-pending:hover{background:#e0f2fe}
 .data-table tr.row-pending td{color:#0369a1}
+/* 결제대기 + 수집완료 — 보라색 alert. 결제 미완료인데 운영팀이 이미 수집 처리한 비정상 상황 */
+.data-table tr.row-pending-alert{background:#faf5ff}
+.data-table tr.row-pending-alert:hover{background:#f3e8ff}
+.data-table tr.row-pending-alert td{color:#7c3aed;font-weight:600}
 .data-table .num{text-align:right;font-variant-numeric:tabular-nums}
 /* COLUMN SELECTOR */
 .col-selector{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;padding:12px;background:var(--gray-50);border-radius:var(--radius)}
@@ -2052,6 +2056,7 @@ function renderOrderTable() {
     const isPendingStatus = r.status_seq === 1 && !r.settle_date;
     let cls = '';
     if (isCollected && isCancelStatus) cls = 'row-cancel-alert';
+    else if (isCollected && isPendingStatus) cls = 'row-pending-alert'; // 결제대기인데 수집완료 — 운영 검토 필요
     else if (isCollected) cls = 'row-collected';
     else if (isCancelStatus) cls = 'row-cancelled';
     else if (isPendingStatus) cls = 'row-pending';
