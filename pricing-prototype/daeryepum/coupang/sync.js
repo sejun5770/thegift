@@ -24,10 +24,10 @@
 const api = require('./api');
 const store = require('./store');
 
-// 답례품 카테고리 필터 — env 로 운영 중 추가/제거 가능
-const CATEGORY_CODES = (process.env.COUPANG_DAERYEPUM_CATEGORY_CODES || '')
+// 답례품 카테고리 필터 — env 로 운영 중 추가/제거 가능 (네이버와 명명 규칙 일관)
+const CATEGORY_CODES = (process.env.COUPANG_CATEGORY_CODES || '')
   .split(',').map(s => s.trim()).filter(Boolean);
-const PRODUCT_IDS = (process.env.COUPANG_DAERYEPUM_PRODUCT_IDS || '')
+const PRODUCT_IDS = (process.env.COUPANG_PRODUCT_IDS || '')
   .split(',').map(s => s.trim()).filter(Boolean);
 const FILTER_DISABLED = !CATEGORY_CODES.length && !PRODUCT_IDS.length;
 
