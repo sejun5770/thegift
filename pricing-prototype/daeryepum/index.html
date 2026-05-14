@@ -7395,14 +7395,25 @@ function renderBgUnified() {
     }
   }
 
-  // 입력완료 탭 정렬: submitted_at / updated_at DESC (최신 입력 위).
-  //   채널 구분 없이 일관 — 운영팀이 최신 입력 순서로 처리할 수 있게.
+  // 입력완료 탭 정렬:
+  //   1순위) 수집처리 안된 건 (processed_at NULL) 이 맨 위 — 처리 액션 필요
+  //   2순위) 수집처리 완료된 건은 수집일시(processed_at) DESC — 최근 처리 위
+  //   3순위) 같은 그룹 내에서는 입력일시(submitted_at/updated_at) DESC
+  //   채널 구분 없이 일관 — 운영팀이 액션 필요 건을 먼저 보도록.
   if (activeTab === 'submitted') {
     filtered.sort((a, b) => {
-      const ciKeyA = bgCiKey(a);
-      const ciKeyB = bgCiKey(b);
-      const ciA = bgUnifiedCiMap.get(ciKeyA);
-      const ciB = bgUnifiedCiMap.get(ciKeyB);
+      const ciA = bgUnifiedCiMap.get(bgCiKey(a));
+      const ciB = bgUnifiedCiMap.get(bgCiKey(b));
+      const procA = ciA?.processed_at;
+      const procB = ciB?.processed_at;
+      // 1순위: 수집처리 안된 건 (NULL) 이 위
+      if (!procA && procB) return -1;
+      if (procA && !procB) return 1;
+      // 2순위: 둘 다 처리 완료 → 수집일시 DESC
+      if (procA && procB) {
+        return (Date.parse(procB) || 0) - (Date.parse(procA) || 0);
+      }
+      // 3순위: 둘 다 미처리 → 입력일시 DESC
       const tA = Math.max(Date.parse(ciA?.updated_at || 0) || 0, Date.parse(ciA?.submitted_at || 0) || 0);
       const tB = Math.max(Date.parse(ciB?.updated_at || 0) || 0, Date.parse(ciB?.submitted_at || 0) || 0);
       return tB - tA;
