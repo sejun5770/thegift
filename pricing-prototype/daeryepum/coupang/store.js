@@ -85,6 +85,31 @@ async function upsertCoupangStubCustomerInfos(stubs) {
 }
 
 /**
+ * 쿠팡 stub 의 enrichment 필드(sticker_selections, desired_ship_date) PATCH.
+ *   processed_at / customer_request 등 운영팀 변경 가능 필드는 건드리지 않음.
+ *   ignore-duplicates upsert 로 안 채워지는 기존 빈 stub 도 새 enrichment 로 갱신.
+ */
+async function patchCoupangStubEnrichment(orderId, { sticker_selections, desired_ship_date }) {
+  if (!USE_SUPABASE) return { patched: 0 };
+  const params = `order_id=eq.${encodeURIComponent(orderId)}`;
+  const url = `${REST_BASE}/bg_order_customer_info?${params}`;
+  const body = {};
+  if (sticker_selections !== undefined) body.sticker_selections = sticker_selections;
+  if (desired_ship_date !== undefined) body.desired_ship_date = desired_ship_date;
+  if (!Object.keys(body).length) return { patched: 0 };
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { ...HEADERS, Prefer: 'return=minimal' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase patch bg_order_customer_info [${res.status}]: ${text.slice(0, 300)}`);
+  }
+  return { patched: 1 };
+}
+
+/**
  * 마지막 동기화 메타 조회.
  */
 async function getSyncState() {
@@ -116,6 +141,7 @@ module.exports = {
   USE_SUPABASE,
   upsertCoupangOrders,
   upsertCoupangStubCustomerInfos,
+  patchCoupangStubEnrichment,
   listCoupangOrders,
   getSyncState,
   updateSyncState,

@@ -23,6 +23,8 @@
 
 const api = require('./api');
 const store = require('./store');
+const bgStore = require('../barungift/store');
+const { enrichOrderItem, calcCoupangShipDate } = require('./option-mapper');
 
 // 답례품 카테고리 필터 — env 로 운영 중 추가/제거 가능 (네이버와 명명 규칙 일관)
 const CATEGORY_CODES = (process.env.COUPANG_CATEGORY_CODES || '')
@@ -173,31 +175,82 @@ async function syncRecent({ daysBack = 7, status } = {}) {
   // 정보입력현황 자동 입력완료 처리 — coupang_order_id 단위로 stub customer_info row 생성.
   //   ignore-duplicates 라 이미 있으면 skip → 수집처리/processed_at 등 보존.
   //   같은 주문(coupang_order_id) 에 여러 row 가 있어도 ci 는 1개.
+  //
+  // 운영 규칙 enrichment:
+  //   - 스티커/박스 = '모델번호' (external_vendor_sku) 로 bg_stickers/bg_product_settings 매칭
+  //   - desired_ship_date = ordered_at(KST) 11시 이전 → 당일, 이후 → 익영업일
   let stubUpserted = 0;
+  let enrichedCount = 0;
   if (rows.length) {
     try {
-      const seen = new Set();
-      const stubs = [];
+      // 참고 데이터 1회 로드
+      let stickers = [];
+      let productSettings = [];
+      try {
+        [stickers, productSettings] = await Promise.all([
+          bgStore.getAllStickers(true).catch(() => []),
+          bgStore.getAllProductSettings().catch(() => []),
+        ]);
+      } catch (e) {
+        console.warn('[coupang sync] 스티커/상품설정 로드 실패 (enrichment 스킵):', e.message);
+      }
+
+      // 같은 coupang_order_id 의 row 를 묶어 sticker_selections 누적
+      const grouped = new Map(); // order_id → { row, selections[] }
       for (const r of rows) {
         const order_id = `CP-${r.coupang_order_id}`;
-        if (seen.has(order_id)) continue;
-        seen.add(order_id);
+        const sel = enrichOrderItem({
+          productCode: r.product_code,
+          productName: r.product_name,
+          quantity: r.item_count,
+          modelNo: r.external_vendor_sku, // 쿠팡 셀러센터의 '모델번호'
+          stickers,
+          productSettings,
+        });
+        if (sel.sticker_code || sel.box_code) enrichedCount++;
+        const entry = grouped.get(order_id) || { row: r, selections: [] };
+        entry.selections.push(sel);
+        grouped.set(order_id, entry);
+      }
+
+      const stubs = [];
+      for (const [order_id, { row, selections }] of grouped) {
+        // 출고일 — ordered_at 기준 11시 컷오프, 토/일 스킵
+        const shipDate = calcCoupangShipDate(row.ordered_at);
         stubs.push({
           order_id,
           is_express: false,
           express_fee: 0,
-          desired_ship_date: null,
-          sticker_selections: [],
+          desired_ship_date: shipDate,
+          sticker_selections: selections,
           cash_receipt_yn: false,
           receipt_type: null,
           receipt_number: null,
           customer_request: null,
-          // 주문일을 입력일로 — '✅ 쿠팡 자동' 라벨 보존이지만 timestamp 도 의미 있게
-          submitted_at: r.ordered_at || new Date().toISOString(),
+          submitted_at: row.ordered_at || new Date().toISOString(),
         });
       }
       const r = await store.upsertCoupangStubCustomerInfos(stubs);
       stubUpserted = r.upserted || 0;
+
+      // enrichment PATCH — ignore-duplicates 라 기존 빈 stub 은 위 upsert 로 안 채워짐.
+      //   sticker_selections + desired_ship_date 동시 patch.
+      //   processed_at / customer_request / express 관련 운영 필드는 미터치.
+      for (const stub of stubs) {
+        const hasEnrich = stub.desired_ship_date
+          || (Array.isArray(stub.sticker_selections) && stub.sticker_selections.some(s =>
+            s.sticker_code || s.box_code
+          ));
+        if (!hasEnrich) continue;
+        try {
+          await store.patchCoupangStubEnrichment(stub.order_id, {
+            sticker_selections: stub.sticker_selections,
+            desired_ship_date: stub.desired_ship_date,
+          });
+        } catch (e) {
+          console.warn(`[coupang sync] enrichment patch 실패 ${stub.order_id}: ${e.message}`);
+        }
+      }
     } catch (e) {
       console.warn('[coupang sync] customer_info stub upsert 실패 (수집처리 버튼 동작 안 할 수 있음):', e.message);
     }
@@ -212,6 +265,7 @@ async function syncRecent({ daysBack = 7, status } = {}) {
     fetched: sheets.length,
     upserted,
     stub_ci_upserted: stubUpserted,
+    enriched: enrichedCount,
     filtered_out: filteredOut,
     items: rows.length,
     filter_disabled: FILTER_DISABLED,
