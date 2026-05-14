@@ -3482,29 +3482,41 @@ const server = http.createServer(async (req, res) => {
         const naverStore = require('./naver/store');
         data = await naverStore.getSyncState();
       } else if (pathname === '/api/naver/debug-auth') {
-        // 인증 서명 페이로드 진단 — 토큰 요청 직전에 보내는 값 노출.
-        //   secret 형식, message, signature 인코딩 등 확인용. 토큰 발급도 실제 시도.
+        // 인증 서명 페이로드 진단 — 토큰 요청 전후 모두 노출.
         logAdminAccess(session, req, 'naver-debug-auth', {});
         const naverApi = require('./naver/api');
         if (!naverApi.isConfigured()) {
           data = { error: 'Naver API 키 미설정' };
         } else {
+          // 직접 서명 만들어보고 페이로드 노출 + 실제 호출 시도
+          const timestamp = Date.now();
+          const message = `${naverApi.CLIENT_ID}_${timestamp}`;
+          let signature, signError;
+          try {
+            signature = naverApi.signClientSecret(naverApi.CLIENT_ID, timestamp, process.env.NAVER_CLIENT_SECRET);
+          } catch (e) { signError = e.message; }
+          let tokenResult = null;
           try {
             const token = await naverApi.getAccessToken();
-            data = {
-              status: 'success',
-              token_first_8: token ? String(token).slice(0, 8) + '...' : null,
-              token_length: token ? token.length : 0,
-              hint: '토큰 발급 성공 — 정상 동작 중.',
-            };
+            tokenResult = { ok: true, token_first_8: String(token).slice(0, 8) + '...', token_length: token.length };
           } catch (e) {
-            data = {
-              status: 'error',
-              error: e.message,
-              client_id: naverApi.CLIENT_ID,
-              hint: 'getAccessToken 실패. 에러 메시지로 다음 단계 진단.',
-            };
+            tokenResult = { ok: false, error: e.message };
           }
+          data = {
+            client_id: naverApi.CLIENT_ID,
+            secret_format: /^\$2[abxy]\$/.test(process.env.NAVER_CLIENT_SECRET || '') ? 'bcrypt ($2x$)' : 'raw',
+            secret_length: (process.env.NAVER_CLIENT_SECRET || '').length,
+            secret_first_8: (process.env.NAVER_CLIENT_SECRET || '').slice(0, 8),
+            sign_method: /^\$2[abxy]\$/.test(process.env.NAVER_CLIENT_SECRET || '') ? 'bcrypt + base64url(padded)' : 'HMAC-SHA256 + base64url(padded)',
+            timestamp,
+            timestamp_iso: new Date(timestamp).toISOString(),
+            message_to_sign: message,
+            signature_length: signature ? signature.length : 0,
+            signature_first_16: signature ? signature.slice(0, 16) + '...' : null,
+            signature_last_8: signature ? '...' + signature.slice(-8) : null,
+            sign_error: signError,
+            token_result: tokenResult,
+          };
         }
       } else if (pathname === '/api/naver/debug-raw') {
         // 네이버 API raw 응답 진단 — 0건 또는 에러 원인 식별용

@@ -44,16 +44,24 @@ let _tokenCache = { token: null, expiresAt: 0 };
  *
  *   secret 의 형식으로 자동 분기.
  */
+/** Java Base64.getUrlEncoder() 와 동일 — URL-safe + padding 유지. */
+function b64UrlWithPadding(buf) {
+  return Buffer.from(buf).toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+  // padding '=' 그대로 유지 (Java 기본 getUrlEncoder() 와 일관)
+}
+
 function signClientSecret(clientId, timestamp, secret) {
   const message = `${clientId}_${timestamp}`;
   // 방식 A — bcrypt 풀 형식 (네이버 spec)
   //   네이버 Java 샘플: Base64.getUrlEncoder().encodeToString(hashed.getBytes("UTF-8"))
-  //   → URL-safe base64 (padding 포함). regular base64 보다 호환성 높음.
+  //   → URL-safe base64, padding 포함 ('=' 유지).
   if (/^\$2[abxy]\$/.test(secret)) {
     const hashed = bcrypt.hashSync(message, secret);
-    return Buffer.from(hashed, 'utf-8').toString('base64url');
+    return b64UrlWithPadding(Buffer.from(hashed, 'utf-8'));
   }
-  // 방식 B — HMAC-SHA256 (신버전 추정, 16자 raw secret 케이스)
+  // 방식 B — HMAC-SHA256 (신버전 추정)
   let key;
   try {
     key = Buffer.from(secret, 'base64url');
@@ -62,7 +70,7 @@ function signClientSecret(clientId, timestamp, secret) {
     key = Buffer.from(secret, 'utf-8');
   }
   const hmac = crypto.createHmac('sha256', key).update(message).digest();
-  return hmac.toString('base64url');
+  return b64UrlWithPadding(hmac);
 }
 
 async function getAccessToken() {
@@ -213,6 +221,7 @@ module.exports = {
   isConfigured,
   getAccessToken,
   callNaver,
+  signClientSecret,
   fmtKstIso,
   listChangedStatuses,
   queryProductOrders,
