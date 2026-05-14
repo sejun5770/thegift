@@ -815,7 +815,22 @@ nav a:hover{color:var(--gray-900)}
     <!-- 1) 핵심 KPI -->
     <div class="card" style="margin-bottom:20px">
       <div style="font-size:13px;color:var(--gray-500);margin-bottom:6px">📈 핵심 KPI <span id="mr-period-label" style="margin-left:8px"></span></div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:10px" id="mr-kpi-grid"></div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:10px" id="mr-kpi-grid"></div>
+    </div>
+
+    <!-- Q. 분기 누적 + 목표 대비 -->
+    <div class="card" style="margin-bottom:20px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:13px;color:var(--gray-500)">🎯 분기 누적 매출 + 목표 대비 <span id="mr-quarter-label" style="margin-left:6px;font-weight:600;color:var(--gray-700)"></span></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <label style="font-size:12px;color:var(--gray-500)">분기목표(원):</label>
+          <input type="number" id="mr-quarter-target" placeholder="예: 450000000" style="width:160px;padding:4px 8px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px" onchange="renderQuarterCumulative()" />
+          <button class="btn" onclick="saveQuarterTarget()" style="padding:3px 10px;font-size:12px">저장</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="data-table" id="mr-quarter-table" style="width:100%"></table>
+      </div>
     </div>
 
     <!-- 2) MoM / YoY 비교 -->
@@ -839,6 +854,32 @@ nav a:hover{color:var(--gray-900)}
       <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">🎁 동시구매 vs 단독주문</div>
       <div style="overflow-x:auto">
         <table class="data-table" id="mr-type-table" style="width:100%"></table>
+      </div>
+    </div>
+
+    <!-- 4.5) 사이트 × 빠른출고 / 일반 (이전 보고서 "오늘 출발 MoM" 동일) -->
+    <div class="card" style="margin-bottom:20px">
+      <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">⚡ 사이트별 일반 / 빠른출고 분리 (MoM 포함)</div>
+      <div style="overflow-x:auto">
+        <table class="data-table" id="mr-express-table" style="width:100%"></table>
+      </div>
+    </div>
+
+    <!-- 4.7) 요일별 패턴 -->
+    <div class="card" style="margin-bottom:20px">
+      <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">📆 요일별 패턴</div>
+      <div style="overflow-x:auto">
+        <table class="data-table" id="mr-dow-table" style="width:100%"></table>
+      </div>
+    </div>
+
+    <!-- 4.8) 수량 구간 분포 -->
+    <div class="card" style="margin-bottom:20px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-size:13px;color:var(--gray-500)">📦 주문 수량 구간 분포 <span id="mr-qty-note" style="font-size:11px;color:var(--gray-400)">(주문 단위)</span></div>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="data-table" id="mr-qty-table" style="width:100%"></table>
       </div>
     </div>
 
@@ -3048,10 +3089,24 @@ async function fetchMonthlySummary(yyyymm) {
 /**
  * 데이터셋(/api/dashboard/summary 응답) 을 KPI/일별/주차별/상품별/채널별 등으로 집계.
  */
-function aggregateMonthly(data) {
+/** 주문 수량 → 구간 라벨 매핑 (이전 보고서 동일 6단계). */
+function _qtyBucket(n) {
+  const q = Number(n) || 0;
+  if (q <= 1) return '1개 (샘플)';
+  if (q <= 50) return '2~50개';
+  if (q <= 100) return '51~100개';
+  if (q <= 200) return '101~200개';
+  if (q <= 300) return '201~300개';
+  return '300개 초과';
+}
+const QTY_BUCKETS = ['1개 (샘플)', '2~50개', '51~100개', '101~200개', '201~300개', '300개 초과'];
+const DOW_LABELS = ['일','월','화','수','목','금','토'];
+
+function aggregateMonthly(data, orders) {
   // API 응답: { summary, order_counts, express_daily }
   const rows = (data && (data.summary || data.rows)) || [];
   const orderCounts = (data && (data.order_counts || data.orderCounts)) || [];
+  const expressDaily = (data && (data.express_daily || data.expressDaily)) || [];
   // 총 KPI
   let totalAmount = 0, totalQty = 0;
   const orderSet = new Set();
@@ -3127,13 +3182,93 @@ function aggregateMonthly(data) {
     if (r.order_day) e.orderDays.add(r.order_day);
     byProduct.set(key, e);
   }
+  // 빠른출고 (express_daily) — 사이트별 합산
+  const expressBySite = new Map();
+  for (const e of expressDaily) {
+    const s = e.site_name || '(미상)';
+    const cur = expressBySite.get(s) || { amount: 0, qty: 0 };
+    cur.amount += e.total_amount || 0;
+    cur.qty += e.total_qty || 0;
+    expressBySite.set(s, cur);
+  }
+  // 사이트별 일반/빠른출고 분리 (일반 = 사이트 전체 - 빠른출고)
+  const siteExpressSplit = new Map();
+  for (const [s, d] of bySite) {
+    const exp = expressBySite.get(s) || { amount: 0, qty: 0 };
+    const normalAmount = Math.max(0, d.amount - exp.amount);
+    const normalQty = Math.max(0, d.qty - exp.qty);
+    siteExpressSplit.set(s, {
+      total: d,
+      express: exp,
+      normal: { amount: normalAmount, qty: normalQty },
+    });
+  }
+
+  // 요일별 합계 — 일별 데이터 그룹핑
+  const byDow = [0, 1, 2, 3, 4, 5, 6].map(() => ({ amount: 0, qty: 0, orders: 0 }));
+  for (const [day, d] of byDay) {
+    const dt = new Date(day + 'T00:00:00Z');
+    const dow = dt.getUTCDay();
+    byDow[dow].amount += d.amount;
+    byDow[dow].qty += d.qty;
+  }
+  for (const [day, cnt] of byDayOrders) {
+    const dt = new Date(day + 'T00:00:00Z');
+    const dow = dt.getUTCDay();
+    byDow[dow].orders += cnt;
+  }
+
+  // 주문자수 + 수량 구간 — orders (per-order data) 필요
+  let uniqueCustomers = 0;
+  const byQty = new Map();
+  for (const b of QTY_BUCKETS) byQty.set(b, { orders: 0, amount: 0 });
+  if (Array.isArray(orders) && orders.length) {
+    const cset = new Set();
+    for (const o of orders) {
+      // status 3=취소 / 5=주문취소 / 14/15 = ETC 취소류 제외 (summary 기준 일관)
+      if (o.status_seq === 3 || o.status_seq === 5 || o.status_seq === 14 || o.status_seq === 15) continue;
+      if (o.status_seq != null && o.status_seq < 2) continue;
+      const key = o.member_id || ('guest|' + (o.recv_hphone || o.order_name || o.order_seq || ''));
+      if (key) cset.add(key);
+      const b = _qtyBucket(o.item_count);
+      const cur = byQty.get(b);
+      if (cur) {
+        cur.orders++;
+        cur.amount += Number(o.settle_price || o.item_amount || 0) || 0;
+      }
+    }
+    uniqueCustomers = cset.size;
+  }
+
   return {
     totalAmount, totalQty, totalOrders,
+    uniqueCustomers,
     byDay, byDayOrders,
     byWeek, byWeekOrders,
     bySite, bySiteOrders,
     byType, byTypeOrders,
     byProduct,
+    expressBySite, siteExpressSplit,
+    byDow, byQty,
+  };
+}
+
+/** 대상월의 per-order 데이터 (수량구간/주문자수용). 답례품 카테고리 한정. */
+async function fetchMonthlyOrders(yyyymm) {
+  const { start, endPlus } = monthRange(yyyymm);
+  const res = await fetch(`${API}/api/orders?start_date=${start}&end_date=${endPlus}&category=daeryepum`);
+  if (!res.ok) throw new Error(`orders fetch failed: ${res.status}`);
+  return res.json();
+}
+
+/** 대상월이 속한 분기 (Q1: 1-3월, Q2: 4-6월, ...) 의 3개월 목록 반환. */
+function quarterMonthsOf(yyyymm) {
+  const [y, m] = yyyymm.split('-').map(Number);
+  const q = Math.ceil(m / 3);
+  const startM = (q - 1) * 3 + 1;
+  return {
+    q,
+    months: [0, 1, 2].map(i => `${y}-${String(startM + i).padStart(2, '0')}`),
   };
 }
 
@@ -3142,20 +3277,32 @@ async function loadMonthlyReport() {
   if (!month) { showToast('월을 선택해주세요'); return; }
   document.getElementById('mr-content').style.display = 'none';
   document.getElementById('mr-loading').style.display = 'block';
-  document.getElementById('mr-loading').textContent = '데이터 조회 중... (대상월 / 전월 / 작년동월 3건 병렬)';
+  document.getElementById('mr-loading').textContent = '데이터 조회 중... (대상월/전월/작년동월/대상월 주문리스트/분기 3개월)';
   try {
-    const [target, prev, yoy] = await Promise.all([
+    const { months: qMonths } = quarterMonthsOf(month);
+    // 1) 핵심 fetch — target/prev/yoy summary + target month orders (per-order)
+    const [target, prev, yoy, targetOrders] = await Promise.all([
       fetchMonthlySummary(month),
       fetchMonthlySummary(prevMonth(month)),
       fetchMonthlySummary(yoyMonth(month)),
+      fetchMonthlyOrders(month).catch(() => []),
     ]);
+    // 2) 분기 다른 월 fetch (대상월은 위 target 재활용)
+    const qData = await Promise.all(qMonths.map(async (m) => {
+      if (m === month) return target;
+      try { return await fetchMonthlySummary(m); } catch { return null; }
+    }));
+
     _mrData = {
       month,
-      target: aggregateMonthly(target),
+      quarterMonths: qMonths,
+      target: aggregateMonthly(target, targetOrders),
       prev: aggregateMonthly(prev),
       yoy: aggregateMonthly(yoy),
+      quarter: qMonths.map((m, i) => ({ month: m, agg: qData[i] ? aggregateMonthly(qData[i]) : null })),
     };
     renderMonthlyReport();
+    renderQuarterCumulative();
     document.getElementById('mr-loading').style.display = 'none';
     document.getElementById('mr-content').style.display = 'block';
   } catch (e) {
@@ -3180,15 +3327,19 @@ function renderMonthlyReport() {
     const color = d >= 0 ? '#16a34a' : '#dc2626';
     return `<span style="color:${color};font-size:11px;font-weight:600">${sign}${d.toFixed(1)}%</span>`;
   }
+  const perCustomer = target.uniqueCustomers ? (target.totalOrders / target.uniqueCustomers) : 0;
+  const perCustomerPrev = (prev.uniqueCustomers || 0) > 0 ? (prev.totalOrders / prev.uniqueCustomers) : 0;
   document.getElementById('mr-kpi-grid').innerHTML = [
     { lab: '총 매출', val: fmtKRW(target.totalAmount), mom: deltaBadge(target.totalAmount, prev.totalAmount), yoy: deltaBadge(target.totalAmount, yoy.totalAmount) },
     { lab: '주문수', val: target.totalOrders.toLocaleString() + '건', mom: deltaBadge(target.totalOrders, prev.totalOrders), yoy: deltaBadge(target.totalOrders, yoy.totalOrders) },
     { lab: '판매수량', val: target.totalQty.toLocaleString() + '개', mom: deltaBadge(target.totalQty, prev.totalQty), yoy: deltaBadge(target.totalQty, yoy.totalQty) },
     { lab: '객단가(AOV)', val: fmtKRW(Math.round(aov)), mom: deltaBadge(aov, aovPrev), yoy: deltaBadge(aov, aovYoY) },
+    { lab: '주문자수', val: target.uniqueCustomers ? (target.uniqueCustomers.toLocaleString() + '명') : '-', mom: target.uniqueCustomers ? deltaBadge(target.uniqueCustomers, prev.uniqueCustomers || 0) : '<span style="color:var(--gray-400);font-size:11px">N/A</span>', yoy: '<span style="color:var(--gray-400);font-size:11px">-</span>', extra: target.uniqueCustomers ? '고객당 ' + perCustomer.toFixed(2) + '건' : '' },
   ].map(k => `
     <div style="padding:14px;background:var(--gray-50);border-radius:var(--radius);border:1px solid var(--gray-200)">
       <div style="font-size:12px;color:var(--gray-500)">${k.lab}</div>
       <div style="font-size:20px;font-weight:700;margin-top:4px">${k.val}</div>
+      ${k.extra ? `<div style="font-size:11px;color:var(--gray-500);margin-top:2px">${k.extra}</div>` : ''}
       <div style="margin-top:6px;font-size:11px;color:var(--gray-500)">전월 ${k.mom} · 작년 ${k.yoy}</div>
     </div>
   `).join('');
@@ -3323,6 +3474,93 @@ function renderMonthlyReport() {
     }).join('')}</tbody>
   `;
 
+  // 4.5) 사이트 × 일반/빠른출고
+  const allSites = new Set([...target.bySite.keys(), ...prev.bySite.keys()]);
+  const sitesArr = [...allSites].sort((a, b) => (target.bySite.get(b)?.amount || 0) - (target.bySite.get(a)?.amount || 0));
+  document.getElementById('mr-express-table').innerHTML = `
+    <thead><tr>
+      <th style="text-align:left">사이트</th>
+      <th style="text-align:left">구분</th>
+      <th>${prevMonth(month)} 매출</th>
+      <th>${month} 매출</th>
+      <th>MoM</th>
+      <th>판매수량</th>
+    </tr></thead>
+    <tbody>${sitesArr.flatMap(s => {
+      const tSplit = target.siteExpressSplit.get(s) || { total: {amount:0,qty:0}, express: {amount:0,qty:0}, normal: {amount:0,qty:0} };
+      const pSplit = prev.siteExpressSplit.get(s) || { total: {amount:0,qty:0}, express: {amount:0,qty:0}, normal: {amount:0,qty:0} };
+      return [
+        `<tr>
+          <td rowspan="2" style="font-weight:600;vertical-align:middle">${esc(s)}</td>
+          <td>일반</td>
+          <td class="num">${fmtKRW(pSplit.normal.amount)}</td>
+          <td class="num">${fmtKRW(tSplit.normal.amount)}</td>
+          <td class="num">${deltaBadge(tSplit.normal.amount, pSplit.normal.amount)}</td>
+          <td class="num">${tSplit.normal.qty.toLocaleString()}</td>
+        </tr>`,
+        `<tr>
+          <td style="color:#dc2626">⚡ 빠른출고</td>
+          <td class="num">${fmtKRW(pSplit.express.amount)}</td>
+          <td class="num">${fmtKRW(tSplit.express.amount)}</td>
+          <td class="num">${deltaBadge(tSplit.express.amount, pSplit.express.amount)}</td>
+          <td class="num">${tSplit.express.qty.toLocaleString()}</td>
+        </tr>`,
+      ];
+    }).join('')}</tbody>
+  `;
+
+  // 4.7) 요일별 패턴
+  document.getElementById('mr-dow-table').innerHTML = `
+    <thead><tr>
+      <th style="text-align:left">요일</th>
+      <th>주문수</th>
+      <th>매출</th>
+      <th>건당 매출</th>
+      <th>판매수량</th>
+    </tr></thead>
+    <tbody>${[1,2,3,4,5,6,0].map(dow => {
+      const d = target.byDow[dow];
+      const perOrder = d.orders ? d.amount / d.orders : 0;
+      const isWeekend = dow === 0 || dow === 6;
+      return `<tr ${isWeekend ? 'style="background:#fafafa"' : ''}>
+        <td style="font-weight:600${isWeekend ? ';color:#dc2626' : ''}">${DOW_LABELS[dow]}</td>
+        <td class="num">${d.orders.toLocaleString()}</td>
+        <td class="num">${fmtKRW(d.amount)}</td>
+        <td class="num">${fmtKRW(Math.round(perOrder))}</td>
+        <td class="num">${d.qty.toLocaleString()}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  `;
+
+  // 4.8) 수량 구간 분포
+  if (target.byQty.size && [...target.byQty.values()].some(v => v.orders > 0)) {
+    const totalQtyOrders = [...target.byQty.values()].reduce((a, v) => a + v.orders, 0);
+    const totalQtyAmount = [...target.byQty.values()].reduce((a, v) => a + v.amount, 0);
+    document.getElementById('mr-qty-table').innerHTML = `
+      <thead><tr>
+        <th style="text-align:left">수량 구간</th>
+        <th>주문수</th>
+        <th>비중</th>
+        <th>매출</th>
+        <th>매출 비중</th>
+      </tr></thead>
+      <tbody>${QTY_BUCKETS.map(b => {
+        const d = target.byQty.get(b);
+        const pctO = totalQtyOrders ? (d.orders / totalQtyOrders * 100).toFixed(1) + '%' : '0%';
+        const pctA = totalQtyAmount ? (d.amount / totalQtyAmount * 100).toFixed(1) + '%' : '0%';
+        return `<tr>
+          <td style="font-weight:600">${b}</td>
+          <td class="num">${d.orders.toLocaleString()}</td>
+          <td class="num">${pctO}</td>
+          <td class="num">${fmtKRW(d.amount)}</td>
+          <td class="num">${pctA}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    `;
+  } else {
+    document.getElementById('mr-qty-table').innerHTML = '<tbody><tr><td style="text-align:center;color:var(--gray-400);padding:20px">주문 데이터 로드 실패 또는 빈 결과</td></tr></tbody>';
+  }
+
   // 7) 상품 베스트 (Top 20) + 전월 비교
   const products = [...target.byProduct.entries()]
     .map(([k, v]) => ({ ...v, key: k }))
@@ -3452,8 +3690,65 @@ function buildMonthlyReportTsv() {
   });
   push('');
 
-  // 7) 전월 / 작년동월 요약 (참고)
-  push('[7. 전월 / 작년동월 요약 (참고)]');
+  // 7) 사이트 × 일반/빠른출고
+  push('[7. 사이트별 일반 / 빠른출고 분리]');
+  push('사이트', '구분', '매출', '판매수량', '전월매출', 'MoM');
+  const allSitesT = new Set([...target.bySite.keys(), ...prev.bySite.keys()]);
+  for (const s of allSitesT) {
+    const tS = target.siteExpressSplit.get(s) || { normal: {amount:0,qty:0}, express: {amount:0,qty:0} };
+    const pS = prev.siteExpressSplit.get(s) || { normal: {amount:0,qty:0}, express: {amount:0,qty:0} };
+    push(s, '일반', tS.normal.amount, tS.normal.qty, pS.normal.amount, pctStr(tS.normal.amount, pS.normal.amount));
+    push(s, '빠른출고', tS.express.amount, tS.express.qty, pS.express.amount, pctStr(tS.express.amount, pS.express.amount));
+  }
+  push('');
+
+  // 8) 요일별 패턴
+  push('[8. 요일별 패턴]');
+  push('요일', '주문수', '매출', '건당매출', '판매수량');
+  for (const dow of [1,2,3,4,5,6,0]) {
+    const d = target.byDow[dow];
+    push(DOW_LABELS[dow], d.orders, d.amount, d.orders ? Math.round(d.amount / d.orders) : 0, d.qty);
+  }
+  push('');
+
+  // 9) 수량 구간 분포
+  if ([...target.byQty.values()].some(v => v.orders > 0)) {
+    push('[9. 주문 수량 구간 분포]');
+    push('수량 구간', '주문수', '비중', '매출', '매출비중');
+    const totalQtyOrders = [...target.byQty.values()].reduce((a, v) => a + v.orders, 0);
+    const totalQtyAmount = [...target.byQty.values()].reduce((a, v) => a + v.amount, 0);
+    for (const b of QTY_BUCKETS) {
+      const d = target.byQty.get(b);
+      push(b, d.orders, totalQtyOrders ? (d.orders/totalQtyOrders*100).toFixed(1)+'%' : '0%',
+              d.amount, totalQtyAmount ? (d.amount/totalQtyAmount*100).toFixed(1)+'%' : '0%');
+    }
+    push('');
+  }
+
+  // 10) 분기 누적
+  if (_mrData.quarter) {
+    const { q } = quarterMonthsOf(month);
+    const yr = month.split('-')[0];
+    push(`[10. ${yr}년 Q${q} 분기 누적]`);
+    push('월', '매출', '주문수', '판매수량', '객단가');
+    let qSumA = 0, qSumO = 0, qSumQ = 0;
+    for (const { month: m, agg } of _mrData.quarter) {
+      if (!agg) { push(m, '데이터없음', '', '', ''); continue; }
+      qSumA += agg.totalAmount; qSumO += agg.totalOrders; qSumQ += agg.totalQty;
+      push(m + (m === month ? ' (선택)' : ''), agg.totalAmount, agg.totalOrders, agg.totalQty, agg.totalOrders ? Math.round(agg.totalAmount/agg.totalOrders) : 0);
+    }
+    push(`Q${q} 누적`, qSumA, qSumO, qSumQ, qSumO ? Math.round(qSumA/qSumO) : 0);
+    const key = `mr-quarter-target-${yr}-Q${q}`;
+    const tgt = Number(localStorage.getItem(key)) || 0;
+    if (tgt > 0) {
+      const ach = (qSumA / tgt * 100).toFixed(2) + '%';
+      push('분기 목표', tgt, '달성률', '', ach);
+    }
+    push('');
+  }
+
+  // 11) 전월 / 작년동월 요약 (참고)
+  push('[11. 전월 / 작년동월 요약 (참고)]');
   push('지표', '전월', '작년동월');
   push('총 매출', prev.totalAmount, yoy.totalAmount);
   push('주문수', prev.totalOrders, yoy.totalOrders);
@@ -3461,6 +3756,82 @@ function buildMonthlyReportTsv() {
   push('객단가', Math.round(aovPrev), Math.round(aovYoY));
 
   return lines.join('\n');
+}
+
+/**
+ * 분기 누적 매출 + 목표 대비 — quarterMonths 3개월 합산, localStorage 에 목표 저장.
+ *   key: 'mr-quarter-target-{Y}-Q{n}' → 숫자.
+ */
+function _quarterTargetKey() {
+  if (!_mrData) return null;
+  const { q } = quarterMonthsOf(_mrData.month);
+  const y = _mrData.month.split('-')[0];
+  return `mr-quarter-target-${y}-Q${q}`;
+}
+
+function saveQuarterTarget() {
+  const key = _quarterTargetKey();
+  if (!key) return;
+  const v = document.getElementById('mr-quarter-target').value;
+  if (v) localStorage.setItem(key, v);
+  else localStorage.removeItem(key);
+  showToast('분기 목표 저장됨');
+  renderQuarterCumulative();
+}
+
+function renderQuarterCumulative() {
+  if (!_mrData || !_mrData.quarter) return;
+  const { q } = quarterMonthsOf(_mrData.month);
+  const yr = _mrData.month.split('-')[0];
+  document.getElementById('mr-quarter-label').textContent = `${yr}년 Q${q}`;
+  // 목표 입력값 — localStorage 우선
+  const key = _quarterTargetKey();
+  const targetEl = document.getElementById('mr-quarter-target');
+  const savedTarget = key ? localStorage.getItem(key) : '';
+  if (savedTarget && !targetEl.value) targetEl.value = savedTarget;
+  const targetNum = Number(targetEl.value) || 0;
+  // 분기 합계
+  let qSumAmount = 0, qSumOrders = 0, qSumQty = 0;
+  const rowsHtml = _mrData.quarter.map(({ month, agg }) => {
+    if (!agg) return `<tr><td>${month}</td><td colspan="4" style="color:var(--gray-400)">데이터 없음</td></tr>`;
+    qSumAmount += agg.totalAmount;
+    qSumOrders += agg.totalOrders;
+    qSumQty += agg.totalQty;
+    return `<tr ${month === _mrData.month ? 'style="background:#f0f9ff;font-weight:600"' : ''}>
+      <td>${month}${month === _mrData.month ? ' (선택)' : ''}</td>
+      <td class="num">${fmtKRW(agg.totalAmount)}</td>
+      <td class="num">${agg.totalOrders.toLocaleString()}</td>
+      <td class="num">${agg.totalQty.toLocaleString()}</td>
+      <td class="num">${agg.totalOrders ? fmtKRW(Math.round(agg.totalAmount / agg.totalOrders)) : '-'}</td>
+    </tr>`;
+  }).join('');
+  const achievement = targetNum ? (qSumAmount / targetNum * 100) : null;
+  const achColor = achievement == null ? 'var(--gray-500)' : (achievement >= 100 ? '#16a34a' : (achievement >= 70 ? '#0369a1' : '#dc2626'));
+  document.getElementById('mr-quarter-table').innerHTML = `
+    <thead><tr>
+      <th style="text-align:left">월</th>
+      <th>매출</th>
+      <th>주문수</th>
+      <th>판매수량</th>
+      <th>객단가</th>
+    </tr></thead>
+    <tbody>
+      ${rowsHtml}
+      <tr style="border-top:2px solid var(--gray-300);background:var(--gray-50);font-weight:700">
+        <td>Q${q} 누적</td>
+        <td class="num">${fmtKRW(qSumAmount)}</td>
+        <td class="num">${qSumOrders.toLocaleString()}</td>
+        <td class="num">${qSumQty.toLocaleString()}</td>
+        <td class="num">${qSumOrders ? fmtKRW(Math.round(qSumAmount / qSumOrders)) : '-'}</td>
+      </tr>
+      <tr style="background:#fefce8">
+        <td>분기 목표</td>
+        <td class="num">${targetNum ? fmtKRW(targetNum) : '<span style="color:var(--gray-400)">미입력</span>'}</td>
+        <td class="num" colspan="2">달성률</td>
+        <td class="num" style="color:${achColor};font-weight:700">${achievement != null ? achievement.toFixed(2) + '%' : '-'}</td>
+      </tr>
+    </tbody>
+  `;
 }
 
 function copyMonthlyReportTsv() {
