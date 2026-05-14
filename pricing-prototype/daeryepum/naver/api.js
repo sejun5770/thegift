@@ -227,50 +227,99 @@ function flattenItem(it) {
   return it;
 }
 
+/**
+ * 통합: 기간 내 모든 주문 조회. 24h 단위 chunk 로 분할 (네이버 API 윈도우 제한 대응).
+ *   각 chunk 마다 direct list 시도 → 비면 last-changed-statuses + query 폴백.
+ *
+ *   반환:
+ *     items, totalCount, chunks, sources[], idsFromChanged, diagnostics
+ */
 async function listAllOrders({ startMs, endMs } = {}) {
-  // 방식 A 먼저 시도
-  try {
-    const res = await listProductOrdersDirect({ startMs, endMs });
-    const raw = res.data?.contents || res.data?.productOrders || res.data || [];
-    if (Array.isArray(raw)) {
-      const items = raw.map(flattenItem);
-      return { items, pages: 1, totalCount: items.length, source: 'direct' };
-    }
-  } catch (e) {
-    console.warn(`[naver listAllOrders] direct list 실패, last-changed-statuses 폴백: ${e.message}`);
-  }
-
-  // 방식 B 폴백 — last-changed-statuses 24h chunk
   const CHUNK_MS = 24 * 3600 * 1000;
-  const idSet = new Set();
+  const allItems = [];
+  const seenIds = new Set();
+  const sources = [];
+  const diagnostics = [];
   let chunks = 0;
+  let idsFromChanged = 0;
+
   for (let from = startMs; from < endMs; from += CHUNK_MS) {
     const to = Math.min(from + CHUNK_MS, endMs);
     chunks++;
+    const diag = { chunk: chunks, from_kst: fmtKstIso(from), to_kst: fmtKstIso(to) };
+
+    // 방식 A — direct list 시도
+    let directOk = false;
     try {
-      const res = await listChangedStatuses({ fromMs: from, toMs: to });
-      const arr = res.data?.lastChangeStatuses || res.data || [];
-      for (const row of (Array.isArray(arr) ? arr : [])) {
-        if (row && row.productOrderId) idSet.add(String(row.productOrderId));
+      const res = await listProductOrdersDirect({ startMs: from, endMs: to });
+      const raw = res.data?.contents || res.data?.productOrders || res.data || [];
+      if (Array.isArray(raw) && raw.length) {
+        const items = raw.map(flattenItem);
+        for (const it of items) {
+          const pid = String(it.productOrderId || it.productOrder?.productOrderId || '');
+          if (pid && !seenIds.has(pid)) {
+            seenIds.add(pid);
+            allItems.push(it);
+          }
+        }
+        diag.direct = { count: items.length };
+        sources.push('direct');
+        directOk = true;
+      } else {
+        diag.direct = { count: 0, response_keys: res && typeof res === 'object' ? Object.keys(res) : [] };
       }
     } catch (e) {
-      console.warn(`[naver listAllOrders] chunk ${new Date(from).toISOString()} 실패: ${e.message}`);
+      diag.direct = { error: e.message, status: e.status };
     }
-  }
-  const ids = [...idSet];
-  if (!ids.length) return { items: [], pages: chunks, totalCount: 0, idsFetched: 0, chunks, source: 'last-changed-fallback' };
 
-  let details;
-  try {
-    const detailRes = await queryProductOrders(ids);
-    const arr = Array.isArray(detailRes.data) ? detailRes.data : [];
-    details = arr.map(flattenItem);
-  } catch (e) {
-    console.warn(`[naver listAllOrders] detail query 실패: ${e.message}`);
-    details = [];
+    // 방식 B — direct 결과 없거나 실패 시 last-changed-statuses 폴백
+    if (!directOk) {
+      try {
+        const res = await listChangedStatuses({ fromMs: from, toMs: to });
+        const arr = res.data?.lastChangeStatuses || res.data || [];
+        const chunkIds = [];
+        for (const row of (Array.isArray(arr) ? arr : [])) {
+          if (row && row.productOrderId) {
+            const pid = String(row.productOrderId);
+            if (!seenIds.has(pid)) chunkIds.push(pid);
+          }
+        }
+        idsFromChanged += chunkIds.length;
+        diag.changed = { count: chunkIds.length };
+        if (chunkIds.length) {
+          try {
+            const detailRes = await queryProductOrders(chunkIds);
+            const detailArr = Array.isArray(detailRes.data) ? detailRes.data : [];
+            const items = detailArr.map(flattenItem);
+            for (const it of items) {
+              const pid = String(it.productOrderId || it.productOrder?.productOrderId || '');
+              if (pid && !seenIds.has(pid)) {
+                seenIds.add(pid);
+                allItems.push(it);
+              }
+            }
+            diag.query = { count: items.length };
+            sources.push('last-changed-fallback');
+          } catch (e) {
+            diag.query = { error: e.message };
+          }
+        }
+      } catch (e) {
+        diag.changed = { error: e.message };
+      }
+    }
+
+    diagnostics.push(diag);
   }
 
-  return { items: details, pages: chunks, totalCount: details.length, idsFetched: ids.length, chunks, source: 'last-changed-fallback' };
+  return {
+    items: allItems,
+    totalCount: allItems.length,
+    chunks,
+    idsFetched: idsFromChanged,
+    sources: [...new Set(sources)],
+    diagnostics,
+  };
 }
 
 module.exports = {

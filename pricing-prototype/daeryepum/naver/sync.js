@@ -203,6 +203,10 @@ async function syncRecent({ daysBack = 7 } = {}) {
       end_kst: api.fmtKstIso(endMs),
     },
     ids_fetched: res.idsFetched || 0,
+    // 진단 정보 — 0건 원인 빠른 파악용
+    sources: res.sources || [],
+    chunks: res.chunks || 0,
+    diagnostics: res.diagnostics || [],
   };
 }
 
