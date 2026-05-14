@@ -176,13 +176,47 @@ function enrichFromOption({
     quantity: Number(quantity) || 0,
     sticker_id: sticker ? sticker.id : null,
     sticker_code: sticker ? sticker.sticker_code : null,
-    sticker_name: sticker ? sticker.name : null,
+    // sticker_name: 운영팀 요청으로 미사용 (스티커 코드 컬럼만 표시).
+    sticker_name: null,
     custom_values: combinedText ? { text: combinedText } : {},
     box_code: box ? box.code : null,
     box_name: box ? box.name : null,
   };
 
   return { sticker_selection, desired_ship_date, parsed };
+}
+
+/**
+ * ISO timestamp (with TZ) → KST 'YYYY-MM-DD'.
+ *   Docker 컨테이너 UTC 환경에서도 KST 기준 날짜 추출.
+ */
+function kstYmd(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  const kst = new Date(d.getTime() + 9 * 3600 * 1000);
+  return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}-${String(kst.getUTCDate()).padStart(2, '0')}`;
+}
+
+/**
+ * 영업일 더하기 — 주말(토/일) 스킵. 공휴일 X (대량 매핑 필요해서 단순화).
+ *   ymd: 'YYYY-MM-DD' (KST). days: 양수.
+ *   반환: 'YYYY-MM-DD'.
+ *
+ * 예: 2026-05-14 (목) + 2영업일 = 2026-05-18 (월)
+ *     2026-05-15 (금) + 2영업일 = 2026-05-19 (화)
+ */
+function addBusinessDays(ymd, days) {
+  if (!ymd || !days || days < 0) return ymd;
+  const [y, m, d] = ymd.split('-').map(Number);
+  const cur = new Date(Date.UTC(y, m - 1, d));
+  let added = 0;
+  while (added < days) {
+    cur.setUTCDate(cur.getUTCDate() + 1);
+    const dow = cur.getUTCDay(); // 0=일, 6=토
+    if (dow !== 0 && dow !== 6) added++;
+  }
+  return `${cur.getUTCFullYear()}-${String(cur.getUTCMonth() + 1).padStart(2, '0')}-${String(cur.getUTCDate()).padStart(2, '0')}`;
 }
 
 module.exports = {
@@ -192,4 +226,6 @@ module.exports = {
   matchSticker,
   matchBox,
   enrichFromOption,
+  kstYmd,
+  addBusinessDays,
 };
