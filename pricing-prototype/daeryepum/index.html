@@ -2228,23 +2228,25 @@ function copyDecoOrders() {
       addrDetail = addrMain.substring(p + 1).trim();
       addrMain = addrMain.substring(0, p + 1).trim();
     }
-    // 22 컬럼 — 스프레드시트 정확 매핑 (북마클릿 동일)
+    // 23 컬럼 — 스프레드시트 정확 매핑.
+    //   O열(index 14) 기준 한 칸씩 뒤로 — 운영팀 스프레드시트 컬럼 추가 대응.
     return [
-      dt,                       // 0  주문일시 (초 절삭)
-      orderType,                // 1  주문구분 (청첩장과 함께/단독주문)
-      n,                        // 2  주문번호
-      o.member_id || '',        // 3  회원ID
-      recvLabel,                // 4  수령자/주문자
-      '', '', '', '', '',       // 5-9 공백
-      o.recv_hphone || '',      // 10 전화번호
-      addrMain,                 // 11 주소(메인)
-      addrDetail,               // 12 주소(상세)
-      o.card_name || '',        // 13 상품명
-      o.card_code || '',        // 14 상품코드
-      '', '', '',               // 15-17 공백
-      o.item_count || 1,        // 18 수량
-      '',                       // 19 공백
-      o.item_amount || 0,       // 20 금액
+      dt,                       // A=0  주문일시 (초 절삭)
+      orderType,                // B=1  주문구분 (청첩장과 함께/단독주문)
+      n,                        // C=2  주문번호
+      o.member_id || '',        // D=3  회원ID
+      recvLabel,                // E=4  수령자/주문자
+      '', '', '', '', '',       // F~J=5-9 공백
+      o.recv_hphone || '',      // K=10 전화번호
+      addrMain,                 // L=11 주소(메인)
+      addrDetail,               // M=12 주소(상세)
+      o.card_name || '',        // N=13 상품명
+      '',                       // O=14 공백 (신규 삽입 — 이후 한 칸씩 뒤로)
+      o.card_code || '',        // P=15 상품코드
+      '', '', '',               // Q~S=16-18 공백
+      o.item_count || 1,        // T=19 수량
+      '',                       // U=20 공백
+      o.item_amount || 0,       // V=21 금액
     ].join('\t');
   });
   const tsv = rows.join('\n');
