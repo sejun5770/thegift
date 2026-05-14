@@ -3532,15 +3532,17 @@ const server = http.createServer(async (req, res) => {
           const endMs = Date.now();
           const startMs = endMs - hoursBack * 3600000;
           try {
-            // start ~ end 명시 (24h 이하 안전)
+            // 1) 방식 A — 직접 리스트
+            let directResult, directError;
+            try {
+              directResult = await naverApi.listProductOrdersDirect({ startMs, endMs });
+            } catch (e) {
+              directError = { message: e.message, status: e.status };
+            }
+            // 2) 방식 B — last-changed-statuses (참고용 비교)
             const changed = await naverApi.listChangedStatuses({ fromMs: startMs, toMs: endMs });
             const lcStatuses = changed.data?.lastChangeStatuses || changed.data || [];
             const ids = Array.isArray(lcStatuses) ? lcStatuses.map(r => r?.productOrderId).filter(Boolean).slice(0, 10) : [];
-            let detail = null;
-            if (ids.length) {
-              try { detail = await naverApi.queryProductOrders(ids.map(String)); }
-              catch (e) { detail = { error: e.message }; }
-            }
             data = {
               query: {
                 hours_back: hoursBack,
@@ -3548,11 +3550,17 @@ const server = http.createServer(async (req, res) => {
                 end_kst: naverApi.fmtKstIso(endMs),
                 client_id: naverApi.CLIENT_ID,
               },
-              raw_response: changed,  // 전체 응답 노출 (진단용)
-              changed_response_keys: changed && typeof changed === 'object' ? Object.keys(changed) : [],
-              changed_count: Array.isArray(lcStatuses) ? lcStatuses.length : null,
-              sample_changed_ids: ids,
-              detail_response: detail,
+              direct_list: {
+                error: directError,
+                raw_response: directResult,
+                response_keys: directResult && typeof directResult === 'object' ? Object.keys(directResult) : [],
+              },
+              last_changed_statuses: {
+                raw_response: changed,
+                response_keys: changed && typeof changed === 'object' ? Object.keys(changed) : [],
+                count: Array.isArray(lcStatuses) ? lcStatuses.length : null,
+                sample_ids: ids,
+              },
             };
           } catch (e) {
             data = { error: e.message, client_id: naverApi.CLIENT_ID };

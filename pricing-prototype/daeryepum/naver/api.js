@@ -187,16 +187,48 @@ async function queryProductOrders(productOrderIds) {
 }
 
 /**
- * 통합: 기간 내 변경된 주문 목록 + 상세 일괄 조회.
- *   네이버 last-changed-statuses 는 최대 24h 윈도우라 일별 chunk 로 반복.
+ * 직접 주문 목록 조회 — 쿠팡 /ordersheets 와 같은 역할.
+ *   네이버 spec: GET /external/v1/pay-order/seller/product-orders
+ *   기간 + 페이지네이션 + 필터 등 지원 추정.
  *
- *   결과: { items, pages, totalCount, idsFetched, chunks }
+ *   params (확인 필요):
+ *     fromDate / toDate or createdAtFrom / createdAtTo (date)
+ *     page / size
+ *     productOrderStatuses
+ */
+async function listProductOrdersDirect({ startMs, endMs, page = 1, size = 100 } = {}) {
+  const params = new URLSearchParams();
+  // 후보 1: fromDate / toDate (KST yyyy-MM-dd)
+  // 후보 2: orderDateFrom / orderDateTo
+  // 일단 둘 다 시도하기 어려우니 가장 흔한 from/to 사용 — 실패하면 변경
+  params.set('from', fmtKstIso(startMs));
+  params.set('to', fmtKstIso(endMs));
+  params.set('page', String(page));
+  params.set('size', String(size));
+  return callNaver('GET', `/external/v1/pay-order/seller/product-orders?${params.toString()}`);
+}
+
+/**
+ * 통합: 기간 내 모든 주문 조회.
+ *   방식 A (preferred): /product-orders 직접 리스트 (쿠팡 패턴)
+ *   방식 B (fallback):  last-changed-statuses + query (이벤트 스트림 패턴, 24h chunk)
  */
 async function listAllOrders({ startMs, endMs } = {}) {
-  const CHUNK_MS = 24 * 3600 * 1000; // 24h
+  // 방식 A 먼저 시도
+  try {
+    const res = await listProductOrdersDirect({ startMs, endMs });
+    const items = res.data?.contents || res.data?.productOrders || res.data || [];
+    if (Array.isArray(items)) {
+      return { items, pages: 1, totalCount: items.length, source: 'direct' };
+    }
+  } catch (e) {
+    console.warn(`[naver listAllOrders] direct list 실패, last-changed-statuses 폴백: ${e.message}`);
+  }
+
+  // 방식 B 폴백 — last-changed-statuses 24h chunk
+  const CHUNK_MS = 24 * 3600 * 1000;
   const idSet = new Set();
   let chunks = 0;
-  // 1) 24h chunk 별로 변경 주문 ID 수집
   for (let from = startMs; from < endMs; from += CHUNK_MS) {
     const to = Math.min(from + CHUNK_MS, endMs);
     chunks++;
@@ -211,9 +243,8 @@ async function listAllOrders({ startMs, endMs } = {}) {
     }
   }
   const ids = [...idSet];
-  if (!ids.length) return { items: [], pages: chunks, totalCount: 0, idsFetched: 0, chunks };
+  if (!ids.length) return { items: [], pages: chunks, totalCount: 0, idsFetched: 0, chunks, source: 'last-changed-fallback' };
 
-  // 2) 상세 조회 (batch — 한 번에 전부; 네이버 가 한 호출당 limit 있으면 추후 분할)
   let details;
   try {
     const detailRes = await queryProductOrders(ids);
@@ -223,16 +254,7 @@ async function listAllOrders({ startMs, endMs } = {}) {
     details = [];
   }
 
-  // endMs 이내로 필터 (안전장치)
-  const filtered = details.filter(item => {
-    const t = item.productOrder?.orderDate || item.productOrder?.paymentDate || null;
-    if (!t) return true;
-    const tMs = Date.parse(t);
-    if (Number.isNaN(tMs)) return true;
-    return tMs <= endMs;
-  });
-
-  return { items: filtered, pages: chunks, totalCount: filtered.length, idsFetched: ids.length, chunks };
+  return { items: details, pages: chunks, totalCount: details.length, idsFetched: ids.length, chunks, source: 'last-changed-fallback' };
 }
 
 module.exports = {
@@ -243,6 +265,7 @@ module.exports = {
   fmtKstIso,
   listChangedStatuses,
   queryProductOrders,
+  listProductOrdersDirect,
   listAllOrders,
   CLIENT_ID, // for log/debug only
 };
