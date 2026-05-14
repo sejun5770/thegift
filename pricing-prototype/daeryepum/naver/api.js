@@ -171,7 +171,7 @@ async function listChangedStatuses({ fromMs, lastChangedType } = {}) {
   const params = new URLSearchParams();
   params.set('lastChangedFrom', fmtKstIso(fromMs));
   if (lastChangedType) params.set('lastChangedType', lastChangedType);
-  return callNaver('GET', `/v1/pay-order/seller/product-orders/last-changed-statuses?${params.toString()}`);
+  return callNaver('GET', `/external/v1/pay-order/seller/product-orders/last-changed-statuses?${params.toString()}`);
 }
 
 /**
@@ -180,7 +180,7 @@ async function listChangedStatuses({ fromMs, lastChangedType } = {}) {
  */
 async function queryProductOrders(productOrderIds) {
   if (!Array.isArray(productOrderIds) || !productOrderIds.length) return { data: [] };
-  return callNaver('POST', '/v1/pay-order/seller/product-orders/query', {
+  return callNaver('POST', '/external/v1/pay-order/seller/product-orders/query', {
     productOrderIds,
   });
 }
