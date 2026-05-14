@@ -61,11 +61,29 @@ function extractSetSize(name) {
  *   분리배송 / 다상품 케이스에서 row 가 여러 개 생성됨.
  *   답례품 카테고리 필터 적용 — 해당 안 되는 row 는 제외.
  */
+/**
+ * 쿠팡 API 응답 일시 파싱 — 명시적 KST 처리.
+ *   쿠팡은 보통 naive 포맷 ("2026-05-14T11:26:00") 반환. Docker UTC 환경에서
+ *   new Date(...) 가 UTC 로 잘못 해석 → 9h 어긋난 UTC ISO 저장. 명시적 +09:00 부여.
+ *   이미 TZ 마커(+09:00/Z/+00:00 등) 가 있으면 그대로 파싱.
+ */
+function parseCoupangDate(s) {
+  if (!s) return null;
+  let str = String(s).trim();
+  if (!str) return null;
+  // 'YYYY-MM-DD HH:mm:ss' 공백 구분 → ISO 'T' 로 정규화
+  if (str.includes(' ') && !str.includes('T')) str = str.replace(' ', 'T');
+  const hasTz = /[+-]\d{2}:?\d{2}$|Z$/i.test(str);
+  if (!hasTz) str = str + '+09:00';
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 function normalizeOrderSheet(sheet) {
   const orderId = sheet.orderId;
   const shipmentBoxId = sheet.shipmentBoxId;
-  const orderedAt = sheet.orderedAt ? new Date(sheet.orderedAt).toISOString() : null;
-  const paidAt = sheet.paidAt ? new Date(sheet.paidAt).toISOString() : null;
+  const orderedAt = parseCoupangDate(sheet.orderedAt);
+  const paidAt = parseCoupangDate(sheet.paidAt);
   const status = sheet.status || 'UNKNOWN';
   const statusLabel = STATUS_LABEL[status] || status;
   const receiver = sheet.receiver || {};
