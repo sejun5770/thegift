@@ -202,7 +202,6 @@ async function syncRecent({ daysBack = 7 } = {}) {
 
       const stubs = [];
       for (const [order_id, { row, byCode }] of grouped) {
-        let shipDate = null;
         const sticker_selections = [];
         for (const [code, info] of byCode) {
           const enriched = enrichFromOption({
@@ -213,17 +212,16 @@ async function syncRecent({ daysBack = 7 } = {}) {
             stickers,
             productSettings,
           });
-          // 출고일 — productOption 의 '희망 출고일' 파싱값 사용 (첫 값 우선).
-          if (enriched.desired_ship_date && !shipDate) shipDate = enriched.desired_ship_date;
           sticker_selections.push(enriched.sticker_selection);
           if (enriched.sticker_selection.sticker_code || enriched.sticker_selection.box_code) {
             enrichedCount++;
           }
         }
+        // 출고일은 운영팀 수동 입력 — sync 시점에 자동 설정 안 함.
         stubs.push({
           order_id,
           is_express: false, express_fee: 0,
-          desired_ship_date: shipDate,
+          desired_ship_date: null,
           sticker_selections,
           cash_receipt_yn: false, receipt_type: null, receipt_number: null,
           customer_request: null,
@@ -234,18 +232,17 @@ async function syncRecent({ daysBack = 7 } = {}) {
       stubUpserted = sr.upserted || 0;
 
       // enrichment PATCH — ignore-duplicates 라 기존 빈 stub 은 위 upsert 로 안 채워짐.
-      //   sticker_selections / desired_ship_date 만 patch (processed_at, customer_request 등 보존).
+      //   sticker_selections 만 patch (desired_ship_date / processed_at / customer_request 등은 운영팀 수동 입력값 보존).
       //   매 sync 마다 호출 → 옵션 변경 시 자동 반영, idempotent.
       for (const stub of stubs) {
-        const hasEnrich = stub.desired_ship_date
-          || (Array.isArray(stub.sticker_selections) && stub.sticker_selections.some(s =>
-            s.sticker_code || s.box_code || (s.custom_values && Object.keys(s.custom_values).length)
-          ));
+        const hasEnrich = Array.isArray(stub.sticker_selections) && stub.sticker_selections.some(s =>
+          s.sticker_code || s.box_code || (s.custom_values && Object.keys(s.custom_values).length)
+        );
         if (!hasEnrich) continue;
         try {
           await store.patchNaverStubEnrichment(stub.order_id, {
             sticker_selections: stub.sticker_selections,
-            desired_ship_date: stub.desired_ship_date,
+            // desired_ship_date 는 의도적으로 제외 — 운영팀 수동 입력값 보존
           });
         } catch (e) {
           console.warn(`[naver sync] enrichment patch 실패 ${stub.order_id}: ${e.message}`);

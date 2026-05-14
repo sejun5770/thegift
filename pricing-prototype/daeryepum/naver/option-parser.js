@@ -150,11 +150,11 @@ function enrichFromOption({
   quantity,
   stickers = [],
   productSettings = [],
-  today = new Date(),
 }) {
   const parsed = parseProductOption(productOption);
 
-  const desired_ship_date = parseShipDate(parsed['희망 출고일'] || parsed['출고일'] || parsed['희망출고일'], today);
+  // 희망 출고일: 운영팀 정책상 sync 시 미사용. 파서 함수는 export 유지 (참고/향후).
+  const desired_ship_date = null;
   const stickerOptionVal = parsed['스티커 타입'] || parsed['스티커타입'] || null;
   const sticker = matchSticker(stickers, productCode, stickerOptionVal);
 
