@@ -32,6 +32,19 @@ let _tokenCache = { token: null, expiresAt: 0 };
  * OAuth access_token 발급 (또는 캐시 재사용).
  *   네이버 bcrypt 서명: hash("{client_id}_{timestamp}", client_secret) → base64
  */
+/**
+ * bcrypt salt 정규화 — 네이버 client_secret 형식 호환.
+ *   네이버가 발급하는 secret 은 bcrypt salt 풀 포맷 ($2a$10$...) 또는
+ *   raw 22자 base64-like 둘 중 하나일 수 있음.
+ *   - $2x$ 시작이면 그대로
+ *   - 아니면 $2a$10$ prefix 자동 추가
+ */
+function normalizeBcryptSalt(secret) {
+  if (!secret) return secret;
+  if (/^\$2[abxy]\$/.test(secret)) return secret;
+  return `$2a$10$${secret}`;
+}
+
 async function getAccessToken() {
   if (_tokenCache.token && _tokenCache.expiresAt > Date.now()) {
     return _tokenCache.token;
@@ -40,8 +53,14 @@ async function getAccessToken() {
 
   const timestamp = Date.now();
   const password = `${CLIENT_ID}_${timestamp}`;
-  // bcrypt hash with client_secret as salt (Naver spec)
-  const hashed = bcrypt.hashSync(password, CLIENT_SECRET);
+  // bcrypt hash — secret 이 raw 면 자동으로 $2a$10$ prefix 추가
+  const salt = normalizeBcryptSalt(CLIENT_SECRET);
+  let hashed;
+  try {
+    hashed = bcrypt.hashSync(password, salt);
+  } catch (e) {
+    throw new Error(`Naver bcrypt 서명 실패 (client_secret 형식 확인): ${e.message}. secret 첫 4자: ${CLIENT_SECRET.slice(0, 4)}... 길이: ${CLIENT_SECRET.length}`);
+  }
   const signature = Buffer.from(hashed).toString('base64');
 
   const form = new URLSearchParams();
@@ -128,7 +147,7 @@ async function listChangedStatuses({ fromMs, lastChangedType } = {}) {
   const params = new URLSearchParams();
   params.set('lastChangedFrom', fmtKstIso(fromMs));
   if (lastChangedType) params.set('lastChangedType', lastChangedType);
-  return callNaver('GET', `/external/v1/pay-order/seller/product-orders/last-changed-statuses?${params.toString()}`);
+  return callNaver('GET', `/v1/pay-order/seller/product-orders/last-changed-statuses?${params.toString()}`);
 }
 
 /**
@@ -137,7 +156,7 @@ async function listChangedStatuses({ fromMs, lastChangedType } = {}) {
  */
 async function queryProductOrders(productOrderIds) {
   if (!Array.isArray(productOrderIds) || !productOrderIds.length) return { data: [] };
-  return callNaver('POST', '/external/v1/pay-order/seller/product-orders/query', {
+  return callNaver('POST', '/v1/pay-order/seller/product-orders/query', {
     productOrderIds,
   });
 }
