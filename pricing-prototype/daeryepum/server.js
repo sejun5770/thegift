@@ -19,24 +19,116 @@ const DEV_SKIP_AUTH = !GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID === 'test'; // 개�
 const SESSION_MAX_AGE = 24 * 60 * 60 * 1000; // 24시간
 const EXPORT_API_KEY = process.env.EXPORT_API_KEY || '';
 
-// --- Session Store ---
-const sessions = new Map();
+// --- Session Store (Supabase 영구화) ---
+//   기존 in-memory Map → Supabase auth_sessions 테이블.
+//   이유: 다중 컨테이너/재시작 시 세션 손실 → 로그인 루프 발생.
+//   세션 ID 는 server 측 HMAC 서명으로 위변조 방지 (cookie 도메인 외부 신뢰 불가).
+//
+// Supabase 미설정 시 메모리 폴백 (개발 환경 호환).
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || '';
+const USE_SUPABASE_AUTH = !!(SUPABASE_URL && SUPABASE_KEY);
+const AUTH_REST_BASE = `${SUPABASE_URL}/rest/v1`;
+const AUTH_HEADERS = {
+  apikey: SUPABASE_KEY,
+  Authorization: `Bearer ${SUPABASE_KEY}`,
+  'Content-Type': 'application/json',
+};
 
-function createSession(userData) {
+// 메모리 폴백 (Supabase 미설정 환경용)
+const _memorySessions = new Map();
+
+async function _supabaseUpsertSession(sessionId, userData, expiresAt) {
+  const row = {
+    id: sessionId,
+    email: userData.email || '',
+    name: userData.name || null,
+    picture: userData.picture || null,
+    expires_at: new Date(expiresAt).toISOString(),
+    last_seen_at: new Date().toISOString(),
+  };
+  const res = await fetch(`${AUTH_REST_BASE}/auth_sessions?on_conflict=id`, {
+    method: 'POST',
+    headers: { ...AUTH_HEADERS, Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify(row),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase upsert auth_sessions [${res.status}]: ${text.slice(0, 300)}`);
+  }
+}
+
+async function _supabaseGetSession(sessionId) {
+  const res = await fetch(`${AUTH_REST_BASE}/auth_sessions?id=eq.${encodeURIComponent(sessionId)}&select=*`, {
+    headers: AUTH_HEADERS,
+  });
+  if (!res.ok) return null;
+  const rows = await res.json();
+  if (!rows.length) return null;
+  const r = rows[0];
+  const expiresAt = Date.parse(r.expires_at);
+  if (!expiresAt || expiresAt < Date.now()) {
+    // 만료 → 삭제 (best-effort, 실패해도 무시)
+    _supabaseDeleteSession(sessionId).catch(() => {});
+    return null;
+  }
+  return { email: r.email, name: r.name, picture: r.picture, expiresAt };
+}
+
+async function _supabaseDeleteSession(sessionId) {
+  await fetch(`${AUTH_REST_BASE}/auth_sessions?id=eq.${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+    headers: AUTH_HEADERS,
+  });
+}
+
+async function createSession(userData) {
   const sessionId = crypto.randomBytes(32).toString('hex');
   const hmac = crypto.createHmac('sha256', SESSION_SECRET).update(sessionId).digest('hex');
-  sessions.set(sessionId, { ...userData, expiresAt: Date.now() + SESSION_MAX_AGE });
+  const expiresAt = Date.now() + SESSION_MAX_AGE;
+  if (USE_SUPABASE_AUTH) {
+    try {
+      await _supabaseUpsertSession(sessionId, userData, expiresAt);
+    } catch (e) {
+      console.error('[auth] Supabase 세션 저장 실패, 메모리 폴백:', e.message);
+      _memorySessions.set(sessionId, { ...userData, expiresAt });
+    }
+  } else {
+    _memorySessions.set(sessionId, { ...userData, expiresAt });
+  }
   return sessionId + '.' + hmac;
 }
 
-function getSession(signedId) {
+async function getSession(signedId) {
   if (!signedId || !signedId.includes('.')) return null;
   const [sessionId, hmac] = signedId.split('.');
   const expected = crypto.createHmac('sha256', SESSION_SECRET).update(sessionId).digest('hex');
   if (hmac !== expected) return null;
-  const session = sessions.get(sessionId);
-  if (!session || Date.now() > session.expiresAt) { sessions.delete(sessionId); return null; }
-  return session;
+  // Supabase 우선 조회 + 메모리 폴백 (양쪽에 존재할 수 있음)
+  if (USE_SUPABASE_AUTH) {
+    try {
+      const s = await _supabaseGetSession(sessionId);
+      if (s) return s;
+    } catch (e) {
+      console.warn('[auth] Supabase 세션 조회 실패, 메모리 폴백:', e.message);
+    }
+  }
+  const memSession = _memorySessions.get(sessionId);
+  if (!memSession || Date.now() > memSession.expiresAt) {
+    _memorySessions.delete(sessionId);
+    return null;
+  }
+  return memSession;
+}
+
+async function destroySession(signedId) {
+  if (!signedId || !signedId.includes('.')) return;
+  const sessionId = signedId.split('.')[0];
+  _memorySessions.delete(sessionId);
+  if (USE_SUPABASE_AUTH) {
+    try { await _supabaseDeleteSession(sessionId); }
+    catch (e) { console.warn('[auth] Supabase 세션 삭제 실패:', e.message); }
+  }
 }
 
 /**
@@ -48,11 +140,6 @@ function logAdminAccess(session, req, action, params = {}) {
   const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket?.remoteAddress || '?';
   const admin = session?.email || 'unknown';
   console.log(`[ADMIN_AUDIT] ${new Date().toISOString()} email=${admin} ip=${ip} action=${action} params=${JSON.stringify(params)}`);
-}
-
-function destroySession(signedId) {
-  if (!signedId || !signedId.includes('.')) return;
-  sessions.delete(signedId.split('.')[0]);
 }
 
 function parseCookies(req) {
@@ -2965,7 +3052,7 @@ const server = http.createServer(async (req, res) => {
 
   // --- Auth routes ---
   const cookies = parseCookies(req);
-  const session = getSession(cookies.session);
+  const session = await getSession(cookies.session);
   const cookiePath = BASE_PATH || '/';
 
   if (pathname === '/auth/google' && req.method === 'POST') {
@@ -2975,7 +3062,7 @@ const server = http.createServer(async (req, res) => {
       try {
         const { credential } = JSON.parse(body);
         const payload = await verifyGoogleToken(credential);
-        const signedId = createSession({ email: payload.email, name: payload.name, picture: payload.picture });
+        const signedId = await createSession({ email: payload.email, name: payload.name, picture: payload.picture });
         const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
         res.writeHead(200, {
           'Set-Cookie': `session=${signedId}; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE/1000}${secure}`,
@@ -2992,7 +3079,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/auth/logout' && req.method === 'POST') {
-    destroySession(cookies.session);
+    await destroySession(cookies.session);
     res.writeHead(200, {
       'Set-Cookie': `session=; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=0`,
       'Content-Type': 'application/json',
