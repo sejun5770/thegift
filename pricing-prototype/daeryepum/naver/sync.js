@@ -21,10 +21,7 @@
 const api = require('./api');
 const store = require('./store');
 const bgStore = require('../barungift/store');
-const { enrichFromOption, kstYmd, addBusinessDays } = require('./option-parser');
-
-// 출고일 = 주문일(KST) + N영업일. 운영팀 요청 기본값 2.
-const SHIP_LEAD_BUSINESS_DAYS = 2;
+const { enrichFromOption } = require('./option-parser');
 
 const CATEGORY_IDS = (process.env.NAVER_CATEGORY_IDS || '')
   .split(',').map(s => s.trim()).filter(Boolean);
@@ -205,6 +202,7 @@ async function syncRecent({ daysBack = 7 } = {}) {
 
       const stubs = [];
       for (const [order_id, { row, byCode }] of grouped) {
+        let shipDate = null;
         const sticker_selections = [];
         for (const [code, info] of byCode) {
           const enriched = enrichFromOption({
@@ -215,15 +213,13 @@ async function syncRecent({ daysBack = 7 } = {}) {
             stickers,
             productSettings,
           });
+          // 출고일 — productOption 의 '희망 출고일' 파싱값 사용 (첫 값 우선).
+          if (enriched.desired_ship_date && !shipDate) shipDate = enriched.desired_ship_date;
           sticker_selections.push(enriched.sticker_selection);
           if (enriched.sticker_selection.sticker_code || enriched.sticker_selection.box_code) {
             enrichedCount++;
           }
         }
-        // 출고일 = 주문일(KST) + 2영업일 — 옵션 파싱값 대신 운영 규칙 적용 (운영팀 요청).
-        //   주문일이 비어있는 비정상 케이스에만 null.
-        const orderedYmd = kstYmd(row.ordered_at);
-        const shipDate = orderedYmd ? addBusinessDays(orderedYmd, SHIP_LEAD_BUSINESS_DAYS) : null;
         stubs.push({
           order_id,
           is_express: false, express_fee: 0,
