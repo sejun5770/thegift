@@ -16,6 +16,7 @@
 'use strict';
 
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 
 const HOST = process.env.NAVER_API_HOST || 'https://api.commerce.naver.com';
 const CLIENT_ID = process.env.NAVER_CLIENT_ID || '';
@@ -33,16 +34,35 @@ let _tokenCache = { token: null, expiresAt: 0 };
  *   네이버 bcrypt 서명: hash("{client_id}_{timestamp}", client_secret) → base64
  */
 /**
- * bcrypt salt 정규화 — 네이버 client_secret 형식 호환.
- *   네이버가 발급하는 secret 은 bcrypt salt 풀 포맷 ($2a$10$...) 또는
- *   raw 22자 base64-like 둘 중 하나일 수 있음.
- *   - $2x$ 시작이면 그대로
- *   - 아니면 $2a$10$ prefix 자동 추가
+ * 네이버 client_secret_sign 생성 — 두 가지 방식 지원.
+ *
+ *   방식 A (bcrypt, 구버전): secret 이 '$2a$10$...' 형식인 경우.
+ *     BCrypt.hashpw(client_id + '_' + timestamp, client_secret) → base64
+ *
+ *   방식 B (HMAC-SHA256, 신버전): secret 이 16자 URL-safe base64 (__KE...) 인 경우.
+ *     HMAC-SHA256(client_secret, client_id + '_' + timestamp) → base64
+ *
+ *   secret 의 형식으로 자동 분기.
  */
-function normalizeBcryptSalt(secret) {
-  if (!secret) return secret;
-  if (/^\$2[abxy]\$/.test(secret)) return secret;
-  return `$2a$10$${secret}`;
+function signClientSecret(clientId, timestamp, secret) {
+  const message = `${clientId}_${timestamp}`;
+  // 방식 A — bcrypt 풀 형식
+  if (/^\$2[abxy]\$/.test(secret)) {
+    const hashed = bcrypt.hashSync(message, secret);
+    return Buffer.from(hashed).toString('base64');
+  }
+  // 방식 B — HMAC-SHA256 (신버전 추정)
+  //   secret 을 URL-safe base64 로 시도 디코드 → 실패 시 utf-8 raw 사용.
+  let key;
+  try {
+    key = Buffer.from(secret, 'base64url');
+    // 디코드 결과가 비정상적으로 짧으면 raw utf-8 사용
+    if (!key.length) throw new Error('empty');
+  } catch {
+    key = Buffer.from(secret, 'utf-8');
+  }
+  const hmac = crypto.createHmac('sha256', key).update(message).digest();
+  return hmac.toString('base64');
 }
 
 async function getAccessToken() {
@@ -52,16 +72,12 @@ async function getAccessToken() {
   if (!isConfigured()) throw new Error('Naver API 키 미설정 (NAVER_CLIENT_ID/CLIENT_SECRET).');
 
   const timestamp = Date.now();
-  const password = `${CLIENT_ID}_${timestamp}`;
-  // bcrypt hash — secret 이 raw 면 자동으로 $2a$10$ prefix 추가
-  const salt = normalizeBcryptSalt(CLIENT_SECRET);
-  let hashed;
+  let signature;
   try {
-    hashed = bcrypt.hashSync(password, salt);
+    signature = signClientSecret(CLIENT_ID, timestamp, CLIENT_SECRET);
   } catch (e) {
-    throw new Error(`Naver bcrypt 서명 실패 (client_secret 형식 확인): ${e.message}. secret 첫 4자: ${CLIENT_SECRET.slice(0, 4)}... 길이: ${CLIENT_SECRET.length}`);
+    throw new Error(`Naver 서명 실패 (client_secret 형식 확인): ${e.message}. secret 첫 4자: ${CLIENT_SECRET.slice(0, 4)}... 길이: ${CLIENT_SECRET.length}`);
   }
-  const signature = Buffer.from(hashed).toString('base64');
 
   const form = new URLSearchParams();
   form.append('client_id', CLIENT_ID);
