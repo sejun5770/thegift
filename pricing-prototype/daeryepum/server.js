@@ -632,6 +632,49 @@ async function apiOrders(query) {
     } catch (e) {
       console.warn('[apiOrders] 쿠팡 주문 UNION 실패 (무시):', e.message);
     }
+    // 네이버 스마트스토어 — 쿠팡과 동일 패턴
+    try {
+      const naverStore = require('./naver/store');
+      const naverRows = await naverStore.listNaverOrders({
+        startStr: startDate, endStr: endDate, byPaid: false,
+      });
+      if (naverRows && naverRows.length) {
+        const normalized = naverRows.map(r => ({
+          order_seq: r.product_order_id,
+          member_id: null,
+          order_type: 'NAVER',
+          has_copurchase: 0,
+          order_date: r.ordered_at,
+          settle_date: r.paid_at,
+          order_name: r.recv_name || '',
+          recv_name: r.recv_name || '',
+          recv_hphone: r.recv_hphone || '',
+          recv_address: r.recv_address || '',
+          recv_msg: r.recv_message || '',
+          card_name: r.product_name || '',
+          card_code: r.product_code || '',
+          item_count: r.item_count || 0,
+          item_amount: r.item_total_price || 0,
+          settle_price: r.settle_price || 0,
+          coupon_price: 0,
+          status_seq: null,
+          status_label: r.status_label || r.status || '',
+          settle_method: r.settle_method || null,
+          wedding_date: null,
+          site_name: '네이버',
+          file_count: 0,
+          delivery_seq: 1,
+          source: 'naver',
+          naver_status: r.status,
+          naver_order_id: r.order_id,
+          display_name: r.recv_name || '',
+        }));
+        rows.push(...normalized);
+        rows.sort((a, b) => String(b.order_date || '').localeCompare(String(a.order_date || '')));
+      }
+    } catch (e) {
+      console.warn('[apiOrders] 네이버 주문 UNION 실패 (무시):', e.message);
+    }
   }
 
   return rows;
@@ -1585,6 +1628,53 @@ async function apiDashboardSummary(query) {
     }
   } catch (e) {
     console.warn('[summary] 쿠팡 주문 머지 실패 (무시):', e.message);
+  }
+
+  // 네이버 스마트스토어 일별 합산 — 쿠팡과 동일 패턴, '네이버' 사이트 그룹.
+  try {
+    const naverStore = require('./naver/store');
+    const naverRows = await naverStore.listNaverOrders({
+      startStr: startDate, endStr: endDate, byPaid: false,
+    });
+    if (naverRows && naverRows.length) {
+      const byDayProduct = new Map();
+      const byDayForCount = new Map();
+      for (const r of naverRows) {
+        const day = String(r.ordered_at || '').slice(0, 10);
+        if (!day) continue;
+        const name = r.product_name || '네이버 답례품';
+        const code = r.product_code || '';
+        const key = `${day}|${code}|${name}`;
+        if (!byDayProduct.has(key)) {
+          byDayProduct.set(key, {
+            card_name: name, card_code: code,
+            order_day: day, site_name: '네이버',
+            order_type: '단독주문',
+            order_count: 0, total_qty: 0, total_amount: 0,
+            _orderIds: new Set(),
+          });
+        }
+        const bucket = byDayProduct.get(key);
+        bucket.total_qty += r.item_count || 0;
+        bucket.total_amount += r.item_total_price || 0;
+        bucket._orderIds.add(`${r.order_id}::${r.product_order_id}`);
+        const ck = `${day}|네이버|단독주문`;
+        if (!byDayForCount.has(ck)) byDayForCount.set(ck, { order_day: day, site_name: '네이버', order_type: '단독주문', _orderIds: new Set() });
+        byDayForCount.get(ck)._orderIds.add(`${r.order_id}::${r.product_order_id}`);
+      }
+      for (const v of byDayProduct.values()) {
+        v.order_count = v._orderIds.size;
+        delete v._orderIds;
+        rows.push(v);
+      }
+      for (const v of byDayForCount.values()) {
+        const distinct_order_count = v._orderIds.size;
+        delete v._orderIds;
+        orderCounts.push({ order_day: v.order_day, site_name: v.site_name, order_type: v.order_type, distinct_order_count });
+      }
+    }
+  } catch (e) {
+    console.warn('[summary] 네이버 주문 머지 실패 (무시):', e.message);
   }
 
   return { summary: rows, order_counts: orderCounts, express_daily: expressDaily };
@@ -3245,6 +3335,57 @@ const server = http.createServer(async (req, res) => {
         // 마지막 동기화 메타 조회 (관리자 UI 표시용)
         const coupangStore = require('./coupang/store');
         data = await coupangStore.getSyncState();
+      } else if (pathname === '/api/naver/sync' && req.method === 'POST') {
+        // 네이버 스마트스토어 수동 동기화 — 커머스 API → Supabase upsert
+        logAdminAccess(session, req, 'naver-sync', {});
+        const body = await new Promise((resolve) => {
+          let raw = ''; req.on('data', c => raw += c);
+          req.on('end', () => {
+            try { resolve(raw ? JSON.parse(raw) : {}); } catch { resolve({}); }
+          });
+        });
+        const naverSync = require('./naver/sync');
+        data = await naverSync.syncRecent({
+          daysBack: parseInt(body.days_back) || 7,
+        });
+      } else if (pathname === '/api/naver/sync-state') {
+        const naverStore = require('./naver/store');
+        data = await naverStore.getSyncState();
+      } else if (pathname === '/api/naver/debug-raw') {
+        // 네이버 API raw 응답 진단 — 0건 또는 에러 원인 식별용
+        logAdminAccess(session, req, 'naver-debug-raw', parsed.query);
+        const naverApi = require('./naver/api');
+        if (!naverApi.isConfigured()) {
+          data = { error: 'Naver API 키 미설정 (NAVER_CLIENT_ID/CLIENT_SECRET)' };
+        } else {
+          const daysBack = parseInt(parsed.query.days_back) || 30;
+          const endMs = Date.now();
+          const startMs = endMs - daysBack * 86400000;
+          try {
+            const changed = await naverApi.listChangedStatuses({ fromMs: startMs });
+            const lcStatuses = changed.data?.lastChangeStatuses || changed.data || [];
+            const ids = Array.isArray(lcStatuses) ? lcStatuses.map(r => r?.productOrderId).filter(Boolean).slice(0, 5) : [];
+            let detail = null;
+            if (ids.length) {
+              try { detail = await naverApi.queryProductOrders(ids.map(String)); }
+              catch (e) { detail = { error: e.message }; }
+            }
+            data = {
+              query: {
+                days_back: daysBack,
+                start_kst: naverApi.fmtKstIso(startMs),
+                client_id: naverApi.CLIENT_ID,
+              },
+              changed_response_keys: changed && typeof changed === 'object' ? Object.keys(changed) : [],
+              changed_data_keys: changed?.data && typeof changed.data === 'object' ? Object.keys(changed.data) : [],
+              changed_count: Array.isArray(lcStatuses) ? lcStatuses.length : null,
+              sample_changed_ids: ids,
+              detail_response: detail,
+            };
+          } catch (e) {
+            data = { error: e.message, client_id: naverApi.CLIENT_ID };
+          }
+        }
       } else if (pathname === '/api/admin/server-ip') {
         // 서버 outbound IP 확인 — 쿠팡 등 외부 API 키 발급 시 IP 화이트리스트 등록용.
         //   외부 echo 서비스 두 곳에 호출해서 일관된 IP 반환.

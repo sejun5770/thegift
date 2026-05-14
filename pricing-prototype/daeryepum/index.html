@@ -824,6 +824,7 @@ nav a:hover{color:var(--gray-900)}
     <button class="btn" onclick="copySelected()" style="padding:5px 12px;font-size:12px" title="선택된 주문 (없으면 전체) 을 클립보드로 복사">📋 복사</button>
     <button class="btn" onclick="downloadExcel()" style="padding:5px 12px;font-size:12px" title="선택된 주문 (없으면 전체) 을 엑셀로 다운로드">📥 엑셀</button>
     <button class="btn" id="ord-btn-coupang-sync" onclick="syncCoupangOrders(this)" style="padding:5px 12px;font-size:12px;background:#fef2f2;border-color:#fecaca" title="쿠팡 Wing API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟥 쿠팡 동기화 <span id="ord-coupang-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
+    <button class="btn" id="ord-btn-naver-sync" onclick="syncNaverOrders(this)" style="padding:5px 12px;font-size:12px;background:#ecfdf5;border-color:#a7f3d0" title="네이버 커머스 API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟩 네이버 동기화 <span id="ord-naver-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
   </div>
 
   <div class="card" style="padding:0;overflow-x:auto">
@@ -1849,6 +1850,7 @@ function init() {
     loadChart();
     loadOrders();
     refreshCoupangSyncMeta();
+    refreshNaverSyncMeta();
   });
 
   // URL hash 기반 페이지 전환
@@ -2230,6 +2232,56 @@ async function refreshCoupangSyncMeta() {
     if (!res.ok) return;
     const s = await res.json();
     const el = document.getElementById('ord-coupang-sync-meta');
+    if (!el) return;
+    if (s?.last_synced_at) {
+      const d = new Date(s.last_synced_at);
+      const pad = n => String(n).padStart(2, '0');
+      const dispDate = `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      el.textContent = `(${dispDate} · ${s.last_synced_order_count || 0}건)`;
+      if (s.last_error) el.title = '마지막 에러: ' + s.last_error;
+    } else {
+      el.textContent = '(미실행)';
+    }
+  } catch { /* ignore */ }
+}
+
+/** 네이버 스마트스토어 주문 수동 동기화 — Commerce API → Supabase naver_orders upsert. */
+async function syncNaverOrders(btn) {
+  if (!confirm('네이버 커머스 API 에서 최근 7일치 주문을 가져와 Supabase 에 저장합니다.\n동기화 후 조회 버튼을 다시 눌러야 화면이 갱신됩니다. 진행할까요?')) return;
+  const origText = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ 동기화 중...';
+  try {
+    const res = await fetch(`${API}/api/naver/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days_back: 7 }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert('네이버 동기화 실패:\n' + data.error);
+    } else {
+      const msg = `✅ 동기화 완료\n\n변경된 주문 ID: ${data.ids_fetched || 0}개\n상세 fetch: ${data.fetched}건\n저장 row: ${data.upserted}개\n필터 제외: ${data.filtered_out}개`
+        + (data.filter_disabled ? '\n\n⚠️ 카테고리 필터 미설정 — 전체 주문 저장됨. 답례품 카테고리 ID 확인 후 환경변수 설정 권장.' : '');
+      alert(msg);
+      loadOrders();
+      refreshNaverSyncMeta();
+    }
+  } catch (e) {
+    alert('네이버 동기화 오류: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = origText;
+  }
+}
+
+/** 네이버 마지막 동기화 시각. */
+async function refreshNaverSyncMeta() {
+  try {
+    const res = await fetch(`${API}/api/naver/sync-state`);
+    if (!res.ok) return;
+    const s = await res.json();
+    const el = document.getElementById('ord-naver-sync-meta');
     if (!el) return;
     if (s?.last_synced_at) {
       const d = new Date(s.last_synced_at);
@@ -4122,7 +4174,7 @@ function renderSampleTable() {
 
 // --- 전환율 차트 ---
 let conversionChart = null;
-const SITE_COLORS = {'바른손카드':'#3b82f6','바른손몰':'#10b981','바른손M카드':'#f59e0b','쿠팡':'#ef4444','기타':'#a1a1aa'};
+const SITE_COLORS = {'바른손카드':'#3b82f6','바른손몰':'#10b981','바른손M카드':'#f59e0b','쿠팡':'#ef4444','네이버':'#03c75a','기타':'#a1a1aa'};
 function renderConversion(data) {
   _conversionData = data;
   const weeks = data.weeks;
@@ -4884,7 +4936,7 @@ function renderDailyTable(data, topProducts) {
     });
     const order = [...set];
     order.sort((a, b) => {
-      const score = g => g === '바른손몰' ? 1 : (g === '쿠팡' ? 2 : (g === '기타' ? 3 : 0));
+      const score = g => g === '바른손몰' ? 1 : (g === '쿠팡' ? 2 : (g === '네이버' ? 3 : (g === '기타' ? 4 : 0)));
       return score(a) - score(b);
     });
     return order;
@@ -5242,7 +5294,7 @@ function renderWeeklyTable(data, topProducts) {
     });
     const order = [...set];
     order.sort((a, b) => {
-      const score = g => g === '바른손몰' ? 1 : (g === '쿠팡' ? 2 : (g === '기타' ? 3 : 0));
+      const score = g => g === '바른손몰' ? 1 : (g === '쿠팡' ? 2 : (g === '네이버' ? 3 : (g === '기타' ? 4 : 0)));
       return score(a) - score(b);
     });
     return order;
@@ -7246,13 +7298,15 @@ function switchUniTab(tab) {
 /**
  * 주문의 customer_info order_id key 생성 — 채널별 prefix 규칙 통일.
  *   ETC (바른손몰)     → 'ETC-{order_seq}'
- *   COUPANG (쿠팡)     → 'CP-{order_seq}'   (stub ci row 동일 prefix)
+ *   COUPANG (쿠팡)     → 'CP-{order_seq}'    (stub ci row 동일 prefix)
+ *   NAVER (네이버)     → 'NV-{order_seq}'    (stub ci row 동일 prefix)
  *   CARD (바른손카드)  → '{order_seq}' (raw)
  */
 function bgCiKey(order) {
   if (!order) return '';
   if (order.order_type === 'ETC') return `ETC-${order.order_seq}`;
   if (order.order_type === 'COUPANG') return `CP-${order.order_seq}`;
+  if (order.order_type === 'NAVER') return `NV-${order.order_seq}`;
   return String(order.order_seq);
 }
 
@@ -7273,9 +7327,9 @@ function renderBgUnified() {
     (!hideCancel  || !isCancelled(o)) &&
     (!hidePending || !isPaymentPending(o))
   );
-  // 쿠팡 주문은 고객 정보입력이 불필요한 채널 → 자동 '입력완료' 처리.
-  //   미입력 탭에 안 나오고, 입력완료 탭에 ci 없는 채로 노출됨.
-  const isCoupang = o => o.order_type === 'COUPANG';
+  // 마켓플레이스 주문(쿠팡/네이버)은 고객 정보입력 불필요 → 자동 '입력완료' 처리.
+  //   미입력 탭에 안 나오고, 입력완료 탭에 ci 없어도 노출됨.
+  const isMarketplace = o => o.order_type === 'COUPANG' || o.order_type === 'NAVER';
 
   // 탭 카운트는 주문 단위 (배송지 분리로 한 주문이 여러 행이어도 1번만 카운트)
   const seenForCount = new Set();
@@ -7284,7 +7338,7 @@ function renderBgUnified() {
     if (seenForCount.has(o.order_seq)) return;
     seenForCount.add(o.order_seq);
     const ciKey = bgCiKey(o);
-    if (isCoupang(o) || bgUnifiedCiMap.get(ciKey)) cntSubmitted++;
+    if (isMarketplace(o) || bgUnifiedCiMap.get(ciKey)) cntSubmitted++;
     else cntUnsubmitted++;
   });
   const cntSubEl = document.getElementById('uni-count-submitted');
@@ -7298,10 +7352,10 @@ function renderBgUnified() {
   let filtered = visibleBase.filter(o => {
     const ciKey = bgCiKey(o);
     const ci = bgUnifiedCiMap.get(ciKey);
-    const submittedLike = isCoupang(o) || !!ci;
+    const submittedLike = isMarketplace(o) || !!ci;
     if (activeTab === 'submitted' && !submittedLike) return false;
     if (activeTab === 'unsubmitted' && submittedLike) return false;
-    // 입력완료 탭에서 '처리완료 숨기기' 체크시 processed_at 있는 주문 제외 (쿠팡은 ci 없으므로 영향 X)
+    // 입력완료 탭에서 '처리완료 숨기기' 체크시 processed_at 있는 주문 제외
     if (activeTab === 'submitted' && hideProcessed && ci?.processed_at) return false;
     return true;
   });
@@ -7326,13 +7380,13 @@ function renderBgUnified() {
   }
 
   // 입력완료 탭 정렬:
-  //   1순위: 쿠팡 주문 먼저 (별도 채널 — 운영팀이 우선 처리하도록 상단 노출)
-  //   2순위: 같은 채널 내에서는 submitted_at / updated_at DESC (최신 입력 위)
+  //   1순위: 마켓플레이스 주문(쿠팡/네이버) 먼저 (별도 채널 — 운영팀이 우선 처리)
+  //   2순위: 같은 그룹 내에서는 submitted_at/updated_at DESC (최신 위)
   if (activeTab === 'submitted') {
     filtered.sort((a, b) => {
-      const aCp = a.order_type === 'COUPANG' ? 0 : 1;
-      const bCp = b.order_type === 'COUPANG' ? 0 : 1;
-      if (aCp !== bCp) return aCp - bCp;
+      const aMk = isMarketplace(a) ? 0 : 1;
+      const bMk = isMarketplace(b) ? 0 : 1;
+      if (aMk !== bMk) return aMk - bMk;
       const ciKeyA = bgCiKey(a);
       const ciKeyB = bgCiKey(b);
       const ciA = bgUnifiedCiMap.get(ciKeyA);
@@ -7428,8 +7482,10 @@ function renderBgUnified() {
     const itemCount = Number(product_qty) || 1;
 
     // 입력 셀 — 완료시 제출(또는 관리자 저장) 일시 표시, 미입력시 '미입력' 뱃지
-    //   쿠팡: 정보입력 불필요 채널이므로 ci 없이 '✅ 쿠팡 자동' 으로 노출.
+    //   마켓플레이스(쿠팡/네이버): 정보입력 불필요 채널 — ci 없이 '✅ 자동' 라벨 노출.
     const orderIsCoupang = order.order_type === 'COUPANG';
+    const orderIsNaver = order.order_type === 'NAVER';
+    const orderIsMarketplace = orderIsCoupang || orderIsNaver;
     const submittedAt = ci?.updated_at || ci?.submitted_at;
     const fmtSubmittedAt = (() => {
       if (!submittedAt) return '';
@@ -7443,9 +7499,11 @@ function renderBgUnified() {
     const hasInput = !!ci;
     const inputBadge = orderIsCoupang
       ? '<span style="color:#dc2626;font-size:11px;font-weight:600;white-space:nowrap" title="쿠팡 주문은 고객 정보입력 불필요 — 동기화 시 자동 입력완료 처리">✅ 쿠팡 자동</span>'
-      : (hasInput
-        ? '<span style="color:#16a34a;font-size:11px;font-weight:600;white-space:nowrap">' + (fmtSubmittedAt || '✅ 완료') + '</span>'
-        : '<span style="color:var(--gray-300);font-size:11px">미입력</span>');
+      : (orderIsNaver
+        ? '<span style="color:#03c75a;font-size:11px;font-weight:600;white-space:nowrap" title="네이버 스마트스토어 주문은 고객 정보입력 불필요 — 동기화 시 자동 입력완료 처리">✅ 네이버 자동</span>'
+        : (hasInput
+          ? '<span style="color:#16a34a;font-size:11px;font-weight:600;white-space:nowrap">' + (fmtSubmittedAt || '✅ 완료') + '</span>'
+          : '<span style="color:var(--gray-300);font-size:11px">미입력</span>'));
 
     // 박스선택 — 아이콘/수량 제거, 코드만 표시 (스티커코드 컬럼과 일관)
     // XSS: 스티커/박스 코드는 sticker_code/box_code DB 에서 옴 → escape 적용
@@ -7482,8 +7540,8 @@ function renderBgUnified() {
     //  · ci 있음 → '수정' (기존)
     //  · ci 없고 취소 아님 → '추가' (관리자가 고객 대신 수동 입력)
     //  · 취소 → 버튼 없음
-    //  · 쿠팡 → 버튼 없음 (정보입력 자체가 불필요한 채널)
-    const editBtn = orderIsCoupang
+    //  · 쿠팡/네이버 → 버튼 없음 (정보입력 자체가 불필요한 채널)
+    const editBtn = orderIsMarketplace
       ? ''
       : (ci
         ? `<button class="btn" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">수정</button>`

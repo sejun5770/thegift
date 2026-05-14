@@ -1,0 +1,186 @@
+/**
+ * 네이버 스마트스토어 (커머스 API) 클라이언트
+ *
+ * 환경변수:
+ *   NAVER_CLIENT_ID         — 커머스 API 애플리케이션 등록 시 발급
+ *   NAVER_CLIENT_SECRET     — 발급된 secret
+ *   NAVER_API_HOST          — 기본 'https://api.commerce.naver.com'
+ *
+ * 인증: OAuth 2.0 (client_credentials)
+ *   1) bcrypt 서명 생성: hash("{client_id}_{timestamp}", client_secret)
+ *   2) POST /external/v1/oauth2/token 으로 access_token 발급 (~3시간 유효)
+ *   3) Authorization: Bearer {access_token} 으로 API 호출
+ *
+ * 토큰은 모듈 메모리에 캐시 (만료 5분 전 갱신).
+ */
+'use strict';
+
+const bcrypt = require('bcryptjs');
+
+const HOST = process.env.NAVER_API_HOST || 'https://api.commerce.naver.com';
+const CLIENT_ID = process.env.NAVER_CLIENT_ID || '';
+const CLIENT_SECRET = process.env.NAVER_CLIENT_SECRET || '';
+
+function isConfigured() {
+  return !!(CLIENT_ID && CLIENT_SECRET);
+}
+
+// 토큰 캐시 — 모듈 메모리
+let _tokenCache = { token: null, expiresAt: 0 };
+
+/**
+ * OAuth access_token 발급 (또는 캐시 재사용).
+ *   네이버 bcrypt 서명: hash("{client_id}_{timestamp}", client_secret) → base64
+ */
+async function getAccessToken() {
+  if (_tokenCache.token && _tokenCache.expiresAt > Date.now()) {
+    return _tokenCache.token;
+  }
+  if (!isConfigured()) throw new Error('Naver API 키 미설정 (NAVER_CLIENT_ID/CLIENT_SECRET).');
+
+  const timestamp = Date.now();
+  const password = `${CLIENT_ID}_${timestamp}`;
+  // bcrypt hash with client_secret as salt (Naver spec)
+  const hashed = bcrypt.hashSync(password, CLIENT_SECRET);
+  const signature = Buffer.from(hashed).toString('base64');
+
+  const form = new URLSearchParams();
+  form.append('client_id', CLIENT_ID);
+  form.append('timestamp', String(timestamp));
+  form.append('client_secret_sign', signature);
+  form.append('grant_type', 'client_credentials');
+  form.append('type', 'SELF');
+
+  const res = await fetch(`${HOST}/external/v1/oauth2/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: form.toString(),
+  });
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = { _raw: text }; }
+  if (!res.ok) {
+    throw new Error(`Naver token [${res.status}]: ${text.slice(0, 500)}`);
+  }
+  if (!data.access_token) {
+    throw new Error(`Naver token: access_token 없음 - ${text.slice(0, 300)}`);
+  }
+  // expires_in 보통 10800초 (3시간) — 5분 buffer
+  const ttlSec = (data.expires_in || 10800) - 300;
+  _tokenCache = {
+    token: data.access_token,
+    expiresAt: Date.now() + Math.max(ttlSec, 60) * 1000,
+  };
+  return _tokenCache.token;
+}
+
+/**
+ * 네이버 API 공통 호출.
+ *   path: '/external/v1/...' (host 제외)
+ *   body: object — 자동 JSON 직렬화
+ */
+async function callNaver(method, path, body = null) {
+  if (!isConfigured()) throw new Error('Naver API 키 미설정.');
+  const token = await getAccessToken();
+  const opts = {
+    method: method.toUpperCase(),
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+  };
+  if (body && opts.method !== 'GET') {
+    opts.body = typeof body === 'string' ? body : JSON.stringify(body);
+  }
+  const res = await fetch(HOST + path, opts);
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = { _raw: text }; }
+  if (!res.ok) {
+    const err = new Error(`Naver API ${method} ${path} [${res.status}]: ${text.slice(0, 500)}`);
+    err.status = res.status;
+    err.body = data;
+    throw err;
+  }
+  return data;
+}
+
+/**
+ * KST 'YYYY-MM-DDTHH:mm:ss.SSS+09:00' 포맷 — 네이버 시간 입력용.
+ *   Docker 컨테이너는 UTC 가정 — 명시적으로 KST 변환.
+ */
+function fmtKstIso(ms) {
+  const d = typeof ms === 'number' ? new Date(ms) : ms;
+  const kst = new Date(d.getTime() + 9 * 3600 * 1000);
+  const pad = (n, len = 2) => String(n).padStart(len, '0');
+  return `${kst.getUTCFullYear()}-${pad(kst.getUTCMonth() + 1)}-${pad(kst.getUTCDate())}`
+    + `T${pad(kst.getUTCHours())}:${pad(kst.getUTCMinutes())}:${pad(kst.getUTCSeconds())}`
+    + `.${pad(kst.getUTCMilliseconds(), 3)}+09:00`;
+}
+
+/**
+ * 변경된 주문 목록 — last-changed-statuses endpoint.
+ *   주문 상태 변화가 있었던 productOrderId 만 반환 (가벼움).
+ *   sync 의 1차 단계로 사용.
+ */
+async function listChangedStatuses({ fromMs, lastChangedType } = {}) {
+  const params = new URLSearchParams();
+  params.set('lastChangedFrom', fmtKstIso(fromMs));
+  if (lastChangedType) params.set('lastChangedType', lastChangedType);
+  return callNaver('GET', `/external/v1/pay-order/seller/product-orders/last-changed-statuses?${params.toString()}`);
+}
+
+/**
+ * productOrderId 리스트로 상세 일괄 조회 — query endpoint.
+ *   네이버 spec 상 한 번에 최대 N개 (보통 300).
+ */
+async function queryProductOrders(productOrderIds) {
+  if (!Array.isArray(productOrderIds) || !productOrderIds.length) return { data: [] };
+  return callNaver('POST', '/external/v1/pay-order/seller/product-orders/query', {
+    productOrderIds,
+  });
+}
+
+/**
+ * 통합: 기간 내 변경된 주문 목록 + 상세 일괄 조회.
+ *   결과: { items: [...상세], pages: 1, totalCount }
+ *   pages 는 호환용 (실제로는 단일 호출 후 batch query).
+ */
+async function listAllOrders({ startMs, endMs } = {}) {
+  // 1) 변경된 주문 ID 목록
+  const changedRes = await listChangedStatuses({ fromMs: startMs });
+  const lastChanged = changedRes.data?.lastChangeStatuses || changedRes.data || [];
+  // productOrderId 리스트 추출
+  const ids = [];
+  for (const row of (Array.isArray(lastChanged) ? lastChanged : [])) {
+    if (row && row.productOrderId) ids.push(String(row.productOrderId));
+  }
+  if (!ids.length) return { items: [], pages: 1, totalCount: 0, idsFetched: 0 };
+
+  // 2) 상세 조회 (batch — 단순화: 한 번에 전부)
+  const detailRes = await queryProductOrders(ids);
+  const details = Array.isArray(detailRes.data) ? detailRes.data : [];
+
+  // endMs 이내로 필터 (안전장치 — 네이버 가 endMs 도 받지 않음, 클라 측 필터)
+  const filtered = details.filter(item => {
+    const t = item.productOrder?.orderDate || item.productOrder?.paymentDate || null;
+    if (!t) return true;
+    const tMs = Date.parse(t);
+    if (Number.isNaN(tMs)) return true;
+    return tMs <= endMs;
+  });
+
+  return { items: filtered, pages: 1, totalCount: filtered.length, idsFetched: ids.length };
+}
+
+module.exports = {
+  isConfigured,
+  getAccessToken,
+  callNaver,
+  fmtKstIso,
+  listChangedStatuses,
+  queryProductOrders,
+  listAllOrders,
+  CLIENT_ID, // for log/debug only
+};

@@ -483,7 +483,9 @@ async function setProcessed(orderId, data) {
   const patch = wantProcessed
     ? { processed_at: now(), processed_by: data.processed_by || null }
     : { processed_at: null, processed_by: null };
-  const isCoupang = String(orderId).startsWith('CP-');
+  // 마켓플레이스 prefix — CP-(쿠팡) / NV-(네이버) ci stub 자동 생성 가능 채널
+  const isMarketplace = String(orderId).startsWith('CP-') || String(orderId).startsWith('NV-');
+  const isCoupang = isMarketplace; // 기존 변수명 호환 (분기 동일)
 
   if (USE_SUPABASE) {
     const existing = await sbGet('bg_order_customer_info', `order_id=eq.${encodeURIComponent(orderId)}`);

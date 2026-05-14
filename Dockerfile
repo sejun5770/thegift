@@ -2,14 +2,15 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# mssql 의존성만 설치
-RUN npm init -y && npm install mssql
+# 의존성: mssql (MSSQL 드라이버), bcryptjs (네이버 커머스 API OAuth 서명용)
+RUN npm init -y && npm install mssql bcryptjs
 
 # 답례품 앱 복사
 COPY pricing-prototype/daeryepum/server.js ./
 COPY pricing-prototype/daeryepum/index.html ./
 COPY pricing-prototype/daeryepum/barungift/ ./barungift/
 COPY pricing-prototype/daeryepum/coupang/ ./coupang/
+COPY pricing-prototype/daeryepum/naver/ ./naver/
 
 RUN mkdir -p /app/data
 
