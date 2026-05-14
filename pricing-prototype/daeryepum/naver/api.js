@@ -46,23 +46,23 @@ let _tokenCache = { token: null, expiresAt: 0 };
  */
 function signClientSecret(clientId, timestamp, secret) {
   const message = `${clientId}_${timestamp}`;
-  // 방식 A — bcrypt 풀 형식
+  // 방식 A — bcrypt 풀 형식 (네이버 spec)
+  //   네이버 Java 샘플: Base64.getUrlEncoder().encodeToString(hashed.getBytes("UTF-8"))
+  //   → URL-safe base64 (padding 포함). regular base64 보다 호환성 높음.
   if (/^\$2[abxy]\$/.test(secret)) {
     const hashed = bcrypt.hashSync(message, secret);
-    return Buffer.from(hashed).toString('base64');
+    return Buffer.from(hashed, 'utf-8').toString('base64url');
   }
-  // 방식 B — HMAC-SHA256 (신버전 추정)
-  //   secret 을 URL-safe base64 로 시도 디코드 → 실패 시 utf-8 raw 사용.
+  // 방식 B — HMAC-SHA256 (신버전 추정, 16자 raw secret 케이스)
   let key;
   try {
     key = Buffer.from(secret, 'base64url');
-    // 디코드 결과가 비정상적으로 짧으면 raw utf-8 사용
     if (!key.length) throw new Error('empty');
   } catch {
     key = Buffer.from(secret, 'utf-8');
   }
   const hmac = crypto.createHmac('sha256', key).update(message).digest();
-  return hmac.toString('base64');
+  return hmac.toString('base64url');
 }
 
 async function getAccessToken() {
