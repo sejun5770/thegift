@@ -1211,6 +1211,49 @@ async function apiDashboardComparison() {
     };
     for (const row of r.recordset) accumulateRow(row);    // ETC
     for (const row of r2.recordset) accumulateRow(row);   // CARD
+
+    // 마켓플레이스(쿠팡/네이버) 머지 — 항상 standalone 으로 누적, site_name='쿠팡'/'네이버'.
+    //   기간 차원 일관: order_date 기준 (MSSQL 와 동일하게 byPaid=false 사용).
+    //   distinct order 단위 카운트: 쿠팡=(order_id, shipment_box_id) / 네이버=product_order_id.
+    //   실패해도 MSSQL 결과는 유지.
+    async function mergeMarketplace(siteName, listFn, getOrderKey) {
+      try {
+        const rows = await listFn();
+        if (!rows || !rows.length) return;
+        const seen = new Set();
+        let amount = 0, orders = 0, qty = 0;
+        for (const r of rows) {
+          const k = getOrderKey(r);
+          if (!seen.has(k)) { seen.add(k); orders++; }
+          amount += r.item_total_price || 0;
+          qty += r.item_count || 0;
+        }
+        if (orders === 0 && amount === 0) return;
+        const site = ensureSite(siteName);
+        site.order_count += orders;
+        site.total_amount += amount;
+        site.total_qty += qty;
+        site.standalone.amount += amount;
+        site.standalone.orders += orders;
+        site.standalone.qty += qty;
+        standalone_amount += amount;
+        standalone_orders += orders;
+        standalone_qty += qty;
+      } catch (e) {
+        console.warn(`[getPeriodTotal] ${siteName} 머지 실패 (무시):`, e.message);
+      }
+    }
+    await mergeMarketplace(
+      '쿠팡',
+      () => require('./coupang/store').listCoupangOrders({ startStr, endStr, byPaid: false }),
+      r => `${r.coupang_order_id}::${r.shipment_box_id}`,
+    );
+    await mergeMarketplace(
+      '네이버',
+      () => require('./naver/store').listNaverOrders({ startStr, endStr, byPaid: false }),
+      r => `${r.product_order_id}`,
+    );
+
     // 전체 합계
     let order_count = 0, total_amount = 0, total_qty = 0;
     for (const v of Object.values(siteMap)) {
