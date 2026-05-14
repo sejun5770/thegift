@@ -2,8 +2,8 @@
  * 네이버 스마트스토어 주문 동기화 — 커머스 API → 정규화 → Supabase upsert.
  *
  * 답례품 카테고리 필터:
- *   NAVER_DAERYEPUM_CATEGORY_IDS    — 콤마 구분 카테고리 ID 리스트
- *   NAVER_DAERYEPUM_PRODUCT_CODES   — 콤마 구분 셀러 상품코드
+ *   NAVER_CATEGORY_IDS    — 콤마 구분 카테고리 ID 리스트
+ *   NAVER_PRODUCT_CODES   — 콤마 구분 셀러 상품코드
  *   둘 다 비어 있으면 전체 통과 (초기 운영 진단용).
  *
  * 상태 매핑 (productOrderStatus → 한글):
@@ -21,9 +21,9 @@
 const api = require('./api');
 const store = require('./store');
 
-const CATEGORY_IDS = (process.env.NAVER_DAERYEPUM_CATEGORY_IDS || '')
+const CATEGORY_IDS = (process.env.NAVER_CATEGORY_IDS || '')
   .split(',').map(s => s.trim()).filter(Boolean);
-const PRODUCT_CODES = (process.env.NAVER_DAERYEPUM_PRODUCT_CODES || '')
+const PRODUCT_CODES = (process.env.NAVER_PRODUCT_CODES || '')
   .split(',').map(s => s.trim()).filter(Boolean);
 const FILTER_DISABLED = !CATEGORY_IDS.length && !PRODUCT_CODES.length;
 
