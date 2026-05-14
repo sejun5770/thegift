@@ -117,36 +117,57 @@ async function getAccessToken() {
   return _tokenCache.token;
 }
 
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
 /**
  * 네이버 API 공통 호출.
  *   path: '/external/v1/...' (host 제외)
  *   body: object — 자동 JSON 직렬화
+ *
+ *   429 (GW.RATE_LIMIT) 자동 재시도 — 기본 2회까지, 1.5s/3s backoff.
+ *   Retry-After 헤더가 있으면 우선 사용.
  */
-async function callNaver(method, path, body = null) {
+async function callNaver(method, path, body = null, { maxRetries = 2, baseBackoffMs = 1500 } = {}) {
   if (!isConfigured()) throw new Error('Naver API 키 미설정.');
-  const token = await getAccessToken();
-  const opts = {
-    method: method.toUpperCase(),
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-  };
-  if (body && opts.method !== 'GET') {
-    opts.body = typeof body === 'string' ? body : JSON.stringify(body);
-  }
-  const res = await fetch(HOST + path, opts);
-  const text = await res.text();
-  let data;
-  try { data = JSON.parse(text); } catch { data = { _raw: text }; }
-  if (!res.ok) {
+
+  let lastErr;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const token = await getAccessToken();
+    const opts = {
+      method: method.toUpperCase(),
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+    };
+    if (body && opts.method !== 'GET') {
+      opts.body = typeof body === 'string' ? body : JSON.stringify(body);
+    }
+    const res = await fetch(HOST + path, opts);
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch { data = { _raw: text }; }
+    if (res.ok) return data;
+
     const err = new Error(`Naver API ${method} ${path} [${res.status}]: ${text.slice(0, 500)}`);
     err.status = res.status;
     err.body = data;
-    throw err;
+
+    // 429 RATE_LIMIT — 재시도
+    if (res.status === 429 && attempt < maxRetries) {
+      const retryAfterSec = parseFloat(res.headers.get('retry-after') || '0');
+      const waitMs = retryAfterSec > 0
+        ? Math.min(retryAfterSec * 1000, 10000)
+        : baseBackoffMs * (attempt + 1);
+      console.warn(`[naver] 429 RATE_LIMIT ${path} — ${waitMs}ms 후 재시도 (attempt ${attempt + 1}/${maxRetries})`);
+      await sleep(waitMs);
+      continue;
+    }
+    lastErr = err;
+    break;
   }
-  return data;
+  throw lastErr;
 }
 
 /**
@@ -234,8 +255,21 @@ function flattenItem(it) {
  *   반환:
  *     items, totalCount, chunks, sources[], idsFromChanged, diagnostics
  */
+/**
+ * 통합: 기간 내 모든 주문 조회. 24h 단위 chunk 로 분할.
+ *
+ * Rate limit 대응:
+ *   - chunk 간 250ms delay (호출 burst 방지)
+ *   - 각 callNaver 내부에서 429 시 1.5s/3s backoff 자동 재시도
+ *
+ * 빈 결과 처리:
+ *   - direct 가 성공(throw 안 함)하면 빈 결과라도 fallback 호출 안 함
+ *     (해당 24h 에 주문이 없는 것이 확정 → changed 호출도 어차피 0건)
+ *   - direct 가 실패(throw — 보통 5xx/429 재시도 실패)했을 때만 changed 폴백
+ */
 async function listAllOrders({ startMs, endMs } = {}) {
   const CHUNK_MS = 24 * 3600 * 1000;
+  const INTER_CHUNK_DELAY_MS = 250;
   const allItems = [];
   const seenIds = new Set();
   const sources = [];
@@ -243,37 +277,37 @@ async function listAllOrders({ startMs, endMs } = {}) {
   let chunks = 0;
   let idsFromChanged = 0;
 
+  let isFirstChunk = true;
   for (let from = startMs; from < endMs; from += CHUNK_MS) {
+    if (!isFirstChunk) await sleep(INTER_CHUNK_DELAY_MS);
+    isFirstChunk = false;
+
     const to = Math.min(from + CHUNK_MS, endMs);
     chunks++;
     const diag = { chunk: chunks, from_kst: fmtKstIso(from), to_kst: fmtKstIso(to) };
 
-    // 방식 A — direct list 시도
-    let directOk = false;
+    // 방식 A — direct list 시도. 성공시 (빈 결과 포함) fallback 안 함.
+    let directSucceeded = false;
     try {
       const res = await listProductOrdersDirect({ startMs: from, endMs: to });
       const raw = res.data?.contents || res.data?.productOrders || res.data || [];
-      if (Array.isArray(raw) && raw.length) {
-        const items = raw.map(flattenItem);
-        for (const it of items) {
-          const pid = String(it.productOrderId || it.productOrder?.productOrderId || '');
-          if (pid && !seenIds.has(pid)) {
-            seenIds.add(pid);
-            allItems.push(it);
-          }
+      const items = Array.isArray(raw) ? raw.map(flattenItem) : [];
+      for (const it of items) {
+        const pid = String(it.productOrderId || it.productOrder?.productOrderId || '');
+        if (pid && !seenIds.has(pid)) {
+          seenIds.add(pid);
+          allItems.push(it);
         }
-        diag.direct = { count: items.length };
-        sources.push('direct');
-        directOk = true;
-      } else {
-        diag.direct = { count: 0, response_keys: res && typeof res === 'object' ? Object.keys(res) : [] };
       }
+      diag.direct = { count: items.length };
+      if (items.length) sources.push('direct');
+      directSucceeded = true; // ← 빈 결과여도 성공 = fallback 불필요
     } catch (e) {
       diag.direct = { error: e.message, status: e.status };
     }
 
-    // 방식 B — direct 결과 없거나 실패 시 last-changed-statuses 폴백
-    if (!directOk) {
+    // 방식 B — direct 가 실패한 경우만 last-changed-statuses 폴백
+    if (!directSucceeded) {
       try {
         const res = await listChangedStatuses({ fromMs: from, toMs: to });
         const arr = res.data?.lastChangeStatuses || res.data || [];
