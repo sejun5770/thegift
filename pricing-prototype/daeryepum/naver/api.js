@@ -213,12 +213,27 @@ async function listProductOrdersDirect({ startMs, endMs, page = 1, size = 100 } 
  *   방식 A (preferred): /product-orders 직접 리스트 (쿠팡 패턴)
  *   방식 B (fallback):  last-changed-statuses + query (이벤트 스트림 패턴, 24h chunk)
  */
+/**
+ * 네이버 응답 item 평면화 — direct/query 모두 한 단계 래핑되어 있음.
+ *   direct: data.contents[i] = { productOrderId, content: { order, productOrder } }
+ *   query:  data[i]          = { productOrderId, content: { order, productOrder } } (추정 동일)
+ *
+ *   → { order, productOrder } 형태로 변환 (sync.js normalizeOrder 인풋).
+ */
+function flattenItem(it) {
+  if (it && it.content && (it.content.order || it.content.productOrder)) {
+    return { ...it.content, productOrderId: it.productOrderId };
+  }
+  return it;
+}
+
 async function listAllOrders({ startMs, endMs } = {}) {
   // 방식 A 먼저 시도
   try {
     const res = await listProductOrdersDirect({ startMs, endMs });
-    const items = res.data?.contents || res.data?.productOrders || res.data || [];
-    if (Array.isArray(items)) {
+    const raw = res.data?.contents || res.data?.productOrders || res.data || [];
+    if (Array.isArray(raw)) {
+      const items = raw.map(flattenItem);
       return { items, pages: 1, totalCount: items.length, source: 'direct' };
     }
   } catch (e) {
@@ -248,7 +263,8 @@ async function listAllOrders({ startMs, endMs } = {}) {
   let details;
   try {
     const detailRes = await queryProductOrders(ids);
-    details = Array.isArray(detailRes.data) ? detailRes.data : [];
+    const arr = Array.isArray(detailRes.data) ? detailRes.data : [];
+    details = arr.map(flattenItem);
   } catch (e) {
     console.warn(`[naver listAllOrders] detail query 실패: ${e.message}`);
     details = [];
