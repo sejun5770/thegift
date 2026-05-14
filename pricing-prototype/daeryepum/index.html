@@ -1885,6 +1885,12 @@ function showPage(name) {
 function switchCategory(cat) {
   currentCategory = cat;
   document.querySelectorAll('.cat-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === cat));
+  // 마켓플레이스 동기화 버튼은 답례품 카테고리에서만 노출 (꽃다발/데코소품 채널 X)
+  const showMarketplaceSync = (cat === 'daeryepum');
+  const cpBtn = document.getElementById('ord-btn-coupang-sync');
+  const nvBtn = document.getElementById('ord-btn-naver-sync');
+  if (cpBtn) cpBtn.style.display = showMarketplaceSync ? '' : 'none';
+  if (nvBtn) nvBtn.style.display = showMarketplaceSync ? '' : 'none';
   loadOrders();
 }
 
@@ -2172,12 +2178,100 @@ function getCheckedRows() {
 
 // --- Copy / Download ---
 function copySelected() {
+  // 데코소품 카테고리는 스프레드시트 전용 22컬럼 포맷으로 출력 (운영팀 매크로 호환)
+  if (currentCategory === 'deco') {
+    copyDecoOrders();
+    return;
+  }
   const cols = getSelectedCols();
   const data = getSelectedRows();
   const header = cols.map(c => c.label).join('\t');
   const rows = data.map(r => cols.map(c => r[c.key] ?? '').join('\t'));
   const text = [header, ...rows].join('\n');
   navigator.clipboard.writeText(text).then(() => showToast(`${data.length}건 클립보드 복사 완료`));
+}
+
+/**
+ * 데코소품 스프레드시트 전용 복사 — 22컬럼 TSV.
+ *   - 취소건(status_seq===3) 제외, 주문일 ASC
+ *   - 주소를 "(...)" 기준으로 메인/상세 분리
+ *   - 주문번호 첫자리: '4'=청첩장과 함께, '3'=단독주문
+ *   - 헤더 없음 (스프레드시트 기존 행에 그대로 paste)
+ *   - 결과를 popup 으로 노출 (textarea + 복사 버튼)
+ */
+function copyDecoOrders() {
+  const selected = getSelectedRows();
+  const valid = selected.filter(o => o.status_seq !== 3);
+  valid.sort((a, b) => new Date(a.order_date) - new Date(b.order_date));
+  const cancelledCount = selected.length - valid.length;
+
+  const rows = valid.map(o => {
+    const n = String(o.order_seq || '');
+    const orderType = n[0] === '4' ? '청첩장과 함께' : n[0] === '3' ? '단독주문' : '';
+    let recvLabel = o.order_name || '';
+    if (o.recv_name && o.recv_name !== o.order_name) {
+      recvLabel = `${o.recv_name}(${o.order_name})`;
+    }
+    // 주문일시 — 초 단위 절삭 ("2026-05-14 14:53:21" → "2026-05-14 14:53")
+    const dt = (o.order_date || '').replace(/:(\d{2})$/, '');
+    // 주소 분리 — "(...)" 패턴 마지막 ')' 위치 기준
+    let addrMain = o.recv_address || '';
+    let addrDetail = '';
+    const p = addrMain.lastIndexOf(')');
+    if (p >= 0 && p < addrMain.length - 1) {
+      addrDetail = addrMain.substring(p + 1).trim();
+      addrMain = addrMain.substring(0, p + 1).trim();
+    }
+    // 22 컬럼 — 스프레드시트 정확 매핑 (북마클릿 동일)
+    return [
+      dt,                       // 0  주문일시 (초 절삭)
+      orderType,                // 1  주문구분 (청첩장과 함께/단독주문)
+      n,                        // 2  주문번호
+      o.member_id || '',        // 3  회원ID
+      recvLabel,                // 4  수령자/주문자
+      '', '', '', '', '',       // 5-9 공백
+      o.recv_hphone || '',      // 10 전화번호
+      addrMain,                 // 11 주소(메인)
+      addrDetail,               // 12 주소(상세)
+      o.card_name || '',        // 13 상품명
+      o.card_code || '',        // 14 상품코드
+      '', '', '',               // 15-17 공백
+      o.item_count || 1,        // 18 수량
+      '',                       // 19 공백
+      o.item_amount || 0,       // 20 금액
+    ].join('\t');
+  });
+  const tsv = rows.join('\n');
+
+  // popup 시도 — 실패 시 clipboard fallback
+  const checked = document.querySelectorAll('.row-check:checked').length;
+  const modeText = checked > 0 ? `선택 ${checked}건 중 ` : '';
+  const start = document.getElementById('ord-start').value;
+  const end = document.getElementById('ord-end').value;
+  const heading = `📦 데코소품 ${modeText}${valid.length}건 (취소 ${cancelledCount}건 제외)`;
+
+  const w = window.open('', '_blank', 'width=720,height=520');
+  if (!w) {
+    // 팝업 차단 시 clipboard fallback
+    navigator.clipboard.writeText(tsv).then(() => {
+      alert(`${heading}\n\n클립보드 복사됨. 스프레드시트 빈 행 A열 → Ctrl+V`);
+    });
+    return;
+  }
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  w.document.write(`<!DOCTYPE html><html><head><title>데코소품 수집</title></head>
+<body style="font-family:sans-serif;padding:20px;margin:0">
+  <h2 style="margin:0 0 8px">${esc(heading)}</h2>
+  <p style="color:#666;margin:4px 0 12px">${esc(start)} ~ ${esc(end)}</p>
+  <textarea id="t" style="width:calc(100% - 12px);height:300px;font-size:11px;padding:8px" readonly>${esc(tsv)}</textarea>
+  <br>
+  <button onclick="document.getElementById('t').select();document.execCommand('copy');this.textContent='✅ 복사됨!';this.style.background='#16a34a'"
+          style="margin-top:12px;padding:10px 28px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:15px">
+    📋 복사
+  </button>
+  <p style="color:#888;font-size:12px;margin-top:12px">스프레드시트 빈 행 A열 클릭 → Ctrl+V</p>
+</body></html>`);
+  w.document.close();
 }
 
 function downloadExcel() {
