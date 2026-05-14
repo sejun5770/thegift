@@ -20,6 +20,8 @@
 
 const api = require('./api');
 const store = require('./store');
+const bgStore = require('../barungift/store');
+const { enrichFromOption } = require('./option-parser');
 
 const CATEGORY_IDS = (process.env.NAVER_CATEGORY_IDS || '')
   .split(',').map(s => s.trim()).filter(Boolean);
@@ -112,6 +114,8 @@ function normalizeOrder(item) {
       productId: po.productId,
       sellerCustomCode1: po.sellerCustomCode1,
       inflowPath: po.inflowPath,
+      // sticker_selections enrichment 입력 (sync 단계에서 사용)
+      productOption: po.productOption,
     },
     synced_at: new Date().toISOString(),
   };
@@ -159,26 +163,93 @@ async function syncRecent({ daysBack = 7 } = {}) {
   }
 
   // stub customer_info 자동 생성 — 정보입력현황 입력완료 탭 자동 노출 + 수집처리 가능.
+  //   productOption 파싱으로 sticker_selections / desired_ship_date 자동 enrichment.
   let stubUpserted = 0;
+  let enrichedCount = 0;
   if (rows.length) {
     try {
-      const seen = new Set();
-      const stubs = [];
+      // 참고 데이터 1회 로드 (전체 sync 동안 재사용)
+      let stickers = [];
+      let productSettings = [];
+      try {
+        [stickers, productSettings] = await Promise.all([
+          bgStore.getAllStickers(true).catch(() => []),
+          bgStore.getAllProductSettings().catch(() => []),
+        ]);
+      } catch (e) {
+        console.warn('[naver sync] 스티커/상품설정 로드 실패 (enrichment 스킵):', e.message);
+      }
+      // 같은 NV- order_id 의 row 가 여러 개면 — 첫 enrichment 만 사용,
+      // 같은 productCode 끼리 묶어 quantity 합산 (분리배송 대응)
+      const grouped = new Map(); // order_id → { row, byCode: Map<code, {row, productOption, quantity}> }
       for (const r of rows) {
         const order_id = `NV-${r.product_order_id}`;
-        if (seen.has(order_id)) continue;
-        seen.add(order_id);
+        const entry = grouped.get(order_id) || { row: r, byCode: new Map() };
+        const code = r.product_code || 'UNKNOWN';
+        const prev = entry.byCode.get(code);
+        const productOption = r.raw_payload?.productOption || null;
+        if (prev) {
+          prev.quantity += Number(r.item_count) || 0;
+        } else {
+          entry.byCode.set(code, {
+            row: r,
+            productOption,
+            quantity: Number(r.item_count) || 0,
+          });
+        }
+        grouped.set(order_id, entry);
+      }
+
+      const stubs = [];
+      for (const [order_id, { row, byCode }] of grouped) {
+        let shipDate = null;
+        const sticker_selections = [];
+        for (const [code, info] of byCode) {
+          const enriched = enrichFromOption({
+            productOption: info.productOption,
+            productCode: code,
+            productName: row.product_name,
+            quantity: info.quantity,
+            stickers,
+            productSettings,
+          });
+          if (enriched.desired_ship_date && !shipDate) shipDate = enriched.desired_ship_date;
+          sticker_selections.push(enriched.sticker_selection);
+          if (enriched.sticker_selection.sticker_code || enriched.sticker_selection.box_code) {
+            enrichedCount++;
+          }
+        }
         stubs.push({
           order_id,
           is_express: false, express_fee: 0,
-          desired_ship_date: null, sticker_selections: [],
+          desired_ship_date: shipDate,
+          sticker_selections,
           cash_receipt_yn: false, receipt_type: null, receipt_number: null,
           customer_request: null,
-          submitted_at: r.ordered_at || new Date().toISOString(),
+          submitted_at: row.ordered_at || new Date().toISOString(),
         });
       }
       const sr = await store.upsertNaverStubCustomerInfos(stubs);
       stubUpserted = sr.upserted || 0;
+
+      // enrichment PATCH — ignore-duplicates 라 기존 빈 stub 은 위 upsert 로 안 채워짐.
+      //   sticker_selections / desired_ship_date 만 patch (processed_at, customer_request 등 보존).
+      //   매 sync 마다 호출 → 옵션 변경 시 자동 반영, idempotent.
+      for (const stub of stubs) {
+        const hasEnrich = stub.desired_ship_date
+          || (Array.isArray(stub.sticker_selections) && stub.sticker_selections.some(s =>
+            s.sticker_code || s.box_code || (s.custom_values && Object.keys(s.custom_values).length)
+          ));
+        if (!hasEnrich) continue;
+        try {
+          await store.patchNaverStubEnrichment(stub.order_id, {
+            sticker_selections: stub.sticker_selections,
+            desired_ship_date: stub.desired_ship_date,
+          });
+        } catch (e) {
+          console.warn(`[naver sync] enrichment patch 실패 ${stub.order_id}: ${e.message}`);
+        }
+      }
     } catch (e) {
       console.warn('[naver sync] stub ci upsert 실패 (수집처리 setProcessed 안전망이 처리):', e.message);
     }
@@ -194,6 +265,7 @@ async function syncRecent({ daysBack = 7 } = {}) {
     fetched: items.length,
     upserted,
     stub_ci_upserted: stubUpserted,
+    enriched: enrichedCount,
     filtered_out: filteredOut,
     items: rows.length,
     filter_disabled: FILTER_DISABLED,

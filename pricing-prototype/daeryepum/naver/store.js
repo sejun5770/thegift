@@ -60,6 +60,31 @@ async function upsertNaverStubCustomerInfos(stubs) {
   return { upserted: stubs.length };
 }
 
+/**
+ * 네이버 stub 의 enrichment 필드(sticker_selections, desired_ship_date) 만 PATCH.
+ *   processed_at / customer_request 등 운영팀이 변경할 수 있는 필드는 건드리지 않음.
+ *   ignore-duplicates 로 이전 sync 에서 생성된 빈 stub 도 새 옵션 파싱 결과로 채워짐.
+ */
+async function patchNaverStubEnrichment(orderId, { sticker_selections, desired_ship_date }) {
+  if (!USE_SUPABASE) return { patched: 0 };
+  const params = `order_id=eq.${encodeURIComponent(orderId)}`;
+  const url = `${REST_BASE}/bg_order_customer_info?${params}`;
+  const body = {};
+  if (sticker_selections !== undefined) body.sticker_selections = sticker_selections;
+  if (desired_ship_date !== undefined) body.desired_ship_date = desired_ship_date;
+  if (!Object.keys(body).length) return { patched: 0 };
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { ...HEADERS, Prefer: 'return=minimal' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase patch bg_order_customer_info [${res.status}]: ${text.slice(0, 300)}`);
+  }
+  return { patched: 1 };
+}
+
 async function listNaverOrders({ startStr, endStr, byPaid = false } = {}) {
   if (!USE_SUPABASE) return [];
   const col = byPaid ? 'paid_at' : 'ordered_at';
@@ -96,6 +121,7 @@ module.exports = {
   USE_SUPABASE,
   upsertNaverOrders,
   upsertNaverStubCustomerInfos,
+  patchNaverStubEnrichment,
   listNaverOrders,
   getSyncState,
   updateSyncState,
