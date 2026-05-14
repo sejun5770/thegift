@@ -1860,6 +1860,30 @@ function init() {
 
 function fmt(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function fmtKRW(n) { return (n||0).toLocaleString('ko-KR') + '원'; }
+
+/**
+ * ISO 일시 → 'YYYY-MM-DD HH:mm' (KST 통일).
+ *   - 'Z' 또는 '+00:00' (UTC) → +9h 변환
+ *   - '+09:00' (KST 명시) → TZ 제거
+ *   - TZ 없음 (naive) → 이미 KST 가정, 그대로 (MSSQL CARD/ETC 데이터)
+ *
+ *   쿠팡/네이버는 sync 시 `new Date(...).toISOString()` 로 'Z' 형식 저장 →
+ *   여기서 KST 로 변환해야 표시값이 실제 주문 시각과 일치 (정렬과도 자연 일치).
+ */
+function fmtKstDate(iso) {
+  if (!iso) return '';
+  const s = String(iso);
+  // UTC ISO ('Z' 또는 '+00:00') → KST 변환
+  if (/Z$|\+00:?00$/i.test(s)) {
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return '';
+    const kst = new Date(d.getTime() + 9 * 3600 * 1000);
+    const p = n => String(n).padStart(2, '0');
+    return `${kst.getUTCFullYear()}-${p(kst.getUTCMonth() + 1)}-${p(kst.getUTCDate())} ${p(kst.getUTCHours())}:${p(kst.getUTCMinutes())}`;
+  }
+  // 그 외 (naive 또는 +09:00): TZ 정보 제거 + T→공백, 앞 16자
+  return s.replace('T', ' ').replace(/[+-]\d{2}:?\d{2}$/, '').slice(0, 16);
+}
 function fmtNum(n) { return (n||0).toLocaleString('ko-KR'); }
 function pctChange(cur,prev) { if(!prev) return cur > 0 ? 100 : 0; return Math.round((cur-prev)/prev*100); }
 
@@ -1946,7 +1970,10 @@ async function loadOrders() {
       return (tB || 0) - (tA || 0);
     });
     ordersData.forEach(r => {
-      r.order_date_fmt = r.order_date ? r.order_date.replace('T',' ').slice(0,16) : '';
+      // 주문일시 표시 — 모든 채널 KST 통일.
+      //   쿠팡/네이버: ISO with 'Z' (UTC) → +9h
+      //   CARD/ETC:  '+09:00' 또는 TZ 없음 → 그대로 (이미 KST)
+      r.order_date_fmt = fmtKstDate(r.order_date);
       r.item_amount_fmt = fmtKRW(r.item_amount);
       r.coupon_price_fmt = r.coupon_price > 0 ? '-' + fmtKRW(r.coupon_price) : '';
       r.settle_price_fmt = fmtKRW(r.settle_price);
