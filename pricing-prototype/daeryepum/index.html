@@ -193,12 +193,22 @@ nav a:hover{color:var(--gray-900)}
   .compare-header{font-size:14px}
   #file-modal>div{max-width:95vw;border-radius:8px}
 }
+/* 월간 보고서 인쇄용 — nav/툴바 숨기고 컬러/폰트 최적화 */
+@media print {
+  nav, .user-area, #mr-loading, .toolbar { display: none !important; }
+  body { background: #fff }
+  .container { max-width: 100%; padding: 0 }
+  .card { box-shadow: none; border: 1px solid #ccc; page-break-inside: avoid }
+  table { font-size: 11px }
+  #page-monthly-report .data-table th { background: #f5f5f5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact }
+}
 </style>
 </head>
 <body>
 <nav>
   <span class="logo">💐 답례품 관리</span>
   <a href="#dashboard" class="active" onclick="showPage('dashboard')">대시보드</a>
+  <a href="#monthly-report" onclick="showPage('monthly-report')">📊 월간 보고서</a>
   <a href="#orders" onclick="showPage('orders')">주문조회</a>
   <a href="#bg-unified" onclick="showPage('bg-unified')">📋 정보입력현황</a>
   <a href="#sns" onclick="showPage('sns')">💡 SNS 인사이트</a>
@@ -780,6 +790,75 @@ nav a:hover{color:var(--gray-900)}
     </div>
     <div class="card">
       <div class="chart-container"><canvas id="salesChart"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== MONTHLY REPORT ========== -->
+<div id="page-monthly-report" class="page">
+  <div class="toolbar" style="margin-bottom:20px;align-items:center">
+    <label style="font-weight:600">📊 월간 보고서 — </label>
+    <input type="month" id="mr-month" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:14px" />
+    <button class="btn btn-primary" onclick="loadMonthlyReport()">조회</button>
+    <button class="btn" onclick="window.print()" style="margin-left:auto">🖨️ 인쇄 / PDF 저장</button>
+  </div>
+
+  <!-- 헤더 KPI -->
+  <div id="mr-loading" style="text-align:center;padding:60px;color:var(--gray-500)">기간을 선택하고 조회 버튼을 눌러주세요.</div>
+
+  <div id="mr-content" style="display:none">
+    <!-- 1) 핵심 KPI -->
+    <div class="card" style="margin-bottom:20px">
+      <div style="font-size:13px;color:var(--gray-500);margin-bottom:6px">📈 핵심 KPI <span id="mr-period-label" style="margin-left:8px"></span></div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:10px" id="mr-kpi-grid"></div>
+    </div>
+
+    <!-- 2) MoM / YoY 비교 -->
+    <div class="card" style="margin-bottom:20px">
+      <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">📊 전월 / 작년 동월 비교</div>
+      <div style="overflow-x:auto">
+        <table class="data-table" id="mr-compare-table" style="width:100%"></table>
+      </div>
+    </div>
+
+    <!-- 3) 사이트(채널) 별 -->
+    <div class="card" style="margin-bottom:20px">
+      <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">🏷️ 사이트(채널) 별 매출 분포</div>
+      <div style="overflow-x:auto">
+        <table class="data-table" id="mr-channel-table" style="width:100%"></table>
+      </div>
+    </div>
+
+    <!-- 4) 동시구매 / 단독주문 -->
+    <div class="card" style="margin-bottom:20px">
+      <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">🎁 동시구매 vs 단독주문</div>
+      <div style="overflow-x:auto">
+        <table class="data-table" id="mr-type-table" style="width:100%"></table>
+      </div>
+    </div>
+
+    <!-- 5) 일별 -->
+    <div class="card" style="margin-bottom:20px">
+      <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">🗓️ 일별 매출</div>
+      <div style="overflow-x:auto;max-height:480px;overflow-y:auto">
+        <table class="data-table" id="mr-daily-table" style="width:100%"></table>
+      </div>
+    </div>
+
+    <!-- 6) 주차별 -->
+    <div class="card" style="margin-bottom:20px">
+      <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">📅 주차별 매출</div>
+      <div style="overflow-x:auto">
+        <table class="data-table" id="mr-weekly-table" style="width:100%"></table>
+      </div>
+    </div>
+
+    <!-- 7) 상품별 베스트 -->
+    <div class="card" style="margin-bottom:20px">
+      <div style="font-size:13px;color:var(--gray-500);margin-bottom:10px">🏆 상품별 베스트 (Top 20)</div>
+      <div style="overflow-x:auto;max-height:560px;overflow-y:auto">
+        <table class="data-table" id="mr-product-table" style="width:100%"></table>
+      </div>
     </div>
   </div>
 </div>
@@ -1859,7 +1938,7 @@ function init() {
 
   // URL hash 기반 페이지 전환
   const hash = location.hash.replace('#', '') || 'dashboard';
-  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-alimtalk', 'bg-unified'].includes(hash)) showPage(hash);
+  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-alimtalk', 'bg-unified', 'monthly-report'].includes(hash)) showPage(hash);
 }
 
 function fmt(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -1899,6 +1978,7 @@ function showPage(name) {
   document.querySelector(`nav a[href="#${name}"]`).classList.add('active');
   // 탭 전환 시마다 해당 탭 데이터 리로드 (딥링크/왕복 일관성 보장)
   if (name === 'dashboard') loadDashboard();
+  if (name === 'monthly-report') initMonthlyReport();
   if (name === 'orders') loadOrders();
   if (name === 'sns') loadSnsInsight();
   if (name === 'worklog') loadWorklog();
@@ -2860,6 +2940,373 @@ function showDashboardSkeleton() {
       `<div class="skeleton" style="flex:1;height:${20 + Math.random()*80}px"></div>`
     ).join('');
   }
+}
+
+// ============================================
+// 월간 보고서 (Monthly Report)
+// ============================================
+//   /api/dashboard/summary 를 3회 호출 (대상월 / 전월 / 작년동월) 후 비교 표/리스트로 렌더.
+//   채널/일자/주차/상품/주문유형 별 모든 차원을 한 화면에 정리 — 외부 보고용.
+//   인쇄(Print) 시 PDF 로 저장 가능.
+
+let _mrData = null;
+
+function initMonthlyReport() {
+  // 기본값: 전월 (당월은 아직 진행 중이라 4월 리포트시 5월 진입 시 자동 4월로)
+  const el = document.getElementById('mr-month');
+  if (!el.value) {
+    const d = new Date();
+    // 1일~7일 사이면 전월, 그 외엔 당월
+    if (d.getDate() <= 7) {
+      d.setMonth(d.getMonth() - 1);
+    }
+    el.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  }
+  if (!_mrData) loadMonthlyReport();
+}
+
+/** YYYY-MM → { start: 'YYYY-MM-01', endPlus: '다음달 1일' } */
+function monthRange(yyyymm) {
+  const [y, m] = yyyymm.split('-').map(Number);
+  const start = `${y}-${String(m).padStart(2, '0')}-01`;
+  const next = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
+  return { start, endPlus: next };
+}
+
+/** YYYY-MM 의 전월 / 작년동월 */
+function prevMonth(yyyymm) {
+  let [y, m] = yyyymm.split('-').map(Number);
+  m--; if (m === 0) { m = 12; y--; }
+  return `${y}-${String(m).padStart(2, '0')}`;
+}
+function yoyMonth(yyyymm) {
+  const [y, m] = yyyymm.split('-').map(Number);
+  return `${y - 1}-${String(m).padStart(2, '0')}`;
+}
+
+/** ISO 주차 (일요일 시작) */
+function weekKey(ymd) {
+  const d = new Date(ymd + 'T00:00:00Z');
+  const dow = d.getUTCDay();
+  const sun = new Date(d.getTime() - dow * 86400000);
+  return sun.getUTCFullYear() + '-' + String(sun.getUTCMonth() + 1).padStart(2, '0') + '-W' + Math.ceil(sun.getUTCDate() / 7);
+}
+
+async function fetchMonthlySummary(yyyymm) {
+  const { start, endPlus } = monthRange(yyyymm);
+  const res = await fetch(`${API}/api/dashboard/summary?start_date=${start}&end_date=${endPlus}`);
+  if (!res.ok) throw new Error(`summary fetch failed: ${res.status}`);
+  return res.json();
+}
+
+/**
+ * 데이터셋(/api/dashboard/summary 응답) 을 KPI/일별/주차별/상품별/채널별 등으로 집계.
+ */
+function aggregateMonthly(data) {
+  const rows = (data && data.rows) || [];
+  const orderCounts = (data && data.orderCounts) || [];
+  // 총 KPI
+  let totalAmount = 0, totalQty = 0;
+  const orderSet = new Set();
+  for (const r of rows) {
+    totalAmount += r.total_amount || 0;
+    totalQty += r.total_qty || 0;
+  }
+  let totalOrders = 0;
+  for (const c of orderCounts) totalOrders += c.distinct_order_count || 0;
+  // 일별
+  const byDay = new Map();
+  for (const r of rows) {
+    if (!r.order_day) continue;
+    const e = byDay.get(r.order_day) || { amount: 0, qty: 0 };
+    e.amount += r.total_amount || 0;
+    e.qty += r.total_qty || 0;
+    byDay.set(r.order_day, e);
+  }
+  const byDayOrders = new Map();
+  for (const c of orderCounts) {
+    byDayOrders.set(c.order_day, (byDayOrders.get(c.order_day) || 0) + (c.distinct_order_count || 0));
+  }
+  // 주차별
+  const byWeek = new Map();
+  for (const r of rows) {
+    if (!r.order_day) continue;
+    const w = weekKey(r.order_day);
+    const e = byWeek.get(w) || { amount: 0, qty: 0 };
+    e.amount += r.total_amount || 0;
+    e.qty += r.total_qty || 0;
+    byWeek.set(w, e);
+  }
+  const byWeekOrders = new Map();
+  for (const c of orderCounts) {
+    const w = weekKey(c.order_day);
+    byWeekOrders.set(w, (byWeekOrders.get(w) || 0) + (c.distinct_order_count || 0));
+  }
+  // 사이트별
+  const bySite = new Map();
+  for (const r of rows) {
+    const s = r.site_name || '(미상)';
+    const e = bySite.get(s) || { amount: 0, qty: 0 };
+    e.amount += r.total_amount || 0;
+    e.qty += r.total_qty || 0;
+    bySite.set(s, e);
+  }
+  const bySiteOrders = new Map();
+  for (const c of orderCounts) {
+    const s = c.site_name || '(미상)';
+    bySiteOrders.set(s, (bySiteOrders.get(s) || 0) + (c.distinct_order_count || 0));
+  }
+  // 주문유형 (동시구매/단독)
+  const byType = new Map();
+  for (const r of rows) {
+    const t = r.order_type || '(미상)';
+    const e = byType.get(t) || { amount: 0, qty: 0 };
+    e.amount += r.total_amount || 0;
+    e.qty += r.total_qty || 0;
+    byType.set(t, e);
+  }
+  const byTypeOrders = new Map();
+  for (const c of orderCounts) {
+    const t = c.order_type || '(미상)';
+    byTypeOrders.set(t, (byTypeOrders.get(t) || 0) + (c.distinct_order_count || 0));
+  }
+  // 상품별
+  const byProduct = new Map();
+  for (const r of rows) {
+    const key = (r.card_code || '?') + '||' + (r.card_name || '?');
+    const e = byProduct.get(key) || { code: r.card_code, name: r.card_name, amount: 0, qty: 0, orderDays: new Set() };
+    e.amount += r.total_amount || 0;
+    e.qty += r.total_qty || 0;
+    if (r.order_day) e.orderDays.add(r.order_day);
+    byProduct.set(key, e);
+  }
+  return {
+    totalAmount, totalQty, totalOrders,
+    byDay, byDayOrders,
+    byWeek, byWeekOrders,
+    bySite, bySiteOrders,
+    byType, byTypeOrders,
+    byProduct,
+  };
+}
+
+async function loadMonthlyReport() {
+  const month = document.getElementById('mr-month').value;
+  if (!month) { showToast('월을 선택해주세요'); return; }
+  document.getElementById('mr-content').style.display = 'none';
+  document.getElementById('mr-loading').style.display = 'block';
+  document.getElementById('mr-loading').textContent = '데이터 조회 중... (대상월 / 전월 / 작년동월 3건 병렬)';
+  try {
+    const [target, prev, yoy] = await Promise.all([
+      fetchMonthlySummary(month),
+      fetchMonthlySummary(prevMonth(month)),
+      fetchMonthlySummary(yoyMonth(month)),
+    ]);
+    _mrData = {
+      month,
+      target: aggregateMonthly(target),
+      prev: aggregateMonthly(prev),
+      yoy: aggregateMonthly(yoy),
+    };
+    renderMonthlyReport();
+    document.getElementById('mr-loading').style.display = 'none';
+    document.getElementById('mr-content').style.display = 'block';
+  } catch (e) {
+    document.getElementById('mr-loading').textContent = '조회 실패: ' + (e.message || e);
+  }
+}
+
+function renderMonthlyReport() {
+  const { month, target, prev, yoy } = _mrData;
+  // 헤더 라벨
+  document.getElementById('mr-period-label').textContent =
+    `(${month} / 전월 ${prevMonth(month)} / 작년동월 ${yoyMonth(month)})`;
+
+  // 1) KPI grid
+  const aov = target.totalOrders > 0 ? target.totalAmount / target.totalOrders : 0;
+  const aovPrev = prev.totalOrders > 0 ? prev.totalAmount / prev.totalOrders : 0;
+  const aovYoY = yoy.totalOrders > 0 ? yoy.totalAmount / yoy.totalOrders : 0;
+  function deltaBadge(cur, base) {
+    if (!base) return '<span style="color:var(--gray-400);font-size:11px">N/A</span>';
+    const d = (cur - base) / base * 100;
+    const sign = d >= 0 ? '+' : '';
+    const color = d >= 0 ? '#16a34a' : '#dc2626';
+    return `<span style="color:${color};font-size:11px;font-weight:600">${sign}${d.toFixed(1)}%</span>`;
+  }
+  document.getElementById('mr-kpi-grid').innerHTML = [
+    { lab: '총 매출', val: fmtKRW(target.totalAmount), mom: deltaBadge(target.totalAmount, prev.totalAmount), yoy: deltaBadge(target.totalAmount, yoy.totalAmount) },
+    { lab: '주문수', val: target.totalOrders.toLocaleString() + '건', mom: deltaBadge(target.totalOrders, prev.totalOrders), yoy: deltaBadge(target.totalOrders, yoy.totalOrders) },
+    { lab: '판매수량', val: target.totalQty.toLocaleString() + '개', mom: deltaBadge(target.totalQty, prev.totalQty), yoy: deltaBadge(target.totalQty, yoy.totalQty) },
+    { lab: '객단가(AOV)', val: fmtKRW(Math.round(aov)), mom: deltaBadge(aov, aovPrev), yoy: deltaBadge(aov, aovYoY) },
+  ].map(k => `
+    <div style="padding:14px;background:var(--gray-50);border-radius:var(--radius);border:1px solid var(--gray-200)">
+      <div style="font-size:12px;color:var(--gray-500)">${k.lab}</div>
+      <div style="font-size:20px;font-weight:700;margin-top:4px">${k.val}</div>
+      <div style="margin-top:6px;font-size:11px;color:var(--gray-500)">전월 ${k.mom} · 작년 ${k.yoy}</div>
+    </div>
+  `).join('');
+
+  // 2) MoM/YoY 비교 표
+  const cmpRows = [
+    ['총 매출 (원)', target.totalAmount, prev.totalAmount, yoy.totalAmount, true],
+    ['주문수', target.totalOrders, prev.totalOrders, yoy.totalOrders, false],
+    ['판매수량', target.totalQty, prev.totalQty, yoy.totalQty, false],
+    ['객단가 (원)', Math.round(aov), Math.round(aovPrev), Math.round(aovYoY), true],
+  ];
+  document.getElementById('mr-compare-table').innerHTML = `
+    <thead><tr>
+      <th style="text-align:left">지표</th>
+      <th>${month}</th>
+      <th>${prevMonth(month)} (전월)</th>
+      <th>MoM</th>
+      <th>${yoyMonth(month)} (작년)</th>
+      <th>YoY</th>
+    </tr></thead>
+    <tbody>${cmpRows.map(r => `
+      <tr>
+        <td style="font-weight:600">${r[0]}</td>
+        <td class="num">${r[4] ? r[1].toLocaleString() : r[1].toLocaleString()}</td>
+        <td class="num">${r[2].toLocaleString()}</td>
+        <td class="num">${deltaBadge(r[1], r[2])}</td>
+        <td class="num">${r[3].toLocaleString()}</td>
+        <td class="num">${deltaBadge(r[1], r[3])}</td>
+      </tr>
+    `).join('')}</tbody>
+  `;
+
+  // 3) 사이트(채널) 별
+  const siteRows = [...target.bySite.entries()].sort((a, b) => b[1].amount - a[1].amount);
+  document.getElementById('mr-channel-table').innerHTML = `
+    <thead><tr>
+      <th style="text-align:left">사이트</th>
+      <th>매출</th>
+      <th>비중</th>
+      <th>주문수</th>
+      <th>판매수량</th>
+      <th>전월 비교</th>
+    </tr></thead>
+    <tbody>${siteRows.map(([s, d]) => {
+      const pct = target.totalAmount ? (d.amount / target.totalAmount * 100).toFixed(1) : '0.0';
+      const prevSite = prev.bySite.get(s);
+      return `<tr>
+        <td style="font-weight:600">${esc(s)}</td>
+        <td class="num">${fmtKRW(d.amount)}</td>
+        <td class="num">${pct}%</td>
+        <td class="num">${(target.bySiteOrders.get(s) || 0).toLocaleString()}</td>
+        <td class="num">${d.qty.toLocaleString()}</td>
+        <td class="num">${prevSite ? deltaBadge(d.amount, prevSite.amount) : '<span style="color:var(--gray-400);font-size:11px">신규</span>'}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  `;
+
+  // 4) 동시구매/단독주문
+  const typeRows = [...target.byType.entries()].sort((a, b) => b[1].amount - a[1].amount);
+  document.getElementById('mr-type-table').innerHTML = `
+    <thead><tr>
+      <th style="text-align:left">주문 유형</th>
+      <th>매출</th>
+      <th>비중</th>
+      <th>주문수</th>
+      <th>판매수량</th>
+      <th>객단가</th>
+    </tr></thead>
+    <tbody>${typeRows.map(([t, d]) => {
+      const orders = target.byTypeOrders.get(t) || 0;
+      const aovT = orders ? d.amount / orders : 0;
+      const pct = target.totalAmount ? (d.amount / target.totalAmount * 100).toFixed(1) : '0.0';
+      return `<tr>
+        <td style="font-weight:600">${esc(t)}</td>
+        <td class="num">${fmtKRW(d.amount)}</td>
+        <td class="num">${pct}%</td>
+        <td class="num">${orders.toLocaleString()}</td>
+        <td class="num">${d.qty.toLocaleString()}</td>
+        <td class="num">${fmtKRW(Math.round(aovT))}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  `;
+
+  // 5) 일별
+  const dayKeys = [...target.byDay.keys()].sort();
+  document.getElementById('mr-daily-table').innerHTML = `
+    <thead style="position:sticky;top:0;background:#fff;z-index:1"><tr>
+      <th style="text-align:left">일자</th>
+      <th>요일</th>
+      <th>매출</th>
+      <th>판매수량</th>
+      <th>주문수</th>
+    </tr></thead>
+    <tbody>${dayKeys.map(d => {
+      const data = target.byDay.get(d);
+      const dt = new Date(d + 'T00:00:00Z');
+      const dow = ['일','월','화','수','목','금','토'][dt.getUTCDay()];
+      const isWeekend = dt.getUTCDay() === 0 || dt.getUTCDay() === 6;
+      return `<tr ${isWeekend ? 'style="background:#fafafa"' : ''}>
+        <td style="font-weight:600">${d}</td>
+        <td style="${isWeekend ? 'color:#dc2626' : ''}">${dow}</td>
+        <td class="num">${fmtKRW(data.amount)}</td>
+        <td class="num">${data.qty.toLocaleString()}</td>
+        <td class="num">${(target.byDayOrders.get(d) || 0).toLocaleString()}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  `;
+
+  // 6) 주차별
+  const weekKeys = [...target.byWeek.keys()].sort();
+  document.getElementById('mr-weekly-table').innerHTML = `
+    <thead><tr>
+      <th style="text-align:left">주차 (일~토)</th>
+      <th>매출</th>
+      <th>판매수량</th>
+      <th>주문수</th>
+      <th>일평균 매출</th>
+    </tr></thead>
+    <tbody>${weekKeys.map(w => {
+      const data = target.byWeek.get(w);
+      const orders = target.byWeekOrders.get(w) || 0;
+      // 해당 주에 속한 일자 수 (대상월 내에서만)
+      const daysInWeek = dayKeys.filter(d => weekKey(d) === w).length;
+      const avg = daysInWeek ? data.amount / daysInWeek : 0;
+      return `<tr>
+        <td style="font-weight:600">${w}</td>
+        <td class="num">${fmtKRW(data.amount)}</td>
+        <td class="num">${data.qty.toLocaleString()}</td>
+        <td class="num">${orders.toLocaleString()}</td>
+        <td class="num">${fmtKRW(Math.round(avg))}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  `;
+
+  // 7) 상품 베스트 (Top 20) + 전월 비교
+  const products = [...target.byProduct.entries()]
+    .map(([k, v]) => ({ ...v, key: k }))
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 20);
+  document.getElementById('mr-product-table').innerHTML = `
+    <thead style="position:sticky;top:0;background:#fff;z-index:1"><tr>
+      <th style="text-align:left">#</th>
+      <th style="text-align:left">상품코드</th>
+      <th style="text-align:left">상품명</th>
+      <th>매출</th>
+      <th>판매수량</th>
+      <th>판매일수</th>
+      <th>전월 매출</th>
+      <th>MoM</th>
+    </tr></thead>
+    <tbody>${products.map((p, i) => {
+      const prevP = prev.byProduct.get(p.key);
+      const prevAmount = prevP ? prevP.amount : 0;
+      return `<tr>
+        <td class="num">${i + 1}</td>
+        <td style="font-family:monospace;font-size:12px">${esc(p.code || '-')}</td>
+        <td>${esc(p.name || '-')}</td>
+        <td class="num">${fmtKRW(p.amount)}</td>
+        <td class="num">${p.qty.toLocaleString()}</td>
+        <td class="num">${p.orderDays.size}</td>
+        <td class="num">${prevAmount ? fmtKRW(prevAmount) : '<span style="color:var(--gray-400)">-</span>'}</td>
+        <td class="num">${prevAmount ? deltaBadge(p.amount, prevAmount) : '<span style="color:#7c3aed;font-size:11px;font-weight:600">신규</span>'}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  `;
 }
 
 async function loadDashboard() {
