@@ -164,12 +164,13 @@ function fmtKstIso(ms) {
 
 /**
  * 변경된 주문 목록 — last-changed-statuses endpoint.
- *   주문 상태 변화가 있었던 productOrderId 만 반환 (가벼움).
- *   sync 의 1차 단계로 사용.
+ *   ⚠️ 네이버 spec: lastChangedFrom 만 주면 자동으로 +24h 윈도우. 더 넓게는 lastChangedTo 명시 필요.
+ *   ⚠️ 최대 윈도우 24h. 더 긴 기간은 24h chunk 반복 (listAllOrders 참고).
  */
-async function listChangedStatuses({ fromMs, lastChangedType } = {}) {
+async function listChangedStatuses({ fromMs, toMs, lastChangedType } = {}) {
   const params = new URLSearchParams();
   params.set('lastChangedFrom', fmtKstIso(fromMs));
+  if (toMs) params.set('lastChangedTo', fmtKstIso(toMs));
   if (lastChangedType) params.set('lastChangedType', lastChangedType);
   return callNaver('GET', `/external/v1/pay-order/seller/product-orders/last-changed-statuses?${params.toString()}`);
 }
@@ -187,25 +188,42 @@ async function queryProductOrders(productOrderIds) {
 
 /**
  * 통합: 기간 내 변경된 주문 목록 + 상세 일괄 조회.
- *   결과: { items: [...상세], pages: 1, totalCount }
- *   pages 는 호환용 (실제로는 단일 호출 후 batch query).
+ *   네이버 last-changed-statuses 는 최대 24h 윈도우라 일별 chunk 로 반복.
+ *
+ *   결과: { items, pages, totalCount, idsFetched, chunks }
  */
 async function listAllOrders({ startMs, endMs } = {}) {
-  // 1) 변경된 주문 ID 목록
-  const changedRes = await listChangedStatuses({ fromMs: startMs });
-  const lastChanged = changedRes.data?.lastChangeStatuses || changedRes.data || [];
-  // productOrderId 리스트 추출
-  const ids = [];
-  for (const row of (Array.isArray(lastChanged) ? lastChanged : [])) {
-    if (row && row.productOrderId) ids.push(String(row.productOrderId));
+  const CHUNK_MS = 24 * 3600 * 1000; // 24h
+  const idSet = new Set();
+  let chunks = 0;
+  // 1) 24h chunk 별로 변경 주문 ID 수집
+  for (let from = startMs; from < endMs; from += CHUNK_MS) {
+    const to = Math.min(from + CHUNK_MS, endMs);
+    chunks++;
+    try {
+      const res = await listChangedStatuses({ fromMs: from, toMs: to });
+      const arr = res.data?.lastChangeStatuses || res.data || [];
+      for (const row of (Array.isArray(arr) ? arr : [])) {
+        if (row && row.productOrderId) idSet.add(String(row.productOrderId));
+      }
+    } catch (e) {
+      console.warn(`[naver listAllOrders] chunk ${new Date(from).toISOString()} 실패: ${e.message}`);
+    }
   }
-  if (!ids.length) return { items: [], pages: 1, totalCount: 0, idsFetched: 0 };
+  const ids = [...idSet];
+  if (!ids.length) return { items: [], pages: chunks, totalCount: 0, idsFetched: 0, chunks };
 
-  // 2) 상세 조회 (batch — 단순화: 한 번에 전부)
-  const detailRes = await queryProductOrders(ids);
-  const details = Array.isArray(detailRes.data) ? detailRes.data : [];
+  // 2) 상세 조회 (batch — 한 번에 전부; 네이버 가 한 호출당 limit 있으면 추후 분할)
+  let details;
+  try {
+    const detailRes = await queryProductOrders(ids);
+    details = Array.isArray(detailRes.data) ? detailRes.data : [];
+  } catch (e) {
+    console.warn(`[naver listAllOrders] detail query 실패: ${e.message}`);
+    details = [];
+  }
 
-  // endMs 이내로 필터 (안전장치 — 네이버 가 endMs 도 받지 않음, 클라 측 필터)
+  // endMs 이내로 필터 (안전장치)
   const filtered = details.filter(item => {
     const t = item.productOrder?.orderDate || item.productOrder?.paymentDate || null;
     if (!t) return true;
@@ -214,7 +232,7 @@ async function listAllOrders({ startMs, endMs } = {}) {
     return tMs <= endMs;
   });
 
-  return { items: filtered, pages: 1, totalCount: filtered.length, idsFetched: ids.length };
+  return { items: filtered, pages: chunks, totalCount: filtered.length, idsFetched: ids.length, chunks };
 }
 
 module.exports = {
