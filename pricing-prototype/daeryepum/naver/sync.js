@@ -45,24 +45,30 @@ const STATUS_LABEL = {
  *   필드명이 실제 응답과 다를 수 있어 raw_payload 도 함께 저장 (디버깅용).
  */
 function normalizeOrder(item) {
+  // 네이버 detail 응답 구조: { order: {...}, productOrder: {...}, (delivery?) }
   const po = item.productOrder || item;
   const order = item.order || {};
-  const delivery = item.delivery || {};
 
   const productOrderId = String(po.productOrderId || '');
   const orderId = String(po.orderId || order.orderId || '');
   if (!productOrderId || !orderId) return null;
 
-  // 카테고리 필터
-  const categoryId = String(po.categoryId || po.category?.categoryId || '');
+  // 카테고리/상품코드 필터 — 실제 응답 필드명 매핑
+  //   sellerProductCode (예: 'TGJSD01') — 셀러센터 등록한 상품 코드 (운영팀 매핑 대상)
+  //   productId (예: '13501813395') — 네이버 상품번호
   const productCode = po.sellerProductCode ? String(po.sellerProductCode) : null;
+  const productId = po.productId ? String(po.productId) : null;
+  const categoryId = String(po.categoryId || po.category?.categoryId || '');
   if (!FILTER_DISABLED) {
     const catOk = CATEGORY_IDS.length && CATEGORY_IDS.includes(categoryId);
-    const codeOk = PRODUCT_CODES.length && productCode && PRODUCT_CODES.includes(productCode);
+    const codeOk = PRODUCT_CODES.length && (
+      (productCode && PRODUCT_CODES.includes(productCode)) ||
+      (productId && PRODUCT_CODES.includes(productId))
+    );
     if (!catOk && !codeOk) return null;
   }
 
-  const orderedAt = po.orderDate ? new Date(po.orderDate).toISOString() : (order.orderDate ? new Date(order.orderDate).toISOString() : null);
+  const orderedAt = order.orderDate ? new Date(order.orderDate).toISOString() : (po.orderDate ? new Date(po.orderDate).toISOString() : null);
   const paidAt = order.paymentDate ? new Date(order.paymentDate).toISOString() : (po.paymentDate ? new Date(po.paymentDate).toISOString() : null);
 
   const status = po.productOrderStatus || 'UNKNOWN';
@@ -72,8 +78,8 @@ function normalizeOrder(item) {
   const unit = Number(po.unitPrice || po.productPrice || 0) || 0;
   const total = Number(po.totalPaymentAmount || po.totalPrice || (unit * qty)) || 0;
 
-  // 수령인/배송지 — delivery 또는 shippingAddress 경로
-  const sa = delivery.shippingAddress || po.shippingAddress || order.shippingAddress || {};
+  // 수령인/배송지 — productOrder.shippingAddress 경로 (실제 응답)
+  const sa = po.shippingAddress || order.shippingAddress || {};
 
   return {
     product_order_id: productOrderId,
@@ -82,7 +88,8 @@ function normalizeOrder(item) {
     paid_at: paidAt,
     product_name: po.productName || '네이버 답례품',
     product_option: po.productOption || null,
-    product_code: productCode,
+    // product_code: sellerProductCode 우선, 없으면 productId 폴백
+    product_code: productCode || productId,
     category_id: categoryId || null,
     category_name: po.categoryName || po.category?.categoryName || null,
     item_count: qty,
@@ -92,12 +99,20 @@ function normalizeOrder(item) {
     recv_hphone: sa.tel1 || sa.tel2 || sa.receiverTel1 || sa.phone || null,
     recv_address: [sa.baseAddress, sa.detailedAddress].filter(Boolean).join(' ') || sa.fullAddress || null,
     recv_postal_code: sa.zipCode || sa.postalCode || null,
-    recv_message: delivery.deliveryMemo || po.deliveryMemo || sa.deliveryMemo || null,
+    // 배송 메모 — 네이버는 'shippingMemo' 필드 사용 (deliveryMemo 아님)
+    recv_message: po.shippingMemo || order.shippingMemo || null,
     settle_price: total,
     settle_method: order.paymentMeans || po.paymentMeans || null,
     status,
     status_label: statusLabel,
-    raw_payload: { item_keys: Object.keys(item), po_keys: Object.keys(po) },
+    raw_payload: {
+      // 진단/재처리용 — 주요 필드만 보존
+      productClass: po.productClass,
+      deliveryAttributeType: po.deliveryAttributeType,
+      productId: po.productId,
+      sellerCustomCode1: po.sellerCustomCode1,
+      inflowPath: po.inflowPath,
+    },
     synced_at: new Date().toISOString(),
   };
 }
