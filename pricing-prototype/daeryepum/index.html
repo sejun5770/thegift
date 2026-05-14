@@ -3049,8 +3049,9 @@ async function fetchMonthlySummary(yyyymm) {
  * 데이터셋(/api/dashboard/summary 응답) 을 KPI/일별/주차별/상품별/채널별 등으로 집계.
  */
 function aggregateMonthly(data) {
-  const rows = (data && data.rows) || [];
-  const orderCounts = (data && data.orderCounts) || [];
+  // API 응답: { summary, order_counts, express_daily }
+  const rows = (data && (data.summary || data.rows)) || [];
+  const orderCounts = (data && (data.order_counts || data.orderCounts)) || [];
   // 총 KPI
   let totalAmount = 0, totalQty = 0;
   const orderSet = new Set();
