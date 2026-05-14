@@ -7379,14 +7379,10 @@ function renderBgUnified() {
     }
   }
 
-  // 입력완료 탭 정렬:
-  //   1순위: 마켓플레이스 주문(쿠팡/네이버) 먼저 (별도 채널 — 운영팀이 우선 처리)
-  //   2순위: 같은 그룹 내에서는 submitted_at/updated_at DESC (최신 위)
+  // 입력완료 탭 정렬: submitted_at / updated_at DESC (최신 입력 위).
+  //   채널 구분 없이 일관 — 운영팀이 최신 입력 순서로 처리할 수 있게.
   if (activeTab === 'submitted') {
     filtered.sort((a, b) => {
-      const aMk = isMarketplace(a) ? 0 : 1;
-      const bMk = isMarketplace(b) ? 0 : 1;
-      if (aMk !== bMk) return aMk - bMk;
       const ciKeyA = bgCiKey(a);
       const ciKeyB = bgCiKey(b);
       const ciA = bgUnifiedCiMap.get(ciKeyA);
