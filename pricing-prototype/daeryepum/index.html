@@ -2258,11 +2258,27 @@ async function syncNaverOrders(btn) {
       body: JSON.stringify({ days_back: 7 }),
     });
     const data = await res.json();
+    // 진단용 — 항상 콘솔에 전체 응답 출력 (0건 원인 추적)
+    console.log('[naver sync] response:', data);
     if (data.error) {
       alert('네이버 동기화 실패:\n' + data.error);
     } else {
-      const msg = `✅ 동기화 완료\n\n변경된 주문 ID: ${data.ids_fetched || 0}개\n상세 fetch: ${data.fetched}건\n저장 row: ${data.upserted}개\n필터 제외: ${data.filtered_out}개`
-        + (data.filter_disabled ? '\n\n⚠️ 카테고리 필터 미설정 — 전체 주문 저장됨. 답례품 카테고리 ID 확인 후 환경변수 설정 권장.' : '');
+      let msg = `✅ 동기화 완료\n\n변경된 주문 ID: ${data.ids_fetched || 0}개\n상세 fetch: ${data.fetched}건\n저장 row: ${data.upserted}개\n필터 제외: ${data.filtered_out}개`;
+      // 진단 정보 — 0건일 때 chunk 별 상세 노출
+      if (data.fetched === 0 && Array.isArray(data.diagnostics) && data.diagnostics.length) {
+        msg += `\n\n— 진단 (chunk 별) —\nsources: ${(data.sources || []).join(', ') || '(none)'}`;
+        for (const d of data.diagnostics) {
+          const parts = [];
+          if (d.direct) parts.push(`direct=${d.direct.count != null ? d.direct.count : ('err:' + (d.direct.error || '?'))}`);
+          if (d.changed) parts.push(`changed=${d.changed.count != null ? d.changed.count : ('err:' + (d.changed.error || '?'))}`);
+          if (d.query) parts.push(`query=${d.query.count != null ? d.query.count : ('err:' + (d.query.error || '?'))}`);
+          msg += `\n  #${d.chunk} ${d.from_kst?.slice(5, 16)}~${d.to_kst?.slice(5, 16)}: ${parts.join(', ')}`;
+        }
+        msg += '\n\n전체 JSON 은 개발자도구 Console 탭 확인 (`[naver sync] response`).';
+      }
+      if (data.filter_disabled) {
+        msg += '\n\n⚠️ 카테고리 필터 미설정 — 전체 주문 저장됨.';
+      }
       alert(msg);
       loadOrders();
       refreshNaverSyncMeta();
