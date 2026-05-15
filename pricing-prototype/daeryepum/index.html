@@ -1777,6 +1777,7 @@ nav a:hover{color:var(--gray-900)}
             <th>현금영수증</th>
             <th style="max-width:160px">요청사항</th>
             <th></th>
+            <th style="min-width:160px;white-space:nowrap">워크플로우</th>
           </tr>
         </thead>
         <tbody id="uni-tbody"></tbody>
@@ -8985,6 +8986,9 @@ function renderBgUnified() {
       processedCellHtml = `<td class="uni-col-processed" style="display:none"></td>`;
     }
 
+    // 워크플로우 셀 — 행의 현재 stage 에 맞는 액션 버튼
+    const workflowCell = _renderWorkflowCell(rowIdx, order, ci, sel);
+
     html += `<tr class="${rowClass}" style="${borderStyle}">
       <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()"></td>
       <td style="font-weight:600;white-space:nowrap">${esc(order.order_seq)}</td>
@@ -9005,11 +9009,398 @@ function renderBgUnified() {
       <td style="font-size:12px">${receiptText}</td>
       <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray-500)" title="${esc(requestText)}">${requestText ? esc(requestText) : '<span style="color:var(--gray-300)">-</span>'}</td>
       <td>${editBtn}</td>
+      <td style="font-size:11px;vertical-align:top;padding:6px 8px">${workflowCell}</td>
     </tr>`;
   });
 
   document.getElementById('uni-tbody').innerHTML = html;
   updateBgUnifiedSelectedCount();
+}
+
+// ============================================
+// 워크플로우 셀 + API + 모달
+// ============================================
+
+const STAGE_LABELS = {
+  unsubmitted: '미입력', submitted: '입력완료', sticker_completed: '스티커 작업완료',
+  printed: '인쇄완료', bound: '제본완료', packed: '포장완료', shipped: '출고완료',
+};
+const STAGE_ORDER = ['unsubmitted', 'submitted', 'sticker_completed', 'printed', 'bound', 'packed', 'shipped'];
+
+function _stickerIndexFromSel(ci, sel) {
+  if (!ci || !sel) return -1;
+  const sels = Array.isArray(ci.sticker_selections) ? ci.sticker_selections : [];
+  return sels.findIndex(s => s.product_code === sel.product_code && s.sticker_code === sel.sticker_code);
+}
+
+/** 행 워크플로우 셀 HTML — 현재 stage 에 맞는 버튼 노출. */
+function _renderWorkflowCell(rowIdx, order, ci, sel) {
+  const stage = computeRowStage(order, ci, sel);
+  const stickerIdx = _stickerIndexFromSel(ci, sel);
+  const orderId = bgCiKey(order);
+  const canEditWorkflow = !!ci && stickerIdx >= 0;
+  const imgs = (sel?.images || []);
+  const imgCnt = imgs.length;
+  const mainImg = imgs.find(i => i.is_main) || imgs[0] || null;
+
+  let html = '';
+  // 이미지 상태 표시
+  if (imgCnt > 0) {
+    html += `<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px">
+      <button class="btn" style="padding:2px 6px;font-size:10px" onclick="openStickerImageModal('${esc(orderId)}', ${stickerIdx})" title="이미지 ${imgCnt}장 보기/관리">📷 ${imgCnt}</button>
+      ${mainImg ? `<span style="color:var(--gray-400);font-size:10px">${esc(mainImg.filename).slice(0, 12)}...</span>` : ''}
+    </div>`;
+  }
+
+  // Stage 별 액션 버튼
+  if (canEditWorkflow) {
+    if (stage === 'submitted') {
+      html += `<button class="btn btn-primary" style="padding:3px 8px;font-size:11px;width:100%" onclick="openStickerUploadModal('${esc(orderId)}', ${stickerIdx})">📤 스티커 업로드</button>`;
+    } else if (stage === 'sticker_completed') {
+      html += `<div style="display:flex;gap:3px;flex-wrap:wrap">
+        <button class="btn btn-primary" style="padding:3px 8px;font-size:11px;flex:1" onclick="advanceWorkflow('${esc(orderId)}', ${stickerIdx}, 'printed')">🖨️ 인쇄완료</button>
+        <button class="btn" style="padding:3px 6px;font-size:11px" onclick="openStickerUploadModal('${esc(orderId)}', ${stickerIdx})" title="이미지 추가">📤</button>
+      </div>`;
+    } else if (stage === 'printed') {
+      html += `<button class="btn btn-primary" style="padding:3px 8px;font-size:11px;width:100%" onclick="advanceWorkflow('${esc(orderId)}', ${stickerIdx}, 'bound')">📑 제본완료</button>`;
+    } else if (stage === 'bound') {
+      html += `<button class="btn btn-primary" style="padding:3px 8px;font-size:11px;width:100%" onclick="advanceWorkflow('${esc(orderId)}', ${stickerIdx}, 'packed')">📦 포장완료</button>`;
+    } else if (stage === 'packed') {
+      html += `<button class="btn btn-primary" style="padding:3px 8px;font-size:11px;width:100%;background:#7c3aed;border-color:#7c3aed" onclick="openInvoiceModal('${esc(orderId)}', ${stickerIdx})">🚚 출고처리</button>`;
+    } else if (stage === 'shipped') {
+      // 출고 정보 표시 + 송장 삭제
+      const shipped = sel?.shipped_at;
+      const shippedDate = shipped ? new Date(shipped).toISOString().slice(0, 10) : '-';
+      html += `<div style="color:#16a34a;font-size:10px;margin-bottom:3px">✅ ${shippedDate} 출고</div>
+        <button class="btn" style="padding:2px 6px;font-size:10px" onclick="openInvoiceModal('${esc(orderId)}', ${stickerIdx})">송장 확인</button>`;
+    }
+    // 임의 stage 점프 버튼 — submitted 이상 모두 노출
+    if (stage !== 'unsubmitted' && stage !== 'submitted') {
+      html += `<button class="btn" style="padding:2px 6px;font-size:10px;margin-top:3px;color:#92400e;border-color:#fbbf24" onclick="openJumpStageModal('${esc(orderId)}', ${stickerIdx})" title="이전 단계로 되돌리기">↺ 점프</button>`;
+    }
+  } else if (stage === 'unsubmitted') {
+    html += '<span style="color:var(--gray-400);font-size:10px">고객 입력 대기</span>';
+  }
+  return html || '<span style="color:var(--gray-300)">-</span>';
+}
+
+/** stage 진행 API 호출 (단순 advance — 현재 stage 다음으로). */
+async function advanceWorkflow(orderId, stickerIndex, stage) {
+  const label = STAGE_LABELS[stage] || stage;
+  if (!confirm(`이 행을 '${label}' 단계로 진행합니다. 계속할까요?`)) return;
+  try {
+    const r = await fetch(`${API}/api/bg/orders/${encodeURIComponent(orderId)}/stickers/${stickerIndex}/workflow`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.message || 'failed');
+    showToast(`✅ ${label} 처리 완료`);
+    await loadBgUnified();
+  } catch (e) {
+    alert('처리 실패: ' + e.message);
+  }
+}
+
+/** 임의 stage 점프 모달 (되돌리기). */
+function openJumpStageModal(orderId, stickerIndex) {
+  // 'submitted' 단계로 점프는 이미지 모두 삭제 필요 (서버 측 STAGE_KEYS 외) → 제외.
+  // 입력완료(이미지 없음) 로 완전 되돌리려면 이미지 보기 모달에서 개별 삭제.
+  const stages = ['sticker_completed', 'printed', 'bound', 'packed'];
+  const stageOpts = stages.map(s => `<option value="${s}">${STAGE_LABELS[s]}</option>`).join('');
+  const html = `
+    <div id="jump-stage-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center">
+      <div style="background:#fff;padding:24px;border-radius:8px;max-width:420px;width:90%">
+        <div style="font-weight:700;font-size:16px;margin-bottom:10px">↺ 단계 되돌리기 / 점프</div>
+        <div style="color:var(--gray-500);font-size:13px;margin-bottom:14px">
+          선택한 단계로 이 행의 상태를 변경합니다. 이후 단계의 timestamps 는 모두 초기화됩니다.
+        </div>
+        <label style="display:block;font-size:13px;margin-bottom:6px">목표 단계</label>
+        <select id="jump-target-stage" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:4px;margin-bottom:14px">${stageOpts}</select>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn" onclick="document.getElementById('jump-stage-modal').remove()">취소</button>
+          <button class="btn btn-primary" onclick="confirmJumpStage('${esc(orderId)}', ${stickerIndex})">점프</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function confirmJumpStage(orderId, stickerIndex) {
+  const stage = document.getElementById('jump-target-stage').value;
+  document.getElementById('jump-stage-modal').remove();
+  if (!stage) return;
+  try {
+    const r = await fetch(`${API}/api/bg/orders/${encodeURIComponent(orderId)}/stickers/${stickerIndex}/workflow`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stage, jump: true }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.message || 'failed');
+    showToast(`✅ ${STAGE_LABELS[stage]} 단계로 점프 완료`);
+    await loadBgUnified();
+  } catch (e) {
+    alert('점프 실패: ' + e.message);
+  }
+}
+
+// ============================================
+// 스티커 이미지 업로드 모달
+// ============================================
+function openStickerUploadModal(orderId, stickerIndex) {
+  const html = `
+    <div id="sticker-upload-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center">
+      <div style="background:#fff;padding:24px;border-radius:8px;max-width:540px;width:90%;max-height:90vh;overflow:auto">
+        <div style="font-weight:700;font-size:16px;margin-bottom:10px">📤 스티커 이미지 업로드</div>
+        <div style="color:var(--gray-500);font-size:12px;margin-bottom:14px">
+          주문번호: <code>${esc(orderId)}</code> · sticker_index: ${stickerIndex}<br>
+          PNG/JPG/PDF (max 10MB) 여러 개 선택 가능.
+        </div>
+        <input type="file" id="sticker-upload-input" accept="image/png,image/jpeg,application/pdf" multiple
+               style="width:100%;padding:10px;border:1px dashed var(--gray-300);border-radius:6px;margin-bottom:14px" />
+        <div id="sticker-upload-progress" style="font-size:12px;color:var(--gray-500);margin-bottom:14px;min-height:20px"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn" onclick="document.getElementById('sticker-upload-modal').remove()">닫기</button>
+          <button class="btn btn-primary" id="sticker-upload-btn" onclick="doStickerUpload('${esc(orderId)}', ${stickerIndex})">업로드</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function doStickerUpload(orderId, stickerIndex) {
+  const input = document.getElementById('sticker-upload-input');
+  const files = Array.from(input.files || []);
+  if (!files.length) { alert('파일을 선택해주세요'); return; }
+  const btn = document.getElementById('sticker-upload-btn');
+  const prog = document.getElementById('sticker-upload-progress');
+  btn.disabled = true;
+  let ok = 0, fail = 0;
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    prog.textContent = `${i + 1}/${files.length} 업로드 중: ${f.name} (${(f.size / 1024).toFixed(1)}KB)`;
+    try {
+      // base64 변환
+      const arrayBuf = await f.arrayBuffer();
+      const data = _bufToBase64(arrayBuf);
+      const r = await fetch(`${API}/api/bg/orders/${encodeURIComponent(orderId)}/stickers/${stickerIndex}/images`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: f.name, mime: f.type || 'application/octet-stream', data }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.message || 'upload failed');
+      ok++;
+    } catch (e) {
+      fail++;
+      console.warn('[sticker upload]', f.name, e);
+    }
+  }
+  prog.textContent = `완료: ${ok}건 성공, ${fail}건 실패`;
+  if (ok > 0) {
+    showToast(`✅ ${ok}건 업로드 완료`);
+    document.getElementById('sticker-upload-modal').remove();
+    await loadBgUnified();
+  } else {
+    btn.disabled = false;
+  }
+}
+
+/** ArrayBuffer → base64 (대용량 안전) */
+function _bufToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+// ============================================
+// 스티커 이미지 보기/관리 모달
+// ============================================
+async function openStickerImageModal(orderId, stickerIndex) {
+  const html = `
+    <div id="sticker-image-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center">
+      <div style="background:#fff;padding:24px;border-radius:8px;max-width:720px;width:90%;max-height:90vh;overflow:auto">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="font-weight:700;font-size:16px">📷 스티커 이미지 관리</span>
+          <span style="color:var(--gray-500);font-size:12px">${esc(orderId)} · #${stickerIndex}</span>
+        </div>
+        <div id="sticker-image-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:14px;min-height:120px">로드 중...</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn" onclick="openStickerUploadModal('${esc(orderId)}', ${stickerIndex});document.getElementById('sticker-image-modal').remove()">📤 추가 업로드</button>
+          <button class="btn" onclick="document.getElementById('sticker-image-modal').remove()">닫기</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  await loadStickerImageList(orderId, stickerIndex);
+}
+
+async function loadStickerImageList(orderId, stickerIndex) {
+  const root = document.getElementById('sticker-image-list');
+  if (!root) return;
+  try {
+    const r = await fetch(`${API}/api/bg/orders/${encodeURIComponent(orderId)}/stickers/${stickerIndex}/images`);
+    const j = await r.json();
+    const imgs = j.images || [];
+    if (!imgs.length) {
+      root.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--gray-400);padding:30px">이미지 없음</div>';
+      return;
+    }
+    root.innerHTML = imgs.map(img => {
+      const isImage = img.mime && img.mime.startsWith('image/');
+      const thumb = isImage && img.url
+        ? `<img src="${esc(img.url)}" style="width:100%;height:120px;object-fit:cover;border-radius:4px" />`
+        : `<div style="width:100%;height:120px;background:var(--gray-100);display:flex;align-items:center;justify-content:center;border-radius:4px;font-size:24px">${(img.mime||'').includes('pdf') ? '📄' : '📎'}</div>`;
+      return `<div style="border:2px solid ${img.is_main ? '#16a34a' : 'var(--gray-200)'};border-radius:6px;padding:6px">
+        ${thumb}
+        <div style="font-size:10px;margin-top:4px;word-break:break-all;color:var(--gray-600)" title="${esc(img.filename)}">${esc(img.filename).slice(0, 30)}${img.filename.length > 30 ? '...' : ''}</div>
+        <div style="display:flex;gap:3px;margin-top:6px;flex-wrap:wrap">
+          ${img.url ? `<a class="btn" href="${esc(img.url)}" target="_blank" download="${esc(img.filename)}" style="padding:2px 6px;font-size:10px;text-decoration:none">📥</a>` : ''}
+          ${!img.is_main ? `<button class="btn" style="padding:2px 6px;font-size:10px" onclick="setStickerMain('${esc(orderId)}', ${stickerIndex}, '${esc(img.filename)}')">⭐ 메인</button>` : '<span style="color:#16a34a;font-size:10px;padding:2px 6px">⭐ 메인</span>'}
+          <button class="btn" style="padding:2px 6px;font-size:10px;color:#dc2626" onclick="deleteStickerImage('${esc(orderId)}', ${stickerIndex}, '${esc(img.filename)}')">🗑️</button>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    root.innerHTML = '<div style="color:#dc2626">에러: ' + esc(e.message) + '</div>';
+  }
+}
+
+async function setStickerMain(orderId, stickerIndex, filename) {
+  try {
+    const r = await fetch(`${API}/api/bg/orders/${encodeURIComponent(orderId)}/stickers/${stickerIndex}/main`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename }),
+    });
+    if (!r.ok) throw new Error((await r.json()).message || 'failed');
+    showToast('✅ 메인 이미지 변경');
+    await loadStickerImageList(orderId, stickerIndex);
+    await loadBgUnified();
+  } catch (e) {
+    alert('실패: ' + e.message);
+  }
+}
+
+async function deleteStickerImage(orderId, stickerIndex, filename) {
+  if (!confirm(`이미지를 삭제할까요?\n${filename}\n\n(마지막 이미지를 삭제하면 워크플로우가 '입력완료' 로 초기화됩니다)`)) return;
+  try {
+    const r = await fetch(`${API}/api/bg/orders/${encodeURIComponent(orderId)}/stickers/${stickerIndex}/images/${encodeURIComponent(filename)}`, {
+      method: 'DELETE',
+    });
+    if (!r.ok) throw new Error((await r.json()).message || 'failed');
+    showToast('✅ 삭제 완료');
+    await loadStickerImageList(orderId, stickerIndex);
+    await loadBgUnified();
+  } catch (e) {
+    alert('삭제 실패: ' + e.message);
+  }
+}
+
+// ============================================
+// 송장 입력 모달 (출고처리)
+// ============================================
+const DELIVERY_COMPANIES = ['CJ대한통운', '한진택배', '롯데택배', '우체국택배', '로젠택배', '기타'];
+
+async function openInvoiceModal(orderId, stickerIndex) {
+  // 기존 송장 조회
+  let invoices = [];
+  try {
+    const r = await fetch(`${API}/api/bg/orders/${encodeURIComponent(orderId)}/invoices`);
+    if (r.ok) invoices = (await r.json()).invoices || [];
+  } catch {}
+
+  const existing = invoices.length
+    ? `<div style="margin-bottom:14px;padding:10px;background:var(--gray-50);border-radius:6px">
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px">기존 송장 (${invoices.length}건)</div>
+        ${invoices.map(inv => `
+          <div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px">
+            <span style="font-family:monospace">${esc(inv.invoice_number)}</span>
+            <span style="color:var(--gray-500)">${esc(inv.delivery_company)}</span>
+            <span style="color:var(--gray-400);font-size:11px">스티커 #${(inv.sticker_indices || []).join(',') || '-'}</span>
+            <button class="btn" style="padding:2px 6px;font-size:10px;color:#dc2626;margin-left:auto" onclick="deleteInvoice('${esc(orderId)}', '${esc(inv.id)}')">삭제</button>
+          </div>`).join('')}
+      </div>`
+    : '';
+
+  const dcOpts = DELIVERY_COMPANIES.map(c => `<option value="${c}">${c}</option>`).join('');
+  const html = `
+    <div id="invoice-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center">
+      <div style="background:#fff;padding:24px;border-radius:8px;max-width:520px;width:90%;max-height:90vh;overflow:auto">
+        <div style="font-weight:700;font-size:16px;margin-bottom:10px">🚚 출고처리 (송장 등록)</div>
+        <div style="color:var(--gray-500);font-size:12px;margin-bottom:14px">주문 <code>${esc(orderId)}</code></div>
+        ${existing}
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+          <label style="font-size:12px">택배사
+            <select id="inv-company" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:4px;margin-top:4px">${dcOpts}</select>
+          </label>
+          <label style="font-size:12px">송장번호
+            <input type="text" id="inv-number" placeholder="예: 1234567890" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:4px;margin-top:4px" />
+          </label>
+          <label style="font-size:12px">포함 sticker index (콤마 구분, 기본 현재 행)
+            <input type="text" id="inv-indices" value="${stickerIndex}" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:4px;margin-top:4px" />
+          </label>
+          <label style="font-size:12px">비고 (선택)
+            <input type="text" id="inv-notes" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:4px;margin-top:4px" />
+          </label>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn" onclick="document.getElementById('invoice-modal').remove()">취소</button>
+          <button class="btn btn-primary" onclick="submitInvoice('${esc(orderId)}')">송장 등록 + 출고완료</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function submitInvoice(orderId) {
+  const company = document.getElementById('inv-company').value;
+  const number = document.getElementById('inv-number').value.trim();
+  const indicesStr = document.getElementById('inv-indices').value.trim();
+  const notes = document.getElementById('inv-notes').value.trim();
+  if (!number) { alert('송장번호를 입력해주세요'); return; }
+  const indices = indicesStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+  if (!indices.length) { alert('포함 sticker index 가 필요합니다'); return; }
+  try {
+    const r = await fetch(`${API}/api/bg/orders/${encodeURIComponent(orderId)}/invoices`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        invoice_number: number,
+        delivery_company: company,
+        sticker_indices: indices,
+        notes,
+      }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.message || 'failed');
+    showToast('✅ 송장 등록 + 출고완료');
+    document.getElementById('invoice-modal').remove();
+    await loadBgUnified();
+  } catch (e) {
+    alert('실패: ' + e.message);
+  }
+}
+
+async function deleteInvoice(orderId, invoiceId) {
+  if (!confirm('송장을 삭제하고 출고 상태를 되돌릴까요?')) return;
+  try {
+    const r = await fetch(`${API}/api/bg/orders/${encodeURIComponent(orderId)}/invoices/${invoiceId}`, {
+      method: 'DELETE',
+    });
+    if (!r.ok) throw new Error((await r.json()).message || 'failed');
+    showToast('✅ 송장 삭제 (출고 롤백)');
+    document.getElementById('invoice-modal')?.remove();
+    await loadBgUnified();
+  } catch (e) {
+    alert('실패: ' + e.message);
+  }
 }
 
 function toggleBgUnifiedSelectAll(el) {
