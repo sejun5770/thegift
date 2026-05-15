@@ -1717,17 +1717,18 @@ nav a:hover{color:var(--gray-900)}
   <!-- 현재 활성 탭 상태 (내부) -->
   <input type="hidden" id="uni-active-tab" value="unsubmitted">
 
-  <!-- 입력완료 탭 전용: 정렬 옵션 -->
+  <!-- 정렬 옵션 — 입력완료 ~ 출고완료 탭 (미입력 제외) -->
   <div id="uni-sort-options" style="display:none;align-items:center;gap:10px;margin-bottom:10px;font-size:12px;color:var(--gray-600)">
     <span>정렬:</span>
     <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
       <input type="radio" name="uni-sort" value="default" checked onchange="renderBgUnified()">
-      수집미처리 우선 (기본)
+      기본 정렬
     </label>
     <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
       <input type="radio" name="uni-sort" value="ship_date_asc" onchange="renderBgUnified()">
       희망출고일 가까운 순
     </label>
+    <span id="uni-sort-default-hint" style="color:var(--gray-400);font-size:11px"></span>
   </div>
 
   <!-- 주문수집 현황 카드 (입력완료 탭 전용, 카운트만 — 액션 버튼은 통합 액션바로 이동) -->
@@ -8678,9 +8679,21 @@ function switchUniTab(tab) {
   document.querySelectorAll('.uni-col-workflow').forEach(el => {
     el.style.display = showWorkflowCol ? '' : 'none';
   });
-  // 정렬 옵션 — 입력완료 탭에서만 노출
+  // 정렬 옵션 — 미입력 외 모든 탭 노출. 기본 정렬 힌트는 탭별로 다름.
   const sortOpts = document.getElementById('uni-sort-options');
-  if (sortOpts) sortOpts.style.display = (tab === 'submitted') ? 'flex' : 'none';
+  if (sortOpts) sortOpts.style.display = (tab !== 'unsubmitted') ? 'flex' : 'none';
+  const hintEl = document.getElementById('uni-sort-default-hint');
+  if (hintEl) {
+    const hints = {
+      submitted: '(수집미처리 우선 + 입력일시 DESC)',
+      sticker_completed: '(스티커 작업일시 ASC — 오래된 것 먼저)',
+      printed: '(인쇄일시 ASC — 오래된 것 먼저)',
+      bound: '(제본일시 ASC — 오래된 것 먼저)',
+      packed: '(포장일시 ASC — 오래된 것 먼저)',
+      shipped: '(출고일시 DESC — 최근 출고 위)',
+    };
+    hintEl.textContent = hints[tab] || '';
+  }
   renderBgUnified();
 }
 
@@ -8829,32 +8842,30 @@ function renderBgUnified() {
     return true;
   });
 
-  // 정렬
-  if (activeTab === 'submitted') {
-    const sortMode = document.querySelector('input[name="uni-sort"]:checked')?.value || 'default';
-    if (sortMode === 'ship_date_asc') {
-      // 희망출고일 ASC (NULL 은 뒤로)
-      bgUnifiedRows.sort((a, b) => {
-        const dA = a.ci?.desired_ship_date || '';
-        const dB = b.ci?.desired_ship_date || '';
-        if (!dA && !dB) return 0;
-        if (!dA) return 1;
-        if (!dB) return -1;
-        return dA.localeCompare(dB);
-      });
-    } else {
-      // 기본: 수집미처리 우선 + processed_at DESC + 입력일시 DESC
-      bgUnifiedRows.sort((a, b) => {
-        const procA = a.ci?.processed_at;
-        const procB = b.ci?.processed_at;
-        if (!procA && procB) return -1;
-        if (procA && !procB) return 1;
-        if (procA && procB) return (Date.parse(procB) || 0) - (Date.parse(procA) || 0);
-        const tA = Math.max(Date.parse(a.ci?.updated_at || 0) || 0, Date.parse(a.ci?.submitted_at || 0) || 0);
-        const tB = Math.max(Date.parse(b.ci?.updated_at || 0) || 0, Date.parse(b.ci?.submitted_at || 0) || 0);
-        return tB - tA;
-      });
-    }
+  // 정렬 — 모든 워크플로우 탭 공통 라디오 옵션 (default / ship_date_asc)
+  const sortMode = document.querySelector('input[name="uni-sort"]:checked')?.value || 'default';
+  if (sortMode === 'ship_date_asc') {
+    // 희망출고일 ASC — 가까운 출고일 우선 (NULL 은 뒤로)
+    bgUnifiedRows.sort((a, b) => {
+      const dA = a.ci?.desired_ship_date || '';
+      const dB = b.ci?.desired_ship_date || '';
+      if (!dA && !dB) return 0;
+      if (!dA) return 1;
+      if (!dB) return -1;
+      return dA.localeCompare(dB);
+    });
+  } else if (activeTab === 'submitted') {
+    // 기본: 수집미처리 우선 + processed_at DESC + 입력일시 DESC
+    bgUnifiedRows.sort((a, b) => {
+      const procA = a.ci?.processed_at;
+      const procB = b.ci?.processed_at;
+      if (!procA && procB) return -1;
+      if (procA && !procB) return 1;
+      if (procA && procB) return (Date.parse(procB) || 0) - (Date.parse(procA) || 0);
+      const tA = Math.max(Date.parse(a.ci?.updated_at || 0) || 0, Date.parse(a.ci?.submitted_at || 0) || 0);
+      const tB = Math.max(Date.parse(b.ci?.updated_at || 0) || 0, Date.parse(b.ci?.submitted_at || 0) || 0);
+      return tB - tA;
+    });
   } else if (activeTab === 'shipped') {
     // 출고완료: shipped_at DESC (최근 출고 위)
     bgUnifiedRows.sort((a, b) => (Date.parse(b.sel?.shipped_at || 0) || 0) - (Date.parse(a.sel?.shipped_at || 0) || 0));
