@@ -9178,6 +9178,15 @@ function openBulkStickerUploadModal() {
   // 각 row 의 매칭 정보 사전 계산
   const rowItems = rows.map(r => {
     const orderId = bgCiKey(r.order);
+    // 스티커 문구(custom_values) 추출 — 같은 주문번호+스티커코드 케이스 식별용
+    let customText = '';
+    try {
+      const entries = _getStickerFieldEntries(r.sel);
+      customText = entries.map(e => {
+        if (e.key === 'text' && entries.length === 1) return String(e.value);
+        return `${e.label}: ${e.value}`;
+      }).join(' / ');
+    } catch {}
     return {
       row: r,
       orderId,
@@ -9185,6 +9194,7 @@ function openBulkStickerUploadModal() {
       stickerCode: r.sel?.sticker_code || null,
       productName: r.product_name || '-',
       recvName: r.order.display_name || r.order.recv_name || '-',
+      customText,
       matchedFiles: [],
     };
   });
@@ -9196,8 +9206,9 @@ function openBulkStickerUploadModal() {
       <div style="background:#fff;padding:22px;border-radius:8px;max-width:820px;width:96%;max-height:94vh;overflow:auto">
         <div style="font-weight:700;font-size:16px;margin-bottom:6px">📤 대량 스티커 업로드 — ${rowItems.length}건 선택</div>
         <div style="font-size:12px;color:var(--gray-500);margin-bottom:12px">
-          파일들을 드롭하면 <b>파일명의 주문번호 + 스티커코드</b> 로 자동 매칭됩니다. <br>
-          매칭된 파일만 업로드됩니다 (스티커코드 없는 행은 주문번호만 매칭).
+          • <b>위 드롭존</b>: 파일 일괄 드롭 → 주문번호+스티커코드로 자동 매칭<br>
+          • <b>각 행 위로 직접 드롭</b>: 같은 주문/스티커코드인데 메시지만 다른 케이스에 사용 (강제 할당)<br>
+          • 행 위의 📝 마크는 해당 행의 <b>스티커 문구</b> — 어느 파일이 어느 행에 가야 할지 식별용
         </div>
 
         <!-- 드롭존 -->
@@ -9271,18 +9282,54 @@ function _addBulkFiles(files) {
         item.matchedFiles.push(file);
       }
     } else if (matches.length > 1) {
-      // 모호함 — 다중 매칭 (스티커코드 없는 행이 여러개일 때 등)
+      // 모호함 — 같은 주문번호+스티커코드의 row 가 2개 이상 (예: 메시지 다른 케이스).
+      //   미매칭 영역으로 보내되, 사용자가 행 위로 드래그해서 직접 할당 가능.
       _bulkUploadState.unmatched.push({
         file,
-        reason: `여러 행에 매칭됨 (${matches.length}건) — 파일명을 더 명확하게`,
+        reason: `여러 행 매칭 (${matches.length}건) — 직접 행 위로 드롭하세요`,
+        ambiguousRowIdxs: matches.map(m => rowItems.indexOf(m)),
       });
     } else {
       _bulkUploadState.unmatched.push({
         file,
-        reason: '매칭되는 행 없음 — 주문번호/스티커코드 확인',
+        reason: '매칭 행 없음 — 주문번호/스티커코드 확인',
       });
     }
   });
+  _renderBulkRowsList();
+}
+
+/** 특정 row 에 파일 강제 할당 (드롭 또는 미매칭 영역에서 끌어옴). */
+function _onBulkRowDrop(rowIdx, e) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (!_bulkUploadState) return;
+  const tile = e.currentTarget;
+  if (tile) { tile.style.borderColor = ''; tile.style.background = ''; }
+  const item = _bulkUploadState.rowItems[rowIdx];
+  if (!item) return;
+  const files = Array.from(e.dataTransfer.files || []);
+  if (!files.length) return;
+
+  let assigned = 0, skipped = 0;
+  files.forEach(file => {
+    // orderSeq 매칭 안 되는 파일은 확인 후 진행
+    if (item.orderSeq && !file.name.includes(item.orderSeq)) {
+      const ok = confirm(`'${file.name}' 의 파일명에 주문번호 '${item.orderSeq}' 가 없습니다.\n이 행에 강제로 할당할까요?`);
+      if (!ok) { skipped++; return; }
+    }
+    // 중복 dedupe
+    const dupKey = file.name + ':' + file.size;
+    if (item.matchedFiles.some(f => (f.name + ':' + f.size) === dupKey)) {
+      skipped++; return;
+    }
+    item.matchedFiles.push(file);
+    assigned++;
+    // 미매칭 영역에 있던 동일 파일 제거 (한 파일이 여기로 이동)
+    const um = _bulkUploadState.unmatched.findIndex(u => (u.file.name + ':' + u.file.size) === dupKey);
+    if (um >= 0) _bulkUploadState.unmatched.splice(um, 1);
+  });
+  if (assigned) showToast(`${assigned}건 행에 할당`);
   _renderBulkRowsList();
 }
 
@@ -9306,12 +9353,23 @@ function _renderBulkRowsList() {
   if (!root) return;
 
   const { rowItems, unmatched } = _bulkUploadState;
+  // 모호 매칭 — 같은 (orderSeq + stickerCode) 그룹의 row 들
+  //   메시지(custom_values) 만 다른 케이스 → 사용자가 직접 분배해야 함
+  const groupKey = (it) => `${it.orderSeq}|${it.stickerCode || '∅'}`;
+  const groupCounts = new Map();
+  rowItems.forEach(it => {
+    const k = groupKey(it);
+    groupCounts.set(k, (groupCounts.get(k) || 0) + 1);
+  });
+
   let totalMatched = 0;
   root.innerHTML = rowItems.map((item, idx) => {
     const has = item.matchedFiles.length;
     totalMatched += has;
-    const bg = has ? '#f0fdf4' : '#f9fafb';
-    const icon = has ? '✅' : '⏳';
+    const isAmbiguous = (groupCounts.get(groupKey(item)) || 0) > 1;
+    const bg = has ? '#f0fdf4' : (isAmbiguous ? '#fef3c7' : '#f9fafb');
+    const border = has ? '#bbf7d0' : (isAmbiguous ? '#fcd34d' : 'var(--gray-200)');
+    const icon = has ? '✅' : (isAmbiguous ? '⚠️' : '⏳');
     const files = item.matchedFiles.map((f, fi) =>
       `<div style="display:inline-flex;align-items:center;gap:4px;background:#fff;padding:2px 6px;border-radius:4px;border:1px solid #d1fae5;font-size:11px;margin:2px">
         <span>${esc(f.name)}</span>
@@ -9319,30 +9377,47 @@ function _renderBulkRowsList() {
         <button class="btn" style="padding:0 4px;font-size:10px;color:#dc2626" onclick="_removeBulkFile(${idx}, ${fi})">×</button>
       </div>`
     ).join('');
-    return `<div style="padding:8px 10px;border-radius:6px;background:${bg};border:1px solid ${has ? '#bbf7d0' : 'var(--gray-200)'}">
-      <div style="display:flex;align-items:baseline;gap:8px;font-size:12px">
+    const ambBadge = isAmbiguous
+      ? `<span style="background:#f59e0b;color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600">동일 코드 ${groupCounts.get(groupKey(item))}건 — 직접 드롭</span>`
+      : '';
+    const customText = item.customText
+      ? `<div style="font-size:11px;color:#7c3aed;margin-top:2px;background:#faf5ff;padding:3px 6px;border-radius:4px;display:inline-block">📝 ${esc(item.customText.slice(0, 80))}${item.customText.length > 80 ? '...' : ''}</div>`
+      : '';
+    // 행 자체가 drop target — 파일을 직접 드래그하면 강제 할당
+    return `<div
+        style="padding:8px 10px;border-radius:6px;background:${bg};border:1px solid ${border};transition:all .12s"
+        ondragover="event.preventDefault();event.stopPropagation();this.style.borderColor='var(--primary)';this.style.background='#dbeafe'"
+        ondragleave="this.style.borderColor='${border}';this.style.background='${bg}'"
+        ondrop="_onBulkRowDrop(${idx}, event)">
+      <div style="display:flex;align-items:baseline;gap:8px;font-size:12px;flex-wrap:wrap">
         <span style="font-size:14px">${icon}</span>
         <code style="color:#0369a1">${esc(item.orderSeq)}</code>
         ${item.stickerCode
           ? `<code style="color:#7c3aed">${esc(item.stickerCode)}</code>`
-          : '<span style="color:#dc2626;font-size:11px">스티커코드 X (주문번호만)</span>'}
+          : '<span style="color:#dc2626;font-size:11px">스티커코드 X</span>'}
         <span style="color:var(--gray-600)">${esc(item.recvName)}</span>
         <span style="color:var(--gray-400);font-size:11px">${esc(item.productName.slice(0, 30))}</span>
+        ${ambBadge}
       </div>
-      ${has ? `<div style="margin-top:4px">${files}</div>` : '<div style="font-size:11px;color:var(--gray-400);margin-top:4px">대기 중 — 파일 드롭 시 자동 매칭</div>'}
+      ${customText}
+      ${has ? `<div style="margin-top:4px">${files}</div>` : `<div style="font-size:11px;color:var(--gray-400);margin-top:4px">${isAmbiguous ? '⚠️ 자동 매칭 불가 — 파일을 이 행으로 직접 드롭하세요' : '대기 중 — 파일 드롭 시 자동 매칭'}</div>`}
     </div>`;
   }).join('');
 
   if (unmatched.length) {
     unsec.style.display = '';
-    unlist.innerHTML = unmatched.map((u, i) =>
-      `<div style="display:flex;align-items:center;gap:6px">
-        <span style="color:#dc2626">❌</span>
-        <span>${esc(u.file.name)}</span>
-        <span style="color:var(--gray-500)">— ${esc(u.reason)}</span>
-        <button class="btn" style="padding:0 4px;font-size:10px;margin-left:auto" onclick="_removeBulkUnmatched(${i})">×</button>
-      </div>`
-    ).join('');
+    const hasAmbiguous = unmatched.some(u => u.ambiguousRowIdxs);
+    unlist.innerHTML = (hasAmbiguous
+        ? '<div style="font-size:11px;color:var(--gray-600);margin-bottom:6px">⚠️ 다중 매칭은 OS 파일탐색기에서 해당 파일을 <b>해당 행 위로</b> 직접 드롭해주세요. 미매칭 영역에서는 × 로 제거 가능.</div>'
+        : '')
+      + unmatched.map((u, i) =>
+        `<div style="display:flex;align-items:center;gap:6px">
+          <span style="color:#dc2626">${u.ambiguousRowIdxs ? '⚠️' : '❌'}</span>
+          <span>${esc(u.file.name)}</span>
+          <span style="color:var(--gray-500)">— ${esc(u.reason)}</span>
+          <button class="btn" style="padding:0 4px;font-size:10px;margin-left:auto" onclick="_removeBulkUnmatched(${i})">×</button>
+        </div>`
+      ).join('');
   } else {
     unsec.style.display = 'none';
   }
