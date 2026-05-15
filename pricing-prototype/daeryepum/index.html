@@ -1783,7 +1783,7 @@ nav a:hover{color:var(--gray-900)}
             <th>현금영수증</th>
             <th style="max-width:160px">요청사항</th>
             <th></th>
-            <th class="uni-col-workflow" style="min-width:160px;white-space:nowrap">워크플로우</th>
+            <th class="uni-col-workflow" style="min-width:160px;white-space:nowrap;display:none">워크플로우</th>
           </tr>
         </thead>
         <tbody id="uni-tbody"></tbody>
@@ -2006,6 +2006,9 @@ function isCancelled(r) {
 }
 
 // --- Auth ---
+//   현재 사용자 role 캐시 (워크플로우 권한 UI 분기용). 'admin' | 'operator' | 'designer'
+let _currentUserRole = 'operator';
+
 function loadUserInfo() {
   fetch(API + '/auth/me').then(r => {
     if (!r.ok) {
@@ -2017,6 +2020,7 @@ function loadUserInfo() {
     return r.json();
   }).then(user => {
     if (!user) return;
+    if (user.role) _currentUserRole = user.role;
     // XSS 방어: OAuth provider가 변조됐을 수 있으므로 escape 후 삽입
     const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     // picture URL은 https 스킴만 허용 (javascript:, data: 차단)
@@ -8710,9 +8714,9 @@ function computeRowStage(order, ci, sel) {
   if (sel.packed_at) return 'packed';
   if (sel.bound_at) return 'bound';
   if (sel.printed_at) return 'printed';
-  // 스티커작업완료 = 이미지가 1장 이상 존재해야 인정 (timestamps 만 있고 이미지 0장은 비정상 → submitted 로 강등)
-  const hasImages = Array.isArray(sel.images) && sel.images.length > 0;
-  if (hasImages) return 'sticker_completed';
+  // 스티커작업완료 — timestamp 우선 (서버에서 업로드 시 set), 이미지는 부수적 (UI 가 timestamp 와 동기화).
+  //   이미지 모두 삭제 시 removeStickerImageMeta 가 timestamp 도 NULL 처리 → 일관성 보장.
+  if (sel.sticker_completed_at) return 'sticker_completed';
   return 'submitted';
 }
 
@@ -9032,7 +9036,7 @@ function renderBgUnified() {
       <td style="font-size:12px">${receiptText}</td>
       <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray-500)" title="${esc(requestText)}">${requestText ? esc(requestText) : '<span style="color:var(--gray-300)">-</span>'}</td>
       <td>${editBtn}</td>
-      <td class="uni-col-workflow" style="font-size:11px;vertical-align:top;padding:6px 8px">${workflowCell}</td>
+      <td class="uni-col-workflow" style="font-size:11px;vertical-align:top;padding:6px 8px${(activeTab === 'unsubmitted' || activeTab === 'submitted') ? ';display:none' : ''}">${workflowCell}</td>
     </tr>`;
   });
 
@@ -9144,7 +9148,8 @@ function bulkRollbackStage() {
   const stages = ['sticker_completed', 'printed', 'bound', 'packed'];
   const opts = stages.map(s => `<option value="${s}">${STAGE_LABELS[s]}</option>`).join('');
   const html = `
-    <div id="bulk-jump-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center">
+    <div id="bulk-jump-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center"
+         onclick="if(event.target===this)this.remove()">
       <div style="background:#fff;padding:24px;border-radius:8px;max-width:440px;width:90%">
         <div style="font-weight:700;font-size:16px;margin-bottom:10px">↺ 단계 되돌리기 (${rows.length}건)</div>
         <div style="color:var(--gray-500);font-size:13px;margin-bottom:14px">
@@ -9407,7 +9412,9 @@ function _renderBulkRowsList() {
       </div>`
     ).join('');
     const ambBadge = isAmbiguous
-      ? `<span style="background:#f59e0b;color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600">동일 코드 ${groupCounts.get(groupKey(item))}건 — 직접 드롭</span>`
+      ? `<div style="background:#f59e0b;color:#fff;font-size:11px;padding:3px 10px;border-radius:6px;font-weight:700;display:inline-flex;align-items:center;gap:4px;margin-bottom:4px;width:fit-content">
+          ⚠️ 동일 코드 ${groupCounts.get(groupKey(item))}건 — 행 위로 직접 드롭
+        </div>`
       : '';
     const customText = item.customText
       ? `<div style="font-size:11px;color:#7c3aed;margin-top:2px;background:#faf5ff;padding:3px 6px;border-radius:4px;display:inline-block">📝 ${esc(item.customText.slice(0, 80))}${item.customText.length > 80 ? '...' : ''}</div>`
@@ -9540,7 +9547,8 @@ function openJumpStageModal(orderId, stickerIndex) {
   const stages = ['sticker_completed', 'printed', 'bound', 'packed'];
   const stageOpts = stages.map(s => `<option value="${s}">${STAGE_LABELS[s]}</option>`).join('');
   const html = `
-    <div id="jump-stage-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center">
+    <div id="jump-stage-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center"
+         onclick="if(event.target===this)this.remove()">
       <div style="background:#fff;padding:24px;border-radius:8px;max-width:420px;width:90%">
         <div style="font-weight:700;font-size:16px;margin-bottom:10px">↺ 단계 되돌리기 / 점프</div>
         <div style="color:var(--gray-500);font-size:13px;margin-bottom:14px">
@@ -9906,7 +9914,8 @@ async function openInvoiceModal(orderId, stickerIndex) {
 
   const dcOpts = DELIVERY_COMPANIES.map(c => `<option value="${c}">${c}</option>`).join('');
   const html = `
-    <div id="invoice-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center">
+    <div id="invoice-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center"
+         onclick="if(event.target===this)this.remove()">
       <div style="background:#fff;padding:24px;border-radius:8px;max-width:520px;width:90%;max-height:90vh;overflow:auto">
         <div style="font-weight:700;font-size:16px;margin-bottom:10px">🚚 출고처리 (송장 등록)</div>
         <div style="color:var(--gray-500);font-size:12px;margin-bottom:14px">주문 <code>${esc(orderId)}</code></div>
@@ -10052,24 +10061,26 @@ function updateBgUnifiedSelectedCount() {
   // ============================================
   //   sticker_completed → printed → bound → packed → (shipped via invoice)
   //   각 단계 별 다음 단계 버튼 + 되돌리기 버튼.
+  //   designer role 은 bound/packed/송장 권한 없음 → 사전 hide.
+  const isAdminOrOp = _currentUserRole === 'admin' || _currentUserRole === 'operator';
   const ADVANCE_MAP = {
-    sticker_completed: { next: 'printed', label: '🖨️ 인쇄완료 처리' },
-    printed: { next: 'bound', label: '📑 제본완료 처리' },
-    bound: { next: 'packed', label: '📦 포장완료 처리' },
+    sticker_completed: { next: 'printed', label: '🖨️ 인쇄완료 처리', adminOnly: false },
+    printed: { next: 'bound', label: '📑 제본완료 처리', adminOnly: true },
+    bound: { next: 'packed', label: '📦 포장완료 처리', adminOnly: true },
     // packed → shipped 는 송장 모달 → bulk 출고처리 버튼 별도
   };
   const advanceCfg = ADVANCE_MAP[activeTab];
   if (btnAdvance) {
-    if (advanceCfg) {
+    if (advanceCfg && (!advanceCfg.adminOnly || isAdminOrOp)) {
       btnAdvance.style.display = '';
       btnAdvanceLabel.textContent = `${advanceCfg.label} (${cnt}건)`;
     } else {
       btnAdvance.style.display = 'none';
     }
   }
-  // 출고처리 — packed 탭에서만, 단일 선택만 허용 (송장 모달)
+  // 출고처리 — packed 탭에서만, 단일 선택만 허용 (송장 모달), admin/operator 만
   if (btnShip) {
-    if (activeTab === 'packed') {
+    if (activeTab === 'packed' && isAdminOrOp) {
       btnShip.style.display = '';
       btnShipLabel.textContent = cnt === 1 ? `출고처리 (1건)` : `1건만 선택 (현재 ${cnt}건)`;
     } else {

@@ -3270,8 +3270,20 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === '/auth/me') {
     if (session) {
+      // role 도 함께 반환 (워크플로우 권한 UI 분기용). super admin 은 'admin'.
+      let role = 'operator';
+      try {
+        if (isSuperAdmin(session)) role = 'admin';
+        else role = await getUserRole(session.email);
+      } catch {}
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ email: session.email, name: session.name, picture: session.picture }));
+      res.end(JSON.stringify({
+        email: session.email,
+        name: session.name,
+        picture: session.picture,
+        role,
+        is_super_admin: isSuperAdmin(session),
+      }));
     } else {
       res.writeHead(401, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Not authenticated' }));
@@ -3892,8 +3904,10 @@ const server = http.createServer(async (req, res) => {
         else if (subResource === 'workflow' && stickerIdx != null && req.method === 'PATCH') {
           const body = await readJsonBody();
           // 권한 — stage 별 다름
+          //   shipped 는 직접 workflow PATCH 가 아닌 invoices POST 로만 처리되어야 하나
+          //   defense-in-depth 차원에서 admin-only 명시
           const stage = body.stage;
-          const adminOnlyStages = ['bound', 'packed'];
+          const adminOnlyStages = ['bound', 'packed', 'shipped'];
           const allowed = adminOnlyStages.includes(stage)
             ? ['admin', 'operator']
             : ['admin', 'operator', 'designer'];
