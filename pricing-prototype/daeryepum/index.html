@@ -10970,19 +10970,31 @@ function renderBgEditStickers() {
       </div>`;
     }
 
-    // 스티커 드롭다운 — 해당 상품에 매핑된 스티커만
-    const availableStickers = (settings.available_sticker_ids || [])
+    // 스티커 드롭다운 — 해당 상품에 매핑된 스티커.
+    //   매핑 없으면 전체 스티커 fallback (운영자 수동 매핑용 — 쿠팡/네이버 등 상품 설정 미완성 케이스)
+    let availableStickers = (settings.available_sticker_ids || [])
       .map(sid => stickerById.get(sid))
       .filter(Boolean);
+    let isFallbackList = false;
+    if (availableStickers.length === 0) {
+      availableStickers = Array.isArray(_bgEditAllStickers)
+        ? _bgEditAllStickers.filter(st => st.is_active !== false)
+        : [];
+      isFallbackList = true;
+    }
     let stickerBlock = '';
     if (availableStickers.length > 0) {
       const stOpts = availableStickers.map(st => {
         const sel = s.sticker_id === st.id ? 'selected' : '';
         const code = st.sticker_code ? ' [' + st.sticker_code + ']' : '';
-        return '<option value="' + st.id + '"' + sel + '>' + (st.name || '스티커') + code + '</option>';
+        const brand = (isFallbackList && st.brand) ? '(' + st.brand + ') ' : '';
+        return '<option value="' + st.id + '"' + sel + '>' + brand + (st.name || '스티커') + code + '</option>';
       }).join('');
+      const fallbackHint = isFallbackList
+        ? ' <span style="color:#dc2626;font-size:10px">⚠️ 상품 설정에 매핑된 스티커 없음 — 전체 목록</span>'
+        : '';
       stickerBlock = `<div style="margin-bottom:6px">
-        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">스티커 타입</label>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">스티커 타입${fallbackHint}</label>
         <select data-edit-sticker-idx="${idx}" data-edit-field="sticker_id" onchange="onBgEditStickerChange(this)" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px">
           <option value="">선택안함</option>
           ${stOpts}
