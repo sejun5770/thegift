@@ -1870,10 +1870,14 @@ const ALL_COLS = [
   {key:'card_name',label:'상품명',default:true},
   {key:'card_code',label:'상품코드',default:false},
   {key:'item_count',label:'상품수량',default:true,num:true},
-  // 라벨 정정 (운영팀 보고): item_amount = 정가 합 → '주문총액', settle_price = 실결제 → '결제금액'
-  //   이전엔 두 라벨이 서로 바뀌어 있어 사용자가 혼동.
+  // 결제금액 컬럼 3종:
+  //   · 주문총액 (item_amount): 이 row 의 정가 (쿠폰 적용 전)
+  //   · 쿠폰할인 (coupon_price): 이 row 에 분배된 쿠폰액
+  //   · 상품 결제액 (item_paid): 이 row 의 실 결제 = 주문총액 - 쿠폰할인  ← 청첩장 동시구매 시 데코 단일 row 결제액 확인용
+  //   · 결제금액 (settle_price): 주문 전체 결제 (청첩장+답례품 등 모두 포함) — 전 row 동일값
   {key:'item_amount_fmt',label:'주문총액',default:false,num:true},
   {key:'coupon_price_fmt',label:'쿠폰할인',default:false,num:true},
+  {key:'item_paid_fmt',label:'상품 결제액',default:true,num:true},
   {key:'settle_price_fmt',label:'결제금액',default:true,num:true},
   {key:'settle_method_label',label:'결제수단',default:false},
   {key:'wedding_date',label:'예식일',default:false},
@@ -2148,6 +2152,9 @@ async function loadOrders() {
       //   CARD/ETC:  '+09:00' 또는 TZ 없음 → 그대로 (이미 KST)
       r.order_date_fmt = fmtKstDate(r.order_date);
       r.item_amount_fmt = fmtKRW(r.item_amount);
+      // 상품 결제액 = 주문총액 - 쿠폰할인 (행 단위 실 결제). 음수 방지(쿠폰이 정가 초과하는 비정상 케이스).
+      r.item_paid = Math.max(0, (Number(r.item_amount) || 0) - (Number(r.coupon_price) || 0));
+      r.item_paid_fmt = fmtKRW(r.item_paid);
       r.coupon_price_fmt = r.coupon_price > 0 ? '-' + fmtKRW(r.coupon_price) : '';
       r.settle_price_fmt = fmtKRW(r.settle_price);
       // 라벨 — has_copurchase (백엔드 신규 필드) 우선, 없으면 기존 가정 fallback.
