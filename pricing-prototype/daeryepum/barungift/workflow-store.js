@@ -157,7 +157,8 @@ async function _addStickerImageMetaImpl({ orderId, stickerIndex, image, by }) {
     sel.sticker_completed_by = sel.sticker_completed_by || by || null;
   }
   images.push({
-    filename: image.filename,
+    filename: image.filename,                                // Storage key (ASCII)
+    original_filename: image.original_filename || image.filename, // 원본 (한글 포함, 다운로드용)
     path: image.path,
     mime: image.mime || null,
     size: image.size || null,
@@ -221,13 +222,26 @@ async function _setStickerMainImageImpl({ orderId, stickerIndex, filename }) {
 // Storage — Supabase Storage REST API
 // ============================================
 
-/** Upload file (Buffer) to storage. Returns the stored path. */
+/**
+ * Upload file (Buffer) to storage.
+ *   ⚠️ Supabase Storage 는 key 에 한글 등 비-ASCII 거부 → ASCII 변환 후 업로드.
+ *   원본 파일명은 metadata 의 original_filename 으로 별도 보존 (다운로드 시 사용).
+ */
 async function uploadStickerImage({ orderId, stickerIndex, filename, buffer, mime }) {
   if (!USE) throw new Error('Supabase 미설정');
-  // path: {order_id}/{sticker_index}/{ts}_{filename} — 충돌 방지 timestamp prefix
   const ts = Date.now();
-  const safeName = String(filename).replace(/[^\w.\-가-힣]+/g, '_').slice(0, 100);
-  const path = `${orderId}/${stickerIndex}/${ts}_${safeName}`;
+  // 확장자 추출 (소문자, ASCII 만)
+  const extMatch = String(filename || '').match(/\.[a-zA-Z0-9]{1,8}$/);
+  const ext = extMatch ? extMatch[0].toLowerCase() : '';
+  // ASCII 만 허용 — 한글/특수문자 → underscore (Storage key 호환성)
+  const baseNoExt = String(filename || '').slice(0, ext ? -ext.length : undefined);
+  const asciiBase = baseNoExt
+    .replace(/[^\w\-]+/g, '_')  // 비-ASCII alpha-num/_/- 모두 _ 로
+    .replace(/_+/g, '_')         // 연속 underscore 압축
+    .replace(/^_+|_+$/g, '')     // 양끝 underscore 제거
+    .slice(0, 80) || 'file';
+  const safeFilename = `${ts}_${asciiBase}${ext}`;
+  const path = `${orderId}/${stickerIndex}/${safeFilename}`;
   const url = `${STORAGE}/object/${BUCKET}/${encodeURI(path)}`;
   const res = await fetch(url, {
     method: 'POST',
@@ -242,7 +256,7 @@ async function uploadStickerImage({ orderId, stickerIndex, filename, buffer, mim
     const t = await res.text();
     throw new Error(`Storage upload [${res.status}]: ${t.slice(0, 300)}`);
   }
-  return { path, filename: safeName, ts };
+  return { path, filename: safeFilename, original_filename: filename, ts };
 }
 
 /** Generate signed URL for download (1 hour expiry). */

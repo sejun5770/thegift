@@ -9252,14 +9252,17 @@ async function loadStickerImageList(orderId, stickerIndex) {
     }
     root.innerHTML = imgs.map(img => {
       const isImage = img.mime && img.mime.startsWith('image/');
+      // 화면 표시는 원본 파일명 (한글 포함), 내부 식별/다운로드는 Storage 파일명(ASCII)
+      const displayName = img.original_filename || img.filename;
+      const downloadName = img.original_filename || img.filename;
       const thumb = isImage && img.url
         ? `<img src="${esc(img.url)}" style="width:100%;height:120px;object-fit:cover;border-radius:4px" />`
         : `<div style="width:100%;height:120px;background:var(--gray-100);display:flex;align-items:center;justify-content:center;border-radius:4px;font-size:24px">${(img.mime||'').includes('pdf') ? '📄' : '📎'}</div>`;
       return `<div style="border:2px solid ${img.is_main ? '#16a34a' : 'var(--gray-200)'};border-radius:6px;padding:6px">
         ${thumb}
-        <div style="font-size:10px;margin-top:4px;word-break:break-all;color:var(--gray-600)" title="${esc(img.filename)}">${esc(img.filename).slice(0, 30)}${img.filename.length > 30 ? '...' : ''}</div>
+        <div style="font-size:10px;margin-top:4px;word-break:break-all;color:var(--gray-600)" title="${esc(displayName)}">${esc(displayName).slice(0, 30)}${displayName.length > 30 ? '...' : ''}</div>
         <div style="display:flex;gap:3px;margin-top:6px;flex-wrap:wrap">
-          ${img.url ? `<a class="btn" href="${esc(img.url)}" target="_blank" download="${esc(img.filename)}" style="padding:2px 6px;font-size:10px;text-decoration:none">📥</a>` : ''}
+          ${img.url ? `<a class="btn" href="${esc(img.url)}" target="_blank" download="${esc(downloadName)}" style="padding:2px 6px;font-size:10px;text-decoration:none">📥</a>` : ''}
           ${!img.is_main ? `<button class="btn" style="padding:2px 6px;font-size:10px" onclick="setStickerMain('${esc(orderId)}', ${stickerIndex}, '${esc(img.filename)}')">⭐ 메인</button>` : '<span style="color:#16a34a;font-size:10px;padding:2px 6px">⭐ 메인</span>'}
           <button class="btn" style="padding:2px 6px;font-size:10px;color:#dc2626" onclick="deleteStickerImage('${esc(orderId)}', ${stickerIndex}, '${esc(img.filename)}')">🗑️</button>
         </div>

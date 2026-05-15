@@ -3785,7 +3785,13 @@ const server = http.createServer(async (req, res) => {
               });
               await wf.addStickerImageMeta({
                 orderId, stickerIndex: stickerIdx,
-                image: { ...uploaded, mime: body.mime, size: buffer.length },
+                image: {
+                  filename: uploaded.filename,
+                  original_filename: uploaded.original_filename,
+                  path: uploaded.path,
+                  mime: body.mime,
+                  size: buffer.length,
+                },
                 by: session.email,
               });
               logAdminAccess(session, req, 'sticker-upload', { orderId, stickerIdx, filename: uploaded.filename });
