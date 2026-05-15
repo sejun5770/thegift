@@ -1754,6 +1754,7 @@ nav a:hover{color:var(--gray-900)}
       <button class="btn" id="uni-btn-bulk-delete" onclick="bulkDeleteCustomerInfo()" style="padding:6px 12px;font-size:12px;display:none;border-color:#dc2626;color:#dc2626;background:#fef2f2" title="선택된 주문의 정보입력 데이터를 모두 삭제 (주문 자체는 유지). 잘못 backfill 된 데이터 정리용.">🗑️ <span id="uni-btn-bulk-delete-label">선택 삭제</span></button>
       <button class="btn" id="uni-btn-mark-manual" onclick="bulkMarkAsManualCollected()" style="padding:6px 12px;font-size:12px;display:none;border-color:#7c3aed;color:#5b21b6;background:#f5f3ff" title="출시 이전 수동 수집된 주문에 '외부 수집 완료' 마커 추가 + 입력완료 + 수집완료 상태로 이동">🏷️ <span id="uni-btn-mark-manual-label">수동 수집됨 표시</span></button>
       <!-- 워크플로우 bulk 액션 — 활성 탭에 따라 라벨/동작 동적 -->
+      <button class="btn" id="uni-btn-bulk-upload" onclick="openBulkStickerUploadModal()" style="padding:6px 12px;font-size:12px;display:none;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8" title="선택된 N건의 스티커 이미지를 파일명 매칭으로 일괄 업로드">📤 <span id="uni-btn-bulk-upload-label">대량 스티커 업로드</span></button>
       <button class="btn btn-primary" id="uni-btn-advance-stage" onclick="bulkAdvanceStage()" style="padding:6px 12px;font-size:12px;display:none" title="선택된 행을 다음 단계로 진행">▶️ <span id="uni-btn-advance-stage-label">다음 단계</span></button>
       <button class="btn" id="uni-btn-ship" onclick="bulkOpenShip()" style="padding:6px 12px;font-size:12px;display:none;background:#7c3aed;color:#fff;border-color:#7c3aed" title="선택된 행 출고처리 (송장 입력) — 1건만 가능">🚚 <span id="uni-btn-ship-label">출고처리</span></button>
       <button class="btn" id="uni-btn-rollback" onclick="bulkRollbackStage()" style="padding:6px 12px;font-size:12px;display:none;border-color:#fbbf24;color:#92400e;background:#fef3c7" title="선택된 행을 이전 단계로 되돌림 (임의 단계 선택 가능)">↺ <span id="uni-btn-rollback-label">단계 되돌리기</span></button>
@@ -9166,6 +9167,236 @@ async function _doBulkJump() {
   switchUniTab(stage);
 }
 
+// ============================================
+// 대량 스티커 업로드 — 입력완료 탭에서 N건 선택 → 파일명 매칭 자동 분배
+// ============================================
+let _bulkUploadState = null;
+
+function openBulkStickerUploadModal() {
+  const rows = _getCheckedWorkflowRows();
+  if (!rows.length) { showToast('대상 행을 선택해주세요'); return; }
+  // 각 row 의 매칭 정보 사전 계산
+  const rowItems = rows.map(r => {
+    const orderId = bgCiKey(r.order);
+    return {
+      row: r,
+      orderId,
+      orderSeq: _rawOrderSeq(orderId) || String(r.order.order_seq),
+      stickerCode: r.sel?.sticker_code || null,
+      productName: r.product_name || '-',
+      recvName: r.order.display_name || r.order.recv_name || '-',
+      matchedFiles: [],
+    };
+  });
+  _bulkUploadState = { rowItems, unmatched: [], uploading: false };
+
+  const html = `
+    <div id="bulk-upload-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center"
+         onclick="if(event.target===this)closeBulkStickerUploadModal()">
+      <div style="background:#fff;padding:22px;border-radius:8px;max-width:820px;width:96%;max-height:94vh;overflow:auto">
+        <div style="font-weight:700;font-size:16px;margin-bottom:6px">📤 대량 스티커 업로드 — ${rowItems.length}건 선택</div>
+        <div style="font-size:12px;color:var(--gray-500);margin-bottom:12px">
+          파일들을 드롭하면 <b>파일명의 주문번호 + 스티커코드</b> 로 자동 매칭됩니다. <br>
+          매칭된 파일만 업로드됩니다 (스티커코드 없는 행은 주문번호만 매칭).
+        </div>
+
+        <!-- 드롭존 -->
+        <div id="bulk-upload-dropzone"
+             style="border:2px dashed var(--gray-300);border-radius:8px;padding:24px 14px;text-align:center;cursor:pointer;background:var(--gray-50);transition:all .15s"
+             onclick="document.getElementById('bulk-upload-input').click()"
+             ondragover="event.preventDefault();this.style.borderColor='var(--primary)';this.style.background='#eff6ff'"
+             ondragleave="this.style.borderColor='var(--gray-300)';this.style.background='var(--gray-50)'"
+             ondrop="_onBulkFileDrop(event)">
+          <div style="font-size:24px;margin-bottom:4px">📤</div>
+          <div style="font-size:13px;color:var(--gray-700)">파일을 끌어다 놓거나 클릭해서 선택 (multi-file)</div>
+        </div>
+        <input type="file" id="bulk-upload-input" accept="image/png,image/jpeg,application/pdf" multiple
+               style="display:none" onchange="_onBulkFileSelect(event)" />
+
+        <!-- 선택된 주문건 + 매칭 결과 -->
+        <div style="font-size:13px;font-weight:600;margin-top:16px;margin-bottom:8px">선택된 주문건</div>
+        <div id="bulk-rows-list" style="display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto"></div>
+
+        <!-- 미매칭 파일 -->
+        <div id="bulk-unmatched-section" style="display:none;margin-top:14px">
+          <div style="font-size:12px;font-weight:600;color:#dc2626;margin-bottom:6px">⚠️ 매칭 안 된 파일</div>
+          <div id="bulk-unmatched-list" style="display:flex;flex-direction:column;gap:4px;font-size:11px;background:#fef2f2;padding:8px;border-radius:4px"></div>
+        </div>
+
+        <div id="bulk-upload-progress" style="font-size:12px;color:var(--gray-500);margin-top:10px;min-height:20px"></div>
+
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+          <button class="btn" onclick="closeBulkStickerUploadModal()">닫기</button>
+          <button class="btn btn-primary" id="bulk-upload-btn" onclick="doBulkStickerUpload()" style="display:none">업로드</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+  _renderBulkRowsList();
+}
+
+function closeBulkStickerUploadModal() {
+  document.getElementById('bulk-upload-modal')?.remove();
+  _bulkUploadState = null;
+}
+
+function _onBulkFileDrop(e) {
+  e.preventDefault();
+  const dz = e.currentTarget;
+  if (dz) { dz.style.borderColor = 'var(--gray-300)'; dz.style.background = 'var(--gray-50)'; }
+  _addBulkFiles(Array.from(e.dataTransfer.files || []));
+}
+function _onBulkFileSelect(e) {
+  _addBulkFiles(Array.from(e.target.files || []));
+  e.target.value = '';
+}
+
+/** 파일들을 각 row 에 자동 매칭. 한 파일이 여러 행에 매칭되면 모호함 처리. */
+function _addBulkFiles(files) {
+  if (!_bulkUploadState || !files.length) return;
+  const { rowItems } = _bulkUploadState;
+  files.forEach(file => {
+    // 매칭되는 row 찾기 (orderSeq + stickerCode 둘 다 만족)
+    const matches = rowItems.filter(item => {
+      const orderOk = item.orderSeq && file.name.includes(item.orderSeq);
+      const stickerOk = !item.stickerCode || file.name.includes(item.stickerCode);
+      return orderOk && stickerOk;
+    });
+    if (matches.length === 1) {
+      // 단일 매칭 → 해당 row 에 추가
+      const item = matches[0];
+      // 중복 방지 (같은 filename+size)
+      const dupKey = file.name + ':' + file.size;
+      if (!item.matchedFiles.some(f => (f.name + ':' + f.size) === dupKey)) {
+        item.matchedFiles.push(file);
+      }
+    } else if (matches.length > 1) {
+      // 모호함 — 다중 매칭 (스티커코드 없는 행이 여러개일 때 등)
+      _bulkUploadState.unmatched.push({
+        file,
+        reason: `여러 행에 매칭됨 (${matches.length}건) — 파일명을 더 명확하게`,
+      });
+    } else {
+      _bulkUploadState.unmatched.push({
+        file,
+        reason: '매칭되는 행 없음 — 주문번호/스티커코드 확인',
+      });
+    }
+  });
+  _renderBulkRowsList();
+}
+
+function _removeBulkFile(rowIdx, fileIdx) {
+  if (!_bulkUploadState) return;
+  _bulkUploadState.rowItems[rowIdx]?.matchedFiles.splice(fileIdx, 1);
+  _renderBulkRowsList();
+}
+function _removeBulkUnmatched(idx) {
+  if (!_bulkUploadState) return;
+  _bulkUploadState.unmatched.splice(idx, 1);
+  _renderBulkRowsList();
+}
+
+function _renderBulkRowsList() {
+  if (!_bulkUploadState) return;
+  const root = document.getElementById('bulk-rows-list');
+  const unsec = document.getElementById('bulk-unmatched-section');
+  const unlist = document.getElementById('bulk-unmatched-list');
+  const uploadBtn = document.getElementById('bulk-upload-btn');
+  if (!root) return;
+
+  const { rowItems, unmatched } = _bulkUploadState;
+  let totalMatched = 0;
+  root.innerHTML = rowItems.map((item, idx) => {
+    const has = item.matchedFiles.length;
+    totalMatched += has;
+    const bg = has ? '#f0fdf4' : '#f9fafb';
+    const icon = has ? '✅' : '⏳';
+    const files = item.matchedFiles.map((f, fi) =>
+      `<div style="display:inline-flex;align-items:center;gap:4px;background:#fff;padding:2px 6px;border-radius:4px;border:1px solid #d1fae5;font-size:11px;margin:2px">
+        <span>${esc(f.name)}</span>
+        <span style="color:var(--gray-400);font-size:10px">${(f.size/1024).toFixed(1)}KB</span>
+        <button class="btn" style="padding:0 4px;font-size:10px;color:#dc2626" onclick="_removeBulkFile(${idx}, ${fi})">×</button>
+      </div>`
+    ).join('');
+    return `<div style="padding:8px 10px;border-radius:6px;background:${bg};border:1px solid ${has ? '#bbf7d0' : 'var(--gray-200)'}">
+      <div style="display:flex;align-items:baseline;gap:8px;font-size:12px">
+        <span style="font-size:14px">${icon}</span>
+        <code style="color:#0369a1">${esc(item.orderSeq)}</code>
+        ${item.stickerCode
+          ? `<code style="color:#7c3aed">${esc(item.stickerCode)}</code>`
+          : '<span style="color:#dc2626;font-size:11px">스티커코드 X (주문번호만)</span>'}
+        <span style="color:var(--gray-600)">${esc(item.recvName)}</span>
+        <span style="color:var(--gray-400);font-size:11px">${esc(item.productName.slice(0, 30))}</span>
+      </div>
+      ${has ? `<div style="margin-top:4px">${files}</div>` : '<div style="font-size:11px;color:var(--gray-400);margin-top:4px">대기 중 — 파일 드롭 시 자동 매칭</div>'}
+    </div>`;
+  }).join('');
+
+  if (unmatched.length) {
+    unsec.style.display = '';
+    unlist.innerHTML = unmatched.map((u, i) =>
+      `<div style="display:flex;align-items:center;gap:6px">
+        <span style="color:#dc2626">❌</span>
+        <span>${esc(u.file.name)}</span>
+        <span style="color:var(--gray-500)">— ${esc(u.reason)}</span>
+        <button class="btn" style="padding:0 4px;font-size:10px;margin-left:auto" onclick="_removeBulkUnmatched(${i})">×</button>
+      </div>`
+    ).join('');
+  } else {
+    unsec.style.display = 'none';
+  }
+
+  if (uploadBtn) {
+    if (totalMatched > 0) {
+      uploadBtn.style.display = '';
+      uploadBtn.textContent = `업로드 (${totalMatched}건)`;
+    } else {
+      uploadBtn.style.display = 'none';
+    }
+  }
+}
+
+async function doBulkStickerUpload() {
+  if (!_bulkUploadState || _bulkUploadState.uploading) return;
+  _bulkUploadState.uploading = true;
+  const { rowItems } = _bulkUploadState;
+  const btn = document.getElementById('bulk-upload-btn');
+  const prog = document.getElementById('bulk-upload-progress');
+  btn.disabled = true;
+  let okTotal = 0, failTotal = 0;
+  // 행 별 순차 — 같은 row 의 여러 파일은 순차 (race 회피)
+  for (const item of rowItems) {
+    for (let i = 0; i < item.matchedFiles.length; i++) {
+      const f = item.matchedFiles[i];
+      prog.textContent = `${item.orderSeq} (${i + 1}/${item.matchedFiles.length}) ${f.name}...`;
+      try {
+        const arrayBuf = await f.arrayBuffer();
+        const data = _bufToBase64(arrayBuf);
+        const r = await fetch(`${API}/api/bg/orders/${encodeURIComponent(item.orderId)}/stickers/${item.row.sticker_index}/images`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: f.name, mime: f.type || 'application/octet-stream', data }),
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.message || 'upload failed');
+        okTotal++;
+      } catch (e) {
+        failTotal++;
+        console.warn('[bulk upload]', item.orderId, f.name, e);
+      }
+    }
+    item.matchedFiles = []; // 완료된 row 의 파일 초기화
+  }
+  prog.textContent = `완료: ${okTotal}건 성공${failTotal ? ` · ${failTotal}건 실패` : ''}`;
+  showToast(`✅ 대량 업로드 완료 — ${okTotal}건${failTotal ? ` (실패 ${failTotal}건)` : ''}`);
+  _renderBulkRowsList();
+  _bulkUploadState.uploading = false;
+  btn.disabled = false;
+  // 메인 테이블 갱신 — 워크플로우 stage 변화 반영
+  await loadBgUnified();
+}
+
 /** 출고처리 — 단일 행만 허용 (송장 모달 띄움). */
 function bulkOpenShip() {
   const rows = _getCheckedWorkflowRows();
@@ -9646,6 +9877,8 @@ function updateBgUnifiedSelectedCount() {
   const btnMarkManualLabel = document.getElementById('uni-btn-mark-manual-label');
   const btnSendAlimtalkLabel = document.getElementById('uni-btn-send-alimtalk-label');
 
+  const btnBulkUpload = document.getElementById('uni-btn-bulk-upload');
+  const btnBulkUploadLabel = document.getElementById('uni-btn-bulk-upload-label');
   const btnAdvance = document.getElementById('uni-btn-advance-stage');
   const btnAdvanceLabel = document.getElementById('uni-btn-advance-stage-label');
   const btnShip = document.getElementById('uni-btn-ship');
@@ -9661,10 +9894,30 @@ function updateBgUnifiedSelectedCount() {
     if (btnDelete) btnDelete.style.display = 'none';
     if (btnMarkManual) btnMarkManual.style.display = 'none';
     if (btnSendAlimtalk) btnSendAlimtalk.style.display = 'none';
+    if (btnBulkUpload) btnBulkUpload.style.display = 'none';
     if (btnAdvance) btnAdvance.style.display = 'none';
     if (btnShip) btnShip.style.display = 'none';
     if (btnRollback) btnRollback.style.display = 'none';
     return;
+  }
+
+  // 대량 스티커 업로드 — submitted (입력완료) 탭에서만 노출
+  //   선택된 행이 워크플로우 가능한 ci 보유 인 경우만. ci 없는 미입력은 X.
+  if (btnBulkUpload) {
+    if (activeTab === 'submitted') {
+      // 워크플로우 적용 가능한 row 개수 (ci 있고 sticker_index >=0)
+      const workflowable = checked
+        .map(cb => bgUnifiedRows[parseInt(cb.dataset.idx)])
+        .filter(r => r && r.ci && r.sticker_index >= 0);
+      if (workflowable.length > 0) {
+        btnBulkUpload.style.display = '';
+        btnBulkUploadLabel.textContent = `대량 스티커 업로드 (${workflowable.length}건)`;
+      } else {
+        btnBulkUpload.style.display = 'none';
+      }
+    } else {
+      btnBulkUpload.style.display = 'none';
+    }
   }
 
   // ============================================
