@@ -1661,14 +1661,16 @@ nav a:hover{color:var(--gray-900)}
     <h2 style="margin:0">📋 정보입력현황</h2>
   </div>
 
-  <!-- 필터바: 날짜 + 필터 + 새로고침 (한 줄에 통합) -->
+  <!-- 필터바: 필터 + 새로고침 -->
+  <!--
+    날짜 입력 제거 (2026-05-15): 주문일자 기준 필터가 customer_info 가 입력된 옛날 주문을
+    가렸음. 정보입력현황은 customer_info 상태 기반 워크플로우 라 전체 로드가 정확. uni-start /
+    uni-end 는 DOM 호환성 위해 hidden input 으로 유지 (loadBgUnified 가 참조). 기간은 service 시작일(2024-01-01) ~ 내일 로 고정.
+  -->
+  <input type="hidden" id="uni-start" value="2024-01-01">
+  <input type="hidden" id="uni-end" value="">
   <div class="toolbar" style="margin-bottom:12px;gap:12px">
-    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex:1;min-width:0">
-      <input type="date" id="uni-start" />
-      <span>~</span>
-      <input type="date" id="uni-end" />
-      <button class="btn btn-primary" onclick="loadBgUnified()">조회</button>
-    </div>
+    <div style="flex:1"></div>
     <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
       <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
         <input type="checkbox" id="uni-hide-cancel" onchange="renderBgUnified()"> 취소 제외
@@ -1737,7 +1739,7 @@ nav a:hover{color:var(--gray-900)}
     <span id="uni-processed-summary" style="font-size:12px;color:var(--gray-700)">-</span>
   </div>
 
-  <div id="uni-loading" style="text-align:center;padding:40px;color:var(--gray-400)">날짜를 선택하고 조회하세요.</div>
+  <div id="uni-loading" style="text-align:center;padding:40px;color:var(--gray-400)">데이터를 불러오는 중입니다...</div>
   <div id="uni-table-wrap" style="display:none">
     <!-- 통합 액션바: 선택 상태 + 모든 액션 버튼 한 곳에 -->
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
@@ -8505,7 +8507,7 @@ let bgUnifiedProductMap = new Map(); // order_seq → Map(card_code → card_nam
 let bgUnifiedCiMap = new Map(); // order_id → customer_info
 let bgUnifiedRows = [];     // 평탄화된 렌더 행
 
-// 통합현황 최대 조회 범위 (일)
+// 통합현황 최대 조회 범위 (일) — DEPRECATED (2026-05-15): 기간 필터 제거되어 미사용. 향후 참조 없으면 삭제.
 const BG_UNIFIED_MAX_RANGE_DAYS = 90;
 
 /**
@@ -8542,33 +8544,17 @@ async function loadBgUnified() {
   showBgUnifiedSkeleton('1/3 데이터 조회 시작...');
   document.getElementById('uni-table-wrap').style.display = 'none';
 
-  // 날짜 기본값 초기화 (최초 1회)
-  if (!document.getElementById('uni-start').value) {
-    const today = fmt(new Date());
-    const weekAgo = fmt(new Date(Date.now() - 7 * 86400000));
-    document.getElementById('uni-start').value = weekAgo;
-    document.getElementById('uni-end').value = today;
-  }
-
-  const start = document.getElementById('uni-start').value;
-  const end = document.getElementById('uni-end').value;
+  // 기간 필터 제거 (2026-05-15) — customer_info 가 입력된 옛날 주문이 가려지는 이슈 해소.
+  //   start: service 시작일(2024-01-01) 또는 hidden input 값 (운영자가 콘솔로 narrow 하고 싶을 때).
+  //   end: 항상 내일 (settle_date 포함 위해 +1일).
+  const today = fmt(new Date());
+  const startEl = document.getElementById('uni-start');
+  const endEl = document.getElementById('uni-end');
+  if (!startEl.value) startEl.value = '2024-01-01';
+  endEl.value = today;
+  const start = startEl.value;
+  const end = today;
   const $loading = document.getElementById('uni-loading');
-
-  // 날짜 유효성 + 최대 범위 가드
-  if (!start || !end) {
-    $loading.textContent = '시작일과 종료일을 선택하세요.';
-    return;
-  }
-  if (start > end) {
-    $loading.textContent = '시작일이 종료일보다 늦을 수 없습니다.';
-    return;
-  }
-  const rangeDays = Math.ceil((new Date(end) - new Date(start)) / 86400000);
-  if (rangeDays > BG_UNIFIED_MAX_RANGE_DAYS) {
-    $loading.innerHTML = `조회 범위가 너무 큽니다 (<b>${rangeDays}일</b>). 최대 ${BG_UNIFIED_MAX_RANGE_DAYS}일 이내로 설정해주세요.`;
-    return;
-  }
-
   const endPlus = fmt(new Date(new Date(end).getTime() + 86400000));
   setBgUnifiedProgress('1/3 주문 데이터 조회 + 고객 입력 정보 조회 중...');
 
