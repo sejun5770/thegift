@@ -9078,10 +9078,14 @@ function _renderWorkflowCell(rowIdx, order, ci, sel, stickerIdx) {
   }
 
   const items = [];
+  const isNoSticker = !sel?.sticker_code && !sel?.sticker_id;
   // 통합 버튼 — 이미지 보기/관리/업로드 한 모달로 (Tab으로 분리되지 않은 통합 화면)
   if (canEditWorkflow) {
     if (imgCnt > 0) {
       items.push(`<button class="btn" style="padding:4px 10px;font-size:11px;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8" onclick="openStickerManageModal('${esc(orderId)}', ${stickerIdx})">이미지 ${imgCnt}장 관리</button>`);
+    } else if (isNoSticker && stage !== 'shipped') {
+      // 스티커 선택안함 — 업로드 불필요, 텍스트만
+      items.push(`<span style="color:var(--gray-600);font-size:11px;padding:4px 10px;background:var(--gray-100);border-radius:4px">스티커 불필요</span>`);
     } else if (stage !== 'shipped') {
       items.push(`<button class="btn btn-primary" style="padding:4px 10px;font-size:11px" onclick="openStickerManageModal('${esc(orderId)}', ${stickerIdx})">스티커 업로드</button>`);
     }

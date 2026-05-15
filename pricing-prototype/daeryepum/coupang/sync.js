@@ -257,10 +257,12 @@ async function syncRecent({ daysBack = 7, status } = {}) {
       // enrichment PATCH — ignore-duplicates 라 기존 빈 stub 은 위 upsert 로 안 채워짐.
       //   sticker_selections + desired_ship_date 동시 patch.
       //   processed_at / customer_request / express 관련 운영 필드는 미터치.
+      //   sticker_code null 인 행도 자동 진행 timestamps 가 있으면 patch (기존 데이터 보정).
       for (const stub of stubs) {
         const hasEnrich = stub.desired_ship_date
           || (Array.isArray(stub.sticker_selections) && stub.sticker_selections.some(s =>
             s.sticker_code || s.box_code
+            || s.sticker_completed_at || s.printed_at || s.bound_at  // 자동 진행 적용된 행
           ));
         if (!hasEnrich) continue;
         try {
