@@ -11,16 +11,42 @@
 
 const api = require('./api');
 
-// 후보 endpoint 들 — 일반적인 Coupang RFM API naming 패턴.
-//   debug-raw 호출 시 모두 시도 → 운영자가 어느 게 200 응답 주는지 확인.
+// 후보 endpoint 들 — Coupang RFM(로켓 그로스) / 일반 매출 보고서 naming 패턴 광범위 시도.
+//   debug-raw 호출 시 모두 GET 시도 → 200 OK 첫 endpoint 식별.
+//   기존 1차 시도(rfm/sales-report 류 4개)는 모두 404 PRECONDITION_FAILED — path 자체가 없음.
 const RFM_ENDPOINTS = [
-  // Pattern A: marketplace_openapi + rfm prefix
-  '/v2/providers/marketplace_openapi/apis/api/v1/rfm/sales-report',
-  '/v2/providers/marketplace_openapi/apis/api/v1/rfm/daily-sales',
-  // Pattern B: openapi vendors path + rfm
-  `/v2/providers/openapi/apis/api/v1/vendors/{VENDOR_ID}/rfm/sales-report`,
-  // Pattern C: seller_api
-  `/v2/providers/seller_api/apis/api/v1/rfm/sales`,
+  // Group A: 일별 매출 (daily-sales / sales-daily / dailysale)
+  '/v2/providers/marketplace_openapi/apis/api/v1/marketplace/dailysale',
+  '/v2/providers/marketplace_openapi/apis/api/v1/dailysale',
+  '/v2/providers/openapi/apis/api/v1/marketplace/dailysale',
+  '/v2/providers/openapi/apis/api/v1/marketplace/sales-daily',
+  '/v2/providers/openapi/apis/api/v1/vendors/{VENDOR_ID}/dailysale',
+  '/v2/providers/openapi/apis/api/v1/vendors/{VENDOR_ID}/sales-daily',
+
+  // Group B: 매출 보고서 (sales-report / sales-revenue)
+  '/v2/providers/openapi/apis/api/v1/marketplace/sales-report',
+  '/v2/providers/openapi/apis/api/v1/marketplace/sales-revenue',
+  '/v2/providers/openapi/apis/api/v1/vendors/{VENDOR_ID}/sales-report',
+  '/v2/providers/openapi/apis/api/v1/vendors/{VENDOR_ID}/sales-revenue',
+  '/v2/providers/marketplace_openapi/apis/api/v1/marketplace/sales-report',
+
+  // Group C: 정산 (settlement)
+  '/v2/providers/openapi/apis/api/v1/marketplace/settlement-histories',
+  '/v2/providers/openapi/apis/api/v1/vendors/{VENDOR_ID}/settlement-histories',
+  '/v2/providers/openapi/apis/api/v1/marketplace/settlements',
+
+  // Group D: RFM/Rocket-Growth 직접 명시
+  '/v2/providers/openapi/apis/api/v1/marketplace/rfm/sales',
+  '/v2/providers/openapi/apis/api/v1/marketplace/rocketgrowth/sales',
+  '/v2/providers/openapi/apis/api/v1/marketplace/rocket-growth/sales',
+  '/v2/providers/openapi/apis/api/v1/vendors/{VENDOR_ID}/rocketgrowth/sales',
+  '/v2/providers/openapi/apis/api/v1/vendors/{VENDOR_ID}/marketplace/rfm/sales',
+
+  // Group E: orderlines / product-sales (상품 단위 집계)
+  '/v2/providers/openapi/apis/api/v1/marketplace/orderlines',
+  '/v2/providers/openapi/apis/api/v3/marketplace/orderlines',
+  '/v2/providers/openapi/apis/api/v1/marketplace/product-sales',
+  '/v2/providers/openapi/apis/api/v1/vendors/{VENDOR_ID}/product-sales',
 ];
 
 /** 후보 endpoint 들을 순회하며 첫 200 응답 반환 (debug 용). */
