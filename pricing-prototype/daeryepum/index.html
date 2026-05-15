@@ -9592,8 +9592,11 @@ function openStickerManageModal(orderId, stickerIndex) {
         </div>
 
         <!-- ── 업로드된 이미지 섹션 ── -->
-        <div style="font-size:13px;font-weight:600;color:var(--gray-700);margin-bottom:8px">업로드된 이미지</div>
-        <div id="sticker-image-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:20px;min-height:80px">로드 중...</div>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:13px;font-weight:600;color:var(--gray-700)">업로드된 이미지</div>
+          <div style="font-size:11px;color:var(--gray-500)">💡 <b>대표 이미지</b>: 여러 버전 중 인쇄에 사용할 최종본</div>
+        </div>
+        <div id="sticker-image-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:20px;min-height:80px">로드 중...</div>
 
         <!-- ── 추가 업로드 섹션 ── -->
         <div style="border-top:1px solid var(--gray-200);padding-top:16px">
@@ -9783,13 +9786,14 @@ async function loadStickerImageList(orderId, stickerIndex) {
       const thumb = isImage && img.url
         ? `<img src="${esc(img.url)}" style="width:100%;height:120px;object-fit:cover;border-radius:4px" />`
         : `<div style="width:100%;height:120px;background:var(--gray-100);display:flex;align-items:center;justify-content:center;border-radius:4px;font-size:24px">${(img.mime||'').includes('pdf') ? '📄' : '📎'}</div>`;
-      return `<div style="border:2px solid ${img.is_main ? '#16a34a' : 'var(--gray-200)'};border-radius:6px;padding:6px">
+      return `<div style="border:2px solid ${img.is_main ? '#16a34a' : 'var(--gray-200)'};border-radius:6px;padding:8px">
         ${thumb}
-        <div style="font-size:10px;margin-top:4px;word-break:break-all;color:var(--gray-600)" title="${esc(displayName)}">${esc(displayName).slice(0, 30)}${displayName.length > 30 ? '...' : ''}</div>
-        <div style="display:flex;gap:3px;margin-top:6px;flex-wrap:wrap">
-          ${img.url ? `<a class="btn" href="${esc(img.url)}" target="_blank" download="${esc(downloadName)}" style="padding:2px 6px;font-size:10px;text-decoration:none">📥</a>` : ''}
-          ${!img.is_main ? `<button class="btn" style="padding:2px 6px;font-size:10px" onclick="setStickerMain('${esc(orderId)}', ${stickerIndex}, '${esc(img.filename)}')">⭐ 메인</button>` : '<span style="color:#16a34a;font-size:10px;padding:2px 6px">⭐ 메인</span>'}
-          <button class="btn" style="padding:2px 6px;font-size:10px;color:#dc2626" onclick="deleteStickerImage('${esc(orderId)}', ${stickerIndex}, '${esc(img.filename)}')">🗑️</button>
+        <div style="font-size:11px;margin-top:6px;word-break:break-all;color:var(--gray-700);line-height:1.4" title="${esc(displayName)}">${esc(displayName).slice(0, 40)}${displayName.length > 40 ? '...' : ''}</div>
+        ${img.is_main ? '<div style="font-size:11px;color:#16a34a;font-weight:600;margin-top:6px;background:#dcfce7;padding:2px 6px;border-radius:3px;display:inline-block">대표 이미지</div>' : ''}
+        <div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap">
+          ${img.url ? `<a class="btn" href="${esc(img.url)}" target="_blank" download="${esc(downloadName)}" style="padding:3px 10px;font-size:11px;text-decoration:none">다운로드</a>` : ''}
+          ${!img.is_main ? `<button class="btn" style="padding:3px 10px;font-size:11px" onclick="setStickerMain('${esc(orderId)}', ${stickerIndex}, '${esc(img.filename)}')" title="여러 이미지 중 대표(최종) 이미지로 지정">대표로 지정</button>` : ''}
+          <button class="btn" style="padding:3px 10px;font-size:11px;color:#dc2626;border-color:#fca5a5" onclick="deleteStickerImage('${esc(orderId)}', ${stickerIndex}, '${esc(img.filename)}')">삭제</button>
         </div>
       </div>`;
     }).join('');
