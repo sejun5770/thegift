@@ -1774,14 +1774,14 @@ nav a:hover{color:var(--gray-900)}
             <th>수령인</th>
             <th>연락처</th>
             <th>배송지</th>
-            <th>박스선택</th>
-            <th>스티커코드</th>
-            <th>스티커명</th>
-            <th>문구</th>
-            <th>희망출고일</th>
-            <th>출고방식</th>
-            <th>현금영수증</th>
-            <th style="max-width:160px">요청사항</th>
+            <th class="uni-col-ci" style="display:none">박스선택</th>
+            <th class="uni-col-ci" style="display:none">스티커코드</th>
+            <th class="uni-col-ci" style="display:none">스티커명</th>
+            <th class="uni-col-ci" style="display:none">문구</th>
+            <th class="uni-col-ci" style="display:none">희망출고일</th>
+            <th class="uni-col-ci" style="display:none">출고방식</th>
+            <th class="uni-col-ci" style="display:none">현금영수증</th>
+            <th class="uni-col-ci" style="max-width:160px;display:none">요청사항</th>
             <th></th>
             <th class="uni-col-workflow" style="min-width:160px;white-space:nowrap;display:none">워크플로우</th>
           </tr>
@@ -8683,6 +8683,12 @@ function switchUniTab(tab) {
   document.querySelectorAll('.uni-col-workflow').forEach(el => {
     el.style.display = showWorkflowCol ? '' : 'none';
   });
+  // CI 관련 컬럼 (박스/스티커/문구/희망출고일/출고방식/현금영수증/요청사항) — 미입력 탭에선 hide
+  //   ci 가 없으므로 모두 빈 값이라 의미 없음.
+  const showCiCols = tab !== 'unsubmitted';
+  document.querySelectorAll('.uni-col-ci').forEach(el => {
+    el.style.display = showCiCols ? '' : 'none';
+  });
   // 정렬 옵션 — 미입력 외 모든 탭 노출. 기본 정렬 힌트는 탭별로 다름.
   const sortOpts = document.getElementById('uni-sort-options');
   if (sortOpts) sortOpts.style.display = (tab !== 'unsubmitted') ? 'flex' : 'none';
@@ -9027,14 +9033,14 @@ function renderBgUnified() {
       <td style="font-size:12px;white-space:nowrap">${recvName}</td>
       <td style="font-size:12px;white-space:nowrap">${recvPhone}</td>
       <td style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${recvAddr}">${recvAddr}</td>
-      <td style="font-size:12px">${boxCell}</td>
-      <td style="font-size:12px">${stickerCode}</td>
-      <td style="font-size:12px">${stickerName}</td>
-      <td style="font-size:12px;line-height:1.6">${customText}</td>
-      <td style="font-size:12px;white-space:nowrap">${shipDate}</td>
-      <td style="font-size:12px">${shipType}</td>
-      <td style="font-size:12px">${receiptText}</td>
-      <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray-500)" title="${esc(requestText)}">${requestText ? esc(requestText) : '<span style="color:var(--gray-300)">-</span>'}</td>
+      <td class="uni-col-ci" style="font-size:12px${activeTab === 'unsubmitted' ? ';display:none' : ''}">${boxCell}</td>
+      <td class="uni-col-ci" style="font-size:12px${activeTab === 'unsubmitted' ? ';display:none' : ''}">${stickerCode}</td>
+      <td class="uni-col-ci" style="font-size:12px${activeTab === 'unsubmitted' ? ';display:none' : ''}">${stickerName}</td>
+      <td class="uni-col-ci" style="font-size:12px;line-height:1.6${activeTab === 'unsubmitted' ? ';display:none' : ''}">${customText}</td>
+      <td class="uni-col-ci" style="font-size:12px;white-space:nowrap${activeTab === 'unsubmitted' ? ';display:none' : ''}">${shipDate}</td>
+      <td class="uni-col-ci" style="font-size:12px${activeTab === 'unsubmitted' ? ';display:none' : ''}">${shipType}</td>
+      <td class="uni-col-ci" style="font-size:12px${activeTab === 'unsubmitted' ? ';display:none' : ''}">${receiptText}</td>
+      <td class="uni-col-ci" style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray-500)${activeTab === 'unsubmitted' ? ';display:none' : ''}" title="${esc(requestText)}">${requestText ? esc(requestText) : '<span style="color:var(--gray-300)">-</span>'}</td>
       <td>${editBtn}</td>
       <td class="uni-col-workflow" style="font-size:11px;vertical-align:top;padding:6px 8px${(activeTab === 'unsubmitted' || activeTab === 'submitted') ? ';display:none' : ''}">${workflowCell}</td>
     </tr>`;
