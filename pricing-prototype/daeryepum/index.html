@@ -9780,12 +9780,28 @@ async function loadStickerImageList(orderId, stickerIndex) {
     }
     root.innerHTML = imgs.map(img => {
       const isImage = img.mime && img.mime.startsWith('image/');
+      const isPdf = img.mime && img.mime.includes('pdf');
       // 화면 표시는 원본 파일명 (한글 포함), 내부 식별/다운로드는 Storage 파일명(ASCII)
       const displayName = img.original_filename || img.filename;
       const downloadName = img.original_filename || img.filename;
-      const thumb = isImage && img.url
-        ? `<img src="${esc(img.url)}" style="width:100%;height:120px;object-fit:cover;border-radius:4px" />`
-        : `<div style="width:100%;height:120px;background:var(--gray-100);display:flex;align-items:center;justify-content:center;border-radius:4px;font-size:24px">${(img.mime||'').includes('pdf') ? '📄' : '📎'}</div>`;
+      // 썸네일 — 이미지/PDF 별 처리
+      let thumb;
+      if (isImage && img.url) {
+        thumb = `<a href="${esc(img.url)}" target="_blank" style="display:block">
+          <img src="${esc(img.url)}" style="width:100%;height:140px;object-fit:cover;border-radius:4px;cursor:zoom-in" />
+        </a>`;
+      } else if (isPdf && img.url) {
+        // PDF 인라인 미리보기 — Chrome/Edge/Firefox 모두 native PDF viewer.
+        //   #toolbar=0 등 hash param 으로 컨트롤 숨김. pointer-events:none 으로 클릭 위임.
+        //   클릭 시 새 탭에서 전체 PDF 열림.
+        thumb = `<a href="${esc(img.url)}" target="_blank" style="display:block;position:relative">
+          <embed src="${esc(img.url)}#toolbar=0&navpanes=0&scrollbar=0&view=FitH" type="application/pdf"
+                 style="width:100%;height:140px;border-radius:4px;background:#fff;pointer-events:none;border:1px solid var(--gray-200)" />
+          <div style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,0.55);color:#fff;font-size:10px;padding:2px 6px;border-radius:3px">PDF · 클릭 확대</div>
+        </a>`;
+      } else {
+        thumb = `<div style="width:100%;height:140px;background:var(--gray-100);display:flex;align-items:center;justify-content:center;border-radius:4px;font-size:24px;color:var(--gray-400)">📎</div>`;
+      }
       return `<div style="border:2px solid ${img.is_main ? '#16a34a' : 'var(--gray-200)'};border-radius:6px;padding:8px">
         ${thumb}
         <div style="font-size:11px;margin-top:6px;word-break:break-all;color:var(--gray-700);line-height:1.4" title="${esc(displayName)}">${esc(displayName).slice(0, 40)}${displayName.length > 40 ? '...' : ''}</div>
