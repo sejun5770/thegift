@@ -138,7 +138,14 @@ async function _patchStickerWorkflowImpl({ orderId, stickerIndex, stage, by, jum
   const sel = { ...sels[stickerIndex] };
   const now = new Date().toISOString();
 
-  if (jump || stage === null) {
+  // 'submitted' 단계로의 jump — 모든 timestamp NULL 처리 (입력완료 상태로 리셋).
+  //   이미지가 있어도 timestamps 만 비워 입력완료 탭에 노출되도록.
+  if (stage === 'submitted') {
+    STAGE_KEYS.forEach(s => {
+      sel[stageTimestampKey(s)] = null;
+      sel[stageByKey(s)] = null;
+    });
+  } else if (jump || stage === null) {
     // 점프 — target 까지 set, 이후 NULL
     const targetIdx = stage === null ? -1 : STAGE_KEYS.indexOf(stage);
     if (stage !== null && targetIdx < 0) throw new Error(`unknown stage: ${stage}`);

@@ -8989,17 +8989,14 @@ function renderBgUnified() {
     // XSS: 상품명은 MSSQL S2_Card 에서 옴 → escape 적용
     const productName = esc(sel?.product_name || product_name || '-');
     // 수정/추가 버튼 — 같은 위치에 노출
-    //  · ci 있음 → '수정' (기존)
+    //  · ci 있음 → '수정' (마켓플레이스 포함 — 운영팀이 스티커코드 매핑 등 후처리 가능)
     //  · ci 없고 취소 아님 → '추가' (관리자가 고객 대신 수동 입력)
     //  · 취소 → 버튼 없음
-    //  · 쿠팡/네이버 → 버튼 없음 (정보입력 자체가 불필요한 채널)
-    const editBtn = orderIsMarketplace
-      ? ''
-      : (ci
-        ? `<button class="btn" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">수정</button>`
-        : (isCancelled(order)
-          ? ''
-          : `<button class="btn btn-primary" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">+ 추가</button>`));
+    const editBtn = ci
+      ? `<button class="btn" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">수정</button>`
+      : (isCancelled(order) || orderIsMarketplace
+        ? ''
+        : `<button class="btn btn-primary" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">+ 추가</button>`);
 
     // 주문수집 셀 — 입력완료 탭에서만 렌더 (미입력엔 의미 없음)
     const showProcessedCol = (activeTab === 'submitted');
@@ -9162,8 +9159,9 @@ async function bulkAdvanceStage() {
 function bulkRollbackStage() {
   const rows = _getCheckedWorkflowRows();
   if (!rows.length) { showToast('대상 행이 없습니다'); return; }
-  // 점프 가능 단계 — sticker_completed 이상이 되어야 함. submitted 로 가려면 이미지 삭제 필요.
-  const stages = ['sticker_completed', 'printed', 'bound', 'packed'];
+  // 입력완료(submitted) 도 허용 — 서버에서 모든 timestamp NULL 처리.
+  //   이미지는 보존됨 (운영팀이 스티커코드 매핑 후 다시 진행 가능).
+  const stages = ['submitted', 'sticker_completed', 'printed', 'bound', 'packed'];
   const opts = stages.map(s => `<option value="${s}">${STAGE_LABELS[s]}</option>`).join('');
   const html = `
     <div id="bulk-jump-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center"
@@ -9560,9 +9558,9 @@ async function advanceWorkflow(orderId, stickerIndex, stage) {
 
 /** 임의 stage 점프 모달 (되돌리기). */
 function openJumpStageModal(orderId, stickerIndex) {
-  // 'submitted' 단계로 점프는 이미지 모두 삭제 필요 (서버 측 STAGE_KEYS 외) → 제외.
-  // 입력완료(이미지 없음) 로 완전 되돌리려면 이미지 보기 모달에서 개별 삭제.
-  const stages = ['sticker_completed', 'printed', 'bound', 'packed'];
+  // 입력완료(submitted) 도 점프 가능 — 서버에서 모든 timestamp NULL 처리.
+  //   이미지는 보존됨. 운영팀이 스티커코드 매핑 등 후처리 가능.
+  const stages = ['submitted', 'sticker_completed', 'printed', 'bound', 'packed'];
   const stageOpts = stages.map(s => `<option value="${s}">${STAGE_LABELS[s]}</option>`).join('');
   const html = `
     <div id="jump-stage-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center"
