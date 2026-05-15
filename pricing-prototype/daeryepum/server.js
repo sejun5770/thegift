@@ -3740,6 +3740,71 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: 'save_failed', message: e.message }));
           return;
         }
+      } else if (pathname === '/api/coupang/rfm/debug-raw') {
+        // 쿠팡 로켓 그로스 (RFM) — endpoint 후보들 순회 시도 + 응답 확인용 debug
+        logAdminAccess(session, req, 'coupang-rfm-debug-raw', parsed.query);
+        const rfm = require('./coupang/rfm');
+        const days = parseInt(parsed.query.days) || 7;
+        const end = new Date();
+        const start = new Date(end.getTime() - days * 86400000);
+        const startDate = start.toISOString().slice(0, 10);
+        const endDate = end.toISOString().slice(0, 10);
+        const result = await rfm.tryFetchRfmSalesReport({ startDate, endDate });
+        data = { query: { startDate, endDate, days }, ...result };
+      } else if (pathname === '/api/coupang/rfm/sync' && req.method === 'POST') {
+        // 쿠팡 로켓 그로스 동기화 — endpoint 식별 후 매출 데이터 upsert
+        logAdminAccess(session, req, 'coupang-rfm-sync', {});
+        const body = await new Promise((resolve) => {
+          let raw = '';
+          req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+        });
+        const rfm = require('./coupang/rfm');
+        const rfmStore = require('./coupang/rfm-store');
+        const days = parseInt(body.days_back) || 7;
+        const end = new Date();
+        const start = new Date(end.getTime() - days * 86400000);
+        const startDate = start.toISOString().slice(0, 10);
+        const endDate = end.toISOString().slice(0, 10);
+        try {
+          const fetchResult = await rfm.tryFetchRfmSalesReport({ startDate, endDate });
+          if (!fetchResult.successEndpoint) {
+            await rfmStore.updateSyncState({ last_error: 'no endpoint succeeded', last_synced_at: new Date().toISOString() });
+            data = { error: 'API endpoint 식별 실패 — debug-raw 로 응답 확인 필요', attempts: fetchResult.attempts };
+          } else {
+            // 응답 구조 확인 후 normalize
+            const raw = fetchResult.response;
+            const items = Array.isArray(raw?.data) ? raw.data
+                        : Array.isArray(raw?.contents) ? raw.contents
+                        : Array.isArray(raw) ? raw : [];
+            const rows = items.map(r => rfm.normalizeRow(r, startDate)).filter(Boolean);
+            let upserted = 0;
+            if (rows.length) {
+              const r = await rfmStore.upsertSales(rows);
+              upserted = r.upserted || 0;
+            }
+            await rfmStore.updateSyncState({
+              last_synced_at: new Date().toISOString(),
+              last_synced_from: startDate,
+              last_synced_to: endDate,
+              last_rows_count: upserted,
+              last_error: null,
+            });
+            data = {
+              ok: true,
+              endpoint: fetchResult.successEndpoint,
+              window: { startDate, endDate },
+              fetched: items.length,
+              upserted,
+            };
+          }
+        } catch (e) {
+          await rfmStore.updateSyncState({ last_error: e.message, last_synced_at: new Date().toISOString() });
+          data = { error: e.message };
+        }
+      } else if (pathname === '/api/coupang/rfm/sync-state') {
+        const rfmStore = require('./coupang/rfm-store');
+        data = await rfmStore.getSyncState();
       } else if (pathname.startsWith('/api/bg/orders/')) {
         // ============================================
         // 정보입력현황 워크플로우 + 스티커 이미지 + 송장
