@@ -9224,42 +9224,154 @@ async function confirmJumpStage(orderId, stickerIndex) {
 }
 
 // ============================================
-// 스티커 이미지 업로드 모달
+// 스티커 이미지 업로드 모달 (드래그&드롭 + 파일명 검증)
 // ============================================
+
+/** orderId 에서 raw 주문번호 추출 ('ETC-123' / 'CP-456' / 'NV-789' / '321' → 숫자). */
+function _rawOrderSeq(orderId) {
+  return String(orderId || '').replace(/^(ETC|CP|NV)-/, '');
+}
+
+/** 파일명 검증 — 주문번호 + 스티커코드 포함 여부. errors 배열 반환 (빈 배열=통과). */
+function _validateStickerFilename(filename, orderSeq, stickerCode) {
+  const errs = [];
+  const name = String(filename || '');
+  if (orderSeq && !name.includes(String(orderSeq))) {
+    errs.push(`주문번호 '${orderSeq}' 누락`);
+  }
+  if (stickerCode && !name.includes(String(stickerCode))) {
+    errs.push(`스티커코드 '${stickerCode}' 누락`);
+  }
+  return errs;
+}
+
+// 업로드 모달 상태 — 현재 선택된 파일들 (드래그/선택 통합 관리)
+let _stickerUploadState = null;
+
 function openStickerUploadModal(orderId, stickerIndex) {
+  // 행 정보에서 검증 기준 추출
+  const row = bgUnifiedRows.find(r => bgCiKey(r.order) === orderId && r.sticker_index === stickerIndex);
+  const orderSeq = _rawOrderSeq(orderId) || row?.order?.order_seq || '';
+  const stickerCode = row?.sel?.sticker_code || '';
+  _stickerUploadState = { orderId, stickerIndex, orderSeq, stickerCode, files: [] };
+
   const html = `
-    <div id="sticker-upload-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center">
-      <div style="background:#fff;padding:24px;border-radius:8px;max-width:540px;width:90%;max-height:90vh;overflow:auto">
+    <div id="sticker-upload-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center"
+         onclick="if(event.target===this)closeStickerUploadModal()">
+      <div style="background:#fff;padding:24px;border-radius:8px;max-width:600px;width:92%;max-height:90vh;overflow:auto">
         <div style="font-weight:700;font-size:16px;margin-bottom:10px">📤 스티커 이미지 업로드</div>
-        <div style="color:var(--gray-500);font-size:12px;margin-bottom:14px">
-          주문번호: <code>${esc(orderId)}</code> · sticker_index: ${stickerIndex}<br>
-          PNG/JPG/PDF (max 10MB) 여러 개 선택 가능.
+        <div style="color:var(--gray-500);font-size:12px;margin-bottom:8px">
+          주문번호: <code style="color:#0369a1">${esc(orderSeq)}</code>
+          ${stickerCode ? ` · 스티커코드: <code style="color:#7c3aed">${esc(stickerCode)}</code>` : ' · <span style="color:#dc2626">스티커코드 미설정 — 검증 생략됨</span>'}
+        </div>
+        <div style="font-size:11px;color:var(--gray-500);margin-bottom:14px">
+          ⚠️ 파일명에 <b>주문번호</b>${stickerCode ? ' + <b>스티커코드</b>' : ''} 가 모두 포함되어야 업로드 가능.<br>
+          PNG/JPG/PDF (max 10MB) 여러 개 가능.
+        </div>
+        <!-- 드래그&드롭 영역 -->
+        <div id="sticker-upload-dropzone"
+             style="border:2px dashed var(--gray-300);border-radius:8px;padding:30px 14px;text-align:center;cursor:pointer;background:var(--gray-50);transition:all .15s"
+             onclick="document.getElementById('sticker-upload-input').click()"
+             ondragover="event.preventDefault();this.style.borderColor='var(--primary)';this.style.background='#eff6ff'"
+             ondragleave="this.style.borderColor='var(--gray-300)';this.style.background='var(--gray-50)'"
+             ondrop="_onStickerFileDrop(event)">
+          <div style="font-size:32px;margin-bottom:6px">📤</div>
+          <div style="font-size:13px;color:var(--gray-700)">파일을 끌어다 놓거나 클릭해서 선택</div>
         </div>
         <input type="file" id="sticker-upload-input" accept="image/png,image/jpeg,application/pdf" multiple
-               style="width:100%;padding:10px;border:1px dashed var(--gray-300);border-radius:6px;margin-bottom:14px" />
-        <div id="sticker-upload-progress" style="font-size:12px;color:var(--gray-500);margin-bottom:14px;min-height:20px"></div>
-        <div style="display:flex;gap:8px;justify-content:flex-end">
-          <button class="btn" onclick="document.getElementById('sticker-upload-modal').remove()">닫기</button>
-          <button class="btn btn-primary" id="sticker-upload-btn" onclick="doStickerUpload('${esc(orderId)}', ${stickerIndex})">업로드</button>
+               style="display:none" onchange="_onStickerFileSelect(event)" />
+        <div id="sticker-upload-filelist" style="margin-top:14px;max-height:240px;overflow-y:auto;font-size:12px"></div>
+        <div id="sticker-upload-progress" style="font-size:12px;color:var(--gray-500);margin-top:10px;min-height:20px"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+          <button class="btn" onclick="closeStickerUploadModal()">닫기</button>
+          <button class="btn btn-primary" id="sticker-upload-btn" onclick="doStickerUpload()">업로드</button>
         </div>
       </div>
     </div>`;
   document.body.insertAdjacentHTML('beforeend', html);
+  _renderStickerFileList();
 }
 
-async function doStickerUpload(orderId, stickerIndex) {
-  const input = document.getElementById('sticker-upload-input');
-  const files = Array.from(input.files || []);
-  if (!files.length) { alert('파일을 선택해주세요'); return; }
+function closeStickerUploadModal() {
+  document.getElementById('sticker-upload-modal')?.remove();
+  _stickerUploadState = null;
+}
+
+function _onStickerFileDrop(e) {
+  e.preventDefault();
+  const dz = e.currentTarget;
+  if (dz) { dz.style.borderColor = 'var(--gray-300)'; dz.style.background = 'var(--gray-50)'; }
+  const files = Array.from(e.dataTransfer.files || []);
+  _addStickerUploadFiles(files);
+}
+
+function _onStickerFileSelect(e) {
+  const files = Array.from(e.target.files || []);
+  _addStickerUploadFiles(files);
+  e.target.value = ''; // reset for re-selection
+}
+
+function _addStickerUploadFiles(files) {
+  if (!_stickerUploadState || !files.length) return;
+  // 중복 제거 (filename+size 기준)
+  const existing = new Set(_stickerUploadState.files.map(f => f.file.name + ':' + f.file.size));
+  files.forEach(f => {
+    const key = f.name + ':' + f.size;
+    if (existing.has(key)) return;
+    const errs = _validateStickerFilename(f.name, _stickerUploadState.orderSeq, _stickerUploadState.stickerCode);
+    _stickerUploadState.files.push({ file: f, errors: errs });
+  });
+  _renderStickerFileList();
+}
+
+function _removeStickerUploadFile(idx) {
+  if (!_stickerUploadState) return;
+  _stickerUploadState.files.splice(idx, 1);
+  _renderStickerFileList();
+}
+
+function _renderStickerFileList() {
+  const root = document.getElementById('sticker-upload-filelist');
+  if (!root || !_stickerUploadState) return;
+  const files = _stickerUploadState.files;
+  if (!files.length) { root.innerHTML = ''; return; }
+  const okCnt = files.filter(f => !f.errors.length).length;
+  const errCnt = files.length - okCnt;
+  root.innerHTML = `
+    <div style="margin-bottom:6px;font-weight:600;color:var(--gray-700)">
+      선택된 파일 ${files.length}건 (✅ ${okCnt} · ❌ ${errCnt})
+    </div>
+    ${files.map((f, i) => {
+      const ok = !f.errors.length;
+      return `<div style="display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border-radius:4px;background:${ok ? '#f0fdf4' : '#fef2f2'};margin-bottom:4px">
+        <span style="font-size:14px">${ok ? '✅' : '❌'}</span>
+        <div style="flex:1;min-width:0">
+          <div style="word-break:break-all;color:${ok ? '#15803d' : '#b91c1c'}">${esc(f.file.name)} <span style="color:var(--gray-500);font-size:11px">(${(f.file.size/1024).toFixed(1)}KB)</span></div>
+          ${ok ? '' : `<div style="font-size:11px;color:#dc2626;margin-top:2px">${f.errors.map(esc).join(' · ')}</div>`}
+        </div>
+        <button class="btn" style="padding:2px 6px;font-size:10px;color:#dc2626" onclick="_removeStickerUploadFile(${i})">×</button>
+      </div>`;
+    }).join('')}
+    ${errCnt > 0 ? '<div style="font-size:11px;color:#dc2626;margin-top:6px">⚠️ ❌ 파일은 업로드되지 않습니다. 파일명을 수정하거나 제거하세요.</div>' : ''}
+  `;
+}
+
+async function doStickerUpload() {
+  if (!_stickerUploadState) return;
+  const { orderId, stickerIndex, files } = _stickerUploadState;
+  const valid = files.filter(f => !f.errors.length);
+  if (!valid.length) {
+    alert('업로드 가능한 파일이 없습니다. 파일명에 주문번호 + 스티커코드 포함 확인.');
+    return;
+  }
   const btn = document.getElementById('sticker-upload-btn');
   const prog = document.getElementById('sticker-upload-progress');
   btn.disabled = true;
   let ok = 0, fail = 0;
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
-    prog.textContent = `${i + 1}/${files.length} 업로드 중: ${f.name} (${(f.size / 1024).toFixed(1)}KB)`;
+  for (let i = 0; i < valid.length; i++) {
+    const f = valid[i].file;
+    prog.textContent = `${i + 1}/${valid.length} 업로드 중: ${f.name} (${(f.size / 1024).toFixed(1)}KB)`;
     try {
-      // base64 변환
       const arrayBuf = await f.arrayBuffer();
       const data = _bufToBase64(arrayBuf);
       const r = await fetch(`${API}/api/bg/orders/${encodeURIComponent(orderId)}/stickers/${stickerIndex}/images`, {
@@ -9278,7 +9390,7 @@ async function doStickerUpload(orderId, stickerIndex) {
   prog.textContent = `완료: ${ok}건 성공, ${fail}건 실패`;
   if (ok > 0) {
     showToast(`✅ ${ok}건 업로드 완료`);
-    document.getElementById('sticker-upload-modal').remove();
+    closeStickerUploadModal();
     await loadBgUnified();
   } else {
     btn.disabled = false;

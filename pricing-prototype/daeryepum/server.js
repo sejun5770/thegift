@@ -3772,6 +3772,33 @@ const server = http.createServer(async (req, res) => {
               res.end(JSON.stringify({ error: 'invalid_body', message: 'filename, data(base64) 필수' }));
               return;
             }
+            // ============================================
+            // 파일명 검증 — 주문번호 + 스티커코드 포함 강제 (클라이언트 우회 방지)
+            // ============================================
+            try {
+              const ciCheck = await wf.getCustomerInfoForUpdate(orderId);
+              const selCheck = ciCheck?.sticker_selections?.[stickerIdx];
+              const rawOrderSeq = String(orderId).replace(/^(ETC|CP|NV)-/, '');
+              const errors = [];
+              if (rawOrderSeq && !body.filename.includes(rawOrderSeq)) {
+                errors.push(`주문번호 '${rawOrderSeq}' 누락`);
+              }
+              if (selCheck?.sticker_code && !body.filename.includes(selCheck.sticker_code)) {
+                errors.push(`스티커코드 '${selCheck.sticker_code}' 누락`);
+              }
+              if (errors.length) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                  error: 'filename_validation_failed',
+                  message: '파일명 검증 실패: ' + errors.join(', '),
+                  details: errors,
+                }));
+                return;
+              }
+            } catch (e) {
+              console.warn('[sticker upload] 파일명 검증 중 ci 조회 실패 (검증 생략):', e.message);
+              // ci 조회 실패 시 검증 생략 (업로드 자체는 진행)
+            }
             try {
               const buffer = Buffer.from(body.data, 'base64');
               if (buffer.length > 10 * 1024 * 1024) {
