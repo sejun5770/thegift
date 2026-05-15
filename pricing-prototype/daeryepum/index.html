@@ -1870,9 +1870,11 @@ const ALL_COLS = [
   {key:'card_name',label:'상품명',default:true},
   {key:'card_code',label:'상품코드',default:false},
   {key:'item_count',label:'상품수량',default:true,num:true},
-  {key:'item_amount_fmt',label:'결제금액',default:true,num:true},
+  // 라벨 정정 (운영팀 보고): item_amount = 정가 합 → '주문총액', settle_price = 실결제 → '결제금액'
+  //   이전엔 두 라벨이 서로 바뀌어 있어 사용자가 혼동.
+  {key:'item_amount_fmt',label:'주문총액',default:false,num:true},
   {key:'coupon_price_fmt',label:'쿠폰할인',default:false,num:true},
-  {key:'settle_price_fmt',label:'주문총액',default:false,num:true},
+  {key:'settle_price_fmt',label:'결제금액',default:true,num:true},
   {key:'settle_method_label',label:'결제수단',default:false},
   {key:'wedding_date',label:'예식일',default:false},
   {key:'lead_days',label:'리드타임(일)',default:false,num:true},

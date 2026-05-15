@@ -594,9 +594,20 @@ async function apiOrders(query) {
   // 카테고리별 cardDiv — ETC coupon 분배 분모로 사용.
   // 주문조회 화면: item_amount 는 gross(쿠폰 X), coupon_price 는 ecd.item_count 로 분배 표시.
   // (Dashboard 등 집계 쿼리는 별도로 etcAmountExpr 사용)
+  //
+  // 카테고리별 가격 산정 방식:
+  //   - D01(답례품): card_sale_price × order_count / Unit_Value — 묶음 단위 가격 구조
+  //   - C29(데코소품) / 2026_qr%: card_sale_price × order_count (Unit_Value 무시)
+  //     · 데코소품은 1상품 = 1set 가격 구조라 Unit_Value 로 나누면 가격 축소됨
+  //     · 예: photo_print_06 — 단위 2매, 가격 1,000원, 1주문 시 결제금액 1,000원 (아닌 500원 X)
+  //   - D02(꽃다발): 일단 기존 동일 (Unit_Value 적용)
   const categoryCfg = CATEGORY_FILTERS[query.category] || CATEGORY_FILTERS.daeryepum;
-  const etcAmountGross = etcAmountGrossExpr();
-  const etcCouponDivisorForCategory = etcCouponDivisorJoin(categoryCfg.cardDiv);
+  const skipUnitValue = query.category === 'deco';
+  const etcAmountGross = etcAmountGrossExpr({ skipUnitValue });
+  // 쿠폰 분배 분모도 카테고리 전체 filter 로 정정 (이전엔 D01 만 고정 → 데코주문에서 쿠폰 분배 오류)
+  const cpdFilter = (categoryCfg.filter || `c.Card_Div = 'D01'`).replace(/\bc\./g, 'c_cpd.');
+  const etcCouponDivisorForCategory = etcCouponDivisorJoin(cpdFilter);
+  const cardUnitDivisor = skipUnitValue ? '1' : 'ISNULL(NULLIF(c.Unit_Value, 0), 1)';
 
   const result = await p.request()
     .input('startDate', sql.VarChar, startDate)
@@ -678,7 +689,7 @@ async function apiOrders(query) {
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
         ISNULL(di.dd_count, coi.item_count) AS item_count,
-        CAST(coi.item_sale_price AS float) * ISNULL(di.dd_count, coi.item_count) / ISNULL(NULLIF(c.Unit_Value, 0), 1) AS item_amount,
+        CAST(coi.item_sale_price AS float) * ISNULL(di.dd_count, coi.item_count) / ${cardUnitDivisor} AS item_amount,
         co.settle_price,
         0 AS coupon_price,
         co.status_seq,
@@ -879,15 +890,18 @@ function mergeNames(recvName, orderName) {
 // Unit_Value: S2_Card.Unit_Value (판매단위 수량, 예: 소프트터치=50개 단위)
 
 /**
- * 같은 주문 내 같은 Card_Div 아이템 수를 미리 집계하는 derived table JOIN 절.
+ * 같은 주문 내 같은 카테고리 아이템 수를 미리 집계하는 derived table JOIN 절.
  *   GROUP BY 로 주문당 1행 → outer 행마다 재계산 X (성능).
+ *   인자: cardDiv 문자열 'D01' (호환) 또는 filter clause "c_cpd.Card_Div = 'C29' OR ..."
  */
-function etcCouponDivisorJoin(cardDiv = 'D01') {
+function etcCouponDivisorJoin(input = 'D01') {
+  // 인자가 단순 cardDiv ('D01') 인지 또는 filter clause (공백 포함) 인지 자동 판별
+  const filter = /\s|=|\(/.test(input) ? input : `c_cpd.Card_Div = '${input}'`;
   return `LEFT JOIN (
     SELECT order_seq, COUNT(*) AS item_count
     FROM CUSTOM_ETC_ORDER_ITEM oi_cpd WITH (NOLOCK)
     INNER JOIN S2_Card c_cpd WITH (NOLOCK) ON oi_cpd.card_seq = c_cpd.Card_Seq
-    WHERE c_cpd.Card_Div = '${cardDiv}'
+    WHERE ${filter}
     GROUP BY order_seq
   ) ecd ON o.order_seq = ecd.order_seq`;
 }
@@ -908,12 +922,17 @@ function etcAmountExpr(cardDiv = 'D01') {
  * ETC 행 단위 정가 식 (쿠폰 분배 X) — 주문조회 화면 표시용.
  *   주문조회 결제금액 컬럼은 정가만 표시하고, 쿠폰할인은 별도 컬럼에서 ecd.item_count 로 분배 표시.
  *   (집계 쿼리는 etcAmountExpr 사용 — coupon 1회 차감 정확성 유지)
+ *
+ *   skipUnitValue: 데코소품/QR스티커 등 1상품=1set 가격 구조 카테고리에서 true.
+ *     · 답례품(D01): card_sale_price × order_count / Unit_Value (묶음 단위 가격)
+ *     · 데코소품(C29/2026_qr): card_sale_price × order_count (Unit_Value 무시)
  */
-function etcAmountGrossExpr() {
+function etcAmountGrossExpr({ skipUnitValue = false } = {}) {
+  const unitDivisor = skipUnitValue ? '1' : 'ISNULL(NULLIF(c.Unit_Value, 0), 1)';
   return `
   CASE
     WHEN si.SiteName IS NULL
-    THEN CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+    THEN CAST(oi.card_sale_price AS float) * oi.order_count / ${unitDivisor}
     ELSE CAST(oi.card_sale_price AS float)
   END`;
 }
