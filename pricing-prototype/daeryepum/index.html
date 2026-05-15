@@ -8694,15 +8694,8 @@ function switchUniTab(tab) {
   if (sortOpts) sortOpts.style.display = (tab !== 'unsubmitted') ? 'flex' : 'none';
   const hintEl = document.getElementById('uni-sort-default-hint');
   if (hintEl) {
-    const hints = {
-      submitted: '(수집미처리 우선 + 입력일시 DESC)',
-      sticker_completed: '(스티커 작업일시 ASC — 오래된 것 먼저)',
-      printed: '(인쇄일시 ASC — 오래된 것 먼저)',
-      bound: '(제본일시 ASC — 오래된 것 먼저)',
-      packed: '(포장일시 ASC — 오래된 것 먼저)',
-      shipped: '(출고일시 DESC — 최근 출고 위)',
-    };
-    hintEl.textContent = hints[tab] || '';
+    // 모든 탭 공통 — 주문일시 ASC + 주문번호 그룹 + 입력일시
+    hintEl.textContent = '(주문일시 ASC + 주문번호 그룹 + 입력일시)';
   }
   renderBgUnified();
 }
@@ -8852,39 +8845,52 @@ function renderBgUnified() {
     return true;
   });
 
-  // 정렬 — 모든 워크플로우 탭 공통 라디오 옵션 (default / ship_date_asc)
+  // ============================================
+  // 정렬 — 운영팀 요청 공통 로직
+  // ============================================
+  //   기본 정렬:
+  //     1) 주문일시 ASC (오래된 주문 먼저)
+  //     2) 주문번호 — 같은 날 다른 주문은 인접 보장 (실질적 그룹화)
+  //     3) 입력일시 (같은 주문 안 row 정렬)
+  //     4) sticker_index 보조
+  //
+  //   희망출고일 가까운 순:
+  //     1) desired_ship_date ASC (NULL 뒤로)
+  //     2) 주문번호 (그룹화)
+  //     3) 주문일시
+  //     4) 입력일시
   const sortMode = document.querySelector('input[name="uni-sort"]:checked')?.value || 'default';
+
+  function _seqStr(r) { return String(r.order?.order_seq || ''); }
+  function _orderDate(r) { return r.order?.order_date || ''; }
+  function _subAt(r) { return r.ci?.submitted_at || r.ci?.updated_at || ''; }
+
   if (sortMode === 'ship_date_asc') {
-    // 희망출고일 ASC — 가까운 출고일 우선 (NULL 은 뒤로)
     bgUnifiedRows.sort((a, b) => {
       const dA = a.ci?.desired_ship_date || '';
       const dB = b.ci?.desired_ship_date || '';
-      if (!dA && !dB) return 0;
-      if (!dA) return 1;
-      if (!dB) return -1;
-      return dA.localeCompare(dB);
+      // 1) 희망출고일 ASC (NULL 뒤로)
+      if (!dA && dB) return 1;
+      if (dA && !dB) return -1;
+      if (dA !== dB) return dA.localeCompare(dB);
+      // 2) 주문번호 그룹
+      if (_seqStr(a) !== _seqStr(b)) return _seqStr(a).localeCompare(_seqStr(b));
+      // 3) 주문일시
+      if (_orderDate(a) !== _orderDate(b)) return _orderDate(a).localeCompare(_orderDate(b));
+      // 4) 입력일시
+      if (_subAt(a) !== _subAt(b)) return _subAt(a).localeCompare(_subAt(b));
+      return (a.sticker_index || 0) - (b.sticker_index || 0);
     });
-  } else if (activeTab === 'submitted') {
-    // 기본: 수집미처리 우선 + processed_at DESC + 입력일시 DESC
+  } else {
     bgUnifiedRows.sort((a, b) => {
-      const procA = a.ci?.processed_at;
-      const procB = b.ci?.processed_at;
-      if (!procA && procB) return -1;
-      if (procA && !procB) return 1;
-      if (procA && procB) return (Date.parse(procB) || 0) - (Date.parse(procA) || 0);
-      const tA = Math.max(Date.parse(a.ci?.updated_at || 0) || 0, Date.parse(a.ci?.submitted_at || 0) || 0);
-      const tB = Math.max(Date.parse(b.ci?.updated_at || 0) || 0, Date.parse(b.ci?.submitted_at || 0) || 0);
-      return tB - tA;
+      // 1) 주문일시 ASC (오래된 먼저)
+      if (_orderDate(a) !== _orderDate(b)) return _orderDate(a).localeCompare(_orderDate(b));
+      // 2) 주문번호 그룹 (같은 날 다른 주문 인접)
+      if (_seqStr(a) !== _seqStr(b)) return _seqStr(a).localeCompare(_seqStr(b));
+      // 3) 입력일시
+      if (_subAt(a) !== _subAt(b)) return _subAt(a).localeCompare(_subAt(b));
+      return (a.sticker_index || 0) - (b.sticker_index || 0);
     });
-  } else if (activeTab === 'shipped') {
-    // 출고완료: shipped_at DESC (최근 출고 위)
-    bgUnifiedRows.sort((a, b) => (Date.parse(b.sel?.shipped_at || 0) || 0) - (Date.parse(a.sel?.shipped_at || 0) || 0));
-  } else if (['sticker_completed', 'printed', 'bound', 'packed'].includes(activeTab)) {
-    // 중간 단계: 해당 단계 timestamp ASC (오래된 것이 먼저 처리되도록)
-    const ts = activeTab === 'sticker_completed' ? 'sticker_completed_at'
-             : activeTab === 'printed' ? 'printed_at'
-             : activeTab === 'bound' ? 'bound_at' : 'packed_at';
-    bgUnifiedRows.sort((a, b) => (Date.parse(a.sel?.[ts] || 0) || 0) - (Date.parse(b.sel?.[ts] || 0) || 0));
   }
 
   if (!bgUnifiedRows.length) {
@@ -9078,7 +9084,9 @@ function _renderWorkflowCell(rowIdx, order, ci, sel, stickerIdx) {
   }
 
   const items = [];
-  const isNoSticker = !sel?.sticker_code && !sel?.sticker_id;
+  // 빈 값 판정 — null/undefined/''/공백/'null' 문자열 모두 empty 로 간주
+  const isEmpty = v => v == null || !String(v).trim() || String(v).trim().toLowerCase() === 'null';
+  const isNoSticker = isEmpty(sel?.sticker_code) && isEmpty(sel?.sticker_id);
   // 통합 버튼 — 이미지 보기/관리/업로드 한 모달로 (Tab으로 분리되지 않은 통합 화면)
   if (canEditWorkflow) {
     if (imgCnt > 0) {

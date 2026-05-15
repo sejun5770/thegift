@@ -52,18 +52,27 @@ async function withOrderLock(orderId, fn) {
 // 워크플로우 stage helpers
 // ============================================
 
+/** 빈 값 판정 — null, undefined, '', 공백문자만, 'null' 문자열 모두 empty 로 간주. */
+function isEmptyStickerValue(v) {
+  if (v == null) return true;
+  const s = String(v).trim();
+  return s === '' || s.toLowerCase() === 'null';
+}
+
 /**
- * 스티커 선택안함 (sticker_code null) 행은 인쇄/스티커 작업 불필요 → 자동으로 제본완료(bound) 까지 진행.
+ * 스티커 선택안함 (sticker_code 빈 값) 행은 인쇄/스티커 작업 불필요 → 자동으로 제본완료(bound) 까지 진행.
  *   포장 / 출고는 운영자가 박스 작업 후 직접 진행.
  *   이미 set 된 timestamp 는 보존 (멱등성). by: 자동 처리 표시용 'system:no-sticker' 권장.
+ *
+ *   판정: sticker_code 와 sticker_id 둘 다 empty (null/'' /공백/'null') 인 경우만 자동 진행.
  */
 function autoAdvanceNoStickerSelections(selections, by = 'system:no-sticker') {
   if (!Array.isArray(selections)) return selections;
   const now = new Date().toISOString();
   return selections.map(sel => {
     if (!sel) return sel;
-    // 스티커 ID 또는 코드 둘 다 없을 때만 스티커 없음으로 간주
-    if (sel.sticker_code || sel.sticker_id) return sel;
+    // 스티커 ID 또는 코드 둘 다 빈 값일 때만 스티커 없음으로 간주
+    if (!isEmptyStickerValue(sel.sticker_code) || !isEmptyStickerValue(sel.sticker_id)) return sel;
     return {
       ...sel,
       sticker_completed_at: sel.sticker_completed_at || now,
@@ -444,4 +453,5 @@ module.exports = {
   insertInvoice,
   deleteInvoice,
   autoAdvanceNoStickerSelections,
+  isEmptyStickerValue,
 };
