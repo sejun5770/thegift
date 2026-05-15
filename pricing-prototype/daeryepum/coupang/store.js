@@ -51,10 +51,24 @@ async function upsertCoupangOrders(rows) {
  * 기간 조회 — 주문조회/대시보드 매출 집계 통합용.
  *   startStr / endStr: 'YYYY-MM-DD' (end exclusive)
  *   기간 차원은 ordered_at (paid_at 기준 원하면 byPaid=true)
+ *   orderIds: BIGINT 배열 — 지정 시 기간과 OR 조건으로 추가 매칭 (정보입력현황 옛날 CI 매칭용).
  */
-async function listCoupangOrders({ startStr, endStr, byPaid = false } = {}) {
+async function listCoupangOrders({ startStr, endStr, byPaid = false, orderIds } = {}) {
   if (!USE_SUPABASE) return [];
   const col = byPaid ? 'paid_at' : 'ordered_at';
+  // orderIds OR 모드 — PostgREST `or=(a.eq.x,b.eq.y)` syntax 활용.
+  if (Array.isArray(orderIds) && orderIds.length) {
+    const inClause = `coupang_order_id=in.(${orderIds.join(',')})`;
+    const params = [];
+    if (startStr && endStr) {
+      // (in range) OR (in ids) — PostgREST 의 or() 함수
+      params.push(`or=(and(${col}.gte.${encodeURIComponent(startStr)},${col}.lt.${encodeURIComponent(endStr)}),coupang_order_id.in.(${orderIds.join(',')}))`);
+    } else {
+      params.push(inClause);
+    }
+    params.push(`order=${col}.desc`);
+    return sbGet('coupang_orders', params.join('&'));
+  }
   const params = [];
   if (startStr) params.push(`${col}=gte.${encodeURIComponent(startStr)}`);
   if (endStr) params.push(`${col}=lt.${encodeURIComponent(endStr)}`);

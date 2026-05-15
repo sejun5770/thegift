@@ -85,9 +85,20 @@ async function patchNaverStubEnrichment(orderId, { sticker_selections, desired_s
   return { patched: 1 };
 }
 
-async function listNaverOrders({ startStr, endStr, byPaid = false } = {}) {
+async function listNaverOrders({ startStr, endStr, byPaid = false, orderIds } = {}) {
   if (!USE_SUPABASE) return [];
   const col = byPaid ? 'paid_at' : 'ordered_at';
+  // orderIds OR 모드 — product_order_id 기준 (옛날 customer_info 매칭용).
+  if (Array.isArray(orderIds) && orderIds.length) {
+    const params = [];
+    if (startStr && endStr) {
+      params.push(`or=(and(${col}.gte.${encodeURIComponent(startStr)},${col}.lt.${encodeURIComponent(endStr)}),product_order_id.in.(${orderIds.map(id => `"${id}"`).join(',')}))`);
+    } else {
+      params.push(`product_order_id=in.(${orderIds.map(id => `"${id}"`).join(',')})`);
+    }
+    params.push(`order=${col}.desc`);
+    return sbGet('naver_orders', params.join('&'));
+  }
   const params = [];
   if (startStr) params.push(`${col}=gte.${encodeURIComponent(startStr)}`);
   if (endStr) params.push(`${col}=lt.${encodeURIComponent(endStr)}`);

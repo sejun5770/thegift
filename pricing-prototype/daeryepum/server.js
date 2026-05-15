@@ -633,6 +633,21 @@ async function apiOrders(query) {
   const startDate = query.start_date || fmtDate(addDays(today(), -7));
   const endDate = query.end_date || fmtDate(addDays(today(), 1));
   const categoryFilter = getCategoryFilter(query.category);
+  // by-IDs 모드 — 정보입력현황의 customer_info 가 있는 옛날 주문 fetch 용.
+  //   prefix 별로 분리 (MSSQL ETC/CARD = order_seq, COUPANG = coupang_order_id, NAVER = product_order_id).
+  //   콤마 분리, 안전상 채널당 500개 제한.
+  //   이 모드면 date filter 와 OR 조건 — (in range) OR (in ids) 둘 다 매칭.
+  const parseIntList = (raw, max = 500) => String(raw || '').trim()
+    ? String(raw).split(',').map(s => parseInt(s.trim(), 10)).filter(n => Number.isInteger(n) && n > 0).slice(0, max)
+    : [];
+  const parseStrList = (raw, max = 500) => String(raw || '').trim()
+    ? String(raw).split(',').map(s => s.trim()).filter(Boolean).slice(0, max)
+    : [];
+  const orderSeqsList = parseIntList(query.order_seqs);
+  const coupangIdsList = parseIntList(query.coupang_ids);
+  const naverIdsList = parseStrList(query.naver_ids);
+  const orderSeqsClause = orderSeqsList.length ? `OR o.order_seq IN (${orderSeqsList.join(',')})` : '';
+  const orderSeqsClauseCo = orderSeqsList.length ? `OR co.order_seq IN (${orderSeqsList.join(',')})` : '';
   // L5: 호출자가 status 필터를 SQL 단에서 적용하도록 옵션 제공.
   //   기본 빈배열 → 모든 status 반환 (주문조회 UI 호환).
   //   /api/export/orders 는 [3,5] 전달 → cancelled/draft 미전송 (네트워크 절약).
@@ -721,7 +736,7 @@ async function apiOrders(query) {
         ORDER BY co2.order_seq DESC
       ) cw
       WHERE ${categoryFilter}
-        AND o.order_date >= @startDate AND o.order_date < @endDate
+        AND (o.order_date >= @startDate AND o.order_date < @endDate ${orderSeqsClause})
         AND o.status_seq >= 1
         ${statusExcludeClause}
 
@@ -780,7 +795,7 @@ async function apiOrders(query) {
       ) di ON di.ORDER_SEQ = co.order_seq
       LEFT JOIN custom_order_WeddInfo w WITH (NOLOCK) ON co.order_seq = w.order_seq
       WHERE ${categoryFilter}
-        AND co.order_date >= @startDate AND co.order_date < @endDate
+        AND (co.order_date >= @startDate AND co.order_date < @endDate ${orderSeqsClauseCo})
         AND co.status_seq >= 1
         ${statusExcludeClauseCo}
 
@@ -807,6 +822,7 @@ async function apiOrders(query) {
         startStr: startDate,
         endStr: endDate,
         byPaid: false, // order_date 기준 (MSSQL 과 일관)
+        orderIds: coupangIdsList.length ? coupangIdsList : undefined,
       });
       if (coupangRows && coupangRows.length) {
         const normalized = coupangRows.map(r => ({
@@ -853,6 +869,7 @@ async function apiOrders(query) {
       const naverStore = require('./naver/store');
       const naverRows = await naverStore.listNaverOrders({
         startStr: startDate, endStr: endDate, byPaid: false,
+        orderIds: naverIdsList.length ? naverIdsList : undefined,
       });
       if (naverRows && naverRows.length) {
         const normalized = naverRows.map(r => ({
