@@ -95,6 +95,60 @@ function isSuperAdmin(session) {
 }
 
 // ============================================
+// Role-based 권한 — admin_users.role ('admin' | 'operator' | 'designer')
+// ============================================
+//   workflow:
+//     - 스티커 업로드/다운로드, 인쇄완료: admin/operator/designer
+//     - 제본완료, 포장완료, 출고처리: admin/operator
+//
+//   미등록 사용자 default = 'operator' (기존 동작 유지, breaking change 회피).
+//   super admin 은 무조건 'admin' 권한 통과.
+const _roleCache = new Map(); // email → { role, cachedAt }
+const ROLE_CACHE_TTL_MS = 60 * 1000; // 1분
+
+async function getUserRole(email) {
+  if (!email) return null;
+  const key = String(email).toLowerCase();
+  const cached = _roleCache.get(key);
+  if (cached && (Date.now() - cached.cachedAt) < ROLE_CACHE_TTL_MS) return cached.role;
+  if (!USE_SUPABASE_AUTH) return 'operator'; // 미설정 환경 default
+  try {
+    const res = await fetch(`${AUTH_REST_BASE}/admin_users?email=eq.${encodeURIComponent(key)}&select=role&limit=1`, {
+      headers: AUTH_HEADERS,
+    });
+    if (!res.ok) {
+      _roleCache.set(key, { role: 'operator', cachedAt: Date.now() });
+      return 'operator';
+    }
+    const rows = await res.json();
+    const role = rows[0]?.role || 'operator'; // 미등록 = operator default
+    _roleCache.set(key, { role, cachedAt: Date.now() });
+    return role;
+  } catch (e) {
+    console.warn(`[role] getUserRole 실패 ${email}: ${e.message}`);
+    return 'operator';
+  }
+}
+
+/**
+ * 세션 + 허용 role 리스트 → 권한 여부.
+ *   super admin 은 무조건 통과.
+ *   예: await hasRole(session, ['admin', 'operator'])
+ */
+async function hasRole(session, allowedRoles) {
+  if (!session || !session.email) return false;
+  if (isSuperAdmin(session)) return true;
+  const role = await getUserRole(session.email);
+  return allowedRoles.includes(role);
+}
+
+/** 권한 거부 응답 헬퍼 — 라우트에서 사용. */
+function denyForbidden(res, hint = 'role required') {
+  res.writeHead(403, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'forbidden', message: '권한 없음 — ' + hint }));
+}
+
+// ============================================
 // GNB 메뉴 설정 — Supabase nav_menu_settings (id=1 단일행)
 // ============================================
 async function getNavMenuConfig() {
@@ -3672,6 +3726,208 @@ const server = http.createServer(async (req, res) => {
         } catch (e) {
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'save_failed', message: e.message }));
+          return;
+        }
+      } else if (pathname.startsWith('/api/bg/orders/')) {
+        // ============================================
+        // 정보입력현황 워크플로우 + 스티커 이미지 + 송장
+        // ============================================
+        //   /api/bg/orders/:order_id/stickers/:idx/images          (POST/GET)
+        //   /api/bg/orders/:order_id/stickers/:idx/images/:filename (DELETE)
+        //   /api/bg/orders/:order_id/stickers/:idx/main            (PATCH body { filename })
+        //   /api/bg/orders/:order_id/stickers/:idx/workflow        (PATCH body { stage, jump? })
+        //   /api/bg/orders/:order_id/invoices                      (GET/POST)
+        //   /api/bg/orders/:order_id/invoices/:id                  (DELETE)
+        const wf = require('./barungift/workflow-store');
+        const m = pathname.match(/^\/api\/bg\/orders\/([^/]+)(?:\/stickers\/(\d+))?(?:\/(images|main|workflow|invoices))?(?:\/([^/]+))?$/);
+        if (!m) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'not_found' }));
+          return;
+        }
+        const orderId = decodeURIComponent(m[1]);
+        const stickerIdx = m[2] != null ? parseInt(m[2], 10) : null;
+        const subResource = m[3] || null;
+        const subId = m[4] ? decodeURIComponent(m[4]) : null;
+
+        async function readJsonBody() {
+          const raw = await new Promise((resolve) => {
+            let buf = '';
+            req.on('data', c => buf += c);
+            req.on('end', () => resolve(buf));
+          });
+          try { return JSON.parse(raw); } catch { return {}; }
+        }
+
+        // --- 스티커 이미지 routes ---
+        if (subResource === 'images' && stickerIdx != null) {
+          if (req.method === 'POST') {
+            // 업로드 — body: { filename, mime, data(base64) }
+            if (!(await hasRole(session, ['admin', 'operator', 'designer']))) {
+              return denyForbidden(res, 'admin/operator/designer 필요');
+            }
+            const body = await readJsonBody();
+            if (!body.filename || !body.data) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'invalid_body', message: 'filename, data(base64) 필수' }));
+              return;
+            }
+            try {
+              const buffer = Buffer.from(body.data, 'base64');
+              if (buffer.length > 10 * 1024 * 1024) {
+                res.writeHead(413, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'too_large', message: '10MB 초과' }));
+                return;
+              }
+              const uploaded = await wf.uploadStickerImage({
+                orderId, stickerIndex: stickerIdx,
+                filename: body.filename, buffer, mime: body.mime,
+              });
+              await wf.addStickerImageMeta({
+                orderId, stickerIndex: stickerIdx,
+                image: { ...uploaded, mime: body.mime, size: buffer.length },
+                by: session.email,
+              });
+              logAdminAccess(session, req, 'sticker-upload', { orderId, stickerIdx, filename: uploaded.filename });
+              data = { ok: true, ...uploaded };
+            } catch (e) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'upload_failed', message: e.message }));
+              return;
+            }
+          } else if (req.method === 'GET') {
+            // 리스트 + signed URL — 모든 인증 사용자
+            try {
+              const ci = await wf.getCustomerInfoForUpdate(orderId);
+              const sel = ci?.sticker_selections?.[stickerIdx] || null;
+              const images = sel?.images || [];
+              // signed URL 부여 (1시간)
+              const urls = await Promise.all(images.map(async (img) => {
+                if (!img.path) return { ...img, url: null };
+                try {
+                  return { ...img, url: await wf.getStickerImageSignedUrl(img.path, 3600) };
+                } catch {
+                  return { ...img, url: null };
+                }
+              }));
+              data = { images: urls };
+            } catch (e) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'list_failed', message: e.message }));
+              return;
+            }
+          } else if (req.method === 'DELETE' && subId) {
+            // 이미지 삭제
+            if (!(await hasRole(session, ['admin', 'operator', 'designer']))) {
+              return denyForbidden(res, 'admin/operator/designer 필요');
+            }
+            try {
+              const ci = await wf.getCustomerInfoForUpdate(orderId);
+              const sel = ci?.sticker_selections?.[stickerIdx] || null;
+              const img = (sel?.images || []).find(x => x.filename === subId);
+              if (img && img.path) await wf.deleteStickerImage(img.path);
+              await wf.removeStickerImageMeta({ orderId, stickerIndex: stickerIdx, filename: subId });
+              logAdminAccess(session, req, 'sticker-delete', { orderId, stickerIdx, filename: subId });
+              data = { ok: true };
+            } catch (e) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'delete_failed', message: e.message }));
+              return;
+            }
+          } else {
+            res.writeHead(405, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'method_not_allowed' }));
+            return;
+          }
+        }
+        // --- 메인 이미지 지정 ---
+        else if (subResource === 'main' && stickerIdx != null && req.method === 'PATCH') {
+          if (!(await hasRole(session, ['admin', 'operator', 'designer']))) {
+            return denyForbidden(res, 'admin/operator/designer 필요');
+          }
+          const body = await readJsonBody();
+          try {
+            await wf.setStickerMainImage({ orderId, stickerIndex: stickerIdx, filename: body.filename });
+            data = { ok: true };
+          } catch (e) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'set_main_failed', message: e.message }));
+            return;
+          }
+        }
+        // --- 워크플로우 stage 진행/점프 ---
+        else if (subResource === 'workflow' && stickerIdx != null && req.method === 'PATCH') {
+          const body = await readJsonBody();
+          // 권한 — stage 별 다름
+          const stage = body.stage;
+          const adminOnlyStages = ['bound', 'packed'];
+          const allowed = adminOnlyStages.includes(stage)
+            ? ['admin', 'operator']
+            : ['admin', 'operator', 'designer'];
+          if (!(await hasRole(session, allowed))) {
+            return denyForbidden(res, `stage=${stage} 처리 권한 없음`);
+          }
+          try {
+            const result = await wf.patchStickerWorkflow({
+              orderId, stickerIndex: stickerIdx,
+              stage: stage === null ? null : stage,
+              jump: !!body.jump,
+              by: session.email,
+            });
+            logAdminAccess(session, req, 'sticker-workflow', { orderId, stickerIdx, stage, jump: !!body.jump });
+            data = { ok: true, result };
+          } catch (e) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'workflow_failed', message: e.message }));
+            return;
+          }
+        }
+        // --- 송장 routes ---
+        else if (subResource === 'invoices') {
+          if (req.method === 'GET') {
+            data = { invoices: await wf.listInvoices(orderId) };
+          } else if (req.method === 'POST') {
+            if (!(await hasRole(session, ['admin', 'operator']))) {
+              return denyForbidden(res, 'admin/operator 필요');
+            }
+            const body = await readJsonBody();
+            try {
+              const inv = await wf.insertInvoice({
+                orderId,
+                invoiceNumber: String(body.invoice_number || '').trim(),
+                deliveryCompany: String(body.delivery_company || '').trim(),
+                stickerIndices: Array.isArray(body.sticker_indices) ? body.sticker_indices.map(Number) : [],
+                shippedBy: session.email,
+                notes: body.notes || null,
+              });
+              logAdminAccess(session, req, 'invoice-create', { orderId, invoice_number: inv.invoice_number });
+              data = { ok: true, invoice: inv };
+            } catch (e) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'invoice_failed', message: e.message }));
+              return;
+            }
+          } else if (req.method === 'DELETE' && subId) {
+            if (!(await hasRole(session, ['admin', 'operator']))) {
+              return denyForbidden(res, 'admin/operator 필요');
+            }
+            try {
+              await wf.deleteInvoice(subId);
+              logAdminAccess(session, req, 'invoice-delete', { orderId, id: subId });
+              data = { ok: true };
+            } catch (e) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'invoice_delete_failed', message: e.message }));
+              return;
+            }
+          } else {
+            res.writeHead(405, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'method_not_allowed' }));
+            return;
+          }
+        } else {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'not_found' }));
           return;
         }
       } else if (pathname === '/api/admin/server-ip') {
