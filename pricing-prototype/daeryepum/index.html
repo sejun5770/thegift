@@ -1753,6 +1753,10 @@ nav a:hover{color:var(--gray-900)}
       <button class="btn" id="uni-btn-unmark-processed" onclick="bulkProcessedAction(false)" style="padding:6px 12px;font-size:12px;display:none;border-color:#fbbf24;color:#92400e;background:#fef3c7" title="선택된 주문의 주문수집 상태를 되돌림">↺ <span id="uni-btn-unmark-processed-label">되돌리기</span></button>
       <button class="btn" id="uni-btn-bulk-delete" onclick="bulkDeleteCustomerInfo()" style="padding:6px 12px;font-size:12px;display:none;border-color:#dc2626;color:#dc2626;background:#fef2f2" title="선택된 주문의 정보입력 데이터를 모두 삭제 (주문 자체는 유지). 잘못 backfill 된 데이터 정리용.">🗑️ <span id="uni-btn-bulk-delete-label">선택 삭제</span></button>
       <button class="btn" id="uni-btn-mark-manual" onclick="bulkMarkAsManualCollected()" style="padding:6px 12px;font-size:12px;display:none;border-color:#7c3aed;color:#5b21b6;background:#f5f3ff" title="출시 이전 수동 수집된 주문에 '외부 수집 완료' 마커 추가 + 입력완료 + 수집완료 상태로 이동">🏷️ <span id="uni-btn-mark-manual-label">수동 수집됨 표시</span></button>
+      <!-- 워크플로우 bulk 액션 — 활성 탭에 따라 라벨/동작 동적 -->
+      <button class="btn btn-primary" id="uni-btn-advance-stage" onclick="bulkAdvanceStage()" style="padding:6px 12px;font-size:12px;display:none" title="선택된 행을 다음 단계로 진행">▶️ <span id="uni-btn-advance-stage-label">다음 단계</span></button>
+      <button class="btn" id="uni-btn-ship" onclick="bulkOpenShip()" style="padding:6px 12px;font-size:12px;display:none;background:#7c3aed;color:#fff;border-color:#7c3aed" title="선택된 행 출고처리 (송장 입력) — 1건만 가능">🚚 <span id="uni-btn-ship-label">출고처리</span></button>
+      <button class="btn" id="uni-btn-rollback" onclick="bulkRollbackStage()" style="padding:6px 12px;font-size:12px;display:none;border-color:#fbbf24;color:#92400e;background:#fef3c7" title="선택된 행을 이전 단계로 되돌림 (임의 단계 선택 가능)">↺ <span id="uni-btn-rollback-label">단계 되돌리기</span></button>
     </div>
     <div style="overflow-x:auto">
       <table class="data-table" id="uni-table">
@@ -9028,8 +9032,8 @@ const STAGE_LABELS = {
 };
 const STAGE_ORDER = ['unsubmitted', 'submitted', 'sticker_completed', 'printed', 'bound', 'packed', 'shipped'];
 
-/** 행 워크플로우 셀 HTML — 현재 stage 에 맞는 버튼 노출.
- *   stickerIdx: bgUnifiedRows 빌드 시 명시 추적된 sticker_selections index (-1 = 없음).
+/** 행 워크플로우 셀 HTML — 간결 노출 (이미지 아이콘 + 업로드 + 출고 상태만).
+ *   다음 단계 진행 / 되돌리기는 상단 bulk action bar 에서 처리.
  */
 function _renderWorkflowCell(rowIdx, order, ci, sel, stickerIdx) {
   const stage = computeRowStage(order, ci, sel);
@@ -9037,47 +9041,122 @@ function _renderWorkflowCell(rowIdx, order, ci, sel, stickerIdx) {
   const canEditWorkflow = !!ci && stickerIdx >= 0;
   const imgs = (sel?.images || []);
   const imgCnt = imgs.length;
-  const mainImg = imgs.find(i => i.is_main) || imgs[0] || null;
 
-  let html = '';
-  // 이미지 상태 표시
+  const items = [];
+  // 1) 이미지 아이콘 — 1장 이상이면 항상 노출 (보기/관리 모달 열기)
   if (imgCnt > 0) {
-    html += `<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px">
-      <button class="btn" style="padding:2px 6px;font-size:10px" onclick="openStickerImageModal('${esc(orderId)}', ${stickerIdx})" title="이미지 ${imgCnt}장 보기/관리">📷 ${imgCnt}</button>
-      ${mainImg ? `<span style="color:var(--gray-400);font-size:10px">${esc(mainImg.filename).slice(0, 12)}...</span>` : ''}
-    </div>`;
+    items.push(`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="openStickerImageModal('${esc(orderId)}', ${stickerIdx})" title="이미지 ${imgCnt}장 보기/관리">📷 ${imgCnt}</button>`);
   }
+  // 2) 업로드 버튼 — submitted/sticker_completed stage 에서 노출 (출고 완료 후엔 hide)
+  if (canEditWorkflow && (stage === 'submitted' || stage === 'sticker_completed' || stage === 'printed' || stage === 'bound' || stage === 'packed')) {
+    items.push(`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="openStickerUploadModal('${esc(orderId)}', ${stickerIdx})" title="스티커 이미지 업로드">📤</button>`);
+  }
+  // 3) 출고완료 표시 — shipped stage 만
+  if (stage === 'shipped' && sel?.shipped_at) {
+    const shippedDate = new Date(sel.shipped_at).toISOString().slice(0, 10);
+    items.push(`<span style="color:#16a34a;font-size:10px;padding:3px 4px">✅ ${shippedDate}</span>`);
+    items.push(`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="openInvoiceModal('${esc(orderId)}', ${stickerIdx})" title="송장 정보">📋</button>`);
+  }
+  if (stage === 'unsubmitted') return '<span style="color:var(--gray-400);font-size:10px">고객 입력 대기</span>';
+  return items.length ? `<div style="display:flex;gap:3px;flex-wrap:wrap">${items.join('')}</div>` : '<span style="color:var(--gray-300)">-</span>';
+}
 
-  // Stage 별 액션 버튼
-  if (canEditWorkflow) {
-    if (stage === 'submitted') {
-      html += `<button class="btn btn-primary" style="padding:3px 8px;font-size:11px;width:100%" onclick="openStickerUploadModal('${esc(orderId)}', ${stickerIdx})">📤 스티커 업로드</button>`;
-    } else if (stage === 'sticker_completed') {
-      html += `<div style="display:flex;gap:3px;flex-wrap:wrap">
-        <button class="btn btn-primary" style="padding:3px 8px;font-size:11px;flex:1" onclick="advanceWorkflow('${esc(orderId)}', ${stickerIdx}, 'printed')">🖨️ 인쇄완료</button>
-        <button class="btn" style="padding:3px 6px;font-size:11px" onclick="openStickerUploadModal('${esc(orderId)}', ${stickerIdx})" title="이미지 추가">📤</button>
-      </div>`;
-    } else if (stage === 'printed') {
-      html += `<button class="btn btn-primary" style="padding:3px 8px;font-size:11px;width:100%" onclick="advanceWorkflow('${esc(orderId)}', ${stickerIdx}, 'bound')">📑 제본완료</button>`;
-    } else if (stage === 'bound') {
-      html += `<button class="btn btn-primary" style="padding:3px 8px;font-size:11px;width:100%" onclick="advanceWorkflow('${esc(orderId)}', ${stickerIdx}, 'packed')">📦 포장완료</button>`;
-    } else if (stage === 'packed') {
-      html += `<button class="btn btn-primary" style="padding:3px 8px;font-size:11px;width:100%;background:#7c3aed;border-color:#7c3aed" onclick="openInvoiceModal('${esc(orderId)}', ${stickerIdx})">🚚 출고처리</button>`;
-    } else if (stage === 'shipped') {
-      // 출고 정보 표시 + 송장 삭제
-      const shipped = sel?.shipped_at;
-      const shippedDate = shipped ? new Date(shipped).toISOString().slice(0, 10) : '-';
-      html += `<div style="color:#16a34a;font-size:10px;margin-bottom:3px">✅ ${shippedDate} 출고</div>
-        <button class="btn" style="padding:2px 6px;font-size:10px" onclick="openInvoiceModal('${esc(orderId)}', ${stickerIdx})">송장 확인</button>`;
-    }
-    // 임의 stage 점프 버튼 — submitted 이상 모두 노출
-    if (stage !== 'unsubmitted' && stage !== 'submitted') {
-      html += `<button class="btn" style="padding:2px 6px;font-size:10px;margin-top:3px;color:#92400e;border-color:#fbbf24" onclick="openJumpStageModal('${esc(orderId)}', ${stickerIdx})" title="이전 단계로 되돌리기">↺ 점프</button>`;
-    }
-  } else if (stage === 'unsubmitted') {
-    html += '<span style="color:var(--gray-400);font-size:10px">고객 입력 대기</span>';
+// ============================================
+// Bulk 워크플로우 액션 (선택 행 일괄 처리)
+// ============================================
+function _getCheckedWorkflowRows() {
+  const checked = [...document.querySelectorAll('.uni-row-check:checked')];
+  return checked.map(cb => bgUnifiedRows[parseInt(cb.dataset.idx)]).filter(r => r && r.ci && r.sticker_index >= 0);
+}
+
+/** 활성 탭의 다음 단계로 선택 행들을 일괄 진행. */
+async function bulkAdvanceStage() {
+  const activeTab = document.getElementById('uni-active-tab')?.value;
+  const map = {
+    sticker_completed: { next: 'printed', label: '인쇄완료' },
+    printed: { next: 'bound', label: '제본완료' },
+    bound: { next: 'packed', label: '포장완료' },
+  };
+  const cfg = map[activeTab];
+  if (!cfg) { showToast('현재 탭에서는 다음 단계로 진행할 수 없습니다'); return; }
+  const rows = _getCheckedWorkflowRows();
+  if (!rows.length) { showToast('대상 행이 없습니다'); return; }
+  if (!confirm(`${rows.length}건을 '${cfg.label}' 단계로 진행합니다. 계속할까요?`)) return;
+  let ok = 0, fail = 0;
+  for (const r of rows) {
+    try {
+      const orderId = bgCiKey(r.order);
+      const res = await fetch(`${API}/api/bg/orders/${encodeURIComponent(orderId)}/stickers/${r.sticker_index}/workflow`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage: cfg.next }),
+      });
+      if (!res.ok) throw new Error((await res.json()).message || 'fail');
+      ok++;
+    } catch (e) { fail++; console.warn('[bulkAdvance]', e); }
   }
-  return html || '<span style="color:var(--gray-300)">-</span>';
+  showToast(`✅ ${ok}건 ${cfg.label} 처리 ${fail ? `(실패 ${fail}건)` : ''}`);
+  await loadBgUnified();
+  switchUniTab(cfg.next);
+}
+
+/** 선택 행들 단계 되돌리기 — 임의 단계 선택 모달. */
+function bulkRollbackStage() {
+  const rows = _getCheckedWorkflowRows();
+  if (!rows.length) { showToast('대상 행이 없습니다'); return; }
+  // 점프 가능 단계 — sticker_completed 이상이 되어야 함. submitted 로 가려면 이미지 삭제 필요.
+  const stages = ['sticker_completed', 'printed', 'bound', 'packed'];
+  const opts = stages.map(s => `<option value="${s}">${STAGE_LABELS[s]}</option>`).join('');
+  const html = `
+    <div id="bulk-jump-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center">
+      <div style="background:#fff;padding:24px;border-radius:8px;max-width:440px;width:90%">
+        <div style="font-weight:700;font-size:16px;margin-bottom:10px">↺ 단계 되돌리기 (${rows.length}건)</div>
+        <div style="color:var(--gray-500);font-size:13px;margin-bottom:14px">
+          선택한 단계로 ${rows.length}건의 상태를 일괄 변경합니다. 이후 단계 timestamps 모두 초기화됩니다.
+        </div>
+        <label style="display:block;font-size:13px;margin-bottom:6px">목표 단계</label>
+        <select id="bulk-jump-target" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:4px;margin-bottom:14px">${opts}</select>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn" onclick="document.getElementById('bulk-jump-modal').remove()">취소</button>
+          <button class="btn btn-primary" onclick="_doBulkJump()">실행</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function _doBulkJump() {
+  const stage = document.getElementById('bulk-jump-target').value;
+  document.getElementById('bulk-jump-modal').remove();
+  const rows = _getCheckedWorkflowRows();
+  if (!stage || !rows.length) return;
+  let ok = 0, fail = 0;
+  for (const r of rows) {
+    try {
+      const orderId = bgCiKey(r.order);
+      const res = await fetch(`${API}/api/bg/orders/${encodeURIComponent(orderId)}/stickers/${r.sticker_index}/workflow`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage, jump: true }),
+      });
+      if (!res.ok) throw new Error((await res.json()).message || 'fail');
+      ok++;
+    } catch (e) { fail++; console.warn('[bulkJump]', e); }
+  }
+  showToast(`✅ ${ok}건 '${STAGE_LABELS[stage]}' 단계로 변경 ${fail ? `(실패 ${fail}건)` : ''}`);
+  await loadBgUnified();
+  switchUniTab(stage);
+}
+
+/** 출고처리 — 단일 행만 허용 (송장 모달 띄움). */
+function bulkOpenShip() {
+  const rows = _getCheckedWorkflowRows();
+  if (rows.length !== 1) {
+    alert('출고처리는 1건씩만 가능합니다 (1주문 1송장 입력 화면).\n현재 ' + rows.length + '건 선택됨.');
+    return;
+  }
+  const r = rows[0];
+  openInvoiceModal(bgCiKey(r.order), r.sticker_index);
 }
 
 /** stage 진행 API 호출 (단순 advance — 현재 stage 다음으로). 성공 시 다음 탭으로 자동 전환. */
@@ -9427,6 +9506,13 @@ function updateBgUnifiedSelectedCount() {
   const btnMarkManualLabel = document.getElementById('uni-btn-mark-manual-label');
   const btnSendAlimtalkLabel = document.getElementById('uni-btn-send-alimtalk-label');
 
+  const btnAdvance = document.getElementById('uni-btn-advance-stage');
+  const btnAdvanceLabel = document.getElementById('uni-btn-advance-stage-label');
+  const btnShip = document.getElementById('uni-btn-ship');
+  const btnShipLabel = document.getElementById('uni-btn-ship-label');
+  const btnRollback = document.getElementById('uni-btn-rollback');
+  const btnRollbackLabel = document.getElementById('uni-btn-rollback-label');
+
   // 선택 0 → 모두 숨김
   if (cnt === 0) {
     if (btnCopy) btnCopy.style.display = 'none';
@@ -9435,7 +9521,50 @@ function updateBgUnifiedSelectedCount() {
     if (btnDelete) btnDelete.style.display = 'none';
     if (btnMarkManual) btnMarkManual.style.display = 'none';
     if (btnSendAlimtalk) btnSendAlimtalk.style.display = 'none';
+    if (btnAdvance) btnAdvance.style.display = 'none';
+    if (btnShip) btnShip.style.display = 'none';
+    if (btnRollback) btnRollback.style.display = 'none';
     return;
+  }
+
+  // ============================================
+  // 워크플로우 bulk 액션 — 활성 탭에 따라 라벨 + 동작
+  // ============================================
+  //   sticker_completed → printed → bound → packed → (shipped via invoice)
+  //   각 단계 별 다음 단계 버튼 + 되돌리기 버튼.
+  const ADVANCE_MAP = {
+    sticker_completed: { next: 'printed', label: '🖨️ 인쇄완료 처리' },
+    printed: { next: 'bound', label: '📑 제본완료 처리' },
+    bound: { next: 'packed', label: '📦 포장완료 처리' },
+    // packed → shipped 는 송장 모달 → bulk 출고처리 버튼 별도
+  };
+  const advanceCfg = ADVANCE_MAP[activeTab];
+  if (btnAdvance) {
+    if (advanceCfg) {
+      btnAdvance.style.display = '';
+      btnAdvanceLabel.textContent = `${advanceCfg.label} (${cnt}건)`;
+    } else {
+      btnAdvance.style.display = 'none';
+    }
+  }
+  // 출고처리 — packed 탭에서만, 단일 선택만 허용 (송장 모달)
+  if (btnShip) {
+    if (activeTab === 'packed') {
+      btnShip.style.display = '';
+      btnShipLabel.textContent = cnt === 1 ? `출고처리 (1건)` : `1건만 선택 (현재 ${cnt}건)`;
+    } else {
+      btnShip.style.display = 'none';
+    }
+  }
+  // 되돌리기 — sticker_completed 이상 모든 탭. 임의 단계 점프 모달 노출.
+  const rollbackableStages = ['sticker_completed', 'printed', 'bound', 'packed', 'shipped'];
+  if (btnRollback) {
+    if (rollbackableStages.includes(activeTab)) {
+      btnRollback.style.display = '';
+      btnRollbackLabel.textContent = `단계 되돌리기 (${cnt}건)`;
+    } else {
+      btnRollback.style.display = 'none';
+    }
   }
 
   // 선택된 행들의 처리 상태 분석
