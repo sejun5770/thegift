@@ -1754,7 +1754,7 @@ nav a:hover{color:var(--gray-900)}
       <button class="btn" id="uni-btn-bulk-delete" onclick="bulkDeleteCustomerInfo()" style="padding:6px 12px;font-size:12px;display:none;border-color:#dc2626;color:#dc2626;background:#fef2f2" title="선택된 주문의 정보입력 데이터를 모두 삭제 (주문 자체는 유지). 잘못 backfill 된 데이터 정리용.">🗑️ <span id="uni-btn-bulk-delete-label">선택 삭제</span></button>
       <button class="btn" id="uni-btn-mark-manual" onclick="bulkMarkAsManualCollected()" style="padding:6px 12px;font-size:12px;display:none;border-color:#7c3aed;color:#5b21b6;background:#f5f3ff" title="출시 이전 수동 수집된 주문에 '외부 수집 완료' 마커 추가 + 입력완료 + 수집완료 상태로 이동">🏷️ <span id="uni-btn-mark-manual-label">수동 수집됨 표시</span></button>
       <!-- 워크플로우 bulk 액션 — 활성 탭에 따라 라벨/동작 동적 -->
-      <button class="btn" id="uni-btn-bulk-upload" onclick="openBulkStickerUploadModal()" style="padding:6px 12px;font-size:12px;display:none;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8" title="선택된 N건의 스티커 이미지를 파일명 매칭으로 일괄 업로드">📤 <span id="uni-btn-bulk-upload-label">대량 스티커 업로드</span></button>
+      <button class="btn" id="uni-btn-bulk-upload" onclick="bulkUploadDispatch()" style="padding:6px 12px;font-size:12px;display:none;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8" title="선택된 행의 스티커 이미지 업로드 (1건=단일 / 2건+=대량 자동 매칭)">📤 <span id="uni-btn-bulk-upload-label">스티커 업로드</span></button>
       <button class="btn btn-primary" id="uni-btn-advance-stage" onclick="bulkAdvanceStage()" style="padding:6px 12px;font-size:12px;display:none" title="선택된 행을 다음 단계로 진행">▶️ <span id="uni-btn-advance-stage-label">다음 단계</span></button>
       <button class="btn" id="uni-btn-ship" onclick="bulkOpenShip()" style="padding:6px 12px;font-size:12px;display:none;background:#7c3aed;color:#fff;border-color:#7c3aed" title="선택된 행 출고처리 (송장 입력) — 1건만 가능">🚚 <span id="uni-btn-ship-label">출고처리</span></button>
       <button class="btn" id="uni-btn-rollback" onclick="bulkRollbackStage()" style="padding:6px 12px;font-size:12px;display:none;border-color:#fbbf24;color:#92400e;background:#fef3c7" title="선택된 행을 이전 단계로 되돌림 (임의 단계 선택 가능)">↺ <span id="uni-btn-rollback-label">단계 되돌리기</span></button>
@@ -1782,7 +1782,7 @@ nav a:hover{color:var(--gray-900)}
             <th>현금영수증</th>
             <th style="max-width:160px">요청사항</th>
             <th></th>
-            <th style="min-width:160px;white-space:nowrap">워크플로우</th>
+            <th class="uni-col-workflow" style="min-width:160px;white-space:nowrap">워크플로우</th>
           </tr>
         </thead>
         <tbody id="uni-tbody"></tbody>
@@ -8672,6 +8672,12 @@ function switchUniTab(tab) {
   document.querySelectorAll('.uni-col-processed').forEach(el => {
     el.style.display = (tab === 'submitted') ? '' : 'none';
   });
+  // 워크플로우 컬럼 — 미입력/입력완료 탭은 hide (액션은 상단 bulk 버튼으로 일원화).
+  //   sticker_completed 이상 탭에서만 노출 (이미지 관리 / 송장 정보 보기용).
+  const showWorkflowCol = !['unsubmitted', 'submitted'].includes(tab);
+  document.querySelectorAll('.uni-col-workflow').forEach(el => {
+    el.style.display = showWorkflowCol ? '' : 'none';
+  });
   // 정렬 옵션 — 입력완료 탭에서만 노출
   const sortOpts = document.getElementById('uni-sort-options');
   if (sortOpts) sortOpts.style.display = (tab === 'submitted') ? 'flex' : 'none';
@@ -9015,7 +9021,7 @@ function renderBgUnified() {
       <td style="font-size:12px">${receiptText}</td>
       <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray-500)" title="${esc(requestText)}">${requestText ? esc(requestText) : '<span style="color:var(--gray-300)">-</span>'}</td>
       <td>${editBtn}</td>
-      <td style="font-size:11px;vertical-align:top;padding:6px 8px">${workflowCell}</td>
+      <td class="uni-col-workflow" style="font-size:11px;vertical-align:top;padding:6px 8px">${workflowCell}</td>
     </tr>`;
   });
 
@@ -9171,6 +9177,18 @@ async function _doBulkJump() {
 // 대량 스티커 업로드 — 입력완료 탭에서 N건 선택 → 파일명 매칭 자동 분배
 // ============================================
 let _bulkUploadState = null;
+
+/** 업로드 버튼 분기 — 1건은 단일 모달, 2건+ 은 대량 매칭 모달. */
+function bulkUploadDispatch() {
+  const rows = _getCheckedWorkflowRows();
+  if (rows.length === 0) { showToast('대상 행을 선택해주세요'); return; }
+  if (rows.length === 1) {
+    const r = rows[0];
+    openStickerManageModal(bgCiKey(r.order), r.sticker_index);
+  } else {
+    openBulkStickerUploadModal();
+  }
+}
 
 function openBulkStickerUploadModal() {
   const rows = _getCheckedWorkflowRows();
@@ -9996,15 +10014,18 @@ function updateBgUnifiedSelectedCount() {
     return;
   }
 
-  // 대량 스티커 업로드 — submitted (입력완료) 탭에서만 노출
-  //   선택된 행이 워크플로우 가능한 ci 보유 인 경우만. ci 없는 미입력은 X.
+  // 스티커 업로드 — submitted (입력완료) 탭에서만 노출.
+  //   1건 선택 → '스티커 업로드' (단일 모달)
+  //   2건+ 선택 → '대량 스티커 업로드 (N건)' (자동 매칭 모달)
   if (btnBulkUpload) {
     if (activeTab === 'submitted') {
-      // 워크플로우 적용 가능한 row 개수 (ci 있고 sticker_index >=0)
       const workflowable = checked
         .map(cb => bgUnifiedRows[parseInt(cb.dataset.idx)])
         .filter(r => r && r.ci && r.sticker_index >= 0);
-      if (workflowable.length > 0) {
+      if (workflowable.length === 1) {
+        btnBulkUpload.style.display = '';
+        btnBulkUploadLabel.textContent = '스티커 업로드';
+      } else if (workflowable.length >= 2) {
         btnBulkUpload.style.display = '';
         btnBulkUploadLabel.textContent = `대량 스티커 업로드 (${workflowable.length}건)`;
       } else {
