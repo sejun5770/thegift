@@ -3740,6 +3740,83 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: 'save_failed', message: e.message }));
           return;
         }
+      } else if (pathname.startsWith('/api/admin/debug-ci/')) {
+        // CI row raw 조회 — sticker_selections 의 timestamps / sticker_code 검증용
+        //   /api/admin/debug-ci/{order_id} — order_id 예: ETC-3245371 또는 raw seq
+        const m = pathname.match(/^\/api\/admin\/debug-ci\/(.+)$/);
+        const orderId = m ? decodeURIComponent(m[1]) : null;
+        if (!orderId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'order_id required' }));
+          return;
+        }
+        const wf = require('./barungift/workflow-store');
+        const ci = await wf.getCustomerInfoForUpdate(orderId);
+        if (!ci) {
+          data = { error: 'not_found', orderId, tried: orderId };
+        } else {
+          data = {
+            order_id: orderId,
+            submitted_at: ci.submitted_at,
+            updated_at: ci.updated_at,
+            processed_at: ci.processed_at,
+            sticker_selections: ci.sticker_selections,
+            // 각 selection 의 stage 진단
+            diagnostics: (ci.sticker_selections || []).map((s, i) => ({
+              index: i,
+              product_code: s?.product_code,
+              sticker_code: s?.sticker_code,
+              sticker_id: s?.sticker_id,
+              has_sticker_code: !!(s?.sticker_code && String(s.sticker_code).trim()),
+              has_sticker_id: !!(s?.sticker_id && String(s.sticker_id).trim()),
+              images_count: Array.isArray(s?.images) ? s.images.length : 0,
+              sticker_completed_at: s?.sticker_completed_at,
+              printed_at: s?.printed_at,
+              bound_at: s?.bound_at,
+              packed_at: s?.packed_at,
+              shipped_at: s?.shipped_at,
+            })),
+          };
+        }
+      } else if (pathname === '/api/admin/backfill-no-sticker' && req.method === 'POST') {
+        // 전체 customer_info 순회 → sticker_code 없는 sticker_selection 자동 진행 적용 (멱등)
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        logAdminAccess(session, req, 'backfill-no-sticker', {});
+        const wf = require('./barungift/workflow-store');
+        // 모든 ci 조회 (limit 큰 단위로)
+        const supabaseUrl = `${AUTH_REST_BASE}/bg_order_customer_info?select=*&limit=10000`;
+        const listRes = await fetch(supabaseUrl, { headers: AUTH_HEADERS });
+        if (!listRes.ok) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'list_failed', message: await listRes.text() }));
+          return;
+        }
+        const allCi = await listRes.json();
+        let scanned = 0, patched = 0, errors = 0;
+        for (const ci of allCi) {
+          scanned++;
+          const orig = Array.isArray(ci.sticker_selections) ? ci.sticker_selections : [];
+          const advanced = wf.autoAdvanceNoStickerSelections(orig, 'system:no-sticker');
+          // 변경된 row 가 있는지 비교 (sticker_completed_at 등)
+          const hasChange = advanced.some((sel, i) => {
+            const a = sel || {};
+            const b = orig[i] || {};
+            return (a.sticker_completed_at && !b.sticker_completed_at)
+                || (a.printed_at && !b.printed_at)
+                || (a.bound_at && !b.bound_at);
+          });
+          if (!hasChange) continue;
+          try {
+            await wf.updateCustomerInfo(ci.order_id, { sticker_selections: advanced });
+            patched++;
+          } catch (e) {
+            errors++;
+            console.warn(`[backfill-no-sticker] ${ci.order_id}: ${e.message}`);
+          }
+        }
+        data = { scanned, patched, errors };
       } else if (pathname === '/api/coupang/rfm/debug-raw') {
         // 쿠팡 로켓 그로스 (RFM) — endpoint 후보들 순회 시도 + 응답 확인용 debug
         logAdminAccess(session, req, 'coupang-rfm-debug-raw', parsed.query);
