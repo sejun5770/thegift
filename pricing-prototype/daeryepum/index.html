@@ -8994,8 +8994,8 @@ function renderBgUnified() {
     // 워크플로우 셀 — 행의 현재 stage 에 맞는 액션 버튼
     const workflowCell = _renderWorkflowCell(rowIdx, order, ci, sel, sticker_index);
 
-    html += `<tr class="${rowClass}" style="${borderStyle}">
-      <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()"></td>
+    html += `<tr class="${rowClass}" style="${borderStyle};cursor:pointer" onclick="_onUniRowClick(${rowIdx}, event)">
+      <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()" onclick="event.stopPropagation()"></td>
       <td style="font-weight:600;white-space:nowrap">${esc(order.order_seq)}</td>
       <td style="font-size:12px;color:var(--gray-500);white-space:nowrap">${orderDateFmt}</td>
       <td style="font-size:12px">${inputBadge}</td>
@@ -9032,7 +9032,10 @@ const STAGE_LABELS = {
 };
 const STAGE_ORDER = ['unsubmitted', 'submitted', 'sticker_completed', 'printed', 'bound', 'packed', 'shipped'];
 
-/** 행 워크플로우 셀 HTML — 간결 노출 (이미지 아이콘 + 업로드 + 출고 상태만).
+/** 행 워크플로우 셀 HTML — 텍스트 기반 단일 버튼 (보기/업로드 통합).
+ *   이미지 N장 → "이미지 N장 관리" 단일 버튼 → 통합 모달
+ *   이미지 0장 → "스티커 업로드" 단일 버튼 → 통합 모달
+ *   출고완료 → "출고완료 (YYYY-MM-DD)" + "송장 정보"
  *   다음 단계 진행 / 되돌리기는 상단 bulk action bar 에서 처리.
  */
 function _renderWorkflowCell(rowIdx, order, ci, sel, stickerIdx) {
@@ -9042,23 +9045,38 @@ function _renderWorkflowCell(rowIdx, order, ci, sel, stickerIdx) {
   const imgs = (sel?.images || []);
   const imgCnt = imgs.length;
 
+  if (stage === 'unsubmitted') {
+    return '<span style="color:var(--gray-400);font-size:11px">고객 입력 대기</span>';
+  }
+
   const items = [];
-  // 1) 이미지 아이콘 — 1장 이상이면 항상 노출 (보기/관리 모달 열기)
-  if (imgCnt > 0) {
-    items.push(`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="openStickerImageModal('${esc(orderId)}', ${stickerIdx})" title="이미지 ${imgCnt}장 보기/관리">📷 ${imgCnt}</button>`);
+  // 통합 버튼 — 이미지 보기/관리/업로드 한 모달로 (Tab으로 분리되지 않은 통합 화면)
+  if (canEditWorkflow) {
+    if (imgCnt > 0) {
+      items.push(`<button class="btn" style="padding:4px 10px;font-size:11px;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8" onclick="openStickerManageModal('${esc(orderId)}', ${stickerIdx})">이미지 ${imgCnt}장 관리</button>`);
+    } else if (stage !== 'shipped') {
+      items.push(`<button class="btn btn-primary" style="padding:4px 10px;font-size:11px" onclick="openStickerManageModal('${esc(orderId)}', ${stickerIdx})">스티커 업로드</button>`);
+    }
   }
-  // 2) 업로드 버튼 — submitted/sticker_completed stage 에서 노출 (출고 완료 후엔 hide)
-  if (canEditWorkflow && (stage === 'submitted' || stage === 'sticker_completed' || stage === 'printed' || stage === 'bound' || stage === 'packed')) {
-    items.push(`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="openStickerUploadModal('${esc(orderId)}', ${stickerIdx})" title="스티커 이미지 업로드">📤</button>`);
-  }
-  // 3) 출고완료 표시 — shipped stage 만
+
+  // 출고완료 표시 — shipped stage 만 추가
   if (stage === 'shipped' && sel?.shipped_at) {
     const shippedDate = new Date(sel.shipped_at).toISOString().slice(0, 10);
-    items.push(`<span style="color:#16a34a;font-size:10px;padding:3px 4px">✅ ${shippedDate}</span>`);
-    items.push(`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="openInvoiceModal('${esc(orderId)}', ${stickerIdx})" title="송장 정보">📋</button>`);
+    items.push(`<span style="color:#16a34a;font-size:11px;padding:4px 0;font-weight:600">출고완료 (${shippedDate})</span>`);
+    items.push(`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="openInvoiceModal('${esc(orderId)}', ${stickerIdx})">송장 정보</button>`);
   }
-  if (stage === 'unsubmitted') return '<span style="color:var(--gray-400);font-size:10px">고객 입력 대기</span>';
-  return items.length ? `<div style="display:flex;gap:3px;flex-wrap:wrap">${items.join('')}</div>` : '<span style="color:var(--gray-300)">-</span>';
+
+  return items.length ? `<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">${items.join('')}</div>` : '<span style="color:var(--gray-300)">-</span>';
+}
+
+/** 행 클릭 핸들러 — 버튼/링크/input 클릭 외 영역 클릭 시 체크박스 토글. */
+function _onUniRowClick(rowIdx, e) {
+  if (e.target.closest('button, a, input, select, textarea, label')) return;
+  const cb = document.querySelector(`.uni-row-check[data-idx="${rowIdx}"]`);
+  if (cb) {
+    cb.checked = !cb.checked;
+    updateBgUnifiedSelectedCount();
+  }
 }
 
 // ============================================
@@ -9224,7 +9242,7 @@ async function confirmJumpStage(orderId, stickerIndex) {
 }
 
 // ============================================
-// 스티커 이미지 업로드 모달 (드래그&드롭 + 파일명 검증)
+// 스티커 이미지 통합 관리 모달 (보기 + 업로드 + 메인 지정 + 삭제 + 다운로드)
 // ============================================
 
 /** orderId 에서 raw 주문번호 추출 ('ETC-123' / 'CP-456' / 'NV-789' / '321' → 숫자). */
@@ -9245,57 +9263,73 @@ function _validateStickerFilename(filename, orderSeq, stickerCode) {
   return errs;
 }
 
-// 업로드 모달 상태 — 현재 선택된 파일들 (드래그/선택 통합 관리)
+// 통합 모달 상태 — 업로드 대기 파일들
 let _stickerUploadState = null;
 
-function openStickerUploadModal(orderId, stickerIndex) {
-  // 행 정보에서 검증 기준 추출
+/** 통합 모달 — 이미지 보기/관리 + 추가 업로드 한 화면. */
+function openStickerManageModal(orderId, stickerIndex) {
   const row = bgUnifiedRows.find(r => bgCiKey(r.order) === orderId && r.sticker_index === stickerIndex);
   const orderSeq = _rawOrderSeq(orderId) || row?.order?.order_seq || '';
   const stickerCode = row?.sel?.sticker_code || '';
   _stickerUploadState = { orderId, stickerIndex, orderSeq, stickerCode, files: [] };
 
   const html = `
-    <div id="sticker-upload-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center"
-         onclick="if(event.target===this)closeStickerUploadModal()">
-      <div style="background:#fff;padding:24px;border-radius:8px;max-width:600px;width:92%;max-height:90vh;overflow:auto">
-        <div style="font-weight:700;font-size:16px;margin-bottom:10px">📤 스티커 이미지 업로드</div>
-        <div style="color:var(--gray-500);font-size:12px;margin-bottom:8px">
+    <div id="sticker-manage-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center"
+         onclick="if(event.target===this)closeStickerManageModal()">
+      <div style="background:#fff;padding:22px;border-radius:8px;max-width:760px;width:94%;max-height:92vh;overflow:auto">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="font-weight:700;font-size:16px">📷 스티커 이미지 관리</span>
+        </div>
+        <div style="color:var(--gray-500);font-size:12px;margin-bottom:14px">
           주문번호: <code style="color:#0369a1">${esc(orderSeq)}</code>
-          ${stickerCode ? ` · 스티커코드: <code style="color:#7c3aed">${esc(stickerCode)}</code>` : ' · <span style="color:#dc2626">스티커코드 미설정 — 검증 생략됨</span>'}
+          ${stickerCode ? ` · 스티커코드: <code style="color:#7c3aed">${esc(stickerCode)}</code>` : ' · <span style="color:#dc2626">스티커코드 미설정</span>'}
         </div>
-        <div style="font-size:11px;color:var(--gray-500);margin-bottom:14px">
-          ⚠️ 파일명에 <b>주문번호</b>${stickerCode ? ' + <b>스티커코드</b>' : ''} 가 모두 포함되어야 업로드 가능.<br>
-          PNG/JPG/PDF (max 10MB) 여러 개 가능.
+
+        <!-- ── 업로드된 이미지 섹션 ── -->
+        <div style="font-size:13px;font-weight:600;color:var(--gray-700);margin-bottom:8px">업로드된 이미지</div>
+        <div id="sticker-image-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:20px;min-height:80px">로드 중...</div>
+
+        <!-- ── 추가 업로드 섹션 ── -->
+        <div style="border-top:1px solid var(--gray-200);padding-top:16px">
+          <div style="font-size:13px;font-weight:600;color:var(--gray-700);margin-bottom:6px">추가 업로드</div>
+          <div style="font-size:11px;color:var(--gray-500);margin-bottom:10px">
+            ⚠️ 파일명에 <b>주문번호</b>${stickerCode ? ' + <b>스티커코드</b>' : ''} 포함 필수 · PNG/JPG/PDF (max 10MB)
+          </div>
+          <div id="sticker-upload-dropzone"
+               style="border:2px dashed var(--gray-300);border-radius:8px;padding:24px 14px;text-align:center;cursor:pointer;background:var(--gray-50);transition:all .15s"
+               onclick="document.getElementById('sticker-upload-input').click()"
+               ondragover="event.preventDefault();this.style.borderColor='var(--primary)';this.style.background='#eff6ff'"
+               ondragleave="this.style.borderColor='var(--gray-300)';this.style.background='var(--gray-50)'"
+               ondrop="_onStickerFileDrop(event)">
+            <div style="font-size:24px;margin-bottom:4px">📤</div>
+            <div style="font-size:13px;color:var(--gray-700)">파일을 끌어다 놓거나 클릭해서 선택</div>
+          </div>
+          <input type="file" id="sticker-upload-input" accept="image/png,image/jpeg,application/pdf" multiple
+                 style="display:none" onchange="_onStickerFileSelect(event)" />
+          <div id="sticker-upload-filelist" style="margin-top:10px;max-height:180px;overflow-y:auto;font-size:12px"></div>
+          <div id="sticker-upload-progress" style="font-size:12px;color:var(--gray-500);margin-top:8px;min-height:18px"></div>
         </div>
-        <!-- 드래그&드롭 영역 -->
-        <div id="sticker-upload-dropzone"
-             style="border:2px dashed var(--gray-300);border-radius:8px;padding:30px 14px;text-align:center;cursor:pointer;background:var(--gray-50);transition:all .15s"
-             onclick="document.getElementById('sticker-upload-input').click()"
-             ondragover="event.preventDefault();this.style.borderColor='var(--primary)';this.style.background='#eff6ff'"
-             ondragleave="this.style.borderColor='var(--gray-300)';this.style.background='var(--gray-50)'"
-             ondrop="_onStickerFileDrop(event)">
-          <div style="font-size:32px;margin-bottom:6px">📤</div>
-          <div style="font-size:13px;color:var(--gray-700)">파일을 끌어다 놓거나 클릭해서 선택</div>
-        </div>
-        <input type="file" id="sticker-upload-input" accept="image/png,image/jpeg,application/pdf" multiple
-               style="display:none" onchange="_onStickerFileSelect(event)" />
-        <div id="sticker-upload-filelist" style="margin-top:14px;max-height:240px;overflow-y:auto;font-size:12px"></div>
-        <div id="sticker-upload-progress" style="font-size:12px;color:var(--gray-500);margin-top:10px;min-height:20px"></div>
-        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-          <button class="btn" onclick="closeStickerUploadModal()">닫기</button>
-          <button class="btn btn-primary" id="sticker-upload-btn" onclick="doStickerUpload()">업로드</button>
+
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+          <button class="btn" onclick="closeStickerManageModal()">닫기</button>
+          <button class="btn btn-primary" id="sticker-upload-btn" onclick="doStickerUpload()" style="display:none">업로드</button>
         </div>
       </div>
     </div>`;
   document.body.insertAdjacentHTML('beforeend', html);
   _renderStickerFileList();
+  loadStickerImageList(orderId, stickerIndex);
 }
 
-function closeStickerUploadModal() {
-  document.getElementById('sticker-upload-modal')?.remove();
+function closeStickerManageModal() {
+  document.getElementById('sticker-manage-modal')?.remove();
   _stickerUploadState = null;
 }
+
+// 호환성 alias — 기존 호출자가 있다면 통합 모달로 라우팅
+function openStickerImageModal(orderId, stickerIndex) { return openStickerManageModal(orderId, stickerIndex); }
+function openStickerUploadModal(orderId, stickerIndex) { return openStickerManageModal(orderId, stickerIndex); }
+function closeStickerUploadModal() { return closeStickerManageModal(); }
 
 function _onStickerFileDrop(e) {
   e.preventDefault();
@@ -9334,9 +9368,19 @@ function _renderStickerFileList() {
   const root = document.getElementById('sticker-upload-filelist');
   if (!root || !_stickerUploadState) return;
   const files = _stickerUploadState.files;
-  if (!files.length) { root.innerHTML = ''; return; }
+  const uploadBtn = document.getElementById('sticker-upload-btn');
   const okCnt = files.filter(f => !f.errors.length).length;
   const errCnt = files.length - okCnt;
+  // 업로드 버튼 — 통과 파일 1건 이상일 때만 노출
+  if (uploadBtn) {
+    if (okCnt > 0) {
+      uploadBtn.style.display = '';
+      uploadBtn.textContent = `업로드 (${okCnt}건)`;
+    } else {
+      uploadBtn.style.display = 'none';
+    }
+  }
+  if (!files.length) { root.innerHTML = ''; return; }
   root.innerHTML = `
     <div style="margin-bottom:6px;font-weight:600;color:var(--gray-700)">
       선택된 파일 ${files.length}건 (✅ ${okCnt} · ❌ ${errCnt})
@@ -9387,14 +9431,17 @@ async function doStickerUpload() {
       console.warn('[sticker upload]', f.name, e);
     }
   }
-  prog.textContent = `완료: ${ok}건 성공, ${fail}건 실패`;
+  prog.textContent = `완료: ${ok}건 성공${fail ? ` · ${fail}건 실패` : ''}`;
   if (ok > 0) {
     showToast(`✅ ${ok}건 업로드 완료`);
-    closeStickerUploadModal();
-    await loadBgUnified();
-  } else {
-    btn.disabled = false;
+    // 통합 모달 내: 업로드 큐 비우고 이미지 그리드 새로고침 (모달 유지 — 추가 작업 가능)
+    _stickerUploadState.files = [];
+    _renderStickerFileList();
+    await loadStickerImageList(orderId, stickerIndex);
+    // 백그라운드에서 메인 테이블도 갱신 (워크플로우 stage 변경 반영)
+    loadBgUnified().catch(() => {});
   }
+  btn.disabled = false;
 }
 
 /** ArrayBuffer → base64 (대용량 안전) */
@@ -9409,27 +9456,8 @@ function _bufToBase64(buf) {
 }
 
 // ============================================
-// 스티커 이미지 보기/관리 모달
+// 스티커 이미지 리스트 로더 — 통합 모달의 '업로드된 이미지' 그리드에 렌더링
 // ============================================
-async function openStickerImageModal(orderId, stickerIndex) {
-  const html = `
-    <div id="sticker-image-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center">
-      <div style="background:#fff;padding:24px;border-radius:8px;max-width:720px;width:90%;max-height:90vh;overflow:auto">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-          <span style="font-weight:700;font-size:16px">📷 스티커 이미지 관리</span>
-          <span style="color:var(--gray-500);font-size:12px">${esc(orderId)} · #${stickerIndex}</span>
-        </div>
-        <div id="sticker-image-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:14px;min-height:120px">로드 중...</div>
-        <div style="display:flex;gap:8px;justify-content:flex-end">
-          <button class="btn" onclick="openStickerUploadModal('${esc(orderId)}', ${stickerIndex});document.getElementById('sticker-image-modal').remove()">📤 추가 업로드</button>
-          <button class="btn" onclick="document.getElementById('sticker-image-modal').remove()">닫기</button>
-        </div>
-      </div>
-    </div>`;
-  document.body.insertAdjacentHTML('beforeend', html);
-  await loadStickerImageList(orderId, stickerIndex);
-}
-
 async function loadStickerImageList(orderId, stickerIndex) {
   const root = document.getElementById('sticker-image-list');
   if (!root) return;
