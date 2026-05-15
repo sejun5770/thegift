@@ -25,6 +25,30 @@ const HDR_SERVICE = { apikey: SUPABASE_SERVICE_KEY, Authorization: `Bearer ${SUP
 const BUCKET = 'bg-order-stickers';
 
 // ============================================
+// orderId 별 in-memory mutex — JSONB read-modify-write race 방지.
+//   2명 동시 작업 시 직렬화. 단일 노드 가정 (Docker 컨테이너 1 instance).
+//   다중 노드면 Supabase advisory lock 필요 (Phase 2).
+// ============================================
+const _orderLocks = new Map();
+
+async function withOrderLock(orderId, fn) {
+  const prev = _orderLocks.get(orderId) || Promise.resolve();
+  let resolveCur;
+  const cur = new Promise(r => { resolveCur = r; });
+  _orderLocks.set(orderId, prev.then(() => cur));
+  try { await prev; } catch {}
+  try {
+    return await fn();
+  } finally {
+    resolveCur();
+    // 마지막 holder 면 cleanup (메모리 누수 방지)
+    if (_orderLocks.get(orderId) === cur || _orderLocks.get(orderId) === prev.then(() => cur)) {
+      _orderLocks.delete(orderId);
+    }
+  }
+}
+
+// ============================================
 // 워크플로우 stage helpers
 // ============================================
 
@@ -70,7 +94,10 @@ async function updateCustomerInfo(orderId, patch) {
  *   - 점프 모드 (jump=true): target stage 까지 timestamp set, 이후 stages 는 모두 NULL 처리 (롤백)
  *   - target 이 null 이면 모든 stage 초기화 (초기 입력완료 상태로)
  */
-async function patchStickerWorkflow({ orderId, stickerIndex, stage, by, jump = false, clearFuture = true }) {
+async function patchStickerWorkflow(opts) {
+  return withOrderLock(opts.orderId, () => _patchStickerWorkflowImpl(opts));
+}
+async function _patchStickerWorkflowImpl({ orderId, stickerIndex, stage, by, jump = false, clearFuture = true }) {
   const ci = await getCustomerInfoForUpdate(orderId);
   if (!ci) throw new Error(`customer_info not found: ${orderId}`);
   const sels = Array.isArray(ci.sticker_selections) ? [...ci.sticker_selections] : [];
@@ -113,7 +140,10 @@ async function patchStickerWorkflow({ orderId, stickerIndex, stage, by, jump = f
  *   업로드 후 호출. 첫 이미지면 is_main=true, sticker_completed_at 자동 set.
  *   options.alreadyMain=true 이면 다른 이미지 is_main 모두 false 처리.
  */
-async function addStickerImageMeta({ orderId, stickerIndex, image, by }) {
+async function addStickerImageMeta(opts) {
+  return withOrderLock(opts.orderId, () => _addStickerImageMetaImpl(opts));
+}
+async function _addStickerImageMetaImpl({ orderId, stickerIndex, image, by }) {
   const ci = await getCustomerInfoForUpdate(orderId);
   if (!ci) throw new Error(`customer_info not found: ${orderId}`);
   const sels = Array.isArray(ci.sticker_selections) ? [...ci.sticker_selections] : [];
@@ -141,7 +171,10 @@ async function addStickerImageMeta({ orderId, stickerIndex, image, by }) {
 }
 
 /** 스티커 이미지 metadata 제거. 마지막 이미지 삭제 시 sticker_completed_at 도 NULL 처리. */
-async function removeStickerImageMeta({ orderId, stickerIndex, filename }) {
+async function removeStickerImageMeta(opts) {
+  return withOrderLock(opts.orderId, () => _removeStickerImageMetaImpl(opts));
+}
+async function _removeStickerImageMetaImpl({ orderId, stickerIndex, filename }) {
   const ci = await getCustomerInfoForUpdate(orderId);
   if (!ci) throw new Error(`customer_info not found: ${orderId}`);
   const sels = Array.isArray(ci.sticker_selections) ? [...ci.sticker_selections] : [];
@@ -164,7 +197,10 @@ async function removeStickerImageMeta({ orderId, stickerIndex, filename }) {
 }
 
 /** 메인 이미지 변경. */
-async function setStickerMainImage({ orderId, stickerIndex, filename }) {
+async function setStickerMainImage(opts) {
+  return withOrderLock(opts.orderId, () => _setStickerMainImageImpl(opts));
+}
+async function _setStickerMainImageImpl({ orderId, stickerIndex, filename }) {
   const ci = await getCustomerInfoForUpdate(orderId);
   if (!ci) throw new Error(`customer_info not found: ${orderId}`);
   const sels = Array.isArray(ci.sticker_selections) ? [...ci.sticker_selections] : [];
@@ -252,13 +288,26 @@ async function listInvoices(orderId) {
   return res.json();
 }
 
-async function insertInvoice({ orderId, invoiceNumber, deliveryCompany, stickerIndices = [], shippedBy, notes }) {
+async function insertInvoice(opts) {
+  return withOrderLock(opts.orderId, () => _insertInvoiceImpl(opts));
+}
+async function _insertInvoiceImpl({ orderId, invoiceNumber, deliveryCompany, stickerIndices = [], shippedBy, notes }) {
   if (!USE) throw new Error('Supabase 미설정');
+  if (!invoiceNumber) throw new Error('invoice_number 필수');
+  if (!deliveryCompany) throw new Error('delivery_company 필수');
+  // sticker_indices 검증 — sticker_selections 범위 내인지, 유효 정수인지
+  const ci = await getCustomerInfoForUpdate(orderId);
+  if (!ci) throw new Error(`customer_info not found: ${orderId}`);
+  const selsLen = Array.isArray(ci.sticker_selections) ? ci.sticker_selections.length : 0;
+  const validIndices = (stickerIndices || []).filter(i => Number.isInteger(i) && i >= 0 && i < selsLen);
+  if (!validIndices.length) {
+    throw new Error(`유효한 sticker_indices 없음 (sticker_selections 길이: ${selsLen})`);
+  }
   const body = {
     order_id: orderId,
     invoice_number: invoiceNumber,
     delivery_company: deliveryCompany,
-    sticker_indices: stickerIndices,
+    sticker_indices: validIndices,
     shipped_by: shippedBy || null,
     notes: notes || null,
   };
@@ -274,23 +323,21 @@ async function insertInvoice({ orderId, invoiceNumber, deliveryCompany, stickerI
   const rows = await res.json();
   const inv = rows[0];
 
-  // 워크플로우 timestamps 도 동기화 — 해당 sticker_indices 의 shipped_at set
-  if (Array.isArray(stickerIndices) && stickerIndices.length) {
-    try {
-      const ci = await getCustomerInfoForUpdate(orderId);
-      if (ci) {
-        const sels = Array.isArray(ci.sticker_selections) ? [...ci.sticker_selections] : [];
-        const now = new Date().toISOString();
-        stickerIndices.forEach(i => {
-          if (sels[i]) {
-            sels[i] = { ...sels[i], shipped_at: now, shipped_by: shippedBy || null };
-          }
-        });
-        await updateCustomerInfo(orderId, { sticker_selections: sels });
-      }
-    } catch (e) {
-      console.warn(`[invoice insert] sticker shipped_at sync 실패 ${orderId}: ${e.message}`);
+  // 워크플로우 timestamps 도 동기화 — validIndices 의 shipped_at set
+  try {
+    const ciFresh = await getCustomerInfoForUpdate(orderId);
+    if (ciFresh) {
+      const sels = Array.isArray(ciFresh.sticker_selections) ? [...ciFresh.sticker_selections] : [];
+      const now = new Date().toISOString();
+      validIndices.forEach(i => {
+        if (sels[i]) {
+          sels[i] = { ...sels[i], shipped_at: now, shipped_by: shippedBy || null };
+        }
+      });
+      await updateCustomerInfo(orderId, { sticker_selections: sels });
     }
+  } catch (e) {
+    console.warn(`[invoice insert] sticker shipped_at sync 실패 ${orderId}: ${e.message}`);
   }
   return inv;
 }
@@ -299,8 +346,16 @@ async function deleteInvoice(invoiceId) {
   if (!USE) throw new Error('Supabase 미설정');
   // 1) row 먼저 조회 (rollback 용 정보)
   const sel = await fetch(`${REST}/bg_order_invoices?id=eq.${encodeURIComponent(invoiceId)}&select=*&limit=1`, { headers: HDR });
-  const rows = sel.ok ? await sel.json() : [];
-  const inv = rows[0];
+  const _earlyRows = sel.ok ? await sel.clone().json() : [];
+  const orderIdForLock = _earlyRows[0]?.order_id;
+  if (orderIdForLock) {
+    return withOrderLock(orderIdForLock, () => _deleteInvoiceImpl(invoiceId, _earlyRows));
+  }
+  return _deleteInvoiceImpl(invoiceId, _earlyRows);
+}
+async function _deleteInvoiceImpl(invoiceId, prefetchedRows) {
+  // 1) row 정보 (외부에서 prefetch 한 데이터 재활용)
+  const inv = (prefetchedRows && prefetchedRows[0]) || null;
   // 2) 삭제
   const res = await fetch(`${REST}/bg_order_invoices?id=eq.${encodeURIComponent(invoiceId)}`, {
     method: 'DELETE',

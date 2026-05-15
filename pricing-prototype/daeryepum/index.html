@@ -8686,7 +8686,9 @@ function computeRowStage(order, ci, sel) {
   if (sel.packed_at) return 'packed';
   if (sel.bound_at) return 'bound';
   if (sel.printed_at) return 'printed';
-  if (sel.sticker_completed_at || (Array.isArray(sel.images) && sel.images.length > 0)) return 'sticker_completed';
+  // 스티커작업완료 = 이미지가 1장 이상 존재해야 인정 (timestamps 만 있고 이미지 0장은 비정상 → submitted 로 강등)
+  const hasImages = Array.isArray(sel.images) && sel.images.length > 0;
+  if (hasImages) return 'sticker_completed';
   return 'submitted';
 }
 
@@ -8742,33 +8744,32 @@ function renderBgUnified() {
     const pm = bgUnifiedProductMap.get(order._composite_key || `${order.order_seq}::${order.delivery_seq||1}`);
 
     if (pm && pm.size > 0) {
-      // 주문의 각 상품에 대해 1행씩
+      // 주문의 각 상품에 대해 1행씩 + sticker_index 명시 추적 (워크플로우 PATCH 용)
       for (const [productCode, productInfo] of pm) {
-        // 이 상품과 매칭되는 sticker_selection 찾기 (없으면 null)
-        const sel = sels.find(s => s.product_code === productCode) || null;
+        const selIdx = sels.findIndex(s => s.product_code === productCode);
+        const sel = selIdx >= 0 ? sels[selIdx] : null;
         bgUnifiedRows.push({
-          order, ci, sel,
+          order, ci, sel, sticker_index: selIdx,
           product_code: productCode,
           product_name: productInfo.card_name,
           product_qty: productInfo.item_count,
         });
       }
-      // 상품코드가 없는 sticker_selection이 있으면 별도 행 추가
-      // (비정상 데이터지만 누락 방지)
-      sels.forEach(sel => {
-        if (sel.product_code && !pm.has(sel.product_code)) {
+      // 상품코드가 없는 sticker_selection이 있으면 별도 행 추가 (비정상 데이터지만 누락 방지)
+      sels.forEach((s, idx) => {
+        if (s.product_code && !pm.has(s.product_code)) {
           bgUnifiedRows.push({
-            order, ci, sel,
-            product_code: sel.product_code,
-            product_name: sel.product_name || sel.product_code,
-            product_qty: sel.quantity || 0,
+            order, ci, sel: s, sticker_index: idx,
+            product_code: s.product_code,
+            product_name: s.product_name || s.product_code,
+            product_qty: s.quantity || 0,
           });
         }
       });
     } else {
       // productMap이 비어있는 경우 (비정상): 주문 1건을 단일 행으로
       bgUnifiedRows.push({
-        order, ci, sel: null,
+        order, ci, sel: null, sticker_index: -1,
         product_code: null,
         product_name: order.card_name || '-',
         product_qty: order.item_count || 1,
@@ -8875,7 +8876,7 @@ function renderBgUnified() {
   // isCancelled 는 함수 상단 (카운트 계산) 에서 이미 선언됨 — 재선언 금지
   let html = '';
 
-  bgUnifiedRows.forEach(({ order, ci, sel, product_code, product_name, product_qty }, rowIdx) => {
+  bgUnifiedRows.forEach(({ order, ci, sel, sticker_index, product_code, product_name, product_qty }, rowIdx) => {
     const prev = rowIdx > 0 ? bgUnifiedRows[rowIdx - 1].order : null;
     const isFirstOfOrder = rowIdx === 0 || (prev && prev.order_seq !== order.order_seq);
     // 같은 주문이지만 다른 배송지 (나눔배송) — 미세 dashed separator
@@ -8987,7 +8988,7 @@ function renderBgUnified() {
     }
 
     // 워크플로우 셀 — 행의 현재 stage 에 맞는 액션 버튼
-    const workflowCell = _renderWorkflowCell(rowIdx, order, ci, sel);
+    const workflowCell = _renderWorkflowCell(rowIdx, order, ci, sel, sticker_index);
 
     html += `<tr class="${rowClass}" style="${borderStyle}">
       <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()"></td>
@@ -9027,16 +9028,11 @@ const STAGE_LABELS = {
 };
 const STAGE_ORDER = ['unsubmitted', 'submitted', 'sticker_completed', 'printed', 'bound', 'packed', 'shipped'];
 
-function _stickerIndexFromSel(ci, sel) {
-  if (!ci || !sel) return -1;
-  const sels = Array.isArray(ci.sticker_selections) ? ci.sticker_selections : [];
-  return sels.findIndex(s => s.product_code === sel.product_code && s.sticker_code === sel.sticker_code);
-}
-
-/** 행 워크플로우 셀 HTML — 현재 stage 에 맞는 버튼 노출. */
-function _renderWorkflowCell(rowIdx, order, ci, sel) {
+/** 행 워크플로우 셀 HTML — 현재 stage 에 맞는 버튼 노출.
+ *   stickerIdx: bgUnifiedRows 빌드 시 명시 추적된 sticker_selections index (-1 = 없음).
+ */
+function _renderWorkflowCell(rowIdx, order, ci, sel, stickerIdx) {
   const stage = computeRowStage(order, ci, sel);
-  const stickerIdx = _stickerIndexFromSel(ci, sel);
   const orderId = bgCiKey(order);
   const canEditWorkflow = !!ci && stickerIdx >= 0;
   const imgs = (sel?.images || []);
@@ -9084,7 +9080,7 @@ function _renderWorkflowCell(rowIdx, order, ci, sel) {
   return html || '<span style="color:var(--gray-300)">-</span>';
 }
 
-/** stage 진행 API 호출 (단순 advance — 현재 stage 다음으로). */
+/** stage 진행 API 호출 (단순 advance — 현재 stage 다음으로). 성공 시 다음 탭으로 자동 전환. */
 async function advanceWorkflow(orderId, stickerIndex, stage) {
   const label = STAGE_LABELS[stage] || stage;
   if (!confirm(`이 행을 '${label}' 단계로 진행합니다. 계속할까요?`)) return;
@@ -9096,8 +9092,10 @@ async function advanceWorkflow(orderId, stickerIndex, stage) {
     });
     const j = await r.json();
     if (!r.ok) throw new Error(j.message || 'failed');
-    showToast(`✅ ${label} 처리 완료`);
+    showToast(`✅ ${label} 처리 완료 — '${label}' 탭에서 확인`);
     await loadBgUnified();
+    // 다음 탭으로 자동 전환 (운영자가 결과 확인하기 쉽게)
+    switchUniTab(stage);
   } catch (e) {
     alert('처리 실패: ' + e.message);
   }
