@@ -720,17 +720,62 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     // sticker_id → sticker_code / sticker_name join
     const allStickers = await store.getAllStickers(false);
     const stickerMap = new Map(allStickers.map(s => [s.id, s]));
-    const enriched = infos.map(info => ({
-      ...info,
-      sticker_selections: (info.sticker_selections || []).map(sel => {
+
+    // 옛날 데이터 대응: customer_info 가 autoAdvanceNoStickerSelections 추가 (2026-05) 이전 생성된
+    //   경우 스티커 없음 행 timestamps 가 비어있어 워크플로우 탭 분류 잘못됨.
+    //   또한 sticker_id 없는데 sticker_code 만 stale 값으로 남아있는 행도 존재 →
+    //   sticker_id 기반 enrichment (canonical) 적용 후 autoAdvance 돌려야 정확히 감지.
+    //   GET 요청 시 stale 데이터 감지하면 백그라운드로 persist (fire-and-forget).
+    const { autoAdvanceNoStickerSelections } = require('./workflow-store');
+    const stalePatchQueue = [];
+    const enriched = infos.map(info => {
+      const origSels = info.sticker_selections || [];
+      // 1) enrichment 먼저 — sticker_code/name 을 sticker_id lookup 결과로 정규화.
+      //    (stale sticker_code 값을 canonical 값으로 교체 — sticker_id=null 이면 sticker_code=null)
+      const enrichedSels = origSels.map(sel => {
         const st = stickerMap.get(sel.sticker_id);
         return {
           ...sel,
           sticker_code: st?.sticker_code || null,
           sticker_name: sel.sticker_name || st?.name || sel.sticker_id,
         };
-      }),
-    }));
+      });
+      // 2) enriched 결과로 autoAdvance 판단 — stale sticker_code 가 차단하지 않음.
+      const advancedSels = autoAdvanceNoStickerSelections(enrichedSels, 'system:no-sticker');
+      // 3) 변경 감지: timestamp 추가됐거나, enrichment 로 sticker_code 가 stale 에서 canonical 로 정정된 경우.
+      const hasTimestampChange = advancedSels.some((sel, i) => {
+        const a = sel || {}; const b = origSels[i] || {};
+        return (a.sticker_completed_at && !b.sticker_completed_at)
+            || (a.printed_at && !b.printed_at)
+            || (a.bound_at && !b.bound_at);
+      });
+      const hasStickerCodeDrift = advancedSels.some((sel, i) => {
+        const b = origSels[i] || {};
+        // sticker_id 가 있는데 enriched sticker_code 가 DB 원본과 다르면 정정.
+        // sticker_id 없는데 sticker_code 가 있으면 stale → null 로 정정.
+        return (sel.sticker_code || null) !== (b.sticker_code || null);
+      });
+      if (hasTimestampChange || hasStickerCodeDrift) {
+        stalePatchQueue.push({ orderId: info.order_id, selections: advancedSels });
+      }
+      return { ...info, sticker_selections: advancedSels };
+    });
+
+    // 비동기 persist — 응답은 즉시 반환, DB 정상화는 백그라운드.
+    if (stalePatchQueue.length) {
+      const { updateCustomerInfo } = require('./workflow-store');
+      (async () => {
+        for (const { orderId, selections } of stalePatchQueue) {
+          try {
+            await updateCustomerInfo(orderId, { sticker_selections: selections });
+          } catch (e) {
+            console.warn(`[customer-infos auto-backfill] ${orderId}: ${e.message}`);
+          }
+        }
+        console.log(`[customer-infos auto-backfill] persisted ${stalePatchQueue.length} stale rows`);
+      })();
+    }
+
     return json(res, { infos: enriched });
   }
 
