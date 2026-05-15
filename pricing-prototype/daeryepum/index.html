@@ -9905,6 +9905,41 @@ async function openInvoiceModal(orderId, stickerIndex) {
     if (r.ok) invoices = (await r.json()).invoices || [];
   } catch {}
 
+  // ============================================
+  // 그룹 검증 + sticker_indices 자동 채움
+  // ============================================
+  //   같은 (order_seq, delivery_seq) 그룹의 모든 row 가 packed 단계인지 확인.
+  //   모두 packed → 그룹의 모든 sticker_indices 자동 채움 + 정상 진행.
+  //   일부만 packed → 경고 confirm 후 진행 (사용자 강제 결정).
+  const currentRow = bgUnifiedRows.find(r =>
+    bgCiKey(r.order) === orderId && r.sticker_index === stickerIndex
+  );
+  let autoIndices = [stickerIndex];
+  let groupWarning = '';
+  if (currentRow) {
+    const targetOrderSeq = currentRow.order.order_seq;
+    const targetDeliverySeq = currentRow.order.delivery_seq || 1;
+    // 같은 주문번호 + 배송지 그룹의 모든 row
+    const groupRows = bgUnifiedRows.filter(r =>
+      r.order.order_seq === targetOrderSeq &&
+      (r.order.delivery_seq || 1) === targetDeliverySeq &&
+      r.sticker_index >= 0
+    );
+    const packedRows = groupRows.filter(r => r.sel?.packed_at && !r.sel?.shipped_at);
+    const notPackedRows = groupRows.filter(r => !r.sel?.packed_at && !r.sel?.shipped_at);
+    // 자동 채움 — packed 상태의 모든 sticker_index
+    if (packedRows.length > 0) {
+      autoIndices = [...new Set(packedRows.map(r => r.sticker_index))].sort((a, b) => a - b);
+    }
+    if (notPackedRows.length > 0) {
+      const items = notPackedRows.map(r => {
+        const sname = r.sel?.sticker_code || r.product_code || '?';
+        return `· ${sname} (현재 ${STAGE_LABELS[computeRowStage(r.order, r.ci, r.sel)] || '미입력'})`;
+      }).join('\n');
+      groupWarning = `⚠️ 같은 주문/배송지의 다른 상품 ${notPackedRows.length}건이 아직 포장완료 단계가 아닙니다:\n${items}\n\n원래는 모두 포장완료 후 함께 출고처리하는 것이 권장됩니다.`;
+    }
+  }
+
   const existing = invoices.length
     ? `<div style="margin-bottom:14px;padding:10px;background:var(--gray-50);border-radius:6px">
         <div style="font-weight:600;font-size:13px;margin-bottom:6px">기존 송장 (${invoices.length}건)</div>
@@ -9919,12 +9954,20 @@ async function openInvoiceModal(orderId, stickerIndex) {
     : '';
 
   const dcOpts = DELIVERY_COMPANIES.map(c => `<option value="${c}">${c}</option>`).join('');
+  const groupWarningHtml = groupWarning
+    ? `<div style="padding:10px 12px;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;margin-bottom:14px;font-size:12px;color:#92400e;white-space:pre-line">${esc(groupWarning)}</div>`
+    : '';
+  const indicesValue = autoIndices.join(',');
+  const indicesHint = autoIndices.length > 1
+    ? `<div style="font-size:11px;color:#16a34a;margin-top:3px">✅ 같은 주문/배송지의 포장완료 ${autoIndices.length}건 자동 포함</div>`
+    : '';
   const html = `
     <div id="invoice-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center"
          onclick="if(event.target===this)this.remove()">
-      <div style="background:#fff;padding:24px;border-radius:8px;max-width:520px;width:90%;max-height:90vh;overflow:auto">
+      <div style="background:#fff;padding:24px;border-radius:8px;max-width:560px;width:90%;max-height:90vh;overflow:auto">
         <div style="font-weight:700;font-size:16px;margin-bottom:10px">🚚 출고처리 (송장 등록)</div>
         <div style="color:var(--gray-500);font-size:12px;margin-bottom:14px">주문 <code>${esc(orderId)}</code></div>
+        ${groupWarningHtml}
         ${existing}
         <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
           <label style="font-size:12px">택배사
@@ -9933,8 +9976,9 @@ async function openInvoiceModal(orderId, stickerIndex) {
           <label style="font-size:12px">송장번호
             <input type="text" id="inv-number" placeholder="예: 1234567890" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:4px;margin-top:4px" />
           </label>
-          <label style="font-size:12px">포함 sticker index (콤마 구분, 기본 현재 행)
-            <input type="text" id="inv-indices" value="${stickerIndex}" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:4px;margin-top:4px" />
+          <label style="font-size:12px">포함 sticker index (콤마 구분)
+            <input type="text" id="inv-indices" value="${indicesValue}" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:4px;margin-top:4px" />
+            ${indicesHint}
           </label>
           <label style="font-size:12px">비고 (선택)
             <input type="text" id="inv-notes" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:4px;margin-top:4px" />
@@ -9942,14 +9986,14 @@ async function openInvoiceModal(orderId, stickerIndex) {
         </div>
         <div style="display:flex;gap:8px;justify-content:flex-end">
           <button class="btn" onclick="document.getElementById('invoice-modal').remove()">취소</button>
-          <button class="btn btn-primary" onclick="submitInvoice('${esc(orderId)}')">송장 등록 + 출고완료</button>
+          <button class="btn btn-primary" onclick="submitInvoice('${esc(orderId)}', ${groupWarning ? 'true' : 'false'})">송장 등록 + 출고완료</button>
         </div>
       </div>
     </div>`;
   document.body.insertAdjacentHTML('beforeend', html);
 }
 
-async function submitInvoice(orderId) {
+async function submitInvoice(orderId, hasGroupWarning) {
   const company = document.getElementById('inv-company').value;
   const number = document.getElementById('inv-number').value.trim();
   const indicesStr = document.getElementById('inv-indices').value.trim();
@@ -9957,6 +10001,11 @@ async function submitInvoice(orderId) {
   if (!number) { alert('송장번호를 입력해주세요'); return; }
   const indices = indicesStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
   if (!indices.length) { alert('포함 sticker index 가 필요합니다'); return; }
+  // 그룹 검증 실패 케이스 — 다른 상품이 포장완료 아님 → 한 번 더 confirm
+  if (hasGroupWarning) {
+    const ok = confirm('같은 주문/배송지의 다른 상품이 아직 포장완료 단계가 아닙니다.\n그래도 이 송장으로 출고처리를 진행할까요?\n\n(다른 상품들은 추후 별도 송장으로 출고 필요)');
+    if (!ok) return;
+  }
   try {
     const r = await fetch(`${API}/api/bg/orders/${encodeURIComponent(orderId)}/invoices`, {
       method: 'POST',

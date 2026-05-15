@@ -22,6 +22,7 @@ const api = require('./api');
 const store = require('./store');
 const bgStore = require('../barungift/store');
 const { enrichFromOption } = require('./option-parser');
+const { autoAdvanceNoStickerSelections } = require('../barungift/workflow-store');
 
 const CATEGORY_IDS = (process.env.NAVER_CATEGORY_IDS || '')
   .split(',').map(s => s.trim()).filter(Boolean);
@@ -218,11 +219,13 @@ async function syncRecent({ daysBack = 7 } = {}) {
           }
         }
         // 출고일은 운영팀 수동 입력 — sync 시점에 자동 설정 안 함.
+        // 스티커 없음 (sticker_code null) 행은 자동으로 제본완료(bound) 까지 진행.
+        const finalSelections = autoAdvanceNoStickerSelections(sticker_selections);
         stubs.push({
           order_id,
           is_express: false, express_fee: 0,
           desired_ship_date: null,
-          sticker_selections,
+          sticker_selections: finalSelections,
           cash_receipt_yn: false, receipt_type: null, receipt_number: null,
           customer_request: null,
           submitted_at: row.ordered_at || new Date().toISOString(),

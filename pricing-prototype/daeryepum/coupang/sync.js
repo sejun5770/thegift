@@ -25,6 +25,7 @@ const api = require('./api');
 const store = require('./store');
 const bgStore = require('../barungift/store');
 const { enrichOrderItem, calcCoupangShipDate } = require('./option-mapper');
+const { autoAdvanceNoStickerSelections } = require('../barungift/workflow-store');
 
 // 답례품 카테고리 필터 — env 로 운영 중 추가/제거 가능 (네이버와 명명 규칙 일관)
 const CATEGORY_CODES = (process.env.COUPANG_CATEGORY_CODES || '')
@@ -235,12 +236,14 @@ async function syncRecent({ daysBack = 7, status } = {}) {
       for (const [order_id, { row, selections }] of grouped) {
         // 출고일 — ordered_at 기준 11시 컷오프, 토/일 스킵
         const shipDate = calcCoupangShipDate(row.ordered_at);
+        // 스티커 없음 (sticker_code null) 행은 자동으로 제본완료(bound) 까지 진행.
+        const finalSelections = autoAdvanceNoStickerSelections(selections);
         stubs.push({
           order_id,
           is_express: false,
           express_fee: 0,
           desired_ship_date: shipDate,
-          sticker_selections: selections,
+          sticker_selections: finalSelections,
           cash_receipt_yn: false,
           receipt_type: null,
           receipt_number: null,

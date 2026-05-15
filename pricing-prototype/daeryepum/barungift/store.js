@@ -315,12 +315,19 @@ async function saveCustomerInfo(orderId, data) {
   // L7: express_fee 음수/NaN 가드 — 입력 검증으로 잘못된 데이터 저장 방지
   const sanitizedExpressFee = Math.max(0, parseInt(data.express_fee, 10) || 0);
 
+  // 스티커 없음 (sticker_code null) 행은 자동으로 제본완료(bound) 까지 진행 (운영팀 정책)
+  const { autoAdvanceNoStickerSelections } = require('./workflow-store');
+  const advancedSelections = autoAdvanceNoStickerSelections(
+    data.sticker_selections || [],
+    'system:no-sticker'
+  );
+
   const info = {
     order_id: orderId,
     is_express: data.is_express || false,
     express_fee: sanitizedExpressFee,
     desired_ship_date: data.desired_ship_date,
-    sticker_selections: data.sticker_selections || [],
+    sticker_selections: advancedSelections,
     cash_receipt_yn: data.cash_receipt_yn || false,
     receipt_type: data.receipt_type || null,
     receipt_number: data.receipt_number || null,
@@ -392,6 +399,11 @@ async function updateCustomerInfo(orderId, data) {
   for (const k of allowed) { if (k in data) patch[k] = data[k]; }
   // L7: express_fee 음수/NaN 가드
   if ('express_fee' in patch) patch.express_fee = Math.max(0, parseInt(patch.express_fee, 10) || 0);
+  // 스티커 없음 행 자동 진행 (saveCustomerInfo 와 동일 정책)
+  if ('sticker_selections' in patch) {
+    const { autoAdvanceNoStickerSelections } = require('./workflow-store');
+    patch.sticker_selections = autoAdvanceNoStickerSelections(patch.sticker_selections, 'system:no-sticker');
+  }
   patch.updated_at = now();
 
   const existing = await getCustomerInfo(orderId);

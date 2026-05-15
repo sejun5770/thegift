@@ -52,6 +52,30 @@ async function withOrderLock(orderId, fn) {
 // 워크플로우 stage helpers
 // ============================================
 
+/**
+ * 스티커 선택안함 (sticker_code null) 행은 인쇄/스티커 작업 불필요 → 자동으로 제본완료(bound) 까지 진행.
+ *   포장 / 출고는 운영자가 박스 작업 후 직접 진행.
+ *   이미 set 된 timestamp 는 보존 (멱등성). by: 자동 처리 표시용 'system:no-sticker' 권장.
+ */
+function autoAdvanceNoStickerSelections(selections, by = 'system:no-sticker') {
+  if (!Array.isArray(selections)) return selections;
+  const now = new Date().toISOString();
+  return selections.map(sel => {
+    if (!sel) return sel;
+    // 스티커 ID 또는 코드 둘 다 없을 때만 스티커 없음으로 간주
+    if (sel.sticker_code || sel.sticker_id) return sel;
+    return {
+      ...sel,
+      sticker_completed_at: sel.sticker_completed_at || now,
+      sticker_completed_by: sel.sticker_completed_by || by,
+      printed_at: sel.printed_at || now,
+      printed_by: sel.printed_by || by,
+      bound_at: sel.bound_at || now,
+      bound_by: sel.bound_by || by,
+    };
+  });
+}
+
 /** 가능한 stage 키 (순서대로). */
 const STAGE_KEYS = ['sticker_completed', 'printed', 'bound', 'packed'];
 // 'shipped' 는 bg_order_invoices 에 row 생기는 시점 = 별도
@@ -419,4 +443,5 @@ module.exports = {
   listInvoices,
   insertInvoice,
   deleteInvoice,
+  autoAdvanceNoStickerSelections,
 };
