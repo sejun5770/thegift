@@ -8752,8 +8752,11 @@ function switchUniTab(tab) {
   if (sortOpts) sortOpts.style.display = (tab !== 'unsubmitted') ? 'flex' : 'none';
   const hintEl = document.getElementById('uni-sort-default-hint');
   if (hintEl) {
-    // 모든 탭 공통 — 주문일시 ASC + 주문번호 그룹 + 입력일시
-    hintEl.textContent = '(주문일시 ASC + 주문번호 그룹 + 입력일시)';
+    if (tab === 'submitted') {
+      hintEl.textContent = '(미수집건 우선 → 최신 수집일시 순)';
+    } else {
+      hintEl.textContent = '(주문일시 ASC + 주문번호 그룹 + 입력일시)';
+    }
   }
   renderBgUnified();
 }
@@ -8904,48 +8907,61 @@ function renderBgUnified() {
   });
 
   // ============================================
-  // 정렬 — 운영팀 요청 공통 로직
+  // 정렬 — 탭별 기본 정렬 다름
   // ============================================
-  //   기본 정렬:
-  //     1) 주문일시 ASC (오래된 주문 먼저)
-  //     2) 주문번호 — 같은 날 다른 주문은 인접 보장 (실질적 그룹화)
-  //     3) 입력일시 (같은 주문 안 row 정렬)
-  //     4) sticker_index 보조
-  //
-  //   희망출고일 가까운 순:
-  //     1) desired_ship_date ASC (NULL 뒤로)
-  //     2) 주문번호 (그룹화)
-  //     3) 주문일시
-  //     4) 입력일시
+  //   미입력 (unsubmitted): 최신 주문일시 DESC (운영자가 새 주문 먼저 처리하도록)
+  //   입력완료 (submitted): 미수집건 (processed_at NULL) 최상단 → 그 다음 최신 수집일시 DESC
+  //   기타 탭 (스티커작업완료 ~ 출고완료): 주문일시 ASC + 주문번호 그룹 + 입력일시
+  //   희망출고일 가까운 순 (라디오): desired_ship_date ASC (NULL 뒤로) + 주문번호 + 주문일시
   const sortMode = document.querySelector('input[name="uni-sort"]:checked')?.value || 'default';
 
   function _seqStr(r) { return String(r.order?.order_seq || ''); }
   function _orderDate(r) { return r.order?.order_date || ''; }
   function _subAt(r) { return r.ci?.submitted_at || r.ci?.updated_at || ''; }
+  function _procAt(r) { return r.ci?.processed_at || ''; }
 
   if (sortMode === 'ship_date_asc') {
     bgUnifiedRows.sort((a, b) => {
       const dA = a.ci?.desired_ship_date || '';
       const dB = b.ci?.desired_ship_date || '';
-      // 1) 희망출고일 ASC (NULL 뒤로)
       if (!dA && dB) return 1;
       if (dA && !dB) return -1;
       if (dA !== dB) return dA.localeCompare(dB);
-      // 2) 주문번호 그룹
       if (_seqStr(a) !== _seqStr(b)) return _seqStr(a).localeCompare(_seqStr(b));
-      // 3) 주문일시
       if (_orderDate(a) !== _orderDate(b)) return _orderDate(a).localeCompare(_orderDate(b));
-      // 4) 입력일시
       if (_subAt(a) !== _subAt(b)) return _subAt(a).localeCompare(_subAt(b));
       return (a.sticker_index || 0) - (b.sticker_index || 0);
     });
-  } else {
+  } else if (activeTab === 'unsubmitted') {
+    // 미입력: 최신 주문일시 DESC
     bgUnifiedRows.sort((a, b) => {
-      // 1) 주문일시 ASC (오래된 먼저)
-      if (_orderDate(a) !== _orderDate(b)) return _orderDate(a).localeCompare(_orderDate(b));
-      // 2) 주문번호 그룹 (같은 날 다른 주문 인접)
+      if (_orderDate(a) !== _orderDate(b)) return _orderDate(b).localeCompare(_orderDate(a));
+      if (_seqStr(a) !== _seqStr(b)) return _seqStr(b).localeCompare(_seqStr(a));
+      return (a.sticker_index || 0) - (b.sticker_index || 0);
+    });
+  } else if (activeTab === 'submitted') {
+    // 입력완료: 미수집건 우선 → 그 다음 최신 수집일시 DESC
+    bgUnifiedRows.sort((a, b) => {
+      const aProc = _procAt(a), bProc = _procAt(b);
+      // 1) 미수집(processed_at 없음)이 위
+      if (!aProc && bProc) return -1;
+      if (aProc && !bProc) return 1;
+      // 2) 둘 다 수집됨 — 최신 수집일시 DESC
+      if (aProc && bProc && aProc !== bProc) return bProc.localeCompare(aProc);
+      // 3) 둘 다 미수집 — 최신 입력일시 DESC (가장 최근 입력된 미수집건 위)
+      if (!aProc && !bProc) {
+        if (_subAt(a) !== _subAt(b)) return _subAt(b).localeCompare(_subAt(a));
+        if (_orderDate(a) !== _orderDate(b)) return _orderDate(b).localeCompare(_orderDate(a));
+      }
+      // 4) 같은 주문 묶음
       if (_seqStr(a) !== _seqStr(b)) return _seqStr(a).localeCompare(_seqStr(b));
-      // 3) 입력일시
+      return (a.sticker_index || 0) - (b.sticker_index || 0);
+    });
+  } else {
+    // 기타 탭 (스티커작업완료 ~ 출고완료): 주문일시 ASC + 그룹화
+    bgUnifiedRows.sort((a, b) => {
+      if (_orderDate(a) !== _orderDate(b)) return _orderDate(a).localeCompare(_orderDate(b));
+      if (_seqStr(a) !== _seqStr(b)) return _seqStr(a).localeCompare(_seqStr(b));
       if (_subAt(a) !== _subAt(b)) return _subAt(a).localeCompare(_subAt(b));
       return (a.sticker_index || 0) - (b.sticker_index || 0);
     });
