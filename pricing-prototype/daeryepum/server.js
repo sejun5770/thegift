@@ -1408,6 +1408,37 @@ async function apiDashboardComparison() {
       r => `${r.product_order_id}`,
     );
 
+    // 쿠팡 로켓그로스(RFM) 매출 — 일별 aggregate (주문 단위 X). 운영자가 Wing 셀러센터
+    //   보고 수동 입력 (Coupang Open API RFM endpoint 미공개). order_count 는 row 수
+    //   (=일자 수) 사용 — 정확한 주문 수는 알 수 없음.
+    //   endStr 는 exclusive 라 rfm listSales 의 lte 와 맞추려 -1 일.
+    try {
+      const rfmStore = require('./coupang/rfm-store');
+      const endIncl = endStr ? new Date(new Date(endStr).getTime() - 86400000).toISOString().slice(0, 10) : null;
+      const rfmRows = await rfmStore.listSales({ startDate: startStr, endDate: endIncl });
+      if (rfmRows && rfmRows.length) {
+        let amount = 0, qty = 0;
+        for (const r of rfmRows) {
+          amount += Number(r.net_amount) || 0;
+          qty += Number(r.sales_qty) || 0;
+        }
+        if (amount !== 0 || qty !== 0 || rfmRows.length) {
+          const site = ensureSite('쿠팡 로켓그로스');
+          site.order_count += rfmRows.length;
+          site.total_amount += amount;
+          site.total_qty += qty;
+          site.standalone.amount += amount;
+          site.standalone.orders += rfmRows.length;
+          site.standalone.qty += qty;
+          standalone_amount += amount;
+          standalone_orders += rfmRows.length;
+          standalone_qty += qty;
+        }
+      }
+    } catch (e) {
+      console.warn('[getPeriodTotal] 쿠팡 로켓그로스 머지 실패 (무시):', e.message);
+    }
+
     // 전체 합계
     let order_count = 0, total_amount = 0, total_qty = 0;
     for (const v of Object.values(siteMap)) {
@@ -3899,6 +3930,61 @@ const server = http.createServer(async (req, res) => {
       } else if (pathname === '/api/coupang/rfm/sync-state') {
         const rfmStore = require('./coupang/rfm-store');
         data = await rfmStore.getSyncState();
+      } else if (pathname === '/api/coupang/rfm/sales' && req.method === 'GET') {
+        // 로켓그로스 매출 row 목록 (수동 입력 + 향후 API sync 포함) — 관리 UI 용.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const rfmStore = require('./coupang/rfm-store');
+        const startDate = parsed.query.startDate || null;
+        const endDate = parsed.query.endDate || null;
+        const rows = await rfmStore.listSales({ startDate, endDate });
+        data = { rows };
+      } else if (pathname === '/api/coupang/rfm/manual' && req.method === 'POST') {
+        // 운영자 수동 입력 (Wing 셀러센터 → 손으로 옮김). Coupang Open API 가 RFM
+        //   매출 endpoint 미공개라 fallback path. 날짜당 1 row, 같은 날 재제출 시 덮어쓰기.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const body = await new Promise((resolve) => {
+          let raw = '';
+          req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+        });
+        logAdminAccess(session, req, 'coupang-rfm-manual', { sale_date: body.sale_date, sales_amount: body.sales_amount });
+        const rfmStore = require('./coupang/rfm-store');
+        try {
+          const row = await rfmStore.upsertManualSale({
+            sale_date: body.sale_date,
+            sales_amount: body.sales_amount,
+            sales_qty: body.sales_qty,
+            refund_amount: body.refund_amount,
+            refund_qty: body.refund_qty,
+            product_name: body.product_name,
+            by: session?.user?.email || null,
+          });
+          data = { ok: true, row };
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname.match(/^\/api\/coupang\/rfm\/sales\/[^/]+$/) && req.method === 'DELETE') {
+        // 단일 row 삭제 (잘못 입력 정정용)
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const id = pathname.split('/').pop();
+        logAdminAccess(session, req, 'coupang-rfm-delete', { id });
+        const rfmStore = require('./coupang/rfm-store');
+        try {
+          await rfmStore.deleteSaleById(decodeURIComponent(id));
+          data = { ok: true };
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
       } else if (pathname.startsWith('/api/bg/orders/')) {
         // ============================================
         // 정보입력현황 워크플로우 + 스티커 이미지 + 송장

@@ -217,6 +217,7 @@ nav a:hover{color:var(--gray-900)}
   <a href="#bg-products" onclick="showPage('bg-products')">⚙️ 상품설정</a>
   <a href="#bg-shipping" onclick="showPage('bg-shipping')">📅 출고일설정</a>
   <a href="#bg-alimtalk" onclick="showPage('bg-alimtalk')">📨 알림톡 발송</a>
+  <a href="#coupang-rfm" onclick="showPage('coupang-rfm')">🟥 로켓그로스</a>
   <a href="#admin-nav-settings" onclick="showPage('admin-nav-settings')" id="nav-link-admin-nav-settings" style="display:none">⚙️ GNB 설정</a>
   <div class="user-area" id="user-area"></div>
 </nav>
@@ -906,6 +907,89 @@ nav a:hover{color:var(--gray-900)}
         <table class="data-table" id="mr-product-table" style="width:100%"></table>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ========== COUPANG RFM (로켓 그로스) 매출 수동 입력 ========== -->
+<!--
+  Coupang Open API 가 RFM(판매자로켓) 매출 endpoint 를 공개하지 않아 운영자가 Wing
+  셀러센터 (https://wing.coupang.com/tenants/rfm/rfm-home/view) 보고 직접 입력하는 path.
+  날짜당 1 row, 같은 날 재제출 시 덮어쓰기. 대시보드 매출 합산에 net_amount 포함.
+-->
+<div id="page-coupang-rfm" class="page">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <div>
+      <h2 style="margin:0">🟥 쿠팡 로켓그로스 매출</h2>
+      <div style="font-size:12px;color:var(--gray-500);margin-top:4px">
+        Wing 셀러센터의 로켓그로스(판매자로켓) 일별 매출을 수동으로 입력합니다.
+        <a href="https://wing.coupang.com/tenants/rfm/rfm-home/view" target="_blank" rel="noopener" style="color:#1d4ed8">Wing RFM 홈 열기 ↗</a>
+      </div>
+    </div>
+    <button class="btn" onclick="loadCoupangRfm()" style="padding:5px 12px;font-size:12px">🔄 새로고침</button>
+  </div>
+
+  <!-- 입력 폼 -->
+  <div class="card" style="margin-bottom:16px;padding:16px">
+    <div style="font-weight:700;font-size:14px;margin-bottom:10px">📝 매출 입력 / 수정</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px;align-items:end">
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">매출일자 *</label>
+        <input type="date" id="rfm-input-date" style="width:100%">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">매출액 (원) *</label>
+        <input type="number" id="rfm-input-amount" min="0" step="1" placeholder="0" style="width:100%">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">판매 수량</label>
+        <input type="number" id="rfm-input-qty" min="0" step="1" placeholder="0" style="width:100%">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">환불액 (원)</label>
+        <input type="number" id="rfm-input-refund-amount" min="0" step="1" placeholder="0" style="width:100%">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">환불 수량</label>
+        <input type="number" id="rfm-input-refund-qty" min="0" step="1" placeholder="0" style="width:100%">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">상품명 (선택)</label>
+        <input type="text" id="rfm-input-product" placeholder="로켓그로스 일별 매출" style="width:100%">
+      </div>
+      <button class="btn btn-primary" onclick="saveCoupangRfmEntry()" style="height:34px">💾 저장</button>
+    </div>
+    <div id="rfm-input-status" style="font-size:12px;margin-top:8px;color:var(--gray-500)"></div>
+    <div style="font-size:11px;color:var(--gray-400);margin-top:6px">
+      ※ 같은 날짜로 재입력 시 기존 row 를 덮어씁니다. 분류별로 나눠 저장하려면 추후 product 단위 분리 기능 추가 예정.
+    </div>
+  </div>
+
+  <!-- 매출 row 목록 -->
+  <div class="card" style="padding:0;overflow-x:auto">
+    <div style="padding:12px 16px;border-bottom:1px solid var(--gray-200);display:flex;align-items:center;gap:10px">
+      <div style="font-weight:700;font-size:14px">📊 입력 내역</div>
+      <span id="rfm-list-count" style="font-size:12px;color:var(--gray-500)"></span>
+      <div style="flex:1"></div>
+      <span id="rfm-list-sum" style="font-size:12px;color:var(--gray-700)"></span>
+    </div>
+    <table class="data-table" style="width:100%">
+      <thead>
+        <tr>
+          <th style="width:110px">매출일자</th>
+          <th>상품</th>
+          <th style="width:100px;text-align:right">수량</th>
+          <th style="width:130px;text-align:right">매출액</th>
+          <th style="width:100px;text-align:right">환불수량</th>
+          <th style="width:130px;text-align:right">환불액</th>
+          <th style="width:130px;text-align:right">순 매출</th>
+          <th style="width:120px">소스</th>
+          <th style="width:80px">액션</th>
+        </tr>
+      </thead>
+      <tbody id="rfm-list-tbody">
+        <tr><td colspan="9" style="text-align:center;padding:30px;color:var(--gray-400)">데이터를 불러오는 중...</td></tr>
+      </tbody>
+    </table>
   </div>
 </div>
 
@@ -2079,7 +2163,7 @@ function init() {
 
   // URL hash 기반 페이지 전환
   const hash = location.hash.replace('#', '') || 'dashboard';
-  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-alimtalk', 'bg-unified', 'monthly-report', 'admin-nav-settings'].includes(hash)) showPage(hash);
+  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-alimtalk', 'bg-unified', 'monthly-report', 'admin-nav-settings', 'coupang-rfm'].includes(hash)) showPage(hash);
 }
 
 function fmt(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -2129,6 +2213,7 @@ function showPage(name) {
   if (name === 'bg-shipping') loadBgShipping();
   if (name === 'bg-alimtalk') loadBgAlimtalk();
   if (name === 'bg-unified') loadBgUnified();
+  if (name === 'coupang-rfm') loadCoupangRfm();
 }
 
 // --- Category Tabs ---
@@ -5568,7 +5653,7 @@ function renderSampleTable() {
 
 // --- 전환율 차트 ---
 let conversionChart = null;
-const SITE_COLORS = {'바른손카드':'#3b82f6','바른손몰':'#10b981','바른손M카드':'#f59e0b','쿠팡':'#ef4444','네이버':'#03c75a','기타':'#a1a1aa'};
+const SITE_COLORS = {'바른손카드':'#3b82f6','바른손몰':'#10b981','바른손M카드':'#f59e0b','쿠팡':'#ef4444','쿠팡 로켓그로스':'#991b1b','네이버':'#03c75a','기타':'#a1a1aa'};
 function renderConversion(data) {
   _conversionData = data;
   const weeks = data.weeks;
@@ -6330,7 +6415,7 @@ function renderDailyTable(data, topProducts) {
     });
     const order = [...set];
     order.sort((a, b) => {
-      const score = g => g === '바른손몰' ? 1 : (g === '쿠팡' ? 2 : (g === '네이버' ? 3 : (g === '기타' ? 4 : 0)));
+      const score = g => g === '바른손몰' ? 1 : (g === '쿠팡' ? 2 : (g === '쿠팡 로켓그로스' ? 2.5 : (g === '네이버' ? 3 : (g === '기타' ? 4 : 0))));
       return score(a) - score(b);
     });
     return order;
@@ -6688,7 +6773,7 @@ function renderWeeklyTable(data, topProducts) {
     });
     const order = [...set];
     order.sort((a, b) => {
-      const score = g => g === '바른손몰' ? 1 : (g === '쿠팡' ? 2 : (g === '네이버' ? 3 : (g === '기타' ? 4 : 0)));
+      const score = g => g === '바른손몰' ? 1 : (g === '쿠팡' ? 2 : (g === '쿠팡 로켓그로스' ? 2.5 : (g === '네이버' ? 3 : (g === '기타' ? 4 : 0))));
       return score(a) - score(b);
     });
     return order;
@@ -8339,6 +8424,146 @@ function bgShPreviewNextMonth() { bgShPreviewMonth.setMonth(bgShPreviewMonth.get
 
 // ============================================
 // 바른기프트: 답례품 알림톡 발송
+// ============================================
+// ============================================
+// 쿠팡 로켓그로스 (RFM) 매출 수동 입력
+// ============================================
+let _rfmRows = [];
+
+async function loadCoupangRfm() {
+  const tbody = document.getElementById('rfm-list-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--gray-400)">데이터를 불러오는 중...</td></tr>';
+  // 입력 폼 기본값 — 오늘 날짜
+  const dateInput = document.getElementById('rfm-input-date');
+  if (dateInput && !dateInput.value) dateInput.value = fmt(new Date());
+  try {
+    const res = await fetch(`${API}/api/coupang/rfm/sales`);
+    if (!res.ok) {
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:30px;color:#dc2626">조회 실패 (${res.status})</td></tr>`;
+      return;
+    }
+    const data = await res.json();
+    _rfmRows = data.rows || [];
+    _renderCoupangRfmList();
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:30px;color:#dc2626">에러: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+function _renderCoupangRfmList() {
+  const tbody = document.getElementById('rfm-list-tbody');
+  const countEl = document.getElementById('rfm-list-count');
+  const sumEl = document.getElementById('rfm-list-sum');
+  if (!tbody) return;
+  if (!_rfmRows.length) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--gray-400)">입력된 매출이 없습니다.</td></tr>';
+    if (countEl) countEl.textContent = '';
+    if (sumEl) sumEl.textContent = '';
+    return;
+  }
+  const fmtN = n => (Number(n) || 0).toLocaleString('ko-KR');
+  let totalSales = 0, totalRefund = 0, totalNet = 0;
+  const html = _rfmRows.map(r => {
+    const isManual = r.vendor_item_id === '_manual';
+    const source = isManual ? '<span style="color:#7c3aed;font-size:11px">수동</span>' : '<span style="color:#1d4ed8;font-size:11px">API sync</span>';
+    totalSales += Number(r.sales_amount) || 0;
+    totalRefund += Number(r.refund_amount) || 0;
+    totalNet += Number(r.net_amount) || 0;
+    return `<tr>
+      <td style="font-weight:600">${esc(r.sale_date || '')}</td>
+      <td style="font-size:12px">${esc(r.product_name || '-')}</td>
+      <td style="text-align:right">${fmtN(r.sales_qty)}</td>
+      <td style="text-align:right">${fmtN(r.sales_amount)}</td>
+      <td style="text-align:right;color:#dc2626">${fmtN(r.refund_qty)}</td>
+      <td style="text-align:right;color:#dc2626">${fmtN(r.refund_amount)}</td>
+      <td style="text-align:right;font-weight:600">${fmtN(r.net_amount)}</td>
+      <td>${source}</td>
+      <td>
+        ${isManual ? `<button class="btn" style="padding:2px 8px;font-size:11px;border-color:#dc2626;color:#dc2626" onclick="deleteCoupangRfmEntry('${esc(r.id)}', '${esc(r.sale_date)}')">🗑️</button>` : '<span style="color:var(--gray-300)">-</span>'}
+        ${isManual ? `<button class="btn" style="padding:2px 8px;font-size:11px;margin-left:4px" onclick="editCoupangRfmEntry('${esc(r.id)}')">✏️</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+  tbody.innerHTML = html;
+  if (countEl) countEl.textContent = `${_rfmRows.length}건`;
+  if (sumEl) sumEl.innerHTML = `매출 합계 <b>${fmtN(totalSales)}</b> · 환불 <b style="color:#dc2626">${fmtN(totalRefund)}</b> · 순매출 <b style="color:#059669">${fmtN(totalNet)}</b>`;
+}
+
+async function saveCoupangRfmEntry() {
+  const statusEl = document.getElementById('rfm-input-status');
+  const sale_date = document.getElementById('rfm-input-date').value;
+  const sales_amount = document.getElementById('rfm-input-amount').value;
+  const sales_qty = document.getElementById('rfm-input-qty').value;
+  const refund_amount = document.getElementById('rfm-input-refund-amount').value;
+  const refund_qty = document.getElementById('rfm-input-refund-qty').value;
+  const product_name = document.getElementById('rfm-input-product').value.trim() || undefined;
+  if (!sale_date) { statusEl.innerHTML = '<span style="color:#dc2626">매출일자를 선택하세요.</span>'; return; }
+  if (sales_amount === '' && refund_amount === '') {
+    statusEl.innerHTML = '<span style="color:#dc2626">매출액 또는 환불액 중 하나 이상 입력하세요.</span>'; return;
+  }
+  statusEl.innerHTML = '<span style="color:var(--gray-500)">저장 중...</span>';
+  try {
+    const res = await fetch(`${API}/api/coupang/rfm/manual`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sale_date,
+        sales_amount: parseFloat(sales_amount) || 0,
+        sales_qty: parseInt(sales_qty) || 0,
+        refund_amount: parseFloat(refund_amount) || 0,
+        refund_qty: parseInt(refund_qty) || 0,
+        product_name,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      statusEl.innerHTML = `<span style="color:#dc2626">실패: ${esc(data.error || res.status)}</span>`;
+      return;
+    }
+    statusEl.innerHTML = `<span style="color:#059669">✅ 저장 완료 (${sale_date})</span>`;
+    // 입력 폼 reset (날짜는 유지 — 같은 날 추가 작업 가능)
+    document.getElementById('rfm-input-amount').value = '';
+    document.getElementById('rfm-input-qty').value = '';
+    document.getElementById('rfm-input-refund-amount').value = '';
+    document.getElementById('rfm-input-refund-qty').value = '';
+    document.getElementById('rfm-input-product').value = '';
+    loadCoupangRfm();
+  } catch (e) {
+    statusEl.innerHTML = `<span style="color:#dc2626">에러: ${esc(e.message)}</span>`;
+  }
+}
+
+function editCoupangRfmEntry(id) {
+  const row = _rfmRows.find(r => r.id === id);
+  if (!row) return;
+  document.getElementById('rfm-input-date').value = row.sale_date || '';
+  document.getElementById('rfm-input-amount').value = row.sales_amount || '';
+  document.getElementById('rfm-input-qty').value = row.sales_qty || '';
+  document.getElementById('rfm-input-refund-amount').value = row.refund_amount || '';
+  document.getElementById('rfm-input-refund-qty').value = row.refund_qty || '';
+  document.getElementById('rfm-input-product').value = row.product_name === '로켓그로스 일별 매출' ? '' : (row.product_name || '');
+  document.getElementById('rfm-input-status').innerHTML = `<span style="color:#1d4ed8">📝 ${esc(row.sale_date)} 의 row 를 폼에 불러옴 — 수정 후 저장</span>`;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function deleteCoupangRfmEntry(id, saleDate) {
+  if (!confirm(`${saleDate} 의 매출 row 를 삭제할까요?`)) return;
+  try {
+    const res = await fetch(`${API}/api/coupang/rfm/sales/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert('삭제 실패: ' + (data.error || res.status));
+      return;
+    }
+    loadCoupangRfm();
+  } catch (e) {
+    alert('삭제 에러: ' + e.message);
+  }
+}
+
+// ============================================
+// 알림톡 발송
 // ============================================
 let bgAtRows = [];
 let bgAtSelected = new Set();
