@@ -36,11 +36,8 @@ CREATE TABLE IF NOT EXISTS coupang_rocket_growth_sync_state (
 
 INSERT INTO coupang_rocket_growth_sync_state (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
 
-ALTER TABLE coupang_rocket_growth_sales ENABLE ROW LEVEL SECURITY;
-ALTER TABLE coupang_rocket_growth_sync_state ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS rg_sales_select ON coupang_rocket_growth_sales;
-CREATE POLICY rg_sales_select ON coupang_rocket_growth_sales FOR SELECT USING (true);
-DROP POLICY IF EXISTS rg_sync_select ON coupang_rocket_growth_sync_state;
-CREATE POLICY rg_sync_select ON coupang_rocket_growth_sync_state FOR SELECT USING (true);
--- 쓰기는 server (service key) 만
+-- RLS 비활성화 — 기존 coupang_orders / naver_orders 테이블과 일관.
+--   server 가 anon key 로 upsert 하는 패턴 (브라우저 직접 접근 X — admin API endpoint 경유만).
+--   이전 버전에서 RLS enable + SELECT only policy 만 두었더니 INSERT 가 차단되어 수동 입력 실패.
+ALTER TABLE coupang_rocket_growth_sales DISABLE ROW LEVEL SECURITY;
+ALTER TABLE coupang_rocket_growth_sync_state DISABLE ROW LEVEL SECURITY;
