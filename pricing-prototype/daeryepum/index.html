@@ -8898,8 +8898,11 @@ async function loadBgUnified() {
     const hasMissing = missingSeqs.length || missingCoupang.length || missingNaver.length;
     if (hasMissing) {
       setBgUnifiedProgress(`주문일 범위 외 CI 매칭 주문 ${missingSeqs.length + missingCoupang.length + missingNaver.length}건 추가 조회 중...`);
-      const params = new URLSearchParams({ start_date: start, end_date: endPlus, category: 'daeryepum' });
-      // 빈 range 로 두면 backend default(-7d) 적용되니 같은 start/end 로 설정.
+      // 2차 호출은 "ID 매칭만" 모드 — date range 를 빈 range (1900-01-01 ~ 1900-01-01) 로
+      //   설정해서 backend 의 (date OR ids) WHERE 절 중 date 쪽은 false 가 되도록 함.
+      //   안 그러면 1차와 동일한 date range 데이터를 또 반환 → productMap item_count 누적 2배.
+      const impossibleDate = '1900-01-01';
+      const params = new URLSearchParams({ start_date: impossibleDate, end_date: impossibleDate, category: 'daeryepum' });
       if (missingSeqs.length) params.set('order_seqs', missingSeqs.join(','));
       if (missingCoupang.length) params.set('coupang_ids', missingCoupang.join(','));
       if (missingNaver.length) params.set('naver_ids', missingNaver.join(','));
