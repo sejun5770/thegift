@@ -2558,9 +2558,11 @@ function copySelected() {
  *   - 클립보드 직접 복사 (popup 노출 안 함 — 답례품 복사와 일관성)
  *
  * 운영팀 스프레드시트 컬럼 (paste-start B 기준):
- *   O = 상품코드 (이전 위치였던 상품명 자리)
  *   P = 상품명
- *   Q = 인쇄수량 (item_count × unit_value)
+ *   Q = 상품코드
+ *   U = 주문수량 (item_count)
+ *   V = 인쇄수량 (item_count × unit_value)
+ *   W = 금액
  *
  *   인쇄수량 산식:
  *     1:1 (기본) → unit_value=1, 인쇄수량=item_count
@@ -2597,25 +2599,25 @@ function copyDecoOrders() {
     const unitValue = Number(o.unit_value) || 1;
     const itemCount = Number(o.item_count) || 1;
     const printQty = itemCount * unitValue;
-    // 컬럼 매핑 (paste-start B 가정 — 운영팀 현재 spreadsheet 와 일치).
+    // 컬럼 매핑 (paste-start B — 운영팀 현재 spreadsheet 기준).
+    //   주석의 spreadsheet 컬럼 = paste 시 실제 표시되는 열.
     return [
-      dt,                       // A=0  주문일시 (초 절삭)
-      orderType,                // B=1  주문구분
-      n,                        // C=2  주문번호
-      o.member_id || '',        // D=3  회원ID
-      recvLabel,                // E=4  수령자/주문자
-      '', '', '', '', '',       // F~J=5-9 공백
-      o.recv_hphone || '',      // K=10 전화번호
-      addrMain,                 // L=11 주소(메인)
-      addrDetail,               // M=12 주소(상세)
-      o.card_code || '',        // N=13 → spreadsheet O 상품코드 (이전 상품명 자리)
-      o.card_name || '',        // O=14 → spreadsheet P 상품명
-      printQty,                 // P=15 → spreadsheet Q 인쇄수량 (NEW)
-      '', '',                   // Q~R=16-17 공백
-      '',                       // S=18 공백
-      itemCount,                // T=19 수량
-      '',                       // U=20 공백
-      o.item_amount || 0,       // V=21 금액
+      dt,                       // index 0  → spreadsheet B  주문일시
+      orderType,                // index 1  → spreadsheet C  주문구분
+      n,                        // index 2  → spreadsheet D  주문번호
+      o.member_id || '',        // index 3  → spreadsheet E  회원ID
+      recvLabel,                // index 4  → spreadsheet F  수령자/주문자
+      '', '', '', '', '',       // index 5-9 → spreadsheet G-K  공백
+      o.recv_hphone || '',      // index 10 → spreadsheet L  전화번호
+      addrMain,                 // index 11 → spreadsheet M  주소(메인)
+      addrDetail,               // index 12 → spreadsheet N  주소(상세)
+      '',                       // index 13 → spreadsheet O  공백
+      o.card_name || '',        // index 14 → spreadsheet P  상품명 ★
+      o.card_code || '',        // index 15 → spreadsheet Q  상품코드 ★
+      '', '', '',               // index 16-18 → spreadsheet R-T  공백
+      itemCount,                // index 19 → spreadsheet U  주문수량 ★
+      printQty,                 // index 20 → spreadsheet V  인쇄수량 ★ (item_count × unit_value)
+      o.item_amount || 0,       // index 21 → spreadsheet W  금액
     ].join('\t');
   });
   const tsv = rows.join('\n');
