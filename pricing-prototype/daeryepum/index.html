@@ -2562,13 +2562,17 @@ function copySelected() {
  *   Q = 상품코드
  *   U = 주문수량 (item_count)
  *   V = 인쇄수량 (item_count × unit_value)
- *   W = 금액
+ *   W = 상품결제금액 (item_paid = item_amount - 분배쿠폰)
  *
  *   인쇄수량 산식:
  *     1:1 (기본) → unit_value=1, 인쇄수량=item_count
  *     1:2 (사진인화) → unit_value=2, 인쇄수량=item_count*2
  *     1:4 (웨딩스티커) → unit_value=4, 인쇄수량=item_count*4
  *     S2_Card.Unit_Value 가 SQL 에서 unit_value 필드로 노출됨.
+ *
+ *   상품결제금액:
+ *     item_paid = max(0, item_amount - coupon_price) — frontend renderOrders 에서 사전 계산.
+ *     gross 상품금액에서 분배된 쿠폰을 차감한 실 결제액.
  */
 function copyDecoOrders() {
   const selected = getSelectedRows();
@@ -2617,7 +2621,9 @@ function copyDecoOrders() {
       '', '', '',               // index 16-18 → spreadsheet R-T  공백
       itemCount,                // index 19 → spreadsheet U  주문수량 ★
       printQty,                 // index 20 → spreadsheet V  인쇄수량 ★ (item_count × unit_value)
-      o.item_amount || 0,       // index 21 → spreadsheet W  금액
+      // W = 상품결제금액 (gross - 분배쿠폰). renderOrders 에서 item_paid 사전 계산됨.
+      //   안전상 fallback 으로 raw 산식도 처리 (없으면 음수 0 보정).
+      Number(o.item_paid) || Math.max(0, (Number(o.item_amount) || 0) - (Number(o.coupon_price) || 0)),
     ].join('\t');
   });
   const tsv = rows.join('\n');
