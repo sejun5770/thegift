@@ -2370,8 +2370,8 @@ function renderOrderTable() {
     else if (isCollected) cls = 'row-collected';
     else if (isCancelStatus) cls = 'row-cancelled';
     else if (isPendingStatus) cls = 'row-pending';
-    return `<tr class="${cls}">` +
-      `<td><input type="checkbox" class="row-check" data-idx="${i}" onchange="updateSelectedCount()"></td>` +
+    return `<tr class="${cls}" style="cursor:pointer" onclick="_onOrderRowClick(${i}, event)">` +
+      `<td><input type="checkbox" class="row-check" data-idx="${i}" onchange="updateSelectedCount()" onclick="event.stopPropagation()"></td>` +
       cols.map(c => `<td class="${c.num?'num':''}">${r[c.key] ?? ''}</td>`).join('') +
       `</tr>`;
   }).join('');
@@ -2393,6 +2393,16 @@ function renderOrderTable() {
 function toggleSelectAll(el) {
   document.querySelectorAll('.row-check').forEach(cb => { cb.checked = el.checked; });
   updateSelectedCount();
+}
+
+/** 주문 행 클릭 — 버튼/링크/input 외 영역 클릭 시 체크박스 토글 (정보입력현황과 동일 패턴). */
+function _onOrderRowClick(rowIdx, e) {
+  if (e.target.closest('button, a, input, select, textarea, label')) return;
+  const cb = document.querySelector(`.row-check[data-idx="${rowIdx}"]`);
+  if (cb) {
+    cb.checked = !cb.checked;
+    updateSelectedCount();
+  }
 }
 
 function updateSelectedCount() {
@@ -2545,7 +2555,18 @@ function copySelected() {
  *   - 주소를 "(...)" 기준으로 메인/상세 분리
  *   - 주문번호 첫자리: '4'=청첩장과 함께, '3'=단독주문
  *   - 헤더 없음 (스프레드시트 기존 행에 그대로 paste)
- *   - 결과를 popup 으로 노출 (textarea + 복사 버튼)
+ *   - 클립보드 직접 복사 (popup 노출 안 함 — 답례품 복사와 일관성)
+ *
+ * 운영팀 스프레드시트 컬럼 (paste-start B 기준):
+ *   O = 상품코드 (이전 위치였던 상품명 자리)
+ *   P = 상품명
+ *   Q = 인쇄수량 (item_count × unit_value)
+ *
+ *   인쇄수량 산식:
+ *     1:1 (기본) → unit_value=1, 인쇄수량=item_count
+ *     1:2 (사진인화) → unit_value=2, 인쇄수량=item_count*2
+ *     1:4 (웨딩스티커) → unit_value=4, 인쇄수량=item_count*4
+ *     S2_Card.Unit_Value 가 SQL 에서 unit_value 필드로 노출됨.
  */
 function copyDecoOrders() {
   const selected = getSelectedRows();
@@ -2570,11 +2591,16 @@ function copyDecoOrders() {
       addrDetail = addrMain.substring(p + 1).trim();
       addrMain = addrMain.substring(0, p + 1).trim();
     }
-    // 23 컬럼 — 스프레드시트 정확 매핑.
-    //   O열(index 14) 기준 한 칸씩 뒤로 — 운영팀 스프레드시트 컬럼 추가 대응.
+    // 인쇄수량 = item_count × unit_value (단위수)
+    //   unit_value 는 SQL 에서 c.Unit_Value 직접 노출 (NULL/0 → 1 보정).
+    //   쿠팡/네이버는 normalize 시 1 고정 (1:1 매핑).
+    const unitValue = Number(o.unit_value) || 1;
+    const itemCount = Number(o.item_count) || 1;
+    const printQty = itemCount * unitValue;
+    // 컬럼 매핑 (paste-start B 가정 — 운영팀 현재 spreadsheet 와 일치).
     return [
       dt,                       // A=0  주문일시 (초 절삭)
-      orderType,                // B=1  주문구분 (청첩장과 함께/단독주문)
+      orderType,                // B=1  주문구분
       n,                        // C=2  주문번호
       o.member_id || '',        // D=3  회원ID
       recvLabel,                // E=4  수령자/주문자
@@ -2582,46 +2608,26 @@ function copyDecoOrders() {
       o.recv_hphone || '',      // K=10 전화번호
       addrMain,                 // L=11 주소(메인)
       addrDetail,               // M=12 주소(상세)
-      o.card_name || '',        // N=13 상품명
-      '',                       // O=14 공백 (신규 삽입 — 이후 한 칸씩 뒤로)
-      o.card_code || '',        // P=15 상품코드
-      '', '', '',               // Q~S=16-18 공백
-      o.item_count || 1,        // T=19 수량
+      o.card_code || '',        // N=13 → spreadsheet O 상품코드 (이전 상품명 자리)
+      o.card_name || '',        // O=14 → spreadsheet P 상품명
+      printQty,                 // P=15 → spreadsheet Q 인쇄수량 (NEW)
+      '', '',                   // Q~R=16-17 공백
+      '',                       // S=18 공백
+      itemCount,                // T=19 수량
       '',                       // U=20 공백
       o.item_amount || 0,       // V=21 금액
     ].join('\t');
   });
   const tsv = rows.join('\n');
 
-  // popup 시도 — 실패 시 clipboard fallback
-  const checked = document.querySelectorAll('.row-check:checked').length;
-  const modeText = checked > 0 ? `선택 ${checked}건 중 ` : '';
-  const start = document.getElementById('ord-start').value;
-  const end = document.getElementById('ord-end').value;
-  const heading = `📦 데코소품 ${modeText}${valid.length}건 (취소 ${cancelledCount}건 제외)`;
-
-  const w = window.open('', '_blank', 'width=720,height=520');
-  if (!w) {
-    // 팝업 차단 시 clipboard fallback
-    navigator.clipboard.writeText(tsv).then(() => {
-      alert(`${heading}\n\n클립보드 복사됨. 스프레드시트 빈 행 A열 → Ctrl+V`);
-    });
-    return;
-  }
-  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
-  w.document.write(`<!DOCTYPE html><html><head><title>데코소품 수집</title></head>
-<body style="font-family:sans-serif;padding:20px;margin:0">
-  <h2 style="margin:0 0 8px">${esc(heading)}</h2>
-  <p style="color:#666;margin:4px 0 12px">${esc(start)} ~ ${esc(end)}</p>
-  <textarea id="t" style="width:calc(100% - 12px);height:300px;font-size:11px;padding:8px" readonly>${esc(tsv)}</textarea>
-  <br>
-  <button onclick="document.getElementById('t').select();document.execCommand('copy');this.textContent='✅ 복사됨!';this.style.background='#16a34a'"
-          style="margin-top:12px;padding:10px 28px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:15px">
-    📋 복사
-  </button>
-  <p style="color:#888;font-size:12px;margin-top:12px">스프레드시트 빈 행 A열 클릭 → Ctrl+V</p>
-</body></html>`);
-  w.document.close();
+  // 클립보드 직접 복사 — 답례품 복사와 일관 (popup 노출 없음)
+  navigator.clipboard.writeText(tsv).then(() => {
+    const cancelText = cancelledCount > 0 ? ` (취소 ${cancelledCount}건 제외)` : '';
+    showToast(`📦 데코소품 ${valid.length}건 클립보드 복사 완료${cancelText}`);
+  }).catch(err => {
+    console.error('clipboard 복사 실패:', err);
+    alert('클립보드 복사 실패 — 브라우저 권한 확인 또는 답례품 카테고리 사용');
+  });
 }
 
 function downloadExcel() {

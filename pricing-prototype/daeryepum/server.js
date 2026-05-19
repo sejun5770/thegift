@@ -711,6 +711,7 @@ async function apiOrders(query) {
         o.recv_msg AS recv_msg,
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
+        ISNULL(NULLIF(c.Unit_Value, 0), 1) AS unit_value,  -- 판매단위 수량 (인쇄수량 산식: item_count × unit_value)
         oi.order_count AS item_count,
         ${etcAmountGross} AS item_amount,
         o.settle_price AS settle_price,
@@ -757,6 +758,7 @@ async function apiOrders(query) {
         di.DELIVERY_MEMO AS recv_msg,
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
+        ISNULL(NULLIF(c.Unit_Value, 0), 1) AS unit_value,  -- 판매단위 수량 (인쇄수량 산식: item_count × unit_value)
         ISNULL(di.dd_count, coi.item_count) AS item_count,
         CAST(coi.item_sale_price AS float) * ISNULL(di.dd_count, coi.item_count) / ${cardUnitDivisor} AS item_amount,
         co.settle_price,
@@ -839,6 +841,7 @@ async function apiOrders(query) {
           recv_msg: r.recv_message || '',
           card_name: r.product_name || '',
           card_code: r.product_code || '',
+          unit_value: 1,  // 쿠팡은 unit_value 개념 없음 (1:1)
           item_count: r.item_count || 0,
           item_amount: r.item_total_price || 0,
           settle_price: r.settle_price || 0,
@@ -886,6 +889,7 @@ async function apiOrders(query) {
           recv_msg: r.recv_message || '',
           card_name: r.product_name || '',
           card_code: r.product_code || '',
+          unit_value: 1,
           item_count: r.item_count || 0,
           item_amount: r.item_total_price || 0,
           settle_price: r.settle_price || 0,
