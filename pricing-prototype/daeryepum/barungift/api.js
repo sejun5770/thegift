@@ -11,6 +11,13 @@ const signedUrl = require('./signed-url');
 // custom_order_item + S2_Card JOIN 후 사용. c 에일리어스 사용.
 const DAERYEPUM_WHERE = `c.Card_Div = 'D01'`;
 
+// 알림톡 SP 권한 가용성 캐시 (process-level).
+//   null = 미시도 / 미확인
+//   true = SP execute 성공 사례 있음 → 우선 시도
+//   false = EXECUTE permission denied 감지 → 이후 HTTP fallback 만 사용
+// DBA 가 GRANT 부여한 경우 컨테이너 재시작하면 다시 null → 시도 → true 로 회복.
+let _spAvailable = null;
+
 function parseBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -1019,14 +1026,14 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
   }
 
-  // POST /api/bg/alimtalk/send-via-sp - 통합관리자 HTTP API 경유 발송
-  //   2026-05-20 변경: SP_GIFT_ORDER_BIZTALK_PROC 직접 EXEC → readonly_user 권한 부족.
-  //   통합관리자 (admin.barunsoncard.com) 의 KakaoBizTalk/ResendGift 호출로 우회.
-  //   - ETC- 접두 → 'E' (CUSTOM_ETC_ORDER 테이블, 부가상품 단독)
-  //   - 그 외     → 'W' (custom_order 테이블, 청첩장+답례품 동시구매 포함)
-  //   - 인증: BARUN_ADMIN_COOKIE 환경변수 (.AspNet.ApplicationCookie). 세션 만료 시 갱신 필요.
-  //   - 발송 이력은 통합관리자 측 시스템에 기록됨 (기존 SP 경로와 동일 위치).
-  //   - 엔드포인트 이름은 frontend 호환 위해 '/send-via-sp' 유지.
+  // POST /api/bg/alimtalk/send-via-sp - 답례품 알림톡 발송 (auto-fallback)
+  //   경로 우선순위:
+  //     1) SP_GIFT_ORDER_BIZTALK_PROC 직접 EXEC (readonly_user 가 GRANT 받았으면 동작)
+  //     2) 권한 에러 시 → 통합관리자 HTTP API (admin.barunsoncard.com/KakaoBizTalk/ResendGift)
+  //   둘 중 어느 쪽이 unblocked 되든 자동으로 살아남 — 운영팀 인프라 의존성 분리.
+  //   메모리에 SP availability 캐시 (권한 거부 1회 감지 후 같은 process 동안 SP skip).
+  //
+  //   엔드포인트 이름은 frontend 호환 위해 '/send-via-sp' 유지 (legacy naming).
   if (pathname === '/api/bg/alimtalk/send-via-sp' && method === 'POST') {
     // M7: rate limit — SMS 비용 폭증 가드 (5분당 5회)
     const rlAlim = rlCheck(req, 'alimtalk_send', RL_LIMITS.alimtalk_send);
@@ -1041,14 +1048,16 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       if (orderIds.length === 0) return json(res, { error: '발송할 주문을 선택해주세요.' }, 400);
       if (orderIds.length > 200) return json(res, { error: '한 번에 최대 200건까지 가능합니다.' }, 400);
 
-      // M7: 발송 시작 시점 audit log
       logAccess(req, 'alimtalk_send_start', null, {
-        metadata: { template: templateName, order_count: orderIds.length, via: 'admin-http' },
+        metadata: { template: templateName, order_count: orderIds.length },
       });
 
       const adminClient = require('./admin-client');
+      const pool = await getPool();
       const results = [];
-      // 외부 HTTP 호출 + 통합관리자 부담 고려해 직렬 처리.
+      const viaCounts = { sp: 0, 'admin-http': 0 };
+      let httpAborted = false; // 세션 만료/네트워크 차단 시 이후 HTTP 호출 skip
+
       for (const rawId of orderIds) {
         const oid = String(rawId || '').trim();
         if (!oid) {
@@ -1062,15 +1071,64 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
           results.push({ order_id: oid, success: false, error: 'order_seq 파싱 실패' });
           continue;
         }
-        try {
-          await adminClient.resendGift({ orderSeq: seq, orderCategory });
-          results.push({ order_id: oid, order_seq: seq, order_type: orderCategory, success: true });
-        } catch (e) {
-          console.warn('[alimtalk-resend] 통합관리자 API 호출 실패', oid, '-', e.message);
-          results.push({ order_id: oid, order_seq: seq, order_type: orderCategory, success: false, error: e.message });
-          // 세션 만료면 이후 호출도 모두 실패할 것 — 일찍 break (운영자에게 빠르게 알림)
-          if (e.message.includes('SESSION_EXPIRED')) {
-            results.push({ order_id: '_aborted', success: false, error: '세션 만료로 이후 호출 중단' });
+
+        let sent = false;
+        let lastError = null;
+        let via = null;
+
+        // 1) SP 경로 — 이전 호출에서 권한 거부 확인됐으면 skip.
+        if (_spAvailable !== false) {
+          try {
+            await pool.request()
+              .input('order_seq', sql.Int, seq)
+              .input('order_type', sql.Char(1), orderCategory)
+              .input('template_name', sql.NVarChar, templateName)
+              .execute('SP_GIFT_ORDER_BIZTALK_PROC');
+            sent = true;
+            via = 'sp';
+            viaCounts.sp++;
+            _spAvailable = true;
+          } catch (spErr) {
+            const msg = spErr.message || '';
+            const isPermDenied = /EXECUTE permission was denied/i.test(msg);
+            if (isPermDenied) {
+              if (_spAvailable !== false) {
+                console.warn('[alimtalk] SP 권한 없음 감지 — 이후 호출은 HTTP fallback 만 사용');
+              }
+              _spAvailable = false;
+              lastError = `SP 권한 없음: ${msg}`;
+              // fallback 진행
+            } else {
+              // 권한 외 SP 에러 (예: order_seq 잘못 등) — HTTP fallback 도 의미 없음
+              lastError = `SP 실패: ${msg}`;
+            }
+          }
+        }
+
+        // 2) HTTP API fallback — SP 미시도 또는 권한 실패 시.
+        if (!sent && !httpAborted) {
+          try {
+            await adminClient.resendGift({ orderSeq: seq, orderCategory });
+            sent = true;
+            via = 'admin-http';
+            viaCounts['admin-http']++;
+          } catch (httpErr) {
+            const msg = httpErr.message || '';
+            lastError = (lastError ? lastError + ' | ' : '') + `HTTP: ${msg}`;
+            if (/SESSION_EXPIRED|NETWORK_FAIL/.test(msg)) {
+              httpAborted = true; // 이후 호출 시도 안 함 (전부 같은 이유로 실패할 것)
+              console.warn('[alimtalk] HTTP fallback 차단 감지 — 이후 호출 abort:', msg);
+            }
+          }
+        }
+
+        if (sent) {
+          results.push({ order_id: oid, order_seq: seq, order_type: orderCategory, success: true, via });
+        } else {
+          results.push({ order_id: oid, order_seq: seq, order_type: orderCategory, success: false, error: lastError || 'unknown' });
+          if (httpAborted) {
+            // 남은 주문들은 어차피 같은 이유로 실패 — 일찍 끝냄
+            results.push({ order_id: '_aborted', success: false, error: '경로 차단으로 이후 호출 중단 (SP 권한 X + HTTP 차단)' });
             break;
           }
         }
@@ -1081,14 +1139,15 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         sent: results.filter(r => r.success).length,
         failed: results.filter(r => !r.success).length,
         template: templateName,
-        via: 'admin-http',
+        via_counts: viaCounts,
+        sp_available: _spAvailable,
       };
       logAccess(req, 'alimtalk_send_done', null, {
         metadata: { ...summary },
       });
       return json(res, { summary, results });
     } catch (err) {
-      console.error('alimtalk send-via-admin-http error:', err.message);
+      console.error('alimtalk send error:', err.message);
       logAccess(req, 'alimtalk_send_error', null, {
         status_code: 500, metadata: { error: err.message },
       });
@@ -1103,11 +1162,22 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     const adminClient = require('./admin-client');
     const config = adminClient.getConfigStatus();
     const parsed = url.parse(req.url, true);
+    const base = { ...config, sp_available: _spAvailable };
     if (parsed.query.test === '1') {
       const conn = await adminClient.testConnectivity();
-      return json(res, { ...config, connectivity: conn });
+      return json(res, { ...base, connectivity: conn });
     }
-    return json(res, config);
+    return json(res, base);
+  }
+
+  // POST /api/bg/alimtalk/sp-reset - SP availability 캐시 초기화
+  //   DBA 가 GRANT EXECUTE 부여 후 컨테이너 재시작 없이 SP 경로 재시도하도록.
+  //   다음 발송 호출 시 SP 우선 시도 → 성공하면 true, 또 실패하면 false.
+  if (pathname === '/api/bg/alimtalk/sp-reset' && method === 'POST') {
+    const prev = _spAvailable;
+    _spAvailable = null;
+    logAccess(req, 'alimtalk_sp_reset', null, { metadata: { prev } });
+    return json(res, { ok: true, prev, current: null });
   }
 
   // GET /api/bg/alimtalk/preview?orderId=... - 메시지 미리보기
