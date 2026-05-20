@@ -23,11 +23,7 @@ INSERT INTO nav_menu_settings (id, config)
 VALUES (1, '[]'::jsonb)
 ON CONFLICT (id) DO NOTHING;
 
-ALTER TABLE nav_menu_settings ENABLE ROW LEVEL SECURITY;
-
--- 모든 인증 사용자가 읽기 가능 (네비 구성용)
-CREATE POLICY nav_menu_settings_select ON nav_menu_settings
-  FOR SELECT USING (true);
-
--- 쓰기는 서버(서비스 키) 에서만 — RLS 우회 (anon 키로는 PUT 차단)
--- 서버에서 super admin 이메일 화이트리스트 검증 후 PATCH 호출.
+-- RLS 비활성화 — 서버가 SUPABASE_ANON_KEY 로 PATCH 하는데 SELECT-only policy 면 silent fail.
+--   서버에서 super admin 이메일 화이트리스트 검증 + admin_users role 체크 후만 호출하므로
+--   RLS 보안 효과 미미. 일관성 위해 다른 admin 테이블 (coupang_orders 등) 패턴과 통일.
+ALTER TABLE nav_menu_settings DISABLE ROW LEVEL SECURITY;

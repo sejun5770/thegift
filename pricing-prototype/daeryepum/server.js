@@ -192,12 +192,22 @@ async function setNavMenuConfig(config, updatedBy) {
       });
       if (!ins.ok) throw new Error(`Supabase insert nav_menu_settings [${ins.status}]: ${(await ins.text()).slice(0,300)}`);
       const inserted = await ins.json();
-      return inserted[0]?.config || clean;
+      if (!inserted.length) {
+        throw new Error('nav_menu_settings INSERT 후 응답이 비어있음 — RLS 정책으로 결과 숨김 가능. ALTER TABLE nav_menu_settings DISABLE ROW LEVEL SECURITY 필요.');
+      }
+      return inserted[0].config || clean;
     }
     throw new Error(`Supabase patch nav_menu_settings [${res.status}]: ${text.slice(0,300)}`);
   }
   const rows = await res.json();
-  return rows[0]?.config || clean;
+  // 빈 응답 = RLS 가 결과 숨김 = 실제로 PATCH 안 됨 (silent fail 감지).
+  //   migration 016 의 RLS 정책이 SELECT-only 인데 PATCH 응답을 return=representation 으로
+  //   요청하면 RLS 가 row 를 가려서 빈 배열 반환. 이전에는 || clean 으로 falsy fallback 해서
+  //   성공처럼 보였음. 명시적으로 throw 해서 클라이언트에 에러 전달.
+  if (!rows.length) {
+    throw new Error('nav_menu_settings PATCH 응답이 비어있음 — RLS 정책이 결과를 가리거나 실제로 변경 안 됨. ALTER TABLE nav_menu_settings DISABLE ROW LEVEL SECURITY 실행 필요.');
+  }
+  return rows[0].config || clean;
 }
 
 async function createSession(userData) {
