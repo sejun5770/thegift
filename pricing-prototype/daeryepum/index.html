@@ -248,13 +248,13 @@ nav a:hover{color:var(--gray-900)}
     <div class="card"><h3>주문 건수</h3><div class="value" id="s-orders">-</div><div class="sub" id="s-orders-sub"></div><div id="s-orders-breakdown"></div></div>
   </div>
   <!-- 제휴사 상세 토글 — 3개 카드에 반복되는 33곳 세부 행을 한 번에 접고/펼침 -->
-  <div id="kpi-affiliate-toggle-wrap" style="display:none;margin-top:6px;text-align:right">
+  <div id="kpi-affiliate-toggle-wrap" style="display:none;margin:8px 0;text-align:right">
     <button class="btn btn-sm" id="kpi-affiliate-toggle-btn" onclick="toggleKpiAffiliateDetail()" style="padding:3px 10px;font-size:11px;color:var(--gray-600)">
       <span id="kpi-affiliate-toggle-icon">▼</span>
       <span id="kpi-affiliate-toggle-label">제휴사 상세 펼치기</span>
     </button>
   </div>
-  <div class="feedback" id="summary-feedback" style="margin-top:-8px;margin-bottom:16px"></div>
+  <div class="feedback" id="summary-feedback" style="margin-bottom:16px"></div>
   </div><!-- end dash-card-view -->
 
   <!-- Table View -->
@@ -4126,6 +4126,77 @@ async function loadChart() {
   } catch(e) { console.error(e); showToast('차트 로딩 실패: ' + e.message); }
 }
 
+// ============================================
+// 대시보드 분석 helper — 20년차 이커머스 전문가 톤의 정밀 분석
+// ============================================
+
+/**
+ * SKU 집중도 분석 (HHI + Pareto)
+ *   HHI (Herfindahl-Hirschman Index): 시장 집중도 지표
+ *     < 1500: 분산형 / 1500-2500: 적정 / > 2500: 집중형
+ *   Pareto: 상위 20% SKU 가 전체 매출의 몇 % 차지 (80/20 법칙 검증)
+ */
+function analyzeSkuConcentration(productSales, total) {
+  const entries = Object.entries(productSales);
+  if (total <= 0 || !entries.length) {
+    return { hhi: 0, hhiLabel: '-', top20Pct: 0, top20Count: 0, skuCount: entries.length };
+  }
+  let hhi = 0;
+  entries.forEach(([, p]) => {
+    const share = (p.amount / total) * 100;
+    hhi += share * share;
+  });
+  hhi = Math.round(hhi);
+  const hhiLabel = hhi < 1500 ? '분산형' : hhi < 2500 ? '적정' : '집중형';
+  const sorted = entries.sort((a, b) => b[1].amount - a[1].amount);
+  const top20Count = Math.max(1, Math.ceil(sorted.length * 0.2));
+  const top20Amount = sorted.slice(0, top20Count).reduce((s, [, v]) => s + v.amount, 0);
+  const top20Pct = Math.round(top20Amount / total * 100);
+  return { hhi, hhiLabel, top20Pct, top20Count, skuCount: entries.length };
+}
+
+/** 채널 mix 분석 — 자사몰 / 마켓플레이스 (네이버+쿠팡) / 제휴몰 비중 */
+function analyzeChannelMix(bySite, total) {
+  if (total <= 0) return { own: 0, market: 0, affiliate: 0, ownAmt: 0, marketAmt: 0, affiliateAmt: 0 };
+  let own = 0, market = 0, affiliate = 0;
+  Object.entries(bySite).forEach(([s, v]) => {
+    const amt = v.total_amount || 0;
+    if (s === '바른손카드') own += amt;
+    else if (s === '네이버' || s === '쿠팡') market += amt;
+    else if (isAffiliateSite(s)) affiliate += amt;
+    else own += amt;
+  });
+  return {
+    own: Math.round(own / total * 100),
+    market: Math.round(market / total * 100),
+    affiliate: Math.round(affiliate / total * 100),
+    ownAmt: own, marketAmt: market, affiliateAmt: affiliate,
+  };
+}
+
+/**
+ * 일별 매출 변동성 (CV) — 표준편차 / 평균 × 100.
+ *   < 30: 안정 / 30~60: 보통 / > 60: 변동.
+ *   summary 가 일별×상품 row 면 일별 합산 후 계산.
+ */
+function analyzeDailyVolatility(summary) {
+  const byDate = {};
+  summary.forEach(r => {
+    const d = r.order_day;
+    if (!d) return;
+    byDate[d] = (byDate[d] || 0) + (r.total_amount || 0);
+  });
+  const values = Object.values(byDate);
+  if (values.length < 2) return { cv: 0, label: '데이터 부족', daysCount: values.length };
+  const mean = values.reduce((s, v) => s + v, 0) / values.length;
+  if (mean === 0) return { cv: 0, label: '-', daysCount: values.length };
+  const variance = values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length;
+  const stdDev = Math.sqrt(variance);
+  const cv = Math.round((stdDev / mean) * 100);
+  const label = cv < 30 ? '안정' : cv < 60 ? '보통' : '변동';
+  return { cv, label, daysCount: values.length, mean: Math.round(mean), stdDev: Math.round(stdDev) };
+}
+
 function renderSummary(summary, lt, orderCounts) {
   dashboardSummaryData = summary;
   dashboardOrderCounts = orderCounts || [];
@@ -4207,25 +4278,124 @@ function renderSummary(summary, lt, orderCounts) {
   const top1 = sorted[0];
   const top1Pct = totalAmt > 0 && top1 ? Math.round(top1[1].amount / totalAmt * 100) : 0;
 
-  let fb = `조회 기간 <strong>${uniqueDays}일</strong> 동안 총 <strong>${fmtNum(totalOrders)}건</strong>의 답례품 주문이 발생했습니다. `;
-  fb += `일평균 매출 <strong>${fmtKRW(dailyAvg)}</strong>, 주문 건당 평균 결제금액 <strong>${fmtKRW(avgOrderValue)}</strong>, 건당 평균 수량 <strong>${fmtNum(avgQtyPerOrder)}개</strong>입니다. `;
+  // ============================================
+  // 정밀 분석 — 20년차 이커머스 전문가 톤
+  //   ① SKU 집중도 (HHI + Pareto), ② 채널믹스, ③ 일별 변동성 (CV)
+  //   ④ AOV 벤치마크 비교, ⑤ 데이터 기반 액션 아이템 자동 생성.
+  // ============================================
+  const skuAnalysis = analyzeSkuConcentration(productSales, totalAmt);
+  const channelMix = analyzeChannelMix(bySite, totalAmt);
+  const volatility = analyzeDailyVolatility(summary);
 
+  // 답례품 카테고리 벤치마크 (운영팀 합의값 — 추후 산업 데이터로 업데이트)
+  const BENCHMARK_AOV = 200000;
+  const aovDelta = avgOrderValue > 0 ? Math.round((avgOrderValue - BENCHMARK_AOV) / BENCHMARK_AOV * 100) : 0;
+  const aovGrade = avgOrderValue >= BENCHMARK_AOV * 1.2 ? '프리미엄'
+                 : avgOrderValue >= BENCHMARK_AOV ? '시장가'
+                 : avgOrderValue >= BENCHMARK_AOV * 0.8 ? '준시장가' : '할인가';
+  const top3 = sorted.slice(0, 3);
+  const top3Sum = top3.reduce((s, [, v]) => s + v.amount, 0);
+  const top3Pct = totalAmt > 0 ? Math.round(top3Sum / totalAmt * 100) : 0;
+  const unitPrice = avgQtyPerOrder > 0 ? Math.round(avgOrderValue / avgQtyPerOrder) : 0;
+  const ltMed = lt.median_days || 0;
+  const ltDiag = ltMed === 0 ? '데이터 부족'
+              : ltMed <= 7 ? '급주문형 (재고·물류 대응력 핵심)'
+              : ltMed <= 14 ? '단기 계획형'
+              : ltMed <= 21 ? '청첩장 발송 연동 계획형'
+              : '사전 준비형 (얼리버드 할인 기회)';
+
+  // 데이터 기반 액션 아이템 자동 생성 — 운영자가 보고 바로 실행 가능한 형태로.
+  const actions = [];
+  if (skuAnalysis.hhi > 2500 && top1) {
+    actions.push(`<b>Top1 SKU "${top1[0]}" 의존도 ${top1Pct}% 과집중</b> (HHI ${skuAnalysis.hhi}) — 차상위 SKU 노출 강화 (메인 배너 / 번들 구성), 신상품 라인 추가로 6개월 내 수명주기 정점 대응`);
+  } else if (skuAnalysis.hhi >= 1500 && skuAnalysis.hhi <= 2500) {
+    actions.push(`SKU 집중도 적정 (HHI ${skuAnalysis.hhi}) — 현 상품믹스 유지하며 Top3 외 신상품 테스트 (A/B 노출로 차상위 후보 검증)`);
+  }
+  if (channelMix.market < 5 && channelMix.market >= 0) {
+    actions.push(`<b>마켓플레이스 진입 초기</b> (네이버+쿠팡 ${channelMix.market}%) — 5% 임계점 돌파 시 광고효율 급격 향상 구간, 월 ROAS 200% 가드레일 하 광고 집행 확대`);
+  }
+  if (cpPct > 0 && cpPct < 10) {
+    actions.push(`<b>청첩장 동시구매 ${cpPct}% (cross-sell 잠재 미흡)</b> — 청첩장 결제 직후 답례품 추천 모달, 장바구니 1+1 번들 노출로 ${Math.min(cpPct + 5, 15)}% 목표`);
+  }
+  if (volatility.cv > 50) {
+    actions.push(`<b>일별 매출 변동성 CV ${volatility.cv}%</b> (불안정) — 정기 프로모션 (월 2회) + 신상품 launch 사이클로 baseline 안정화, 평균 ${fmtKRW(volatility.mean)} 의 ±${Math.round(volatility.stdDev/volatility.mean*100)}% 진폭 축소`);
+  }
+  if (ltMed >= 21) {
+    actions.push(`리드타임 중앙값 ${ltMed}일 (사전형) — D-14 이상 얼리버드 5% 할인으로 사전예약 인센티브 + 캐시플로우 개선`);
+  }
+  if (channelMix.affiliate > 25) {
+    actions.push(`제휴몰 ${channelMix.affiliate}% — 다채널 네트워크 효과 우수. 개별 제휴사 매출 편중도 추가 점검 (상위 5곳 비중 ≥80% 면 의존도 리스크)`);
+  }
+  if (aovGrade === '할인가') {
+    actions.push(`AOV ${fmtKRW(avgOrderValue)} 가 벤치마크 ${aovDelta}% 미달 — 번들 / 옵션 추가로 단가 인상 또는 객단가 그루핑 캠페인`);
+  }
+
+  // ============================================
+  // 분석 HTML 조립 — 5개 섹션 구조
+  // ============================================
+  const colorCore = '#0369a1', colorStruct = '#7c2d12', colorChannel = '#6b21a8';
+  const colorOps = '#15803d', colorAction = '#b91c1c';
+
+  let fb = `<div style="display:grid;gap:10px;font-size:13px;line-height:1.65">`;
+
+  // ① 핵심 진단 (1-2줄 요약)
+  fb += `<div>
+    <div style="font-weight:700;color:${colorCore};margin-bottom:2px">🎯 핵심 진단</div>
+    <div>AOV <b>${fmtKRW(avgOrderValue)}</b> (벤치마크 대비 <b>${aovDelta >= 0 ? '+' : ''}${aovDelta}%</b>, <b>${aovGrade}</b> 포지셔닝).
+         채널믹스 자사몰 <b>${channelMix.own}%</b> / 마켓 <b>${channelMix.market}%</b> / 제휴 <b>${channelMix.affiliate}%</b>.
+         SKU 집중도 HHI <b>${skuAnalysis.hhi}</b> (${skuAnalysis.hhiLabel}).
+         일별 매출 변동성 CV <b>${volatility.cv}%</b> (${volatility.label}).</div>
+  </div>`;
+
+  // ② 매출 구조
+  fb += `<div>
+    <div style="font-weight:700;color:${colorStruct};margin-bottom:2px">📊 매출 구조</div>
+    <ul style="margin:2px 0;padding-left:18px">
+      <li>객단가 <b>${fmtKRW(avgOrderValue)}</b>, 건당 <b>${fmtNum(avgQtyPerOrder)}개</b> → 개당 단가 <b>${fmtKRW(unitPrice)}</b></li>`;
   if (top1) {
-    fb += `매출 1위 상품은 <strong>${top1[0]}</strong>(${fmtKRW(top1[1].amount)}, 전체의 ${top1Pct}%)입니다. `;
-    if (top1Pct > 50) fb += '매출이 단일 상품에 과도하게 집중되어 있으며, 상품 다변화 전략이 필요할 수 있습니다. ';
-    else if (sorted.length >= 3) fb += `상위 3개 상품(${sorted.slice(0,3).map(s=>s[0]).join(', ')})이 고르게 분포하여 건강한 포트폴리오입니다. `;
+    fb += `<li>Top1 "${top1[0]}" <b>${top1Pct}%</b>, Top3 합산 <b>${top3Pct}%</b> — ${skuAnalysis.hhiLabel}</li>`;
   }
+  fb += `<li>Pareto: 상위 <b>${skuAnalysis.top20Count}개</b> SKU (전체 ${skuAnalysis.skuCount}개의 20%) 가 매출 <b>${skuAnalysis.top20Pct}%</b> 차지</li>
+      <li>일평균 매출 <b>${fmtKRW(dailyAvg)}</b> · 표준편차 <b>±${fmtKRW(volatility.stdDev || 0)}</b> (${uniqueDays}일 기준)</li>
+    </ul>
+  </div>`;
 
-  // 동시구매/단독 비율 피드백
+  // ③ 채널 진단
+  fb += `<div>
+    <div style="font-weight:700;color:${colorChannel};margin-bottom:2px">🔄 채널 진단</div>
+    <ul style="margin:2px 0;padding-left:18px">
+      <li>자사몰 (바른손카드) <b>${channelMix.own}%</b> · ${fmtKRW(channelMix.ownAmt)} — ${channelMix.own > 70 ? '메인 채널 견고, 외부 의존도 낮음 (양호)' : channelMix.own > 50 ? '주요 채널이나 다채널 분산 진행 중' : '다채널 분산 우세 (자사몰 강화 검토)'}</li>
+      <li>마켓플레이스 (네이버/쿠팡) <b>${channelMix.market}%</b> · ${fmtKRW(channelMix.marketAmt)} — ${channelMix.market < 5 ? '진입 초기 (임계점 5% 미달)' : channelMix.market < 15 ? '성장 단계 (안정 운영 구간 진입)' : '주요 채널 위치 (광고 효율 최적화 단계)'}</li>
+      <li>제휴몰 (33곳) <b>${channelMix.affiliate}%</b> · ${fmtKRW(channelMix.affiliateAmt)} — ${channelMix.affiliate > 25 ? '네트워크 효과 우수 (개별 편중도 점검 권장)' : channelMix.affiliate > 10 ? '제휴 분산 양호' : '제휴 활성화 여지'}</li>
+    </ul>
+  </div>`;
+
+  // ④ 운영 효율
+  fb += `<div>
+    <div style="font-weight:700;color:${colorOps};margin-bottom:2px">⚡ 운영 효율</div>
+    <ul style="margin:2px 0;padding-left:18px">
+      <li>리드타임 P50 <b>${ltMed}일</b> — ${ltDiag}</li>`;
   if (copurchaseAmt > 0 || standaloneAmt > 0) {
-    fb += `주문유형별로는 <strong>청첩장 동시구매 ${fmtKRW(copurchaseAmt)}(${cpPct}%)</strong>, <strong>단독주문 ${fmtKRW(standaloneAmt)}(${saPct}%)</strong>입니다. `;
-    if (cpPct > 60) fb += '청첩장 동시구매 비중이 높아 청첩장 연계 마케팅이 매우 효과적입니다. ';
-    else if (saPct > 60) fb += '단독주문 비중이 높아 답례품 전용 마케팅 채널(SNS, 퍼널 등)의 기여도가 큽니다. ';
+    const cpDiag = cpPct < 10 ? 'cross-sell 잠재 미흡 (개선 여지 큼)'
+                 : cpPct < 30 ? 'cross-sell 적정 구간'
+                 : cpPct < 60 ? 'cross-sell 효과적'
+                 : '청첩장 연계 의존도 높음';
+    fb += `<li>청첩장 동시구매율 <b>${cpPct}%</b> (${fmtKRW(copurchaseAmt)}) / 단독주문 <b>${saPct}%</b> (${fmtKRW(standaloneAmt)}) — ${cpDiag}</li>`;
+  }
+  fb += `</ul>
+  </div>`;
+
+  // ⑤ 권장 액션 (데이터 기반 자동 생성)
+  if (actions.length) {
+    fb += `<div>
+      <div style="font-weight:700;color:${colorAction};margin-bottom:2px">🚀 권장 액션</div>
+      <ol style="margin:2px 0;padding-left:22px">
+        ${actions.map(a => `<li style="margin:3px 0">${a}</li>`).join('')}
+      </ol>
+    </div>`;
   }
 
-  if (lt.median_days <= 7) fb += '📌 리드타임 중앙값이 <strong>7일 이내</strong>로, 급주문 비율이 높아 재고/물류 대응력이 중요합니다.';
-  else if (lt.median_days <= 21) fb += '📌 리드타임 중앙값이 <strong>2~3주</strong>로, 청첩장 발송과 연동된 계획형 주문 패턴입니다.';
-  else fb += '📌 리드타임 중앙값이 <strong>3주 이상</strong>으로, 사전 준비형 고객이 많습니다. 얼리버드 할인이 효과적일 수 있습니다.';
+  fb += `</div>`;
 
   document.getElementById('summary-feedback').innerHTML = fb;
 }
