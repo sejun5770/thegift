@@ -247,6 +247,13 @@ nav a:hover{color:var(--gray-900)}
     <div class="card"><h3>총 수량</h3><div class="value" id="s-qty">-</div><div class="sub" id="s-qty-sub"></div><div id="s-qty-breakdown"></div></div>
     <div class="card"><h3>주문 건수</h3><div class="value" id="s-orders">-</div><div class="sub" id="s-orders-sub"></div><div id="s-orders-breakdown"></div></div>
   </div>
+  <!-- 제휴사 상세 토글 — 3개 카드에 반복되는 33곳 세부 행을 한 번에 접고/펼침 -->
+  <div id="kpi-affiliate-toggle-wrap" style="display:none;margin-top:6px;text-align:right">
+    <button class="btn btn-sm" id="kpi-affiliate-toggle-btn" onclick="toggleKpiAffiliateDetail()" style="padding:3px 10px;font-size:11px;color:var(--gray-600)">
+      <span id="kpi-affiliate-toggle-icon">▼</span>
+      <span id="kpi-affiliate-toggle-label">제휴사 상세 펼치기</span>
+    </button>
+  </div>
   <div class="feedback" id="summary-feedback" style="margin-top:-8px;margin-bottom:16px"></div>
   </div><!-- end dash-card-view -->
 
@@ -4177,6 +4184,8 @@ function renderSummary(summary, lt, orderCounts) {
   document.getElementById('s-orders-sub').textContent = `건`;
 
   // === 3개 카드 — 사이트×동시/단독 breakdown 공통 렌더 ===
+  // toggleKpiAffiliateDetail 가 펼치기/접기 시 재렌더할 수 있도록 cache.
+  _lastKpiData = { bySite, totalAmount: totalAmt, totalQty, orderCount: totalOrders };
   renderKpiCardBreakdown('s-revenue-breakdown', bySite, 'amount', totalAmt);
   renderKpiCardBreakdown('s-qty-breakdown', bySite, 'qty', totalQty);
   renderKpiCardBreakdown('s-orders-breakdown', bySite, 'orders', totalOrders);
@@ -4295,7 +4304,29 @@ function renderExpressAnalysis(data) {
  *   - 사이트 그룹 (바른손카드 / 바른손몰 합계 / 개별 제휴사) × 동시/단독 분리.
  *   - 'metric' 으로 어느 지표 (amount/qty/orders) 를 표시할지 결정.
  *   - 컴팩트 레이아웃 (font-size:11px, line-height tight) — 카드 폭 제한 대응.
+ *   - 제휴사 세부 33곳 행은 _kpiAffiliateExpanded 상태에 따라 hide (기본 collapse) —
+ *     3개 카드에 같은 33행 반복되어 시각 노이즈 큼 → 합계 행만 보이고 토글로 펼침.
  */
+let _kpiAffiliateExpanded = false;
+
+function toggleKpiAffiliateDetail() {
+  _kpiAffiliateExpanded = !_kpiAffiliateExpanded;
+  const icon = document.getElementById('kpi-affiliate-toggle-icon');
+  const label = document.getElementById('kpi-affiliate-toggle-label');
+  if (icon) icon.textContent = _kpiAffiliateExpanded ? '▲' : '▼';
+  if (label) label.textContent = _kpiAffiliateExpanded ? '제휴사 상세 접기' : '제휴사 상세 펼치기';
+  // 3개 카드 재렌더 — _lastKpiData 가 최근 dashboard summary 응답 cache.
+  if (_lastKpiData) {
+    const { bySite, totalAmount, totalQty, orderCount } = _lastKpiData;
+    renderKpiCardBreakdown('s-revenue-breakdown', bySite, 'amount', totalAmount);
+    renderKpiCardBreakdown('s-qty-breakdown', bySite, 'qty', totalQty);
+    renderKpiCardBreakdown('s-orders-breakdown', bySite, 'orders', orderCount);
+  }
+}
+
+// dashboard summary 응답 캐시 (toggle 시 재렌더용)
+let _lastKpiData = null;
+
 function renderKpiCardBreakdown(containerId, bySite, metric, total) {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -4369,12 +4400,22 @@ function renderKpiCardBreakdown(containerId, bySite, metric, total) {
   if (affiliateSummary) {
     const lbl = `바른손몰 <span style="color:var(--gray-400);font-weight:400;font-size:9px">(제휴 ${affiliateSites.length}곳)</span>`;
     parts.push(rowHtml(lbl, SITE_COLORS['바른손몰'] || '#10b981', affiliateSummary, { summaryStyle: true }));
-    affiliateSites.forEach(s => parts.push(rowHtml(s, SITE_COLORS[s] || SITE_COLORS['바른손몰'] || '#10b981', bySite[s], { indent: true })));
+    // 제휴사 개별 행 — 토글 펼침 상태일 때만 노출 (기본 collapse).
+    if (_kpiAffiliateExpanded) {
+      affiliateSites.forEach(s => parts.push(rowHtml(s, SITE_COLORS[s] || SITE_COLORS['바른손몰'] || '#10b981', bySite[s], { indent: true })));
+    }
   } else {
     affiliateSites.forEach(s => parts.push(rowHtml(s, SITE_COLORS[s] || '#a1a1aa', bySite[s])));
   }
 
   container.innerHTML = `<div style="border-top:1px solid var(--gray-100);padding-top:6px;margin-top:6px">${parts.join('')}</div>`;
+
+  // 토글 버튼 가시화 — 제휴사 ≥2 곳일 때만 노출 (1곳 이하면 토글 의미 없음).
+  // 매 카드 render 마다 호출돼도 idempotent.
+  const toggleWrap = document.getElementById('kpi-affiliate-toggle-wrap');
+  if (toggleWrap) {
+    toggleWrap.style.display = (hasAffiliateSummary ? '' : 'none');
+  }
 }
 
 function renderSiteBreakdown(data, prefix) {
