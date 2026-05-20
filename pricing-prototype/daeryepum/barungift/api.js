@@ -1019,12 +1019,14 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
   }
 
-  // POST /api/bg/alimtalk/send-via-sp - 백엔드 SP 호출 발송 (SP_GIFT_ORDER_BIZTALK_PROC)
-  //   바른손 백엔드의 기존 알림톡 디스패치 SP 를 직접 EXEC.
-  //   - ETC- 접두어 → 'E' (CUSTOM_ETC_ORDER 테이블, 부가상품 단독)
-  //   - 그 외       → 'W' (custom_order 테이블, 청첩장+답례품 동시구매 포함)
-  //   - template_name 은 body 로 override 가능 (기본 '답례품_주문완료')
-  //   본 admin alimtalk.js 발송과 달리 발송 이력은 SP 측 시스템에 기록됨.
+  // POST /api/bg/alimtalk/send-via-sp - 통합관리자 HTTP API 경유 발송
+  //   2026-05-20 변경: SP_GIFT_ORDER_BIZTALK_PROC 직접 EXEC → readonly_user 권한 부족.
+  //   통합관리자 (admin.barunsoncard.com) 의 KakaoBizTalk/ResendGift 호출로 우회.
+  //   - ETC- 접두 → 'E' (CUSTOM_ETC_ORDER 테이블, 부가상품 단독)
+  //   - 그 외     → 'W' (custom_order 테이블, 청첩장+답례품 동시구매 포함)
+  //   - 인증: BARUN_ADMIN_COOKIE 환경변수 (.AspNet.ApplicationCookie). 세션 만료 시 갱신 필요.
+  //   - 발송 이력은 통합관리자 측 시스템에 기록됨 (기존 SP 경로와 동일 위치).
+  //   - 엔드포인트 이름은 frontend 호환 위해 '/send-via-sp' 유지.
   if (pathname === '/api/bg/alimtalk/send-via-sp' && method === 'POST') {
     // M7: rate limit — SMS 비용 폭증 가드 (5분당 5회)
     const rlAlim = rlCheck(req, 'alimtalk_send', RL_LIMITS.alimtalk_send);
@@ -1039,14 +1041,14 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       if (orderIds.length === 0) return json(res, { error: '발송할 주문을 선택해주세요.' }, 400);
       if (orderIds.length > 200) return json(res, { error: '한 번에 최대 200건까지 가능합니다.' }, 400);
 
-      // M7: 발송 시작 시점 audit log — 누가 어떤 템플릿으로 몇 건 발송 시도했는지 추적
+      // M7: 발송 시작 시점 audit log
       logAccess(req, 'alimtalk_send_start', null, {
-        metadata: { template: templateName, order_count: orderIds.length },
+        metadata: { template: templateName, order_count: orderIds.length, via: 'admin-http' },
       });
 
-      const pool = await getPool();
+      const adminClient = require('./admin-client');
       const results = [];
-      // 동시 호출은 SP/디스패처 부담 + 외부 알림톡 API rate-limit 고려해 직렬 처리.
+      // 외부 HTTP 호출 + 통합관리자 부담 고려해 직렬 처리.
       for (const rawId of orderIds) {
         const oid = String(rawId || '').trim();
         if (!oid) {
@@ -1055,21 +1057,22 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         }
         const isEtc = oid.startsWith('ETC-');
         const seq = parseInt(isEtc ? oid.slice(4) : oid);
-        const orderType = isEtc ? 'E' : 'W';
+        const orderCategory = isEtc ? 'E' : 'W';
         if (!seq || isNaN(seq)) {
           results.push({ order_id: oid, success: false, error: 'order_seq 파싱 실패' });
           continue;
         }
         try {
-          await pool.request()
-            .input('order_seq', sql.Int, seq)
-            .input('order_type', sql.Char(1), orderType)
-            .input('template_name', sql.NVarChar, templateName)
-            .execute('SP_GIFT_ORDER_BIZTALK_PROC');
-          results.push({ order_id: oid, order_seq: seq, order_type: orderType, success: true });
+          await adminClient.resendGift({ orderSeq: seq, orderCategory });
+          results.push({ order_id: oid, order_seq: seq, order_type: orderCategory, success: true });
         } catch (e) {
-          console.warn('[send-via-sp] SP 호출 실패', oid, '-', e.message);
-          results.push({ order_id: oid, order_seq: seq, order_type: orderType, success: false, error: e.message });
+          console.warn('[alimtalk-resend] 통합관리자 API 호출 실패', oid, '-', e.message);
+          results.push({ order_id: oid, order_seq: seq, order_type: orderCategory, success: false, error: e.message });
+          // 세션 만료면 이후 호출도 모두 실패할 것 — 일찍 break (운영자에게 빠르게 알림)
+          if (e.message.includes('SESSION_EXPIRED')) {
+            results.push({ order_id: '_aborted', success: false, error: '세션 만료로 이후 호출 중단' });
+            break;
+          }
         }
       }
 
@@ -1078,19 +1081,26 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         sent: results.filter(r => r.success).length,
         failed: results.filter(r => !r.success).length,
         template: templateName,
+        via: 'admin-http',
       };
-      // M7: 발송 결과 audit log — sent/failed 수 추적
       logAccess(req, 'alimtalk_send_done', null, {
         metadata: { ...summary },
       });
       return json(res, { summary, results });
     } catch (err) {
-      console.error('alimtalk send-via-sp error:', err.message);
+      console.error('alimtalk send-via-admin-http error:', err.message);
       logAccess(req, 'alimtalk_send_error', null, {
         status_code: 500, metadata: { error: err.message },
       });
-      return json(res, { error: 'SP 발송 실패: ' + err.message }, 500);
+      return json(res, { error: '알림톡 발송 실패: ' + err.message }, 500);
     }
+  }
+
+  // GET /api/bg/alimtalk/admin-status - 통합관리자 cookie 설정 상태 진단
+  //   세션 만료 운영 점검용 (cookie 값 노출 X, 설정 여부만).
+  if (pathname === '/api/bg/alimtalk/admin-status' && method === 'GET') {
+    const adminClient = require('./admin-client');
+    return json(res, adminClient.getConfigStatus());
   }
 
   // GET /api/bg/alimtalk/preview?orderId=... - 메시지 미리보기

@@ -10818,18 +10818,26 @@ async function bulkSendAlimtalkViaSp() {
 
     const s = data.summary || {};
     if ((s.failed || 0) > 0) {
-      const failedSamples = (data.results || [])
-        .filter(r => !r.success)
+      const failedResults = (data.results || []).filter(r => !r.success);
+      const sessionExpired = failedResults.some(r => r.error && r.error.includes('SESSION_EXPIRED'));
+      const failedSamples = failedResults
         .slice(0, 3)
         .map(r => `${r.order_id}: ${r.error || '?'}`)
         .join('\n');
-      console.warn('[alimtalk-sp] 실패 샘플:', failedSamples);
-      showToast(`${s.sent}건 발송 · ${s.failed}건 실패 (콘솔 확인)`);
+      console.warn('[alimtalk-resend] 실패 샘플:', failedSamples);
+      if (sessionExpired) {
+        alert(`⚠️ 통합관리자 세션이 만료되었습니다.\n\n` +
+              `발송 결과: ${s.sent}건 성공 · ${s.failed}건 실패\n\n` +
+              `관리자에게 BARUN_ADMIN_COOKIE 환경변수 갱신을 요청하세요.\n` +
+              `(통합관리자 재로그인 → DevTools cookie 추출 → 배포 환경변수 업데이트)`);
+      } else {
+        showToast(`${s.sent}건 발송 · ${s.failed}건 실패 (콘솔 확인)`);
+      }
     } else {
       showToast(`✅ ${s.sent}건 알림톡 발송 완료`);
     }
   } catch (e) {
-    console.error('[alimtalk-sp] 호출 실패:', e);
+    console.error('[alimtalk-resend] 호출 실패:', e);
     alert('알림톡 발송 실패: ' + e.message);
   }
 }
