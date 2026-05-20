@@ -49,17 +49,27 @@ async function resendGift({ orderSeq, orderCategory }) {
   });
 
   const url = `${ADMIN_BASE}/KakaoBizTalk/ResendGift`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      ...COMMON_HEADERS,
-      cookie: ADMIN_COOKIE,
-      // referer 는 SendList 페이지 가정 — anti-CSRF 검사에서 origin 일치만 보면 충분.
-      referer: `${ADMIN_BASE}/KakaoBizTalk/SendList`,
-    },
-    body: body.toString(),
-    redirect: 'manual', // 로그인 리다이렉트 감지 — 따라가지 않고 status 확인
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        ...COMMON_HEADERS,
+        cookie: ADMIN_COOKIE,
+        // referer 는 SendList 페이지 가정 — anti-CSRF 검사에서 origin 일치만 보면 충분.
+        referer: `${ADMIN_BASE}/KakaoBizTalk/SendList`,
+      },
+      body: body.toString(),
+      redirect: 'manual', // 로그인 리다이렉트 감지 — 따라가지 않고 status 확인
+    });
+  } catch (e) {
+    // Node fetch 의 'fetch failed' 는 generic 메시지 — 실제 원인은 cause 안에.
+    //   ENOTFOUND/ECONNREFUSED/EAI_AGAIN/etc.
+    const cause = e.cause || {};
+    const causeCode = cause.code || cause.errno || cause.message || '';
+    const detail = causeCode ? ` (${causeCode})` : '';
+    throw new Error(`NETWORK_FAIL — fetch ${url}: ${e.message}${detail}`);
+  }
 
   // 302/401 → 세션 만료
   if (res.status === 302 || res.status === 401 || res.status === 403) {
@@ -97,7 +107,48 @@ function getConfigStatus() {
   };
 }
 
+/**
+ * 네트워크 연결 진단 — admin.barunsoncard.com 도달 가능 여부만 확인.
+ *   cookie 없어도 OK (auth 검증은 안 함). 컨테이너 outbound 차단 / DNS 이슈 발견용.
+ *   GET / 로 HEAD 비슷한 가벼운 요청.
+ */
+async function testConnectivity() {
+  const url = `${ADMIN_BASE}/`;
+  const startedAt = Date.now();
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'user-agent': COMMON_HEADERS['user-agent'] },
+      redirect: 'manual',
+    });
+    return {
+      reachable: true,
+      status: res.status,
+      url,
+      elapsed_ms: Date.now() - startedAt,
+      // body 는 안 읽음 (HTML 다운로드 불필요)
+    };
+  } catch (e) {
+    const cause = e.cause || {};
+    return {
+      reachable: false,
+      url,
+      elapsed_ms: Date.now() - startedAt,
+      error: e.message,
+      error_code: cause.code || cause.errno || null,
+      error_detail: cause.message || null,
+      // 흔한 코드:
+      //   ENOTFOUND     — DNS 해석 실패 (컨테이너 DNS 설정 또는 도메인 차단)
+      //   ECONNREFUSED  — 호스트는 보이는데 포트 차단
+      //   EAI_AGAIN     — DNS 일시 실패
+      //   ETIMEDOUT     — 네트워크 timeout (방화벽)
+      //   UND_ERR_*     — undici (Node fetch) 내부 에러
+    };
+  }
+}
+
 module.exports = {
   resendGift,
   getConfigStatus,
+  testConnectivity,
 };

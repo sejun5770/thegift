@@ -1098,9 +1098,16 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
   // GET /api/bg/alimtalk/admin-status - 통합관리자 cookie 설정 상태 진단
   //   세션 만료 운영 점검용 (cookie 값 노출 X, 설정 여부만).
+  //   ?test=1 옵션 — 실제 admin.barunsoncard.com 도달 가능 여부 ping (cookie 무관).
   if (pathname === '/api/bg/alimtalk/admin-status' && method === 'GET') {
     const adminClient = require('./admin-client');
-    return json(res, adminClient.getConfigStatus());
+    const config = adminClient.getConfigStatus();
+    const parsed = url.parse(req.url, true);
+    if (parsed.query.test === '1') {
+      const conn = await adminClient.testConnectivity();
+      return json(res, { ...config, connectivity: conn });
+    }
+    return json(res, config);
   }
 
   // GET /api/bg/alimtalk/preview?orderId=... - 메시지 미리보기
