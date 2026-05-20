@@ -202,10 +202,30 @@ nav a:hover{color:var(--gray-900)}
   table { font-size: 11px }
   #page-monthly-report .data-table th { background: #f5f5f5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact }
 }
+
+/* ============================================
+   GNB 스켈레톤 — fetchAndApplyNavConfig 적용 전 깜빡임 방지.
+     모든 a 링크의 텍스트가 회색 박스로 표시되어 hidden 메뉴가 잠시 노출되는 현상 차단.
+     JS 가 적용 완료 후 nav.classList.remove('nav-loading') → 정상 표시.
+     CSS-only — JS 실패해도 finally 에서 reveal 보장.
+   ============================================ */
+nav.nav-loading a[href^="#"] {
+  color: transparent !important;
+  background: var(--gray-100, #f4f4f5);
+  border-radius: 6px;
+  pointer-events: none;
+  user-select: none;
+  /* shimmer 약간 — 로딩 중임을 시각화 */
+  animation: nav-skeleton-pulse 1.4s ease-in-out infinite;
+}
+@keyframes nav-skeleton-pulse {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
+}
 </style>
 </head>
 <body>
-<nav>
+<nav class="nav-loading">
   <span class="logo">💐 답례품 관리</span>
   <a href="#dashboard" class="active" onclick="showPage('dashboard')">대시보드</a>
   <a href="#monthly-report" onclick="showPage('monthly-report')">📊 월간 보고서</a>
@@ -3965,6 +3985,12 @@ async function fetchAndApplyNavConfig() {
     _applyNavConfigToDom(_navConfigCache);
   } catch (e) {
     console.warn('[nav config] fetch 실패:', e.message);
+  } finally {
+    // 스켈레톤 해제 — fetch 성공/실패 무관 reveal (실패해도 nav 가 깜빡임 없이 그대로 표시).
+    //   미노출 메뉴는 _applyNavConfigToDom 의 display:none 이 이미 적용됐고,
+    //   적용 안된 (fetch 실패) 케이스는 inline style default 따라 표시됨.
+    const nav = document.querySelector('nav.nav-loading');
+    if (nav) nav.classList.remove('nav-loading');
   }
 }
 
