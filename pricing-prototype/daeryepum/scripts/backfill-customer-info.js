@@ -107,11 +107,22 @@ if (limit) console.log(`🔢 제한: 첫 ${limit} 건만 처리`);
 // 헬퍼
 // ============================================
 
-/** 텍스트 → 숫자 추출 (예: "(바)4716976" → "4716976", "BRS-4716976" → "4716976") */
+/**
+ * 텍스트 → canonical order_id (ETC- prefix 포함).
+ *   예: "(바)4716976" → "ETC-4716976", "BRS-4716976" → "ETC-4716976"
+ *
+ *   ⚠️ 2026-05-21 fix: 이전 버전은 prefix 없이 숫자만 반환 → orphan CI 다수 생성됨.
+ *   답례품 backfill 은 모두 CUSTOM_ETC_ORDER 기반이므로 ETC- prefix 안전.
+ *   --no-prefix 플래그로 옛 동작 유지 가능 (호환성).
+ */
 function extractOrderId(raw) {
   if (!raw) return null;
   const digits = String(raw).match(/\d+/);
-  return digits ? digits[0] : null;
+  if (!digits) return null;
+  const seq = digits[0];
+  // 명시적 옵트아웃 (디버깅 / 옛 데이터 재실행 시) — 기본은 prefix 추가
+  if (process.argv.includes('--no-prefix')) return seq;
+  return `ETC-${seq}`;
 }
 
 /**
