@@ -480,7 +480,8 @@ nav.nav-loading a[href^="#"] {
       <table class="forecast-table">
         <thead><tr>
           <th>주차</th><th>기간 <span style="font-size:10px;font-weight:400;color:var(--gray-500)">(일~토)</span></th>
-          <th>예식건수<br><span style="font-size:10px;font-weight:400">(본주 −14일 ~ 본주 끝 +7일, 28일)</span></th>
+          <th>본주 예식<br><span style="font-size:10px;font-weight:400;color:var(--gray-500)">(해당 주, 7일)</span></th>
+          <th>예식 풀<br><span style="font-size:10px;font-weight:400;color:var(--gray-500)">(−14 ~ +7일, 28일)</span></th>
           <th>예상 건수</th>
           <th>예상 매출</th>
           <th>실제 매출</th>
@@ -4920,9 +4921,14 @@ function renderForecastRow(w, maxRevenue, isHistory) {
 
   const estOrdersCell = w.est_orders != null ? `${fmtNum(w.est_orders)}건` : '-';
 
+  // 본주 예식수 (해당 주 7일) — wedding_in_week 가 서버 응답에 있으면 사용, 없으면 '-'.
+  //   wedding_pool (28일) 대비 본주차의 실제 결혼식 수 — 일별 매출 예측 정밀화에 활용.
+  const inWeekCell = w.wedding_in_week != null ? `${fmtNum(w.wedding_in_week)}명` : '-';
+
   return `<tr class="${rowClass}" style="${rowStyle}">
     <td><strong>${w.week_no}주차</strong> ${weekBadge}</td>
     <td>${startD} ~ ${endD}</td>
+    <td class="num" style="color:var(--gray-700)">${inWeekCell}</td>
     <td class="num">${fmtNum(w.wedding_pool)}명</td>
     <td class="num">${estOrdersCell}</td>
     <td class="num" style="min-width:140px"><div class="forecast-bar" style="width:${estBar}px;background:var(--primary);opacity:.3"></div> ${fmtKRW(w.est_weekly_revenue)}</td>

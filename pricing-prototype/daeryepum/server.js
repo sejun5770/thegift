@@ -2314,9 +2314,12 @@ async function apiForecast() {
     // 예식 윈도우: [weekStart - 14일, weekEnd + 7일] = 28일 비대칭 윈도우
     //   d 범위: -14 ~ 13 (= 6 + 7) 포함, 총 28일
     let weddingPool = 0;
+    let weddingInWeek = 0; // 본 주차 [weekStart ~ weekEnd, 7일] 합산 — 28일 풀과 별개로 표시.
     for (let d = -PAST_WINDOW; d <= 6 + FUTURE_WINDOW; d++) {
       const key = fmtDate(addDays(weekStart, d));
-      weddingPool += weddingDailyMap[key] || 0;
+      const cnt = weddingDailyMap[key] || 0;
+      weddingPool += cnt;
+      if (d >= 0 && d <= 6) weddingInWeek += cnt; // 본주차 7일 범위
     }
 
     weeks.push({
@@ -2324,6 +2327,7 @@ async function apiForecast() {
       week_start: fmtDate(weekStart),
       week_end: fmtDate(weekEnd),
       wedding_pool: weddingPool,
+      wedding_in_week: weddingInWeek,
       est_weekly_revenue: 0,
       has_data: weddingPool > 0,
     });
