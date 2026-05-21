@@ -2785,6 +2785,32 @@ async function apiConversion() {
   return { weeks, sites: [...MAIN_SITES, '기타'] };
 }
 
+/**
+ * CI row 의 가장 최근 활동 timestamp 추출 — 정보입력 ~ 출고완료 모든 stage 포함.
+ *   순회: submitted_at, updated_at, processed_at + 각 sticker_selection 의
+ *         sticker_completed_at / printed_at / bound_at / packed_at / shipped_at.
+ *   '기간 내 어떤 stage 든 활동한 주문 모두' 필터링 기준 timestamp.
+ */
+function _getCiLatestActivity(ci) {
+  if (!ci) return null;
+  const dates = [];
+  if (ci.submitted_at) dates.push(ci.submitted_at);
+  if (ci.updated_at) dates.push(ci.updated_at);
+  if (ci.processed_at) dates.push(ci.processed_at);
+  const sels = Array.isArray(ci.sticker_selections) ? ci.sticker_selections : [];
+  for (const sel of sels) {
+    if (!sel) continue;
+    if (sel.sticker_completed_at) dates.push(sel.sticker_completed_at);
+    if (sel.printed_at) dates.push(sel.printed_at);
+    if (sel.bound_at) dates.push(sel.bound_at);
+    if (sel.packed_at) dates.push(sel.packed_at);
+    if (sel.shipped_at) dates.push(sel.shipped_at);
+  }
+  if (!dates.length) return null;
+  // ISO 8601 timestamp 는 문자열 비교로도 시간 순서 정확 — Date 변환 불필요.
+  return dates.reduce((mx, d) => (d > mx ? d : mx));
+}
+
 // === 3-way 리드타임 분석 (주문 / 희망출고 / 예식) ===
 //   bg_order_customer_info.desired_ship_date + MSSQL order_date + wedding_date 조인.
 //   3개 리드타임 계산:
@@ -2807,10 +2833,13 @@ async function apiLeadtime3way(query) {
     console.warn('[leadtime-3way] CI fetch 실패:', e.message);
     return FALLBACK;
   }
-  // 기간 + desired_ship_date 필터
+  // 기간 + desired_ship_date 필터.
+  //   '기간 내 어떤 stage 든 활동한 주문 모두' — submitted_at + 워크플로우 timestamps 의 max.
   const inRange = allCi.filter(ci => {
-    if (!ci.submitted_at || !ci.desired_ship_date) return false;
-    const day = String(ci.submitted_at).slice(0, 10);
+    if (!ci.desired_ship_date) return false;
+    const latest = _getCiLatestActivity(ci);
+    if (!latest) return false;
+    const day = String(latest).slice(0, 10);
     return day >= startDate && day <= endDate;
   });
   if (!inRange.length) return { ...FALLBACK, period: { ...FALLBACK.period, ci_with_ship_date: 0 } };
@@ -3041,11 +3070,12 @@ async function apiStickerAnalytics(query) {
     console.warn('[sticker-analytics] CI fetch 실패:', e.message);
     return { products: [], messages: { total: 0 }, period: { start: startDate, end: endDate, ci_count: 0 } };
   }
-  // 기간 필터 (submitted_at 또는 updated_at — submitted 우선)
+  // 기간 필터 — '기간 내 어떤 stage 든 활동한 주문 모두' (submitted + 모든 워크플로우 timestamps max).
+  //   입력완료 → 출고완료 까지 어느 stage 에서든 timestamp 가 기간 내면 포함.
   const inRange = allCi.filter(ci => {
-    const ts = ci.submitted_at || ci.updated_at;
-    if (!ts) return false;
-    const day = String(ts).slice(0, 10);
+    const latest = _getCiLatestActivity(ci);
+    if (!latest) return false;
+    const day = String(latest).slice(0, 10);
     return day >= startDate && day <= endDate;
   });
 

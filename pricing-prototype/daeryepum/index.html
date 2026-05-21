@@ -510,9 +510,9 @@ nav.nav-loading a[href^="#"] {
     </div>
   </div>
 
-  <!-- 📅 3-way 리드타임 (주문 / 희망출고 / 예식) — CI 입력완료 주문 기준 -->
+  <!-- 📅 3-way 리드타임 (주문 / 희망출고 / 예식) — CI 입력완료~출고완료 모든 stage -->
   <div class="section">
-    <div class="section-title">📅 3-way 리드타임 분석 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(주문일 → 희망출고일 → 예식일)</span></div>
+    <div class="section-title">📅 3-way 리드타임 분석 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(주문일 → 희망출고일 → 예식일 · 정보입력 이후 모든 stage 포함)</span></div>
     <div class="card">
       <div id="lt3-summary" style="font-size:12px;color:var(--gray-500);margin-bottom:12px">로딩 중...</div>
       <div id="lt3-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px"></div>
@@ -520,9 +520,9 @@ nav.nav-loading a[href^="#"] {
     </div>
   </div>
 
-  <!-- 🎨 스티커 / 💬 메시지 분석 (정보입력 완료 주문 기준) — sticker_selections JSONB 분석 -->
+  <!-- 🎨 스티커 / 💬 메시지 분석 — CI 입력완료~출고완료 모든 stage 의 sticker_selections JSONB 분석 -->
   <div class="section">
-    <div class="section-title">🎨 스티커 · 💬 메시지 분석 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(고객 정보입력 완료된 주문 기준)</span></div>
+    <div class="section-title">🎨 스티커 · 💬 메시지 분석 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(정보입력 이후 모든 stage 포함 · 스티커작업/인쇄/제본/포장/출고)</span></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
       <!-- 좌: 상품별 스티커 타입 인기도 -->
       <div class="card">
