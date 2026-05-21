@@ -360,9 +360,23 @@ async function saveCustomerInfo(orderId, data) {
 }
 
 async function getAllCustomerInfos() {
-  // limit=10000 명시 — PostgREST 기본 max-rows=1000 이라 누락되면 frontend ciMap 에서 빠짐.
-  //   증상: 오래된 주문의 CI 가 응답 외 → 미입력 탭에 잘못 표시 + 수동 수정해도 반영 안 됨.
-  if (USE_SUPABASE) return sbGet('bg_order_customer_info', 'order=submitted_at.desc&limit=10000');
+  // PostgREST 의 server-side max-rows 가 1000 이라 단일 limit=N 호출로 N 보장 안 됨.
+  //   → 명시적 페이지네이션 (offset 기반) 으로 전체 row 수집.
+  //   증상 (수정 전): 오래된 CI 가 응답 외 → 미입력 잘못 표시 + 수동 수정 반영 안 됨.
+  //   안전 ceiling 100,000 — 그 이상은 architectural redesign 필요.
+  if (USE_SUPABASE) {
+    const PAGE_SIZE = 1000;
+    const MAX_PAGES = 100; // 안전 — 최대 100,000 row
+    const all = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const offset = page * PAGE_SIZE;
+      const rows = await sbGet('bg_order_customer_info', `order=submitted_at.desc&limit=${PAGE_SIZE}&offset=${offset}`);
+      if (!rows || !rows.length) break;
+      all.push(...rows);
+      if (rows.length < PAGE_SIZE) break; // 마지막 페이지
+    }
+    return all;
+  }
   const infos = readJson(FILES.customerInfo, []);
   return [...infos].sort((a, b) => (b.submitted_at || '').localeCompare(a.submitted_at || ''));
 }
