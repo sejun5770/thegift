@@ -299,7 +299,8 @@ async function getCustomerInfo(orderId) {
 async function getCustomerInfoBatch(orderIds) {
   if (!orderIds.length) return [];
   if (USE_SUPABASE) {
-    const filter = `order_id=in.(${orderIds.map(id => encodeURIComponent(id)).join(',')})`;
+    // limit=10000 — PostgREST 기본 max-rows=1000 회피 (다수 order_ids 조회 시 누락 방지).
+    const filter = `order_id=in.(${orderIds.map(id => encodeURIComponent(id)).join(',')})&limit=10000`;
     return sbGet('bg_order_customer_info', filter);
   }
   const infos = readJson(FILES.customerInfo, []);
@@ -359,7 +360,9 @@ async function saveCustomerInfo(orderId, data) {
 }
 
 async function getAllCustomerInfos() {
-  if (USE_SUPABASE) return sbGet('bg_order_customer_info', 'order=submitted_at.desc');
+  // limit=10000 명시 — PostgREST 기본 max-rows=1000 이라 누락되면 frontend ciMap 에서 빠짐.
+  //   증상: 오래된 주문의 CI 가 응답 외 → 미입력 탭에 잘못 표시 + 수동 수정해도 반영 안 됨.
+  if (USE_SUPABASE) return sbGet('bg_order_customer_info', 'order=submitted_at.desc&limit=10000');
   const infos = readJson(FILES.customerInfo, []);
   return [...infos].sort((a, b) => (b.submitted_at || '').localeCompare(a.submitted_at || ''));
 }
@@ -371,8 +374,8 @@ async function getAllCustomerInfos() {
  */
 async function getExpressCustomerInfos() {
   if (USE_SUPABASE) {
-    // sbGet 가 select=* 자동 포함하므로 filter 만 추가
-    return sbGet('bg_order_customer_info', 'is_express=eq.true');
+    // sbGet 가 select=* 자동 포함하므로 filter 만 추가. limit 명시 — PostgREST 기본 1000 회피.
+    return sbGet('bg_order_customer_info', 'is_express=eq.true&limit=10000');
   }
   const infos = readJson(FILES.customerInfo, []);
   return infos.filter(ci => ci.is_express === true);
