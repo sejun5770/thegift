@@ -2811,6 +2811,148 @@ function _getCiLatestActivity(ci) {
   return dates.reduce((mx, d) => (d > mx ? d : mx));
 }
 
+/**
+ * orphan CI 스캔 + cleanup — prefix 누락된 bg_order_customer_info row 정리.
+ *
+ *   현재 운영 DB 에 raw 숫자 (예: '3244222') 로 저장된 CI 가 존재.
+ *   frontend 의 bgCiKey 는 ETC 주문에 'ETC-3244222' 를 lookup → 미매칭으로 미입력 잘못 표시.
+ *   (현재 fallback 매칭으로 display 는 해결됐지만, DB 레벨 정리가 필요)
+ *
+ *   classify:
+ *     - to_migrate: orphan 만 존재 + MSSQL 에서 ETC 확인 → rename ('X' → 'ETC-X')
+ *     - conflict: orphan AND canonical 둘 다 → manual_review 보고만
+ *     - card_already_canonical: MSSQL 이 CARD 주문 → raw seq 가 이미 canonical (skip)
+ *     - no_mssql_match: MSSQL 에 없음 → 보고만 (delete 위험해서 안 함)
+ *
+ *   options: { execute: bool }
+ *     - false: dry-run, 계획만 반환
+ *     - true: to_migrate 만 rename 실행
+ */
+async function scanAndCleanupOrphanCi({ execute }) {
+  const SUPABASE_URL = process.env.SUPABASE_URL || '';
+  const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || '';
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    return { error: 'SUPABASE 미설정' };
+  }
+  const REST = `${SUPABASE_URL}/rest/v1`;
+  const HDR = { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' };
+
+  // 1) 전체 CI 의 order_id 수집 (필요 필드만, 페이로드 최소화)
+  const listRes = await fetch(`${REST}/bg_order_customer_info?select=order_id,submitted_at,updated_at&limit=20000`, { headers: HDR });
+  if (!listRes.ok) {
+    return { error: `Supabase fetch failed: ${listRes.status}` };
+  }
+  const allCi = await listRes.json();
+  const orphans = []; // raw 숫자
+  const canonicalSet = new Set(); // ETC-/CP-/NV- 접두
+  for (const ci of allCi) {
+    const oid = String(ci.order_id || '');
+    if (/^\d+$/.test(oid)) {
+      orphans.push({ order_id: oid, submitted_at: ci.submitted_at, updated_at: ci.updated_at });
+    } else if (oid.startsWith('ETC-') || oid.startsWith('CP-') || oid.startsWith('NV-')) {
+      canonicalSet.add(oid);
+    }
+  }
+
+  if (!orphans.length) {
+    return { scanned: allCi.length, orphans: 0, plan: [], message: 'orphan CI 없음' };
+  }
+
+  // 2) MSSQL 에서 orphan seq 의 order_type 확인 (chunk 단위)
+  const pool = await getPool();
+  const orphanSeqs = orphans.map(o => parseInt(o.order_id)).filter(n => Number.isInteger(n) && n > 0);
+  const CHUNK = 500;
+  const etcSet = new Set();
+  const cardSet = new Set();
+  for (let i = 0; i < orphanSeqs.length; i += CHUNK) {
+    const chunk = orphanSeqs.slice(i, i + CHUNK);
+    const phs = chunk.map((_, idx) => `@s${idx}`).join(',');
+    const r1 = pool.request();
+    chunk.forEach((s, idx) => r1.input(`s${idx}`, sql.Int, s));
+    try {
+      const etcR = await r1.query(`SELECT DISTINCT order_seq FROM CUSTOM_ETC_ORDER WITH (NOLOCK) WHERE order_seq IN (${phs})`);
+      etcR.recordset.forEach(row => etcSet.add(row.order_seq));
+    } catch (e) {
+      console.warn('[scan-orphan-ci] ETC lookup chunk 실패:', e.message);
+    }
+    const r2 = pool.request();
+    chunk.forEach((s, idx) => r2.input(`s${idx}`, sql.Int, s));
+    try {
+      const cardR = await r2.query(`SELECT DISTINCT order_seq FROM custom_order WITH (NOLOCK) WHERE order_seq IN (${phs})`);
+      cardR.recordset.forEach(row => cardSet.add(row.order_seq));
+    } catch (e) {
+      console.warn('[scan-orphan-ci] CARD lookup chunk 실패:', e.message);
+    }
+  }
+
+  // 3) 분류 및 계획 생성
+  const plan = orphans.map(o => {
+    const seq = parseInt(o.order_id);
+    const isEtc = etcSet.has(seq);
+    const isCard = cardSet.has(seq);
+    if (!isEtc && !isCard) {
+      return { ...o, status: 'no_mssql_match', action: 'skip', message: 'MSSQL 에 주문 없음' };
+    }
+    if (isCard && !isEtc) {
+      return { ...o, status: 'card_already_canonical', action: 'skip', message: 'CARD 주문은 raw seq 가 canonical' };
+    }
+    // ETC (또는 ETC + CARD 둘 다 — 드물지만 처리)
+    const newId = `ETC-${seq}`;
+    if (canonicalSet.has(newId)) {
+      return { ...o, status: 'conflict', action: 'manual_review', new_id: newId, message: 'canonical 도 존재 — 수동 검토 필요' };
+    }
+    return { ...o, status: 'to_migrate', action: 'rename', new_id: newId };
+  });
+
+  // 4) 실행 (옵션)
+  const toMigrate = plan.filter(p => p.action === 'rename');
+  let renamed = 0, errors = 0;
+  const errorSamples = [];
+  if (execute && toMigrate.length) {
+    for (const item of toMigrate) {
+      try {
+        const url = `${REST}/bg_order_customer_info?order_id=eq.${encodeURIComponent(item.order_id)}`;
+        const res = await fetch(url, {
+          method: 'PATCH',
+          headers: { ...HDR, Prefer: 'return=minimal' },
+          body: JSON.stringify({ order_id: item.new_id, updated_at: new Date().toISOString() }),
+        });
+        if (res.ok) {
+          renamed++;
+        } else {
+          errors++;
+          const text = await res.text();
+          if (errorSamples.length < 5) errorSamples.push({ order_id: item.order_id, status: res.status, detail: text.slice(0, 200) });
+          console.warn(`[cleanup-orphan-ci] ${item.order_id} → ${item.new_id} 실패 [${res.status}]: ${text.slice(0, 200)}`);
+        }
+      } catch (e) {
+        errors++;
+        if (errorSamples.length < 5) errorSamples.push({ order_id: item.order_id, exception: e.message });
+        console.warn(`[cleanup-orphan-ci] ${item.order_id} 예외:`, e.message);
+      }
+    }
+  }
+
+  return {
+    scanned: allCi.length,
+    orphan_count: orphans.length,
+    summary: {
+      to_migrate: plan.filter(p => p.action === 'rename').length,
+      conflict: plan.filter(p => p.action === 'manual_review').length,
+      no_mssql_match: plan.filter(p => p.status === 'no_mssql_match').length,
+      card_already_canonical: plan.filter(p => p.status === 'card_already_canonical').length,
+    },
+    plan,
+    executed: !!execute,
+    renamed: execute ? renamed : null,
+    errors: execute ? errors : null,
+    error_samples: execute && errorSamples.length ? errorSamples : undefined,
+    message: execute
+      ? `${renamed}건 rename 완료${errors ? `, ${errors}건 실패` : ''}${plan.filter(p => p.action === 'manual_review').length ? `, 충돌 ${plan.filter(p => p.action === 'manual_review').length}건은 수동 검토 필요` : ''}.`
+      : `dry-run — to_migrate ${plan.filter(p => p.action === 'rename').length}건, conflict ${plan.filter(p => p.action === 'manual_review').length}건, no_mssql ${plan.filter(p => p.status === 'no_mssql_match').length}건. POST /api/admin/cleanup-orphan-ci 로 실행.`,
+  };
+}
+
 // === 3-way 리드타임 분석 (주문 / 희망출고 / 예식) ===
 //   bg_order_customer_info.desired_ship_date + MSSQL order_date + wedding_date 조인.
 //   3개 리드타임 계산:
@@ -4237,6 +4379,22 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: 'save_failed', message: e.message }));
           return;
         }
+      } else if (pathname === '/api/admin/scan-orphan-ci' && req.method === 'GET') {
+        // bg_order_customer_info 의 orphan CI (prefix 누락된 raw seq) 식별 — dry run.
+        //   /api/admin/scan-orphan-ci → 마이그레이션 계획만 출력 (실제 변경 X).
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        data = await scanAndCleanupOrphanCi({ execute: false });
+      } else if (pathname === '/api/admin/cleanup-orphan-ci' && req.method === 'POST') {
+        // 충돌 없는 orphan CI 를 canonical prefix (ETC-X) 로 rename — 실제 실행.
+        //   /api/admin/cleanup-orphan-ci (POST) → scan 후 to_migrate 만 rename.
+        //   충돌 케이스 (canonical 도 존재) 는 건드리지 않음 — 보고만.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        logAdminAccess(session, req, 'cleanup-orphan-ci', {});
+        data = await scanAndCleanupOrphanCi({ execute: true });
       } else if (pathname.startsWith('/api/admin/debug-by-seq/')) {
         // 종합 진단 — order_seq 로 MSSQL + Supabase 모든 변형 prefix CI 조회.
         //   /api/admin/debug-by-seq/3244610
