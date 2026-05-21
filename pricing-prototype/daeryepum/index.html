@@ -9347,8 +9347,9 @@ function bgCiKey(order) {
  * CI lookup with fallback — orphan CI (prefix 없음) 대응.
  *   ETC 주문의 일부는 옛날 코드 / 외부 backfill 로 'order_seq' raw 형태로 저장된 row 가 존재.
  *   primary key (예: 'ETC-3244610') 매칭 실패 시 raw seq ('3244610') 도 시도 → orphan 자동 회수.
- *   매칭되면 콘솔 경고 (data 정리 필요 신호).
+ *   매칭되면 콘솔 경고 (data 정리 필요 신호) — 같은 order 는 세션당 1회만 warn (노이즈 감소).
  */
+const _bgFallbackWarned = new Set(); // session-level dedup
 function bgFindCi(ciMap, order) {
   if (!order) return null;
   const primary = bgCiKey(order);
@@ -9358,7 +9359,10 @@ function bgFindCi(ciMap, order) {
   if (order.order_type === 'ETC') {
     const raw = String(order.order_seq);
     if (raw && ciMap.has(raw)) {
-      console.warn(`[ci-fallback] ETC 주문 CI 가 prefix 없이 저장됨: ${raw} (정상 키: ${primary}). DB 정리 추천.`);
+      if (!_bgFallbackWarned.has(raw)) {
+        _bgFallbackWarned.add(raw);
+        console.warn(`[ci-fallback] ETC 주문 CI 가 prefix 없이 저장됨: ${raw} (정상 키: ${primary}). DB 정리 추천.`);
+      }
       return ciMap.get(raw);
     }
   }
