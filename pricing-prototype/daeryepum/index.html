@@ -555,13 +555,30 @@ nav.nav-loading a[href^="#"] {
         <input type="date" id="bsd-end" style="padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
         <button class="btn btn-primary" style="padding:6px 14px;font-size:13px" onclick="loadByShipDate()">조회</button>
         <span id="bsd-loading" style="color:var(--gray-500);font-size:12px;margin-left:8px"></span>
+        <div style="flex:1"></div>
+        <!-- 뷰 전환 토글: 차트 / 테이블 -->
+        <div style="display:inline-flex;border:1px solid var(--gray-300);border-radius:6px;overflow:hidden">
+          <button id="bsd-view-chart" onclick="setBsdView('chart')" style="padding:6px 12px;font-size:12px;border:none;background:var(--primary);color:#fff;cursor:pointer">📊 차트</button>
+          <button id="bsd-view-table" onclick="setBsdView('table')" style="padding:6px 12px;font-size:12px;border:none;background:#fff;color:var(--gray-700);cursor:pointer;border-left:1px solid var(--gray-300)">📋 테이블</button>
+        </div>
       </div>
       <div style="display:flex;gap:24px;margin-bottom:12px;flex-wrap:wrap">
         <div><span style="font-size:12px;color:var(--gray-500)">총 매출</span><br><strong id="bsd-total-amount" style="font-size:16px">-</strong></div>
         <div><span style="font-size:12px;color:var(--gray-500)">총 주문</span><br><strong id="bsd-total-orders">-</strong></div>
         <div><span style="font-size:12px;color:var(--gray-500)">총 수량</span><br><strong id="bsd-total-qty">-</strong></div>
+        <div style="flex:1"></div>
+        <!-- 범례 -->
+        <div id="bsd-legend" style="display:flex;gap:12px;font-size:11px;color:var(--gray-600);align-items:center">
+          <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:#3b82f6;border-radius:2px"></span> 일반 매출</span>
+          <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:#dc2626;border-radius:2px"></span> ⚡ 빠른출고</span>
+        </div>
       </div>
-      <div style="overflow-x:auto">
+      <!-- 차트 뷰 (default) — 좌우 스크롤 stacked bar chart -->
+      <div id="bsd-chart-wrap" style="overflow-x:auto;border:1px solid var(--gray-200);border-radius:6px;background:var(--gray-50);padding:14px 8px 8px;margin-bottom:12px">
+        <div id="bsd-chart" style="display:flex;align-items:flex-end;gap:6px;min-height:300px;padding-bottom:8px"></div>
+      </div>
+      <!-- 테이블 뷰 (toggle) -->
+      <div id="bsd-table-wrap" style="overflow-x:auto;display:none">
         <table id="bsd-table" style="width:100%;border-collapse:collapse;font-size:13px">
           <thead>
             <tr style="background:var(--gray-50)">
@@ -5391,6 +5408,27 @@ async function loadByShipDate() {
  *   고객 정보입력 완료 + desired_ship_date 지정된 주문만 집계.
  *   사용자 지정 기간 내 일별 출고 부하 가시성 목적.
  */
+/** 뷰 토글 — 차트 / 테이블 전환. */
+let _bsdView = 'chart';
+function setBsdView(view) {
+  _bsdView = view;
+  const chart = document.getElementById('bsd-chart-wrap');
+  const table = document.getElementById('bsd-table-wrap');
+  const btnChart = document.getElementById('bsd-view-chart');
+  const btnTable = document.getElementById('bsd-view-table');
+  if (view === 'chart') {
+    chart.style.display = '';
+    table.style.display = 'none';
+    btnChart.style.background = 'var(--primary)'; btnChart.style.color = '#fff';
+    btnTable.style.background = '#fff'; btnTable.style.color = 'var(--gray-700)';
+  } else {
+    chart.style.display = 'none';
+    table.style.display = '';
+    btnChart.style.background = '#fff'; btnChart.style.color = 'var(--gray-700)';
+    btnTable.style.background = 'var(--primary)'; btnTable.style.color = '#fff';
+  }
+}
+
 function renderByShipDate(data) {
   const safe = data || {};
   const total = safe.total || { amount: 0, orders: 0, qty: 0 };
@@ -5402,14 +5440,66 @@ function renderByShipDate(data) {
   // 기간은 입력 필드(bsd-start/end)에 이미 표시되므로 별도 표시 X
 
   const tbody = document.getElementById('bsd-tbody');
+  const chartEl = document.getElementById('bsd-chart');
   if (!dates.length) {
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--gray-500);font-size:12px">조회 기간 내 정보입력 완료 + 희망출고일이 지정된 주문이 없습니다.</td></tr>';
+    chartEl.innerHTML = '<div style="text-align:center;padding:40px;color:var(--gray-500);font-size:12px;width:100%">조회 기간 내 데이터 없음</div>';
     document.getElementById('bsd-feedback').innerHTML = '';
     return;
   }
-  // 매출 큰 날 강조 (최대값 기준 막대)
-  const maxAmt = Math.max(...dates.map(d => d.amount || 0), 1);
+
+  // ============================================
+  // 1) 차트 렌더 — 좌우 스크롤 stacked bar (일반 + 빠른출고).
+  //    각 bar 높이 = total amount 비례. 상단 빨강(빠른) / 하단 파랑(일반) 적층.
+  //    bar 너비 60px 고정 → 일수가 많아도 가로 스크롤로 확인.
+  // ============================================
+  const CHART_MAX_H = 240; // px — bar 최대 높이
+  const BAR_W = 60;
   const todayStr = fmt(new Date());
+  const maxTotal = Math.max(...dates.map(d => d.amount || 0), 1);
+  const chartBars = dates.map(d => {
+    const dow = ['일','월','화','수','목','금','토'][new Date(d.date + 'T00:00:00').getDay()];
+    const dowColor = dow === '일' ? '#dc2626' : (dow === '토' ? '#2563eb' : 'var(--gray-500)');
+    const isToday = d.date === todayStr;
+    const exprAmt = d.express?.amount || 0;
+    const exprOrd = d.express?.orders || 0;
+    const regAmt = d.regular?.amount || 0;
+    const regOrd = d.regular?.orders || 0;
+    const totalAmt = d.amount || 0;
+    const totalH = Math.max(2, Math.round(totalAmt / maxTotal * CHART_MAX_H));
+    const exprH = totalAmt > 0 ? Math.round(exprAmt / totalAmt * totalH) : 0;
+    const regH = totalH - exprH;
+    const exprPct = totalAmt > 0 ? Math.round(exprAmt / totalAmt * 100) : 0;
+    // 일자 표시 — 'MM/DD' + 요일
+    const [yy, mm, dd] = d.date.split('-');
+    const dateShort = `${parseInt(mm)}/${parseInt(dd)}`;
+    const tooltip = `${d.date} (${dow})\n총 매출 ${fmtKRW(totalAmt)} · ${fmtNum(d.orders || 0)}건 · ${fmtNum(d.qty || 0)}개\n일반 ${fmtKRW(regAmt)} (${fmtNum(regOrd)}건)\n빠른출고 ${fmtKRW(exprAmt)} (${fmtNum(exprOrd)}건, ${exprPct}%)`;
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex-shrink:0;width:${BAR_W}px${isToday ? ';outline:2px solid #2563eb;outline-offset:2px;border-radius:4px;padding:2px 0' : ''}" title="${esc(tooltip)}">
+      <!-- 합계 라벨 (bar 위) -->
+      <div style="font-size:9px;color:var(--gray-700);font-weight:600;white-space:nowrap;line-height:1.2">${totalAmt >= 1000000 ? (Math.round(totalAmt / 100000) / 10) + 'M' : totalAmt >= 1000 ? Math.round(totalAmt / 1000) + 'k' : totalAmt}</div>
+      <!-- bar 컨테이너 (높이 = CHART_MAX_H + 2 보정) -->
+      <div style="display:flex;flex-direction:column;justify-content:flex-end;height:${CHART_MAX_H}px;width:32px;position:relative">
+        <!-- 빠른출고 (상단, 빨강) -->
+        ${exprH > 0 ? `<div style="height:${exprH}px;background:#dc2626;border-radius:3px 3px 0 0;width:100%"></div>` : ''}
+        <!-- 일반 (하단, 파랑) -->
+        ${regH > 0 ? `<div style="height:${regH}px;background:#3b82f6;border-radius:${exprH > 0 ? '0' : '3px 3px'} 0 0;width:100%"></div>` : ''}
+        ${totalAmt === 0 ? '<div style="height:2px;background:var(--gray-200);width:100%;border-radius:2px"></div>' : ''}
+      </div>
+      <!-- 날짜 라벨 -->
+      <div style="font-size:11px;line-height:1.2;color:var(--gray-700);text-align:center;font-weight:600">${dateShort}</div>
+      <div style="font-size:10px;color:${dowColor};line-height:1">${dow}${isToday ? ' <span style="color:#2563eb">●</span>' : ''}</div>
+      <!-- 건수 라벨 -->
+      <div style="font-size:9px;color:var(--gray-500);line-height:1.2">${fmtNum(d.orders || 0)}건</div>
+      <!-- 빠른출고 비중 (있을 때만) -->
+      ${exprPct > 0 ? `<div style="font-size:9px;color:#dc2626;line-height:1;font-weight:600">⚡${exprPct}%</div>` : ''}
+    </div>`;
+  }).join('');
+  chartEl.innerHTML = chartBars;
+
+  // ============================================
+  // 2) 테이블 렌더 (기존 로직 유지)
+  // ============================================
+  const maxAmt = Math.max(...dates.map(d => d.amount || 0), 1);
   const rows = dates.map(d => {
     const dow = ['일','월','화','수','목','금','토'][new Date(d.date + 'T00:00:00').getDay()];
     const dowColor = dow === '일' ? '#dc2626' : (dow === '토' ? '#2563eb' : 'var(--gray-500)');
