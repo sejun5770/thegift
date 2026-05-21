@@ -9182,7 +9182,41 @@ function renderBgUnified() {
   // isCancelled 는 함수 상단 (카운트 계산) 에서 이미 선언됨 — 재선언 금지
   let html = '';
 
+  // === 입력완료 탭 — 수집처리 필요/완료 섹션 구분 ===
+  //   상단: 처리 대기 (processed_at NULL), 하단: 처리 완료 (processed_at SET).
+  //   각 섹션 시작에 색상 구분 헤더 row 삽입. 정렬 로직이 이미 미수집→수집 순으로 정렬해둠.
+  const isSubmittedTab = activeTab === 'submitted';
+  const COLSPAN_FULL = 20; // table 전체 컬럼 수 (헤더 row colspan 용)
+  let pendingCount = 0, processedCount = 0;
+  if (isSubmittedTab) {
+    const seenPending = new Set(), seenProcessed = new Set();
+    bgUnifiedRows.forEach(r => {
+      const oid = bgCiKey(r.order);
+      if (r.ci?.processed_at) {
+        if (!seenProcessed.has(oid)) { seenProcessed.add(oid); processedCount++; }
+      } else {
+        if (!seenPending.has(oid)) { seenPending.add(oid); pendingCount++; }
+      }
+    });
+  }
+  function _sectionHeader(label, cnt, bg, fg, border) {
+    return `<tr class="uni-section-header"><td colspan="${COLSPAN_FULL}" style="background:${bg};padding:10px 14px;font-size:13px;font-weight:700;color:${fg};border-top:2px solid ${border};border-bottom:1px solid ${border}">${label} <span style="font-weight:600;font-size:12px;margin-left:4px;color:${fg};opacity:.75">(${cnt}건)</span></td></tr>`;
+  }
+  let processedHeaderInserted = false;
+  // 시작 헤더 — pending 행이 있으면 '처리 필요', 없고 processed 만 있으면 '처리 완료'.
+  if (isSubmittedTab && pendingCount > 0) {
+    html += _sectionHeader('⏳ 수집처리 필요', pendingCount, '#fef3c7', '#92400e', '#fcd34d');
+  } else if (isSubmittedTab && pendingCount === 0 && processedCount > 0) {
+    html += _sectionHeader('✅ 수집처리 완료', processedCount, '#dcfce7', '#15803d', '#86efac');
+    processedHeaderInserted = true;
+  }
+
   bgUnifiedRows.forEach(({ order, ci, sel, sticker_index, product_code, product_name, product_qty }, rowIdx) => {
+    // 처음 processed row 만나면 '수집처리 완료' 헤더 삽입 (1회).
+    if (isSubmittedTab && !processedHeaderInserted && ci?.processed_at) {
+      html += _sectionHeader('✅ 수집처리 완료', processedCount, '#dcfce7', '#15803d', '#86efac');
+      processedHeaderInserted = true;
+    }
     const prev = rowIdx > 0 ? bgUnifiedRows[rowIdx - 1].order : null;
     const isFirstOfOrder = rowIdx === 0 || (prev && prev.order_seq !== order.order_seq);
     // 같은 주문이지만 다른 배송지 (나눔배송) — 미세 dashed separator
