@@ -5327,21 +5327,37 @@ function renderStickerAnalytics(d) {
       }).join('')}
     </div>` : '';
 
-  // 키워드 카테고리 분포
-  const categories = (m.keyword_categories || []).filter(c => c.count > 0);
-  const categoriesHtml = categories.length ? `
-    <div style="font-weight:600;font-size:11px;margin-bottom:6px;color:var(--gray-600)">📊 메시지 카테고리 (키워드 포함률)</div>
-    <div>${categories.map(c => `
-      <div style="display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0">
-        <div style="flex:0 0 80px;color:var(--gray-700)">${esc(c.category)}</div>
-        <div style="flex:1;background:var(--gray-100);border-radius:3px;height:8px;position:relative">
-          <div style="position:absolute;left:0;top:0;bottom:0;width:${c.pct}%;background:#a78bfa;border-radius:3px"></div>
+  // 행사 유추 분포 (mutually exclusive 분류)
+  const events = (m.event_inference || []);
+  // 미분류 비중 — 행사 유추 정확도 지표 (낮을수록 도메인 사전 매칭 잘 됨)
+  const matched = events.filter(e => e.type !== '미분류');
+  const unmatched = events.find(e => e.type === '미분류');
+  const matchedCount = matched.reduce((s, e) => s + e.count, 0);
+  const matchedPct = m.non_empty > 0 ? Math.round(matchedCount / m.non_empty * 100) : 0;
+  const eventsHtml = events.length ? `
+    <div style="font-weight:600;font-size:11px;margin-bottom:6px;color:var(--gray-600);display:flex;justify-content:space-between;align-items:center">
+      <span>🔮 메시지로 유추한 행사</span>
+      <span style="font-weight:400;font-size:10px;color:var(--gray-500)">매칭률 ${matchedPct}%</span>
+    </div>
+    <div>${events.map(e => {
+      // 미분류는 회색, 매칭은 카테고리별 색상 (해시 기반 또는 고정)
+      const isUnmatched = e.type === '미분류';
+      const barColor = isUnmatched ? 'var(--gray-300)' : '#a78bfa';
+      const textColor = isUnmatched ? 'var(--gray-500)' : 'var(--gray-700)';
+      return `<div style="display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0">
+        <div style="flex:0 0 130px;color:${textColor};display:flex;align-items:center;gap:4px">
+          <span style="font-size:13px">${e.icon || ''}</span>
+          <span>${esc(e.type)}</span>
         </div>
-        <div style="flex:0 0 80px;text-align:right;color:var(--gray-600);font-size:10px">${fmtNum(c.count)}건 (${c.pct}%)</div>
-      </div>`).join('')}
+        <div style="flex:1;background:var(--gray-100);border-radius:3px;height:8px;position:relative;min-width:40px">
+          <div style="position:absolute;left:0;top:0;bottom:0;width:${e.pct}%;background:${barColor};border-radius:3px"></div>
+        </div>
+        <div style="flex:0 0 80px;text-align:right;color:var(--gray-600);font-size:10px">${fmtNum(e.count)}건 (${e.pct}%)</div>
+      </div>`;
+    }).join('')}
     </div>` : '';
 
-  msgEl.innerHTML = statsHtml + wordsHtml + categoriesHtml;
+  msgEl.innerHTML = statsHtml + wordsHtml + eventsHtml;
 }
 
 /** 희망출고일별 매출 조회 — input 의 start/end 로 fetch. */

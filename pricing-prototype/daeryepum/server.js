@@ -3155,33 +3155,47 @@ async function apiStickerAnalytics(query) {
     .slice(0, 30)
     .map(([word, count]) => ({ word, count }));
 
-  // 키워드 카테고리 — 답례품 메시지 도메인 사전. 사용자 messages 중 카테고리 포함 비율.
-  const KEYWORD_CATEGORIES = {
-    '감사': ['감사', '고맙', '땡큐', 'thank', 'thanks'],
-    '축하': ['축하', 'congrat'],
-    '사랑': ['사랑', '러브', 'love'],
-    '결혼/예식': ['결혼', '예식', '웨딩', 'wedding', 'marry'],
-    '행복': ['행복', '해피', 'happy'],
-    '함께': ['함께', '같이'],
-    '꽃길': ['꽃길'],
-    '축복': ['축복', 'bless'],
-    '하나': ['하나', '둘이', '둘이서'],
-    '영원': ['영원', '평생'],
-  };
-  const keywordCategories = [];
-  for (const [cat, keywords] of Object.entries(KEYWORD_CATEGORIES)) {
-    let cnt = 0;
-    for (const msg of nonEmpty) {
-      const lc = msg.toLowerCase();
-      if (keywords.some(k => lc.includes(k.toLowerCase()))) cnt++;
+  // === 행사 유추 (Event Inference) ===
+  //   메시지 키워드로 행사 종류 추론 — 답례품 도메인 사전 (우선순위 mutually exclusive).
+  //   각 메시지는 첫 매칭 카테고리에 1회만 카운트.
+  //   미분류 = 어떤 행사 키워드도 없음 (이름만 / 일반 인사 등).
+  const EVENT_INFERENCE_TYPES = [
+    // 우선순위 — 위에서부터 매칭. 더 구체적인 행사가 먼저.
+    { type: '결혼식', icon: '💒', keywords: ['결혼', '웨딩', '예식', '신랑', '신부', '신혼', '부부', 'wedding', '백년가약', '혼인', '러브스토리', '러브 스토리'] },
+    { type: '돌잔치/첫돌', icon: '🎂', keywords: ['돌잔치', '첫돌', '첫 돌', '첫 생일', '돌상', '돌떡', '돌맞이', '돌선물'] },
+    { type: '백일', icon: '👶', keywords: ['백일', '100일'] },
+    { type: '회갑/칠순/팔순', icon: '🎉', keywords: ['회갑', '환갑', '칠순', '팔순', '고희', '미수', '구순', '백수연', '진갑'] },
+    { type: '출산/탄생', icon: '🍼', keywords: ['출산', '탄생', '베이비', '아가', '아기', '태어남'] },
+    { type: '약혼/상견례', icon: '💍', keywords: ['약혼', '상견례', '프로포즈'] },
+    { type: '개업/오픈', icon: '🏪', keywords: ['개업', '오픈', '창립', '개원', '리뉴얼'] },
+    { type: '입학/졸업', icon: '🎓', keywords: ['입학', '졸업', '학사', '석사', '박사 학위'] },
+    { type: '추모/장례', icon: '🕯️', keywords: ['추모', '영전', '명복', '고인', '장례', '추도'] },
+    { type: '기타 행사', icon: '🎁', keywords: ['행사', '이벤트', '기념', '축하'] }, // 일반 축하 — 행사 미상이나 명확히 축하 의도
+  ];
+  function inferEvent(msg) {
+    const lc = msg.toLowerCase();
+    for (const { type, icon, keywords } of EVENT_INFERENCE_TYPES) {
+      if (keywords.some(k => lc.includes(k.toLowerCase()))) return { type, icon };
     }
-    keywordCategories.push({
-      category: cat,
-      count: cnt,
-      pct: nonEmpty.length > 0 ? Math.round(cnt / nonEmpty.length * 100) : 0,
-    });
+    return { type: '미분류', icon: '❓' };
   }
-  keywordCategories.sort((a, b) => b.count - a.count);
+  const eventCounts = new Map(); // type → { type, icon, count }
+  // 초기화 (분포 표시 일관성)
+  EVENT_INFERENCE_TYPES.forEach(({ type, icon }) => eventCounts.set(type, { type, icon, count: 0 }));
+  eventCounts.set('미분류', { type: '미분류', icon: '❓', count: 0 });
+  nonEmpty.forEach(msg => {
+    const { type, icon } = inferEvent(msg);
+    const e = eventCounts.get(type);
+    if (e) e.count++;
+    else eventCounts.set(type, { type, icon, count: 1 });
+  });
+  const eventInference = [...eventCounts.values()]
+    .map(e => ({
+      ...e,
+      pct: nonEmpty.length > 0 ? Math.round(e.count / nonEmpty.length * 100) : 0,
+    }))
+    .filter(e => e.count > 0) // 0건은 표시 안 함 (시각적 노이즈 감소)
+    .sort((a, b) => b.count - a.count);
 
   return {
     products,
@@ -3192,7 +3206,7 @@ async function apiStickerAnalytics(query) {
       median_length: medianLength,
       max_length: maxLength,
       top_words: topWords,
-      keyword_categories: keywordCategories,
+      event_inference: eventInference,
     },
     period: { start: startDate, end: endDate, ci_count: inRange.length },
   };
