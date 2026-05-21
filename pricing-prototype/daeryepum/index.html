@@ -510,6 +510,16 @@ nav.nav-loading a[href^="#"] {
     </div>
   </div>
 
+  <!-- 📅 3-way 리드타임 (주문 / 희망출고 / 예식) — CI 입력완료 주문 기준 -->
+  <div class="section">
+    <div class="section-title">📅 3-way 리드타임 분석 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(주문일 → 희망출고일 → 예식일)</span></div>
+    <div class="card">
+      <div id="lt3-summary" style="font-size:12px;color:var(--gray-500);margin-bottom:12px">로딩 중...</div>
+      <div id="lt3-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px"></div>
+      <div class="feedback" id="lt3-feedback" style="margin-top:12px"></div>
+    </div>
+  </div>
+
   <!-- 🎨 스티커 / 💬 메시지 분석 (정보입력 완료 주문 기준) — sticker_selections JSONB 분석 -->
   <div class="section">
     <div class="section-title">🎨 스티커 · 💬 메시지 분석 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(고객 정보입력 완료된 주문 기준)</span></div>
@@ -4155,8 +4165,10 @@ async function loadDashboard() {
     // 전환율 + 샘플 (별도 로드)
     fetch(`${API}/api/dashboard/conversion`).then(r=>r.json()).then(renderConversion).catch(e=>console.warn('Conversion load failed:', e));
     fetch(`${API}/api/dashboard/samples`).then(r=>r.json()).then(renderSamples).catch(e=>console.warn('Samples load failed:', e));
-    // 스티커 · 메시지 분석 (정보입력 완료 주문 기준, 90일 default — dashboard date 와 무관)
+    // 스티커 · 메시지 분석 (정보입력 완료 주문 기준)
     loadStickerAnalytics();
+    // 3-way 리드타임 분석 (주문/희망출고/예식)
+    loadLeadtime3way();
     // 희망출고일별 매출 — 기본 향후 30일 프리셋으로 초기 로드 (사용자가 별도 변경 가능)
     setBsdPreset('next-30');
   } catch(e) { console.error(e); showToast('대시보드 로딩 실패: ' + e.message); }
@@ -5123,6 +5135,96 @@ function setBsdPreset(preset, btn) {
   document.querySelectorAll('.bsd-preset').forEach(b => b.classList.remove('btn-primary'));
   if (btn) btn.classList.add('btn-primary');
   loadByShipDate();
+}
+
+/**
+ * 📅 3-way 리드타임 — apiLeadtime3way 응답 기반 렌더.
+ *   3개 LT 카드 (주문→희망출고 / 희망출고→예식 / 주문→예식) + 통계 + 분포 막대.
+ *   기간: dashboard date input 연동. CI 입력완료 주문만 대상.
+ */
+async function loadLeadtime3way() {
+  const start = document.getElementById('dash-start').value;
+  const end = document.getElementById('dash-end').value;
+  const params = new URLSearchParams();
+  if (start) params.set('start_date', start);
+  if (end) params.set('end_date', end);
+  try {
+    const r = await fetch(`${API}/api/dashboard/leadtime-3way?${params.toString()}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    renderLeadtime3way(d);
+  } catch (e) {
+    console.warn('[leadtime-3way] 로드 실패:', e.message);
+    document.getElementById('lt3-summary').textContent = '조회 실패';
+    document.getElementById('lt3-grid').innerHTML = '';
+  }
+}
+
+function renderLeadtime3way(d) {
+  const summaryEl = document.getElementById('lt3-summary');
+  const gridEl = document.getElementById('lt3-grid');
+  const feedbackEl = document.getElementById('lt3-feedback');
+  const period = d.period || {};
+  summaryEl.innerHTML = `대상: 정보입력 완료 + 희망출고일 지정 주문 <b>${fmtNum(period.ci_with_ship_date || 0)}건</b> · 매칭 표본 <b>${fmtNum(period.total_samples || 0)}건</b> (기간 ${period.start || '-'} ~ ${period.end || '-'})`;
+
+  function cardHtml(title, subtitle, stats, color) {
+    if (!stats || stats.samples === 0) {
+      return `<div class="card" style="padding:14px"><h3 style="margin:0 0 4px;font-size:13px">${title}</h3>
+        <div style="font-size:11px;color:var(--gray-500);margin-bottom:8px">${subtitle}</div>
+        <div style="color:var(--gray-400);text-align:center;padding:20px;font-size:12px">표본 없음</div></div>`;
+    }
+    const maxCount = Math.max(...stats.distribution.map(b => b.count));
+    const bars = stats.distribution.map(b => {
+      const pct = stats.samples > 0 ? Math.round(b.count / stats.samples * 100) : 0;
+      const w = maxCount > 0 ? Math.round(b.count / maxCount * 100) : 0;
+      return `<div style="display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0">
+        <div style="flex:0 0 78px;color:var(--gray-700)">${b.label}</div>
+        <div style="flex:1;background:var(--gray-100);border-radius:3px;height:8px;position:relative;min-width:40px">
+          <div style="position:absolute;left:0;top:0;bottom:0;width:${w}%;background:${color};border-radius:3px"></div>
+        </div>
+        <div style="flex:0 0 60px;text-align:right;color:var(--gray-600);font-size:10px">${fmtNum(b.count)}건 (${pct}%)</div>
+      </div>`;
+    }).join('');
+    return `<div class="card" style="padding:14px">
+      <h3 style="margin:0 0 2px;font-size:13px">${title}</h3>
+      <div style="font-size:11px;color:var(--gray-500);margin-bottom:10px">${subtitle}</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px">
+        <div style="text-align:center"><div style="font-size:10px;color:var(--gray-500)">평균</div><div style="font-size:15px;font-weight:700">${stats.mean}일</div></div>
+        <div style="text-align:center"><div style="font-size:10px;color:var(--gray-500)">중앙값</div><div style="font-size:15px;font-weight:700">${stats.median}일</div></div>
+        <div style="text-align:center"><div style="font-size:10px;color:var(--gray-500)">P25~P75</div><div style="font-size:13px;font-weight:700">${stats.p25}~${stats.p75}</div></div>
+        <div style="text-align:center"><div style="font-size:10px;color:var(--gray-500)">표본</div><div style="font-size:15px;font-weight:700">${fmtNum(stats.samples)}</div></div>
+      </div>
+      <div style="font-size:11px;font-weight:600;color:var(--gray-600);margin-bottom:4px">분포</div>
+      ${bars}
+    </div>`;
+  }
+
+  gridEl.innerHTML =
+    cardHtml('① 주문 → 희망출고', '제조/배송 소요일 (운영 처리시간)', d.order_to_ship, '#3b82f6') +
+    cardHtml('② 희망출고 → 예식', '예식 buffer (며칠 전 받기 원하는지)', d.ship_to_wedding, '#a78bfa') +
+    cardHtml('③ 주문 → 예식', '전체 LT (고객 주문 시점 패턴)', d.order_to_wedding, '#10b981');
+
+  // 인사이트 피드백
+  let fb = '';
+  const ots = d.order_to_ship, stw = d.ship_to_wedding, otw = d.order_to_wedding;
+  if (ots?.median != null) {
+    fb += `📦 <b>주문→희망출고 중앙값 ${ots.median}일</b> — 운영 처리시간 기준. P90 ${ots.p90}일 (상위 10% 까지 최대 ${ots.p90}일 내 출고 희망). `;
+  }
+  if (stw?.median != null) {
+    const stwLabel = stw.median > 7 ? '여유형 (예식 1주 이상 전 수령)' : stw.median > 3 ? '적정 (4~7일 전)' : stw.median > 0 ? '직전형 (1~3일 전)' : '당일/사후형';
+    fb += `🎀 <b>희망출고→예식 중앙값 ${stw.median}일 전</b> — ${stwLabel}. `;
+  }
+  if (otw?.median != null) {
+    fb += `⏳ <b>주문→예식 중앙값 ${otw.median}일</b> — 평균적으로 예식 ${otw.median}일 전에 주문. `;
+  }
+  if (ots && stw && otw && ots.samples > 0) {
+    // 운영 인사이트 — 처리시간이 buffer 보다 길면 위험
+    const tooTight = ots.p90 > stw.median && stw.median > 0;
+    if (tooTight) {
+      fb += `<br>⚠️ <b>P90 출고시간(${ots.p90}일) 이 예식 buffer 중앙값(${stw.median}일) 보다 길어, 상위 10% 주문은 예식일 임박/초과 위험.</b>`;
+    }
+  }
+  feedbackEl.innerHTML = fb || '<span style="color:var(--gray-400)">분석 데이터 부족</span>';
 }
 
 /**

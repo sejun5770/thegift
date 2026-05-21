@@ -2785,6 +2785,245 @@ async function apiConversion() {
   return { weeks, sites: [...MAIN_SITES, '기타'] };
 }
 
+// === 3-way 리드타임 분석 (주문 / 희망출고 / 예식) ===
+//   bg_order_customer_info.desired_ship_date + MSSQL order_date + wedding_date 조인.
+//   3개 리드타임 계산:
+//     ① 주문 → 희망출고 (제조/배송 LT — 운영 처리시간)
+//     ② 희망출고 → 예식 (예식 buffer — 고객이 며칠 전 받기 원하는지)
+//     ③ 주문 → 예식 (전체 LT — 고객 주문 시점 결정 패턴)
+//   기간: submitted_at 기준 (default 90일).
+//   대상: CI 입력 완료 + desired_ship_date 있음 + ETC/CARD 주문 (CP/NV 제외 — wedding 정보 없음).
+async function apiLeadtime3way(query) {
+  const _bgStore = require('./barungift/store');
+  const endDate = query.end_date || fmtDate(addDays(today(), 1));
+  const startDate = query.start_date || fmtDate(addDays(today(), -90));
+
+  const FALLBACK = { order_to_ship: null, ship_to_wedding: null, order_to_wedding: null, period: { start: startDate, end: endDate, ci_with_ship_date: 0, total_samples: 0 } };
+
+  let allCi = [];
+  try {
+    allCi = await _bgStore.getCustomerInfosWithShipDate();
+  } catch (e) {
+    console.warn('[leadtime-3way] CI fetch 실패:', e.message);
+    return FALLBACK;
+  }
+  // 기간 + desired_ship_date 필터
+  const inRange = allCi.filter(ci => {
+    if (!ci.submitted_at || !ci.desired_ship_date) return false;
+    const day = String(ci.submitted_at).slice(0, 10);
+    return day >= startDate && day <= endDate;
+  });
+  if (!inRange.length) return { ...FALLBACK, period: { ...FALLBACK.period, ci_with_ship_date: 0 } };
+
+  // order_id prefix 별 분리 — ETC-/CARD(raw 숫자)/CP-/NV-
+  const etcMap = new Map(); // seq -> ci
+  const cardMap = new Map();
+  inRange.forEach(ci => {
+    const oid = String(ci.order_id);
+    if (oid.startsWith('ETC-')) {
+      const seq = parseInt(oid.slice(4));
+      if (Number.isInteger(seq) && seq > 0) etcMap.set(seq, ci);
+    } else if (/^\d+$/.test(oid)) {
+      const seq = parseInt(oid);
+      if (Number.isInteger(seq) && seq > 0) cardMap.set(seq, ci);
+    }
+    // CP-/NV- 는 wedding_date 정보 없어 skip
+  });
+
+  let p;
+  try { p = await getPool(); }
+  catch (e) {
+    console.warn('[leadtime-3way] pool 실패:', e.message);
+    return FALLBACK;
+  }
+
+  // 결과 row: { orderDate, shipDate, weddingDate }
+  const rows = [];
+  const CHUNK = 500;
+
+  // === ETC: order_date 조회 + member_id 추출 ===
+  const etcSeqs = [...etcMap.keys()];
+  const etcMembers = new Map(); // member_id -> [{ seq, orderDate }]
+  for (let i = 0; i < etcSeqs.length; i += CHUNK) {
+    const chunk = etcSeqs.slice(i, i + CHUNK);
+    const req = p.request();
+    const placeholders = chunk.map((_, idx) => { req.input(`s${idx}`, sql.Int, chunk[idx]); return `@s${idx}`; }).join(',');
+    try {
+      const r = await req.query(`
+        SELECT o.order_seq, o.member_id, CONVERT(varchar(10), o.order_date, 120) AS order_date
+        FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+        WHERE o.order_seq IN (${placeholders})
+      `);
+      r.recordset.forEach(row => {
+        const ci = etcMap.get(row.order_seq);
+        if (!ci) return;
+        const arr = etcMembers.get(row.member_id) || [];
+        arr.push({ seq: row.order_seq, orderDate: row.order_date, shipDate: ci.desired_ship_date });
+        etcMembers.set(row.member_id, arr);
+      });
+    } catch (e) {
+      console.warn('[leadtime-3way] ETC order_date fetch 실패:', e.message);
+    }
+  }
+
+  // === ETC: member_id 별 wedding_date 후보 lookup (apiLeadtime 동일 패턴) ===
+  const etcMemberIds = [...etcMembers.keys()].filter(Boolean);
+  const memberWeddings = new Map(); // member_id -> Date[]
+  for (let i = 0; i < etcMemberIds.length; i += CHUNK) {
+    const chunk = etcMemberIds.slice(i, i + CHUNK);
+    const req = p.request();
+    const placeholders = chunk.map((_, idx) => { req.input(`m${idx}`, sql.VarChar, String(chunk[idx])); return `@m${idx}`; }).join(',');
+    try {
+      const r = await req.query(`
+        SELECT DISTINCT co.member_id,
+          TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) AS wedding_date
+        FROM custom_order co WITH (NOLOCK)
+        INNER JOIN custom_order_WeddInfo w WITH (NOLOCK) ON co.order_seq = w.order_seq
+        WHERE co.member_id IN (${placeholders})
+          AND co.status_seq >= 1
+          AND w.event_year IS NOT NULL AND LEN(w.event_year) = 4
+          AND TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) IS NOT NULL
+      `);
+      r.recordset.forEach(row => {
+        if (!row.wedding_date) return;
+        const arr = memberWeddings.get(row.member_id) || [];
+        arr.push(new Date(row.wedding_date));
+        memberWeddings.set(row.member_id, arr);
+      });
+    } catch (e) {
+      console.warn('[leadtime-3way] ETC wedding lookup 실패:', e.message);
+    }
+  }
+  // ETC: 주문일 기준 최적 wedding 매칭 (apiLeadtime 정책 — 주문 후 가장 가까운 결혼식, 없으면 -14일 까지 허용)
+  for (const [memberId, orders] of etcMembers) {
+    const candidates = memberWeddings.get(memberId) || [];
+    orders.forEach(o => {
+      const orderDt = new Date(o.orderDate);
+      let best = null;
+      for (const w of candidates) {
+        const diff = Math.round((w - orderDt) / 86400000);
+        if (diff >= -14) {
+          if (!best || diff < best.diff) best = { wd: w, diff };
+        }
+      }
+      rows.push({
+        orderDate: o.orderDate,
+        shipDate: o.shipDate,
+        weddingDate: best ? best.wd.toISOString().slice(0, 10) : null,
+      });
+    });
+  }
+
+  // === CARD: order_date + wedding_date direct JOIN ===
+  const cardSeqs = [...cardMap.keys()];
+  for (let i = 0; i < cardSeqs.length; i += CHUNK) {
+    const chunk = cardSeqs.slice(i, i + CHUNK);
+    const req = p.request();
+    const placeholders = chunk.map((_, idx) => { req.input(`c${idx}`, sql.Int, chunk[idx]); return `@c${idx}`; }).join(',');
+    try {
+      const r = await req.query(`
+        SELECT co.order_seq, CONVERT(varchar(10), co.order_date, 120) AS order_date,
+          TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) AS wedding_date
+        FROM custom_order co WITH (NOLOCK)
+        LEFT JOIN custom_order_WeddInfo w WITH (NOLOCK) ON co.order_seq = w.order_seq
+          AND w.event_year IS NOT NULL AND LEN(w.event_year) = 4
+        WHERE co.order_seq IN (${placeholders})
+      `);
+      r.recordset.forEach(row => {
+        const ci = cardMap.get(row.order_seq);
+        if (!ci) return;
+        rows.push({
+          orderDate: row.order_date,
+          shipDate: ci.desired_ship_date,
+          weddingDate: row.wedding_date ? row.wedding_date.toISOString().slice(0, 10) : null,
+        });
+      });
+    } catch (e) {
+      console.warn('[leadtime-3way] CARD fetch 실패:', e.message);
+    }
+  }
+
+  // === 3개 리드타임 계산 ===
+  const orderToShip = [], shipToWedding = [], orderToWedding = [];
+  for (const r of rows) {
+    if (!r.orderDate || !r.shipDate) continue;
+    const oDt = new Date(r.orderDate);
+    const sDt = new Date(r.shipDate);
+    const ots = Math.round((sDt - oDt) / 86400000);
+    orderToShip.push(ots);
+    if (r.weddingDate) {
+      const wDt = new Date(r.weddingDate);
+      const stw = Math.round((wDt - sDt) / 86400000);
+      const otw = Math.round((wDt - oDt) / 86400000);
+      shipToWedding.push(stw);
+      orderToWedding.push(otw);
+    }
+  }
+
+  // 통계 + distribution 계산
+  function statsOf(values) {
+    const v = values.slice().sort((a, b) => a - b);
+    if (!v.length) return { samples: 0, mean: null, median: null, p25: null, p75: null, p90: null, min: null, max: null };
+    const mean = Math.round(v.reduce((s, x) => s + x, 0) / v.length);
+    return {
+      samples: v.length,
+      mean,
+      median: v[Math.floor(v.length / 2)],
+      p25: v[Math.floor(v.length * 0.25)],
+      p75: v[Math.floor(v.length * 0.75)],
+      p90: v[Math.floor(v.length * 0.90)],
+      min: v[0],
+      max: v[v.length - 1],
+    };
+  }
+  function distOf(values, buckets) {
+    const dist = buckets.map(b => ({ ...b, count: 0 }));
+    values.forEach(v => {
+      for (const b of dist) {
+        if (v >= b.min && v <= b.max) { b.count++; break; }
+      }
+    });
+    return dist;
+  }
+
+  return {
+    order_to_ship: {
+      ...statsOf(orderToShip),
+      distribution: distOf(orderToShip, [
+        { label: '0~3일', min: 0, max: 3 },
+        { label: '4~7일', min: 4, max: 7 },
+        { label: '8~14일', min: 8, max: 14 },
+        { label: '15~21일', min: 15, max: 21 },
+        { label: '22~30일', min: 22, max: 30 },
+        { label: '30일+', min: 31, max: 99999 },
+      ]),
+    },
+    ship_to_wedding: {
+      ...statsOf(shipToWedding),
+      distribution: distOf(shipToWedding, [
+        { label: '예식 후', min: -9999, max: -1 },
+        { label: '당일', min: 0, max: 0 },
+        { label: '1~3일 전', min: 1, max: 3 },
+        { label: '4~7일 전', min: 4, max: 7 },
+        { label: '8~14일 전', min: 8, max: 14 },
+        { label: '15일+ 전', min: 15, max: 9999 },
+      ]),
+    },
+    order_to_wedding: {
+      ...statsOf(orderToWedding),
+      distribution: distOf(orderToWedding, [
+        { label: '~7일', min: 0, max: 7 },
+        { label: '8~14일', min: 8, max: 14 },
+        { label: '15~21일', min: 15, max: 21 },
+        { label: '22~30일', min: 22, max: 30 },
+        { label: '31~60일', min: 31, max: 60 },
+        { label: '60일+', min: 61, max: 99999 },
+      ]),
+    },
+    period: { start: startDate, end: endDate, ci_with_ship_date: inRange.length, total_samples: rows.length },
+  };
+}
+
 // === 스티커 · 메시지 분석 (정보입력 완료 주문 기준) ===
 //   bg_order_customer_info.sticker_selections JSONB 를 집계 — 다음 두 가지 분석:
 //   1) 상품별 스티커 인기도 (Top 10 상품 × 스티커별 선택률)
@@ -3569,6 +3808,8 @@ const server = http.createServer(async (req, res) => {
         data = await apiSamples();
       } else if (pathname === '/api/dashboard/sticker-analytics') {
         data = await apiStickerAnalytics(parsed.query);
+      } else if (pathname === '/api/dashboard/leadtime-3way') {
+        data = await apiLeadtime3way(parsed.query);
       } else if (pathname === '/api/debug-order') {
         // 주문 원시 데이터 확인용 (order_seq 파라미터)
         const seq = parseInt(parsed.query.order_seq);
