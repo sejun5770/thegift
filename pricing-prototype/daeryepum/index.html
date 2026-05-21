@@ -9343,6 +9343,28 @@ function bgCiKey(order) {
   return String(order.order_seq);
 }
 
+/**
+ * CI lookup with fallback — orphan CI (prefix 없음) 대응.
+ *   ETC 주문의 일부는 옛날 코드 / 외부 backfill 로 'order_seq' raw 형태로 저장된 row 가 존재.
+ *   primary key (예: 'ETC-3244610') 매칭 실패 시 raw seq ('3244610') 도 시도 → orphan 자동 회수.
+ *   매칭되면 콘솔 경고 (data 정리 필요 신호).
+ */
+function bgFindCi(ciMap, order) {
+  if (!order) return null;
+  const primary = bgCiKey(order);
+  let ci = ciMap.get(primary) || null;
+  if (ci) return ci;
+  // ETC 주문 — orphan raw seq 로 fallback
+  if (order.order_type === 'ETC') {
+    const raw = String(order.order_seq);
+    if (raw && ciMap.has(raw)) {
+      console.warn(`[ci-fallback] ETC 주문 CI 가 prefix 없이 저장됨: ${raw} (정상 키: ${primary}). DB 정리 추천.`);
+      return ciMap.get(raw);
+    }
+  }
+  return null;
+}
+
 function renderBgUnified() {
   const hideCancel = document.getElementById('uni-hide-cancel')?.checked;
   const hidePending = document.getElementById('uni-hide-pending')?.checked;
@@ -9373,8 +9395,8 @@ function renderBgUnified() {
   // - 입력완료: 각 상품마다 매칭되는 sticker_selection을 찾아 붙이고, 없으면 null
   bgUnifiedRows = [];
   filtered.forEach(order => {
-    const ciKey = bgCiKey(order);
-    const ci = bgUnifiedCiMap.get(ciKey) || null;
+    // bgFindCi: primary key 매칭 실패 시 orphan (prefix 누락) raw seq 로 fallback.
+    const ci = bgFindCi(bgUnifiedCiMap, order);
     const sels = ci?.sticker_selections || [];
     // 배송지별 상품 매칭 — 복합키 사용 (order_seq + delivery_seq)
     const pm = bgUnifiedProductMap.get(order._composite_key || `${order.order_seq}::${order.delivery_seq||1}`);
