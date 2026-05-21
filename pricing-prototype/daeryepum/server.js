@@ -4237,6 +4237,70 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: 'save_failed', message: e.message }));
           return;
         }
+      } else if (pathname.startsWith('/api/admin/debug-by-seq/')) {
+        // 종합 진단 — order_seq 로 MSSQL + Supabase 모든 변형 prefix CI 조회.
+        //   /api/admin/debug-by-seq/3244610
+        //   "수동 입력해도 입력완료 탭으로 안 넘어감" 류 이슈 진단용.
+        const mm = pathname.match(/^\/api\/admin\/debug-by-seq\/(\d+)$/);
+        const seq = mm ? parseInt(mm[1]) : null;
+        if (!seq) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'order_seq required' }));
+          return;
+        }
+        const pp = await getPool();
+        const wf = require('./barungift/workflow-store');
+        // 1) MSSQL — ETC / CARD 어느 테이블에 있는지 확인
+        const [etcR, cardR] = await Promise.all([
+          pp.request().input('s', sql.Int, seq).query(
+            `SELECT TOP 1 order_seq, member_id, CONVERT(varchar(10), order_date, 120) AS order_date FROM CUSTOM_ETC_ORDER WITH (NOLOCK) WHERE order_seq = @s`
+          ),
+          pp.request().input('s', sql.Int, seq).query(
+            `SELECT TOP 1 order_seq, member_id, CONVERT(varchar(10), order_date, 120) AS order_date FROM custom_order WITH (NOLOCK) WHERE order_seq = @s`
+          ),
+        ]);
+        const etcRow = etcR.recordset[0] || null;
+        const cardRow = cardR.recordset[0] || null;
+        // 2) Supabase — 모든 prefix 변형 CI row 검색
+        const variants = [`ETC-${seq}`, `${seq}`, `CP-${seq}`, `NV-${seq}`];
+        const ciResults = await Promise.all(variants.map(async v => {
+          try {
+            const ci = await wf.getCustomerInfoForUpdate(v);
+            return { order_id: v, exists: !!ci, ci: ci ? {
+              order_id: ci.order_id,
+              submitted_at: ci.submitted_at,
+              updated_at: ci.updated_at,
+              processed_at: ci.processed_at,
+              has_sticker_selections: Array.isArray(ci.sticker_selections) ? ci.sticker_selections.length : null,
+              has_desired_ship_date: !!ci.desired_ship_date,
+            } : null };
+          } catch (e) {
+            return { order_id: v, error: e.message };
+          }
+        }));
+        // 3) 진단 — 어떤 order_type 이면 frontend 가 어떤 prefix 를 쓸지
+        const expectedKey = etcRow ? `ETC-${seq}` : cardRow ? `${seq}` : '?';
+        const mismatch = ciResults
+          .filter(r => r.exists)
+          .filter(r => r.order_id !== expectedKey);
+        data = {
+          query: { seq, expected_ci_key: expectedKey },
+          mssql: {
+            etc: etcRow,
+            card: cardRow,
+            order_type: etcRow ? 'ETC' : cardRow ? 'CARD' : 'NOT_FOUND',
+          },
+          ci_variants: ciResults,
+          diagnosis: {
+            ci_exists_at_expected: ciResults.find(r => r.order_id === expectedKey)?.exists || false,
+            mismatched_rows: mismatch, // 다른 prefix 로 저장된 row (key mismatch 원인)
+            advice: mismatch.length > 0
+              ? `⚠️ CI row 가 ${mismatch.map(m => m.order_id).join(',')} 로 존재하는데 frontend 는 ${expectedKey} 를 lookup 함. order_id 정리 필요.`
+              : (!ciResults.find(r => r.order_id === expectedKey)?.exists
+                  ? `CI row 없음 — 저장이 실제로 안 됐거나 다른 prefix 로 됨 (모든 변형 확인 완료, 발견 X).`
+                  : `정상 — ${expectedKey} 에 CI 존재.`),
+          },
+        };
       } else if (pathname.startsWith('/api/admin/debug-ci/')) {
         // CI row raw 조회 — sticker_selections 의 timestamps / sticker_code 검증용
         //   /api/admin/debug-ci/{order_id} — order_id 예: ETC-3245371 또는 raw seq
