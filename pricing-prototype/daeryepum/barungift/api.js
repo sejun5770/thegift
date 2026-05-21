@@ -528,25 +528,41 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
   // POST /api/bg/stickers - 스티커 생성
   if (pathname === '/api/bg/stickers' && method === 'POST') {
-    const body = await parseBody(req);
-    if (!body.name) return json(res, { error: '스티커명을 입력해주세요.' }, 400);
-    const sticker = await store.createSticker(body);
-    return json(res, sticker, 201);
+    try {
+      const body = await parseBody(req);
+      if (!body.name) return json(res, { error: '스티커명을 입력해주세요.' }, 400);
+      const sticker = await store.createSticker(body);
+      return json(res, sticker, 201);
+    } catch (err) {
+      console.error('[bg/stickers POST]', err.message, err.stack);
+      // Supabase 에러 메시지 그대로 노출 — 운영자가 즉시 진단 가능 (PGRST204 컬럼 없음 / 23505 unique 등).
+      return json(res, { error: '스티커 생성 실패: ' + err.message }, 500);
+    }
   }
 
   // PUT /api/bg/stickers/:id - 스티커 수정
   const stickerUpdateMatch = pathname.match(/^\/api\/bg\/stickers\/([^/]+)$/);
   if (stickerUpdateMatch && method === 'PUT') {
-    const body = await parseBody(req);
-    const sticker = await store.updateSticker(stickerUpdateMatch[1], body);
-    if (!sticker) return json(res, { error: '스티커를 찾을 수 없습니다.' }, 404);
-    return json(res, sticker);
+    try {
+      const body = await parseBody(req);
+      const sticker = await store.updateSticker(stickerUpdateMatch[1], body);
+      if (!sticker) return json(res, { error: '스티커를 찾을 수 없습니다.' }, 404);
+      return json(res, sticker);
+    } catch (err) {
+      console.error('[bg/stickers PUT]', err.message, err.stack);
+      return json(res, { error: '스티커 수정 실패: ' + err.message }, 500);
+    }
   }
 
   // DELETE /api/bg/stickers/:id - 스티커 삭제
   if (stickerUpdateMatch && method === 'DELETE') {
-    await store.deleteSticker(stickerUpdateMatch[1]);
-    return json(res, { success: true });
+    try {
+      await store.deleteSticker(stickerUpdateMatch[1]);
+      return json(res, { success: true });
+    } catch (err) {
+      console.error('[bg/stickers DELETE]', err.message, err.stack);
+      return json(res, { error: '스티커 삭제 실패: ' + err.message }, 500);
+    }
   }
 
   // GET /api/bg/products/settings - 전체 상품 설정 목록
