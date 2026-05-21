@@ -510,6 +510,23 @@ nav.nav-loading a[href^="#"] {
     </div>
   </div>
 
+  <!-- 🎨 스티커 / 💬 메시지 분석 (정보입력 완료 주문 기준) — sticker_selections JSONB 분석 -->
+  <div class="section">
+    <div class="section-title">🎨 스티커 · 💬 메시지 분석 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(고객 정보입력 완료된 주문 기준)</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <!-- 좌: 상품별 스티커 타입 인기도 -->
+      <div class="card">
+        <h3 style="margin:0 0 8px;font-size:14px">상품별 스티커 인기도 <span style="font-size:11px;color:var(--gray-500);font-weight:400">(Top 10 상품 × 스티커별 선택률)</span></h3>
+        <div id="sa-products"><div style="color:var(--gray-400);text-align:center;padding:20px;font-size:12px">로딩 중...</div></div>
+      </div>
+      <!-- 우: 메시지 분석 -->
+      <div class="card">
+        <h3 style="margin:0 0 8px;font-size:14px">메시지 분석 <span style="font-size:11px;color:var(--gray-500);font-weight:400">(custom_fields 입력값 통계)</span></h3>
+        <div id="sa-messages"><div style="color:var(--gray-400);text-align:center;padding:20px;font-size:12px">로딩 중...</div></div>
+      </div>
+    </div>
+  </div>
+
   <!-- 희망출고일별 매출 (정보입력 완료 기준) — 매출 데이터와 기간 차원이 다름 (order_date vs desired_ship_date) -->
   <div class="section">
     <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -4138,6 +4155,8 @@ async function loadDashboard() {
     // 전환율 + 샘플 (별도 로드)
     fetch(`${API}/api/dashboard/conversion`).then(r=>r.json()).then(renderConversion).catch(e=>console.warn('Conversion load failed:', e));
     fetch(`${API}/api/dashboard/samples`).then(r=>r.json()).then(renderSamples).catch(e=>console.warn('Samples load failed:', e));
+    // 스티커 · 메시지 분석 (정보입력 완료 주문 기준, 90일 default — dashboard date 와 무관)
+    loadStickerAnalytics();
     // 희망출고일별 매출 — 기본 향후 30일 프리셋으로 초기 로드 (사용자가 별도 변경 가능)
     setBsdPreset('next-30');
   } catch(e) { console.error(e); showToast('대시보드 로딩 실패: ' + e.message); }
@@ -5104,6 +5123,123 @@ function setBsdPreset(preset, btn) {
   document.querySelectorAll('.bsd-preset').forEach(b => b.classList.remove('btn-primary'));
   if (btn) btn.classList.add('btn-primary');
   loadByShipDate();
+}
+
+/**
+ * 🎨 스티커 · 💬 메시지 분석 — apiStickerAnalytics 응답 기반 렌더.
+ *   기간: dashboard 의 dash-start / dash-end 사용 (default 90일 분량 — bg_order_customer_info.submitted_at 기준).
+ *   실패해도 silent (loadDashboard 다른 부분 영향 X).
+ */
+async function loadStickerAnalytics() {
+  const start = document.getElementById('dash-start').value;
+  const end = document.getElementById('dash-end').value;
+  const params = new URLSearchParams();
+  if (start) params.set('start_date', start);
+  if (end) params.set('end_date', end);
+  try {
+    const r = await fetch(`${API}/api/dashboard/sticker-analytics?${params.toString()}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    renderStickerAnalytics(d);
+  } catch (e) {
+    console.warn('[sticker-analytics] 로드 실패:', e.message);
+    document.getElementById('sa-products').innerHTML = '<div style="color:var(--red);text-align:center;padding:20px;font-size:12px">조회 실패</div>';
+    document.getElementById('sa-messages').innerHTML = '<div style="color:var(--red);text-align:center;padding:20px;font-size:12px">조회 실패</div>';
+  }
+}
+
+function renderStickerAnalytics(d) {
+  // === 좌: 상품별 스티커 인기도 ===
+  const productsEl = document.getElementById('sa-products');
+  if (!d.products?.length) {
+    productsEl.innerHTML = '<div style="color:var(--gray-400);text-align:center;padding:20px;font-size:12px">분석 데이터 없음 — 정보입력 완료된 주문이 없습니다.</div>';
+  } else {
+    productsEl.innerHTML = d.products.map(p => {
+      const stickerBars = p.stickers.slice(0, 5).map(s => {
+        const label = s.sticker_code
+          ? `<span style="font-family:monospace;font-size:10px;color:var(--gray-500)">${esc(s.sticker_code)}</span> ${esc(s.sticker_name || '-')}`
+          : '<span style="color:var(--gray-500);font-style:italic">스티커 없음</span>';
+        const barColor = s.sticker_code ? 'var(--primary)' : 'var(--gray-300)';
+        return `<div style="display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0">
+          <div style="flex:0 0 150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${label}</div>
+          <div style="flex:1;background:var(--gray-100);border-radius:3px;height:8px;position:relative;min-width:40px">
+            <div style="position:absolute;left:0;top:0;bottom:0;width:${s.pct}%;background:${barColor};border-radius:3px"></div>
+          </div>
+          <div style="flex:0 0 70px;text-align:right;color:var(--gray-600);font-size:10px">${fmtNum(s.count)}회 (${s.pct}%)</div>
+        </div>`;
+      }).join('');
+      const moreCnt = p.stickers.length - 5;
+      const moreNote = moreCnt > 0 ? `<div style="font-size:10px;color:var(--gray-400);margin-top:2px">+ ${moreCnt}개 더</div>` : '';
+      return `<div style="margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--gray-100)">
+        <div style="font-weight:600;font-size:12px;margin-bottom:4px;display:flex;justify-content:space-between;gap:8px">
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.product_name)}</span>
+          <span style="color:var(--gray-400);font-size:11px;font-weight:400;flex-shrink:0">${fmtNum(p.total)}건 선택</span>
+        </div>
+        ${stickerBars}
+        ${moreNote}
+      </div>`;
+    }).join('');
+  }
+
+  // === 우: 메시지 분석 ===
+  const msgEl = document.getElementById('sa-messages');
+  const m = d.messages || {};
+  const inputRate = m.total > 0 ? Math.round(m.non_empty / m.total * 100) : 0;
+
+  if (!m.total) {
+    msgEl.innerHTML = '<div style="color:var(--gray-400);text-align:center;padding:20px;font-size:12px">메시지 데이터 없음</div>';
+    return;
+  }
+
+  // 통계 카드 (3분할)
+  const statsHtml = `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">
+      <div style="background:var(--gray-50);padding:10px;border-radius:6px;text-align:center">
+        <div style="font-size:10px;color:var(--gray-500)">입력률</div>
+        <div style="font-size:16px;font-weight:700">${inputRate}%</div>
+        <div style="font-size:10px;color:var(--gray-500)">${fmtNum(m.non_empty)}/${fmtNum(m.total)}건</div>
+      </div>
+      <div style="background:var(--gray-50);padding:10px;border-radius:6px;text-align:center">
+        <div style="font-size:10px;color:var(--gray-500)">평균/중앙</div>
+        <div style="font-size:16px;font-weight:700">${m.avg_length}/${m.median_length}<span style="font-size:11px">자</span></div>
+        <div style="font-size:10px;color:var(--gray-500)">최대 ${m.max_length}자</div>
+      </div>
+      <div style="background:var(--gray-50);padding:10px;border-radius:6px;text-align:center">
+        <div style="font-size:10px;color:var(--gray-500)">최다 단어</div>
+        <div style="font-size:14px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((m.top_words || [])[0]?.word || '-')}</div>
+        <div style="font-size:10px;color:var(--gray-500)">${fmtNum((m.top_words || [])[0]?.count || 0)}회</div>
+      </div>
+    </div>`;
+
+  // 단어 클라우드 (top 20, 빈도순 크기 가변)
+  const topWords = (m.top_words || []).slice(0, 20);
+  const maxCount = topWords[0]?.count || 1;
+  const wordsHtml = topWords.length ? `
+    <div style="font-weight:600;font-size:11px;margin-bottom:6px;color:var(--gray-600)">🔥 자주 등장 단어 Top ${topWords.length}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:12px">
+      ${topWords.map(w => {
+        const ratio = w.count / maxCount;
+        const size = Math.max(11, Math.round(11 + ratio * 8));
+        const weight = ratio > 0.6 ? 700 : ratio > 0.3 ? 600 : 500;
+        return `<span style="padding:3px 9px;background:#eef2ff;color:#4338ca;border-radius:12px;font-size:${size}px;font-weight:${weight}">${esc(w.word)} <span style="color:var(--gray-500);font-size:10px;font-weight:400">${w.count}</span></span>`;
+      }).join('')}
+    </div>` : '';
+
+  // 키워드 카테고리 분포
+  const categories = (m.keyword_categories || []).filter(c => c.count > 0);
+  const categoriesHtml = categories.length ? `
+    <div style="font-weight:600;font-size:11px;margin-bottom:6px;color:var(--gray-600)">📊 메시지 카테고리 (키워드 포함률)</div>
+    <div>${categories.map(c => `
+      <div style="display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0">
+        <div style="flex:0 0 80px;color:var(--gray-700)">${esc(c.category)}</div>
+        <div style="flex:1;background:var(--gray-100);border-radius:3px;height:8px;position:relative">
+          <div style="position:absolute;left:0;top:0;bottom:0;width:${c.pct}%;background:#a78bfa;border-radius:3px"></div>
+        </div>
+        <div style="flex:0 0 80px;text-align:right;color:var(--gray-600);font-size:10px">${fmtNum(c.count)}건 (${c.pct}%)</div>
+      </div>`).join('')}
+    </div>` : '';
+
+  msgEl.innerHTML = statsHtml + wordsHtml + categoriesHtml;
 }
 
 /** 희망출고일별 매출 조회 — input 의 start/end 로 fetch. */

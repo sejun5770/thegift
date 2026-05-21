@@ -2785,6 +2785,150 @@ async function apiConversion() {
   return { weeks, sites: [...MAIN_SITES, '기타'] };
 }
 
+// === 스티커 · 메시지 분석 (정보입력 완료 주문 기준) ===
+//   bg_order_customer_info.sticker_selections JSONB 를 집계 — 다음 두 가지 분석:
+//   1) 상품별 스티커 인기도 (Top 10 상품 × 스티커별 선택률)
+//   2) 메시지 분석 — 입력률, 길이 통계, 자주 등장 단어 / 키워드 카테고리
+//   기간 필터: submitted_at 기준 (기본 최근 90일).
+async function apiStickerAnalytics(query) {
+  const _bgStore = require('./barungift/store');
+  const endDate = query.end_date || fmtDate(addDays(today(), 1));
+  const startDate = query.start_date || fmtDate(addDays(today(), -90));
+
+  let allCi = [];
+  try {
+    allCi = await _bgStore.getAllCustomerInfos();
+  } catch (e) {
+    console.warn('[sticker-analytics] CI fetch 실패:', e.message);
+    return { products: [], messages: { total: 0 }, period: { start: startDate, end: endDate, ci_count: 0 } };
+  }
+  // 기간 필터 (submitted_at 또는 updated_at — submitted 우선)
+  const inRange = allCi.filter(ci => {
+    const ts = ci.submitted_at || ci.updated_at;
+    if (!ts) return false;
+    const day = String(ts).slice(0, 10);
+    return day >= startDate && day <= endDate;
+  });
+
+  // 집계
+  const productMap = new Map(); // product_code -> { product_name, total, stickerMap }
+  const messages = [];
+  for (const ci of inRange) {
+    const sels = Array.isArray(ci.sticker_selections) ? ci.sticker_selections : [];
+    for (const sel of sels) {
+      const pc = sel.product_code;
+      if (!pc) continue;
+      let p = productMap.get(pc);
+      if (!p) {
+        p = { product_code: pc, product_name: sel.product_name || pc, total: 0, stickerMap: new Map() };
+        productMap.set(pc, p);
+      }
+      p.total++;
+      const sCode = (sel.sticker_code || '').trim() || null;
+      const sName = (sel.sticker_name || '').trim() || null;
+      const key = sCode || '_no_sticker';
+      let s = p.stickerMap.get(key);
+      if (!s) {
+        s = { sticker_code: sCode, sticker_name: sName, count: 0 };
+        p.stickerMap.set(key, s);
+      }
+      s.count++;
+      // 메시지 수집 (custom_values 모든 string 값)
+      const cv = sel.custom_values || {};
+      for (const v of Object.values(cv)) {
+        if (typeof v === 'string') messages.push(v);
+      }
+    }
+  }
+
+  // 상품별 스티커 인기도 (Top 10 상품)
+  const products = [...productMap.values()]
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10)
+    .map(p => ({
+      product_code: p.product_code,
+      product_name: p.product_name,
+      total: p.total,
+      stickers: [...p.stickerMap.values()]
+        .sort((a, b) => b.count - a.count)
+        .map(s => ({
+          sticker_code: s.sticker_code,
+          sticker_name: s.sticker_name,
+          count: s.count,
+          pct: Math.round(s.count / p.total * 100),
+        })),
+    }));
+
+  // 메시지 분석
+  const total = messages.length;
+  const nonEmpty = messages.filter(m => m.trim().length > 0);
+  const lengths = nonEmpty.map(m => m.length).sort((a, b) => a - b);
+  const sum = lengths.reduce((s, v) => s + v, 0);
+  const avgLength = lengths.length ? Math.round(sum / lengths.length) : 0;
+  const medianLength = lengths.length ? lengths[Math.floor(lengths.length / 2)] : 0;
+  const maxLength = lengths.length ? lengths[lengths.length - 1] : 0;
+
+  // 자주 등장 단어 (whitespace split, 2자 이상, 한글/영문/숫자만, 불용어 제외)
+  const stopWords = new Set(['그리고', '하지만', '그래서', '이번', '저희', '저는', '저의', '우리', '우리의']);
+  const wordCounts = new Map();
+  for (const msg of nonEmpty) {
+    const tokens = msg.split(/[\s,\.!?·,]+/);
+    for (const raw of tokens) {
+      const w = raw.replace(/[^가-힯\w]/g, '').trim();
+      if (!w || w.length < 2 || stopWords.has(w)) continue;
+      // 숫자만은 제외
+      if (/^\d+$/.test(w)) continue;
+      wordCounts.set(w, (wordCounts.get(w) || 0) + 1);
+    }
+  }
+  const topWords = [...wordCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 30)
+    .map(([word, count]) => ({ word, count }));
+
+  // 키워드 카테고리 — 답례품 메시지 도메인 사전. 사용자 messages 중 카테고리 포함 비율.
+  const KEYWORD_CATEGORIES = {
+    '감사': ['감사', '고맙', '땡큐', 'thank', 'thanks'],
+    '축하': ['축하', 'congrat'],
+    '사랑': ['사랑', '러브', 'love'],
+    '결혼/예식': ['결혼', '예식', '웨딩', 'wedding', 'marry'],
+    '행복': ['행복', '해피', 'happy'],
+    '함께': ['함께', '같이'],
+    '꽃길': ['꽃길'],
+    '축복': ['축복', 'bless'],
+    '하나': ['하나', '둘이', '둘이서'],
+    '영원': ['영원', '평생'],
+  };
+  const keywordCategories = [];
+  for (const [cat, keywords] of Object.entries(KEYWORD_CATEGORIES)) {
+    let cnt = 0;
+    for (const msg of nonEmpty) {
+      const lc = msg.toLowerCase();
+      if (keywords.some(k => lc.includes(k.toLowerCase()))) cnt++;
+    }
+    keywordCategories.push({
+      category: cat,
+      count: cnt,
+      pct: nonEmpty.length > 0 ? Math.round(cnt / nonEmpty.length * 100) : 0,
+    });
+  }
+  keywordCategories.sort((a, b) => b.count - a.count);
+
+  return {
+    products,
+    messages: {
+      total,
+      non_empty: nonEmpty.length,
+      avg_length: avgLength,
+      median_length: medianLength,
+      max_length: maxLength,
+      top_words: topWords,
+      keyword_categories: keywordCategories,
+    },
+    period: { start: startDate, end: endDate, ci_count: inRange.length },
+  };
+}
+
 // === 샘플 주문 (수량=1) 일별 추이 ===
 async function apiSamples() {
   const p = await getPool();
@@ -3423,6 +3567,8 @@ const server = http.createServer(async (req, res) => {
         data = await apiConversion();
       } else if (pathname === '/api/dashboard/samples') {
         data = await apiSamples();
+      } else if (pathname === '/api/dashboard/sticker-analytics') {
+        data = await apiStickerAnalytics(parsed.query);
       } else if (pathname === '/api/debug-order') {
         // 주문 원시 데이터 확인용 (order_seq 파라미터)
         const seq = parseInt(parsed.query.order_seq);
