@@ -95,14 +95,34 @@ function stageByKey(stage) { return `${stage}_by`; }
 
 /**
  * customer_info row 조회 — 워크플로우 patch 의 read-modify-write 용.
+ *   orphan CI (prefix 누락) fallback 포함: 'ETC-X' 못 찾으면 raw 'X' 도 시도.
+ *   _resolvedOrderId 필드 추가 — caller 가 어느 키로 매칭됐는지 알 수 있게 (PATCH 시 사용).
  */
 async function getCustomerInfoForUpdate(orderId) {
   if (!USE) return null;
+  // 1차: 원래 키
   const url = `${REST}/bg_order_customer_info?order_id=eq.${encodeURIComponent(orderId)}&select=*&limit=1`;
   const res = await fetch(url, { headers: HDR });
-  if (!res.ok) return null;
-  const rows = await res.json();
-  return rows[0] || null;
+  if (res.ok) {
+    const rows = await res.json();
+    if (rows[0]) return { ...rows[0], _resolvedOrderId: orderId };
+  }
+  // 2차 fallback: 'ETC-X' 못 찾으면 raw 'X' (orphan CI 대응)
+  if (typeof orderId === 'string' && orderId.startsWith('ETC-')) {
+    const raw = orderId.slice(4);
+    if (/^\d+$/.test(raw)) {
+      const fbUrl = `${REST}/bg_order_customer_info?order_id=eq.${encodeURIComponent(raw)}&select=*&limit=1`;
+      const fbRes = await fetch(fbUrl, { headers: HDR });
+      if (fbRes.ok) {
+        const fbRows = await fbRes.json();
+        if (fbRows[0]) {
+          console.warn(`[wf-store] orphan CI fallback: ${orderId} → ${raw} 로 매칭. DB cleanup 추천.`);
+          return { ...fbRows[0], _resolvedOrderId: raw };
+        }
+      }
+    }
+  }
+  return null;
 }
 
 /** PATCH 통해 customer_info row 업데이트 (sticker_selections 등). */
@@ -172,7 +192,8 @@ async function _patchStickerWorkflowImpl({ orderId, stickerIndex, stage, by, jum
   }
 
   sels[stickerIndex] = sel;
-  return updateCustomerInfo(orderId, { sticker_selections: sels });
+  // orphan CI fallback — getCustomerInfoForUpdate 가 raw seq 로 매칭됐으면 그 키로 PATCH.
+  return updateCustomerInfo(ci._resolvedOrderId || orderId, { sticker_selections: sels });
 }
 
 /**
@@ -208,7 +229,8 @@ async function _addStickerImageMetaImpl({ orderId, stickerIndex, image, by }) {
   });
   sel.images = images;
   sels[stickerIndex] = sel;
-  return updateCustomerInfo(orderId, { sticker_selections: sels });
+  // orphan CI fallback — getCustomerInfoForUpdate 가 raw seq 로 매칭됐으면 그 키로 PATCH.
+  return updateCustomerInfo(ci._resolvedOrderId || orderId, { sticker_selections: sels });
 }
 
 /** 스티커 이미지 metadata 제거. 마지막 이미지 삭제 시 sticker_completed_at 도 NULL 처리. */
@@ -234,7 +256,8 @@ async function _removeStickerImageMetaImpl({ orderId, stickerIndex, filename }) 
   }
   sel.images = images;
   sels[stickerIndex] = sel;
-  return updateCustomerInfo(orderId, { sticker_selections: sels });
+  // orphan CI fallback — getCustomerInfoForUpdate 가 raw seq 로 매칭됐으면 그 키로 PATCH.
+  return updateCustomerInfo(ci._resolvedOrderId || orderId, { sticker_selections: sels });
 }
 
 /** 메인 이미지 변경. */
@@ -255,7 +278,8 @@ async function _setStickerMainImageImpl({ orderId, stickerIndex, filename }) {
   });
   if (!found) throw new Error(`image not found: ${filename}`);
   sels[stickerIndex] = sel;
-  return updateCustomerInfo(orderId, { sticker_selections: sels });
+  // orphan CI fallback — getCustomerInfoForUpdate 가 raw seq 로 매칭됐으면 그 키로 PATCH.
+  return updateCustomerInfo(ci._resolvedOrderId || orderId, { sticker_selections: sels });
 }
 
 // ============================================
@@ -388,7 +412,8 @@ async function _insertInvoiceImpl({ orderId, invoiceNumber, deliveryCompany, sti
           sels[i] = { ...sels[i], shipped_at: now, shipped_by: shippedBy || null };
         }
       });
-      await updateCustomerInfo(orderId, { sticker_selections: sels });
+      // orphan CI fallback — 매칭된 실제 키로 PATCH
+      await updateCustomerInfo(ciFresh._resolvedOrderId || orderId, { sticker_selections: sels });
     }
   } catch (e) {
     console.warn(`[invoice insert] sticker shipped_at sync 실패 ${orderId}: ${e.message}`);
@@ -434,7 +459,8 @@ async function _deleteInvoiceImpl(invoiceId, prefetchedRows) {
             changed = true;
           }
         });
-        if (changed) await updateCustomerInfo(inv.order_id, { sticker_selections: sels });
+        // orphan CI fallback — 매칭된 실제 키로 PATCH
+        if (changed) await updateCustomerInfo(ci._resolvedOrderId || inv.order_id, { sticker_selections: sels });
       }
     } catch (e) {
       console.warn(`[invoice delete] sticker shipped_at rollback 실패: ${e.message}`);
