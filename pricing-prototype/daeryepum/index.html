@@ -255,9 +255,10 @@ nav.nav-loading a[href^="#"] {
   <!-- Sales Data Toggle -->
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
     <span style="font-size:15px;font-weight:700">📋 기간 매출 현황</span>
-    <div style="display:flex;gap:4px">
+    <div style="display:flex;gap:4px;align-items:center">
       <button class="btn btn-sm btn-primary" id="btn-view-card" onclick="setDashView('card')">카드 보기</button>
       <button class="btn btn-sm" id="btn-view-table" onclick="setDashView('table')">테이블 보기</button>
+      <button class="btn btn-sm" id="btn-dash-download" onclick="downloadDashTableExcel()" style="display:none;border-color:#10b981;color:#047857" title="현재 테이블 내용을 엑셀로 다운로드">📥 엑셀</button>
     </div>
   </div>
   <div id="dash-card-view">
@@ -561,6 +562,7 @@ nav.nav-loading a[href^="#"] {
           <button id="bsd-view-chart" onclick="setBsdView('chart')" style="padding:6px 12px;font-size:12px;border:none;background:var(--primary);color:#fff;cursor:pointer">📊 차트</button>
           <button id="bsd-view-table" onclick="setBsdView('table')" style="padding:6px 12px;font-size:12px;border:none;background:#fff;color:var(--gray-700);cursor:pointer;border-left:1px solid var(--gray-300)">📋 테이블</button>
         </div>
+        <button class="btn btn-sm" onclick="downloadBsdExcel()" style="border-color:#10b981;color:#047857;padding:6px 12px;font-size:12px" title="현재 조회된 희망출고일별 매출을 엑셀로 다운로드">📥 엑셀</button>
       </div>
       <div style="display:flex;gap:24px;margin-bottom:12px;flex-wrap:wrap">
         <div><span style="font-size:12px;color:var(--gray-500)">총 매출</span><br><strong id="bsd-total-amount" style="font-size:16px">-</strong></div>
@@ -5400,7 +5402,54 @@ function setBsdView(view) {
   }
 }
 
+// 희망출고일별 매출 — 마지막 응답 cache (엑셀 다운로드 재활용용).
+let _lastBsdData = null;
+
+/**
+ * 희망출고일별 매출 엑셀 다운로드 — 현재 조회된 데이터를 TSV 로 export.
+ *   컬럼: 희망출고일 / 요일 / 매출 / 주문 / 수량 / 일반매출 / 일반건수 / 빠른출고매출 / 빠른출고건수 / 빠른출고비중%
+ *   차트/테이블 뷰 무관 동일 데이터.
+ */
+function downloadBsdExcel() {
+  const data = _lastBsdData;
+  if (!data || !Array.isArray(data.ship_dates) || !data.ship_dates.length) {
+    showToast('다운로드할 데이터가 없습니다');
+    return;
+  }
+  const headers = ['희망출고일', '요일', '매출', '주문건수', '수량', '일반매출', '일반건수', '빠른출고매출', '빠른출고건수', '빠른출고비중(%)'];
+  const dowNames = ['일', '월', '화', '수', '목', '금', '토'];
+  const rows = data.ship_dates.map(d => {
+    const dow = dowNames[new Date(d.date + 'T00:00:00').getDay()];
+    const exprAmt = d.express?.amount || 0;
+    const exprOrd = d.express?.orders || 0;
+    const regAmt = d.regular?.amount || 0;
+    const regOrd = d.regular?.orders || 0;
+    const totalAmt = d.amount || 0;
+    const exprPct = totalAmt > 0 ? Math.round(exprAmt / totalAmt * 100) : 0;
+    return [d.date, dow, totalAmt, d.orders || 0, d.qty || 0, regAmt, regOrd, exprAmt, exprOrd, exprPct].join('\t');
+  });
+  // 합계 footer
+  const total = data.total || { amount: 0, orders: 0, qty: 0 };
+  const totalExprAmt = data.ship_dates.reduce((s, d) => s + (d.express?.amount || 0), 0);
+  const totalExprOrd = data.ship_dates.reduce((s, d) => s + (d.express?.orders || 0), 0);
+  const totalRegAmt = data.ship_dates.reduce((s, d) => s + (d.regular?.amount || 0), 0);
+  const totalRegOrd = data.ship_dates.reduce((s, d) => s + (d.regular?.orders || 0), 0);
+  const totalExprPct = total.amount > 0 ? Math.round(totalExprAmt / total.amount * 100) : 0;
+  const footer = ['합계', '-', total.amount, total.orders, total.qty, totalRegAmt, totalRegOrd, totalExprAmt, totalExprOrd, totalExprPct].join('\t');
+  const BOM = '﻿';
+  const tsv = BOM + [headers.join('\t'), ...rows, footer].join('\n');
+  const blob = new Blob([tsv], { type: 'text/tab-separated-values;charset=utf-8' });
+  const start = document.getElementById('bsd-start')?.value || '';
+  const end = document.getElementById('bsd-end')?.value || '';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `희망출고일별매출_${start}_${end}.tsv`;
+  a.click();
+  showToast(`${rows.length}일 다운로드 완료`);
+}
+
 function renderByShipDate(data) {
+  _lastBsdData = data; // 엑셀 다운로드 재활용용 cache
   const safe = data || {};
   const total = safe.total || { amount: 0, orders: 0, qty: 0 };
   const dates = Array.isArray(safe.ship_dates) ? safe.ship_dates : [];
@@ -6459,7 +6508,43 @@ function setDashView(mode) {
   document.getElementById('dash-table-view').style.display = mode === 'table' ? '' : 'none';
   document.getElementById('btn-view-card').className = 'btn btn-sm' + (mode === 'card' ? ' btn-primary' : '');
   document.getElementById('btn-view-table').className = 'btn btn-sm' + (mode === 'table' ? ' btn-primary' : '');
+  // 엑셀 다운로드 버튼은 테이블 뷰에서만 노출
+  const btnDl = document.getElementById('btn-dash-download');
+  if (btnDl) btnDl.style.display = (mode === 'table') ? '' : 'none';
   if (mode === 'table' && dashboardSummaryData.length > 0) renderDashTable();
+}
+
+/**
+ * 기간 매출 현황 (일자별 / 주차별) 엑셀 다운로드.
+ *   현재 렌더된 #sales-table 의 thead + tbody 를 그대로 TSV 로 변환.
+ *   merged cells / 다중 헤더 행 모두 지원 — 시각 그대로 export.
+ */
+function downloadDashTableExcel() {
+  const tbl = document.getElementById('sales-table');
+  if (!tbl) { showToast('테이블이 없습니다'); return; }
+  const rows = [];
+  // thead — 행 단위로 각 셀 textContent 추출
+  tbl.querySelectorAll('thead tr').forEach(tr => {
+    const cells = [...tr.querySelectorAll('th,td')].map(c => (c.textContent || '').trim().replace(/\s+/g, ' '));
+    if (cells.length) rows.push(cells.join('\t'));
+  });
+  // tbody
+  tbl.querySelectorAll('tbody tr').forEach(tr => {
+    const cells = [...tr.querySelectorAll('th,td')].map(c => (c.textContent || '').trim().replace(/\s+/g, ' '));
+    if (cells.length) rows.push(cells.join('\t'));
+  });
+  if (!rows.length) { showToast('다운로드할 데이터가 없습니다'); return; }
+  const BOM = '﻿';
+  const tsv = BOM + rows.join('\n');
+  const blob = new Blob([tsv], { type: 'text/tab-separated-values;charset=utf-8' });
+  const start = document.getElementById('dash-start')?.value || '';
+  const end = document.getElementById('dash-end')?.value || '';
+  const tabSuffix = tableTabMode === 'weekly' ? '주차별' : '일자별';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `기간매출_${tabSuffix}_${start}_${end}.tsv`;
+  a.click();
+  showToast(`${rows.length - 1}행 다운로드 완료`);
 }
 
 function setTableTab(tab) {
