@@ -8,7 +8,40 @@
 <style>
 :root{--primary:#2563eb;--primary-light:#dbeafe;--green:#16a34a;--green-bg:#dcfce7;--red:#dc2626;--red-bg:#fee2e2;--orange:#ea580c;--yellow:#fbbf24;--gray-50:#f9fafb;--gray-100:#f3f4f6;--gray-200:#e5e7eb;--gray-300:#d1d5db;--gray-500:#6b7280;--gray-700:#374151;--gray-900:#111827;--radius:8px}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,'Pretendard','Noto Sans KR',sans-serif;background:var(--gray-50);color:var(--gray-900);font-size:14px}
+body{font-family:-apple-system,'Pretendard','Noto Sans KR',sans-serif;background:var(--gray-50);color:var(--gray-900);font-size:14px;background-attachment:fixed}
+/* ============================================
+   배경 패턴 — body 의 data-bg-pattern attribute 로 적용.
+   localStorage 'bg-pattern' 에 저장 / 복원. SVG/gradient CSS-only (네트워크 fetch 없음).
+   각 패턴은 fixed attachment 로 스크롤 시 안정.
+   ============================================ */
+body[data-bg-pattern="dots"]{background-image:radial-gradient(circle,var(--gray-200) 1px,transparent 1px);background-size:18px 18px}
+body[data-bg-pattern="grid"]{background-image:linear-gradient(var(--gray-200) 1px,transparent 1px),linear-gradient(90deg,var(--gray-200) 1px,transparent 1px);background-size:24px 24px}
+body[data-bg-pattern="diagonal"]{background-image:repeating-linear-gradient(45deg,transparent,transparent 14px,var(--gray-100) 14px,var(--gray-100) 15px)}
+body[data-bg-pattern="paper"]{background-image:radial-gradient(circle at 20% 30%,rgba(0,0,0,0.018) 0%,transparent 35%),radial-gradient(circle at 70% 70%,rgba(0,0,0,0.015) 0%,transparent 40%),radial-gradient(circle at 50% 50%,rgba(255,255,255,0.4) 0%,transparent 60%)}
+body[data-bg-pattern="cross"]{background-image:linear-gradient(var(--gray-100) 0.5px,transparent 0.5px),linear-gradient(90deg,var(--gray-100) 0.5px,transparent 0.5px);background-size:50px 50px}
+body[data-bg-pattern="warm"]{background:linear-gradient(135deg,#fef9f3 0%,#fef3e6 50%,#fef9f3 100%)}
+body[data-bg-pattern="cool"]{background:linear-gradient(135deg,#f0f7ff 0%,#e6f0fc 50%,#f0f7ff 100%)}
+body[data-bg-pattern="mint"]{background:linear-gradient(135deg,#f0fdf4 0%,#dcfce7 50%,#f0fdf4 100%)}
+
+/* 배경 패턴 선택기 (floating button + popup panel) */
+.bg-picker-btn{position:fixed;bottom:20px;right:20px;width:44px;height:44px;border-radius:50%;background:#fff;border:1px solid var(--gray-300);box-shadow:0 4px 12px rgba(0,0,0,0.15);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:20px;z-index:200;transition:all 0.15s}
+.bg-picker-btn:hover{transform:scale(1.05);box-shadow:0 6px 18px rgba(0,0,0,0.2)}
+.bg-picker-panel{position:fixed;bottom:74px;right:20px;width:260px;background:#fff;border:1px solid var(--gray-200);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.15);padding:14px;z-index:201;display:none}
+.bg-picker-panel.open{display:block}
+.bg-picker-title{font-size:12px;font-weight:700;color:var(--gray-700);margin-bottom:10px}
+.bg-picker-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.bg-picker-item{aspect-ratio:1;border:2px solid var(--gray-200);border-radius:8px;cursor:pointer;transition:all 0.15s;position:relative;overflow:hidden;background:var(--gray-50)}
+.bg-picker-item:hover{border-color:var(--primary);transform:scale(1.05)}
+.bg-picker-item.active{border-color:var(--primary);border-width:3px;box-shadow:0 0 0 1px rgba(37,99,235,0.2)}
+.bg-picker-item[data-pattern="dots"]{background-image:radial-gradient(circle,var(--gray-200) 1px,transparent 1px);background-size:8px 8px;background-color:var(--gray-50)}
+.bg-picker-item[data-pattern="grid"]{background-image:linear-gradient(var(--gray-200) 1px,transparent 1px),linear-gradient(90deg,var(--gray-200) 1px,transparent 1px);background-size:10px 10px;background-color:var(--gray-50)}
+.bg-picker-item[data-pattern="diagonal"]{background:repeating-linear-gradient(45deg,var(--gray-50),var(--gray-50) 6px,var(--gray-100) 6px,var(--gray-100) 7px)}
+.bg-picker-item[data-pattern="paper"]{background:radial-gradient(circle at 30% 40%,#fafafa 0%,#f4f4f5 100%)}
+.bg-picker-item[data-pattern="cross"]{background-image:linear-gradient(var(--gray-100) 0.5px,transparent 0.5px),linear-gradient(90deg,var(--gray-100) 0.5px,transparent 0.5px);background-size:14px 14px;background-color:var(--gray-50)}
+.bg-picker-item[data-pattern="warm"]{background:linear-gradient(135deg,#fef9f3,#fef3e6)}
+.bg-picker-item[data-pattern="cool"]{background:linear-gradient(135deg,#f0f7ff,#e6f0fc)}
+.bg-picker-item[data-pattern="mint"]{background:linear-gradient(135deg,#f0fdf4,#dcfce7)}
+.bg-picker-label{position:absolute;bottom:2px;left:0;right:0;text-align:center;font-size:9px;color:var(--gray-600);font-weight:500;text-shadow:0 0 2px rgba(255,255,255,0.8)}
 /* NAV */
 nav{background:#fff;border-bottom:1px solid var(--gray-200);padding:0 24px;display:flex;align-items:center;height:52px;gap:32px;position:sticky;top:0;z-index:100}
 .user-area{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--gray-500)}
@@ -1906,6 +1939,41 @@ nav.nav-loading a[href^="#"] {
   </div>
 </div>
 
+<!-- 배경 패턴 선택기 — floating button + popup panel -->
+<button class="bg-picker-btn" id="bg-picker-btn" title="배경 패턴 변경" onclick="toggleBgPicker()">🎨</button>
+<div class="bg-picker-panel" id="bg-picker-panel">
+  <div class="bg-picker-title">🎨 배경 패턴 선택</div>
+  <div class="bg-picker-grid">
+    <div class="bg-picker-item" data-pattern="none" onclick="setBgPattern('none')" title="기본 (패턴 없음)">
+      <span class="bg-picker-label">기본</span>
+    </div>
+    <div class="bg-picker-item" data-pattern="dots" onclick="setBgPattern('dots')" title="점 패턴">
+      <span class="bg-picker-label">점</span>
+    </div>
+    <div class="bg-picker-item" data-pattern="grid" onclick="setBgPattern('grid')" title="격자">
+      <span class="bg-picker-label">격자</span>
+    </div>
+    <div class="bg-picker-item" data-pattern="cross" onclick="setBgPattern('cross')" title="얇은 격자">
+      <span class="bg-picker-label">얇은격자</span>
+    </div>
+    <div class="bg-picker-item" data-pattern="diagonal" onclick="setBgPattern('diagonal')" title="대각선">
+      <span class="bg-picker-label">대각선</span>
+    </div>
+    <div class="bg-picker-item" data-pattern="paper" onclick="setBgPattern('paper')" title="종이 질감">
+      <span class="bg-picker-label">종이</span>
+    </div>
+    <div class="bg-picker-item" data-pattern="warm" onclick="setBgPattern('warm')" title="웜 그라디언트">
+      <span class="bg-picker-label">웜</span>
+    </div>
+    <div class="bg-picker-item" data-pattern="cool" onclick="setBgPattern('cool')" title="쿨 그라디언트">
+      <span class="bg-picker-label">쿨</span>
+    </div>
+    <div class="bg-picker-item" data-pattern="mint" onclick="setBgPattern('mint')" title="민트 그라디언트">
+      <span class="bg-picker-label">민트</span>
+    </div>
+  </div>
+</div>
+
 <script>
 // basePath 자동 감지: /c/barungift/ → '/c/barungift', localhost:3457/ → ''
 const API = window.location.pathname.replace(/\/+$/, '') || '';
@@ -2083,6 +2151,8 @@ function init() {
   buildColSelector();
   // GNB 설정 적용 — 페이지 로드 직후 (네비 깜빡임 최소화). 실패해도 페이지 진행.
   fetchAndApplyNavConfig().catch(() => {});
+  // 배경 패턴 복원 (localStorage)
+  restoreBgPattern();
   loadCollectedFromServer().catch(() => {}).finally(() => {
     loadDashboard();
     loadOrders();
@@ -2097,6 +2167,54 @@ function init() {
 
 function fmt(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function fmtKRW(n) { return (n||0).toLocaleString('ko-KR') + '원'; }
+
+// ============================================
+// 배경 패턴 선택기 — localStorage 기반 영구 저장
+// ============================================
+const BG_PATTERNS = ['none','dots','grid','cross','diagonal','paper','warm','cool','mint'];
+
+function restoreBgPattern() {
+  try {
+    const saved = localStorage.getItem('bg-pattern');
+    const pattern = BG_PATTERNS.includes(saved) ? saved : 'none';
+    applyBgPattern(pattern);
+  } catch (e) {
+    // localStorage 차단 환경 — 기본값 적용
+    applyBgPattern('none');
+  }
+}
+
+function applyBgPattern(pattern) {
+  if (pattern === 'none' || !pattern) {
+    document.body.removeAttribute('data-bg-pattern');
+  } else {
+    document.body.setAttribute('data-bg-pattern', pattern);
+  }
+  // 픽커 active 상태 동기화
+  document.querySelectorAll('.bg-picker-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.pattern === (pattern || 'none'));
+  });
+}
+
+function setBgPattern(pattern) {
+  applyBgPattern(pattern);
+  try { localStorage.setItem('bg-pattern', pattern); } catch {}
+}
+
+function toggleBgPicker() {
+  const panel = document.getElementById('bg-picker-panel');
+  if (panel) panel.classList.toggle('open');
+}
+
+// 패널 바깥 클릭 시 닫기
+document.addEventListener('click', (e) => {
+  const panel = document.getElementById('bg-picker-panel');
+  const btn = document.getElementById('bg-picker-btn');
+  if (!panel || !btn) return;
+  if (panel.classList.contains('open') && !panel.contains(e.target) && !btn.contains(e.target)) {
+    panel.classList.remove('open');
+  }
+});
 
 /**
  * ISO 일시 → 'YYYY-MM-DD HH:mm' (KST 통일).
@@ -9708,9 +9826,17 @@ function renderBgUnified() {
     // 워크플로우 셀 — 행의 현재 stage 에 맞는 액션 버튼
     const workflowCell = _renderWorkflowCell(rowIdx, order, ci, sel, sticker_index);
 
+    // 요청사항 있는 주문 하이라이트 — 노란 배경 + 📝 아이콘 prefix. 운영자 주의 환기용.
+    const hasRequest = !!(ci?.customer_request && String(ci.customer_request).trim() && !/^\[admin\]/.test(String(ci.customer_request)));
+    const orderSeqStyle = hasRequest
+      ? 'font-weight:700;white-space:nowrap;background:#fef3c7;color:#92400e;border-radius:4px;padding:2px 6px'
+      : 'font-weight:600;white-space:nowrap';
+    const orderSeqContent = hasRequest
+      ? `<span title="${esc(String(ci.customer_request).slice(0, 200))}">📝 ${esc(order.order_seq)}</span>`
+      : esc(order.order_seq);
     html += `<tr class="${rowClass}" style="${borderStyle};cursor:pointer" onclick="_onUniRowClick(${rowIdx}, event)">
       <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()" onclick="event.stopPropagation()"></td>
-      <td style="font-weight:600;white-space:nowrap">${esc(order.order_seq)}</td>
+      <td style="${orderSeqStyle}">${orderSeqContent}</td>
       <td style="font-size:12px;color:var(--gray-500);white-space:nowrap">${orderDateFmt}</td>
       <td class="uni-col-input" style="font-size:12px${activeTab === 'unsubmitted' ? ';display:none' : ''}">${inputBadge}</td>
       ${processedCellHtml}
