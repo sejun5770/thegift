@@ -1790,7 +1790,7 @@ nav.nav-loading a[href^="#"] {
             <th style="width:36px"></th>
             <th>주문번호</th>
             <th>주문일</th>
-            <th style="white-space:nowrap">입력일시</th>
+            <th class="uni-col-input" style="white-space:nowrap">입력일시</th>
             <th class="uni-col-processed" style="white-space:nowrap;display:none" title="정보수집이 완료되어 주문수집 스프레드시트로 등록이 완료된 주문건입니다.">주문수집 <span style="font-size:10px;color:var(--gray-400);font-weight:400;cursor:help">ⓘ</span></th>
             <th>상품명</th>
             <th style="text-align:center">수량</th>
@@ -9295,6 +9295,10 @@ function switchUniTab(tab) {
   document.querySelectorAll('.uni-col-ci').forEach(el => {
     el.style.display = showCiCols ? '' : 'none';
   });
+  // 입력일시 컬럼 — 미입력 탭에선 모두 '미입력' 뱃지라 의미 없음 → hide.
+  document.querySelectorAll('.uni-col-input').forEach(el => {
+    el.style.display = (tab !== 'unsubmitted') ? '' : 'none';
+  });
   // 정렬 옵션 — 미입력 외 모든 탭 노출. 기본 정렬 힌트는 탭별로 다름.
   const sortOpts = document.getElementById('uni-sort-options');
   if (sortOpts) sortOpts.style.display = (tab !== 'unsubmitted') ? 'flex' : 'none';
@@ -9711,7 +9715,7 @@ function renderBgUnified() {
       <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()" onclick="event.stopPropagation()"></td>
       <td style="font-weight:600;white-space:nowrap">${esc(order.order_seq)}</td>
       <td style="font-size:12px;color:var(--gray-500);white-space:nowrap">${orderDateFmt}</td>
-      <td style="font-size:12px">${inputBadge}</td>
+      <td class="uni-col-input" style="font-size:12px">${inputBadge}</td>
       ${processedCellHtml}
       <td style="font-size:12px">${productName}</td>
       <td style="text-align:center;font-size:12px">${itemCount}</td>
