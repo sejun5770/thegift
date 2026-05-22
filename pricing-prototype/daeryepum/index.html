@@ -9715,7 +9715,7 @@ function renderBgUnified() {
       <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()" onclick="event.stopPropagation()"></td>
       <td style="font-weight:600;white-space:nowrap">${esc(order.order_seq)}</td>
       <td style="font-size:12px;color:var(--gray-500);white-space:nowrap">${orderDateFmt}</td>
-      <td class="uni-col-input" style="font-size:12px">${inputBadge}</td>
+      <td class="uni-col-input" style="font-size:12px${activeTab === 'unsubmitted' ? ';display:none' : ''}">${inputBadge}</td>
       ${processedCellHtml}
       <td style="font-size:12px">${productName}</td>
       <td style="text-align:center;font-size:12px">${itemCount}</td>
