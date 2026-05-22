@@ -983,8 +983,13 @@
   /**
    * 특정 날짜가 속한 존(zone) 판정
    * @returns {'closed'|'express'|'normal'} closed=선택불가, express=빠른출고존, normal=일반출고존
-   * 빠른/일반 존이 겹치는 경우엔 빠른출고(고객 유리하지 않은쪽)보다 express 우선 표기.
-   * 실제 클릭시 존에 따라 shipping_type 이 결정됨.
+   *
+   * 정책 (2026-05-21 변경 — 운영팀 요청):
+   *   빠른/일반 존이 겹치는 날에는 normal 우선. 이유: 해당 날짜는 일반출고로도 받을 수
+   *   있으므로 고객에게 빠른출고 비용을 안내할 필요 없음 (고객 부담 최소화).
+   *   빠른출고 zone 은 normal zone 의 '바깥쪽' (보통 더 빠른 출고일) 에서만 의미 있음.
+   *
+   * 이전 정책: express 우선 (겹치는 날에도 빠른출고 비용 부과) — 2026-05-21 까지.
    */
   function getDateZone(dateStr) {
     if (!dateStr) return 'closed';
@@ -993,8 +998,8 @@
     const norm = getNormalRange();
     const inExpr = expr && dateStr >= expr.min && dateStr <= expr.max;
     const inNorm = norm && dateStr >= norm.min && dateStr <= norm.max;
+    if (inNorm) return 'normal';   // 겹쳐도 일반출고 우선 (무료 — 고객 부담 최소화)
     if (inExpr) return 'express';
-    if (inNorm) return 'normal';
     return 'closed';
   }
 
