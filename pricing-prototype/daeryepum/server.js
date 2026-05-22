@@ -4395,6 +4395,35 @@ const server = http.createServer(async (req, res) => {
         }
         logAdminAccess(session, req, 'cleanup-orphan-ci', {});
         data = await scanAndCleanupOrphanCi({ execute: true });
+      } else if (pathname === '/api/admin/discover-card-divs' && req.method === 'GET') {
+        // S2_Card 의 Card_Div 분포 + 샘플 — 화환 등 미등록 카테고리 식별용.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const pp = await getPool();
+        const r = await pp.request().query(`
+          WITH ranked AS (
+            SELECT Card_Div, Card_Name, Card_Code,
+              ROW_NUMBER() OVER (PARTITION BY Card_Div ORDER BY Card_Seq DESC) AS rn,
+              COUNT(*) OVER (PARTITION BY Card_Div) AS total
+            FROM S2_Card WITH (NOLOCK)
+          )
+          SELECT Card_Div, total, Card_Name, Card_Code
+          FROM ranked
+          WHERE rn <= 5
+          ORDER BY total DESC, Card_Div, rn
+        `);
+        // Group by Card_Div for cleaner output
+        const byDiv = {};
+        r.recordset.forEach(row => {
+          if (!byDiv[row.Card_Div]) byDiv[row.Card_Div] = { card_div: row.Card_Div, total: row.total, samples: [] };
+          byDiv[row.Card_Div].samples.push({ name: row.Card_Name, code: row.Card_Code });
+        });
+        data = {
+          known_categories: Object.entries(CATEGORY_FILTERS).map(([key, v]) => ({ category_key: key, label: v.label, filter: v.filter })),
+          card_divs: Object.values(byDiv).sort((a, b) => b.total - a.total),
+          hint: '화환 / M카드 전용 상품 등을 위 목록에서 식별 후 CATEGORY_FILTERS 에 추가 요청해주세요.',
+        };
       } else if (pathname.startsWith('/api/admin/debug-by-seq/')) {
         // 종합 진단 — order_seq 로 MSSQL + Supabase 모든 변형 prefix CI 조회.
         //   /api/admin/debug-by-seq/3244610
