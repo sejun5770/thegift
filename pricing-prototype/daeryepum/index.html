@@ -1803,7 +1803,6 @@ nav.nav-loading a[href^="#"] {
             <th class="uni-col-ci" style="display:none">희망출고일</th>
             <th class="uni-col-ci" style="display:none">출고방식</th>
             <th class="uni-col-ci" style="display:none">현금영수증</th>
-            <th class="uni-col-ci" style="max-width:160px;display:none">요청사항</th>
             <th></th>
             <th class="uni-col-workflow" style="min-width:160px;white-space:nowrap;display:none">워크플로우</th>
           </tr>
@@ -9669,8 +9668,6 @@ function renderBgUnified() {
     const receiptText = ci ? (ci.cash_receipt_yn
       ? esc((receiptLabel[ci.receipt_type] || '') + ' ' + (ci.receipt_number || ''))
       : '미신청') : '<span style="color:var(--gray-300)">-</span>';
-    const requestText = ci?.customer_request || '';
-
     // 상품명: 행 단위로 이미 product_name 제공. sel.product_name이 있으면 우선 사용 (사용자 저장값).
     // XSS: 상품명은 MSSQL S2_Card 에서 옴 → escape 적용
     const productName = esc(sel?.product_name || product_name || '-');
@@ -9729,7 +9726,6 @@ function renderBgUnified() {
       <td class="uni-col-ci" style="font-size:12px;white-space:nowrap${activeTab === 'unsubmitted' ? ';display:none' : ''}">${shipDate}</td>
       <td class="uni-col-ci" style="font-size:12px${activeTab === 'unsubmitted' ? ';display:none' : ''}">${shipType}</td>
       <td class="uni-col-ci" style="font-size:12px${activeTab === 'unsubmitted' ? ';display:none' : ''}">${receiptText}</td>
-      <td class="uni-col-ci" style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray-500)${activeTab === 'unsubmitted' ? ';display:none' : ''}" title="${esc(requestText)}">${requestText ? esc(requestText) : '<span style="color:var(--gray-300)">-</span>'}</td>
       <td>${editBtn}</td>
       <td class="uni-col-workflow" style="font-size:11px;vertical-align:top;padding:6px 8px${(activeTab === 'unsubmitted' || activeTab === 'submitted') ? ';display:none' : ''}">${workflowCell}</td>
     </tr>`;
