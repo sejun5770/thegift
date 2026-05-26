@@ -1453,7 +1453,7 @@ nav.nav-loading a[href^="#"] {
 
 <!-- 상품 설정 모달 (v4 - 스티커 선택 UX 개선) -->
 <div id="bg-product-modal" onclick="if(event.target===this)closeBgProductForm()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
-  <div style="background:#fff;border-radius:12px;max-width:500px;width:95%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+  <div style="background:#fff;border-radius:12px;max-width:680px;width:95%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">
     <!-- 헤더 -->
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200);border-radius:12px 12px 0 0;flex-shrink:0">
       <div>
@@ -1463,8 +1463,8 @@ nav.nav-loading a[href^="#"] {
       <button onclick="closeBgProductForm()" style="border:none;background:none;font-size:20px;cursor:pointer;color:var(--gray-500);line-height:1">&times;</button>
     </div>
 
-    <!-- 바디 (스크롤 없음 — 내부 리스트만 스크롤) -->
-    <div style="padding:16px 20px;display:flex;flex-direction:column;gap:12px;flex:1;min-height:0">
+    <!-- 바디 — 내부 스크롤 (옵션 그룹 등 콘텐츠 많아도 footer 항상 노출) -->
+    <div style="padding:16px 20px;display:flex;flex-direction:column;gap:12px;flex:1;min-height:0;overflow-y:auto">
 
       <!-- 품목 식별 정보 — 품목코드/브랜드/제품명 -->
       <div style="display:grid;grid-template-columns:130px 1fr;gap:8px">
