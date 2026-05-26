@@ -1071,11 +1071,19 @@
     const boxOptions = getBoxOptionsForProduct(productCode);
     // 품절 아닌 첫 옵션을 기본값으로. 모든 옵션이 품절이면 null → 고객이 수동 선택 필요
     const firstAvailableBox = (boxOptions || []).find(o => !o.sold_out);
+    // 자유 옵션 그룹 — 각 그룹별 품절 아닌 첫 옵션 기본 선택
+    const customGroups = getCustomOptionGroupsForProduct(productCode);
+    const defaultCustom = {};
+    for (const [gName, g] of Object.entries(customGroups)) {
+      const firstAvail = (g.options || []).find(o => !o.sold_out);
+      if (firstAvail) defaultCustom[gName] = firstAvail.code;
+    }
     return {
       sticker_type: firstStickerId,
       sticker_input: firstStickerId ? 'custom' : 'none',
       sticker_fields: {},
       box_code: firstAvailableBox ? firstAvailableBox.code : null,
+      custom_options: defaultCustom,  // { 그룹명: 선택된code, ... }
     };
   }
 
@@ -1176,6 +1184,15 @@
           const boxOptions = getBoxOptionsForProduct(productCode);
           if (boxOptions.length > 0) {
             const picked = boxOptions.find(o => o.code === ps.box_code);
+            if (!picked || picked.sold_out) return false;
+          }
+
+          // 자유 옵션 그룹 — 각 그룹마다 유효한 (품절 아닌) 코드 선택 필수
+          const customGroups = getCustomOptionGroupsForProduct(productCode);
+          for (const [gName, g] of Object.entries(customGroups)) {
+            const selected = (ps.custom_options || {})[gName];
+            if (!selected) return false;
+            const picked = (g.options || []).find(o => o.code === selected);
             if (!picked || picked.sold_out) return false;
           }
 
@@ -1292,6 +1309,30 @@
     return [];
   }
 
+  /**
+   * 상품에 매핑된 자유 옵션 그룹 목록 (수건 색상, 고리수건 타입 등).
+   * @returns {Object<string,{use_images:boolean, options:Array}>}
+   *   서버(bg_product_settings.custom_options)에서 내려온 그룹.
+   *   해당 상품이 자유 옵션을 쓰지 않으면 빈 객체.
+   *   options 가 1개 이상 있는 그룹만 반환 (빈 그룹은 UI 미노출).
+   */
+  function getCustomOptionGroupsForProduct(productCode) {
+    const map = orderData?.custom_options_by_product;
+    if (!productCode || !map || !map[productCode]) return {};
+    const raw = map[productCode];
+    const result = {};
+    for (const [gName, val] of Object.entries(raw || {})) {
+      if (!val) continue;
+      const opts = Array.isArray(val.options) ? val.options : (Array.isArray(val) ? val : []);
+      if (!opts.length) continue;
+      result[gName] = {
+        use_images: val && typeof val === 'object' && !Array.isArray(val) ? (val.use_images !== false) : true,
+        options: opts,
+      };
+    }
+    return result;
+  }
+
   function renderStep1() {
     // 진입시마다 이전 선택값을 관리자 최신 설정 기준으로 재검증 (무효하면 초기화)
     validateShipDate();
@@ -1370,9 +1411,52 @@
     }
   }
 
+  /**
+   * 자유 옵션 그룹 선택 재검증.
+   * - 그룹 삭제됨 → ps.custom_options 에서 키 제거
+   * - 그룹은 살아있지만 선택 코드가 없거나 품절 → 품절 아닌 첫 옵션으로 fallback (없으면 null)
+   * - ps.custom_options 자체가 없으면 객체로 초기화 후 기본값 seeding
+   */
+  function validateCustomSelections() {
+    const products = orderData?.products || [];
+    let changed = false;
+    for (let i = 0; i < products.length; i++) {
+      const productCode = products[i].product_code;
+      const groups = getCustomOptionGroupsForProduct(productCode);
+      const groupNames = Object.keys(groups);
+      const ps = formState.products[String(i)];
+      if (!ps) continue;
+      if (!ps.custom_options || typeof ps.custom_options !== 'object') {
+        ps.custom_options = {};
+        changed = true;
+      }
+      // 기존 선택값 중 삭제된 그룹/존재 안 하는/품절 코드 정리
+      for (const key of Object.keys(ps.custom_options)) {
+        if (!groups[key]) { delete ps.custom_options[key]; changed = true; continue; }
+        const opts = groups[key].options || [];
+        const picked = opts.find(o => o.code === ps.custom_options[key]);
+        if (!picked || picked.sold_out) {
+          const fallback = opts.find(o => !o.sold_out);
+          ps.custom_options[key] = fallback ? fallback.code : null;
+          changed = true;
+        }
+      }
+      // 새로 추가된 그룹 — 기본 옵션 자동 선택
+      for (const gName of groupNames) {
+        if (ps.custom_options[gName] != null) continue;
+        const fallback = (groups[gName].options || []).find(o => !o.sold_out);
+        if (fallback) { ps.custom_options[gName] = fallback.code; changed = true; }
+      }
+    }
+    if (changed) {
+      try { saveFormState(); } catch (e) { /* ignore */ }
+    }
+  }
+
   /** 스티커 선택 (Step 0) — 상품 개인화를 먼저 받아 고객 몰입도 확보 */
   function renderStep0() {
     validateBoxSelections(); // 진입시마다 품절/삭제된 옵션 정리
+    validateCustomSelections(); // 자유 옵션 그룹도 동일하게 재검증
     const products = orderData?.products || [];
 
     var cardsHtml = products.map(function(p, i) {
@@ -1430,6 +1514,68 @@
           + '</div>';
       }
 
+      // 자유 옵션 그룹 — 박스와 동일한 카드 UI 패턴 (use_images=false 면 이미지 영역 제거 텍스트만)
+      var customGroups = getCustomOptionGroupsForProduct(productCode);
+      var customGroupNames = Object.keys(customGroups);
+      var customHtml = '';
+      if (customGroupNames.length > 0) {
+        var selectedCustom = (ps.custom_options && typeof ps.custom_options === 'object') ? ps.custom_options : {};
+        customHtml = customGroupNames.map(function(gName) {
+          var g = customGroups[gName];
+          var useImages = g.use_images !== false;
+          var opts = g.options || [];
+          var selectedCode = selectedCustom[gName] || '';
+          var safeGroupName = esc(gName);
+          var cardsHtml = opts.map(function(opt) {
+            var isSel = selectedCode === opt.code;
+            var isSoldOut = !!opt.sold_out;
+            var cardCls = isSoldOut
+              ? 'ring-1 ring-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
+              : (isSel
+                  ? 'ring-2 ring-indigo-500 gradient-brand-soft'
+                  : 'ring-1 ring-slate-200 bg-white hover:ring-indigo-300');
+            var safeOptName = esc(opt.name || opt.code || '');
+            var safeOptCode = esc(opt.code || '');
+            var safeColor = esc(opt.color || '#F3F4F6');
+            var safeImgUrl = esc(opt.preview_image_url || '');
+            var thumbHtml = '';
+            if (useImages) {
+              thumbHtml = opt.preview_image_url
+                ? '<img src="' + safeImgUrl + '" alt="' + safeOptName + '" class="w-full aspect-square object-contain bg-white pointer-events-none' + (isSoldOut ? ' grayscale' : '') + '" loading="lazy" />'
+                : '<div class="w-full aspect-square pointer-events-none' + (isSoldOut ? ' grayscale' : '') + '" style="background:' + safeColor + '"></div>';
+            }
+            var tag = isSoldOut ? 'div' : 'button';
+            var actionAttrs = isSoldOut ? ''
+              : ' data-action="productCustomSelect"'
+              + ' data-idx="' + idx + '"'
+              + ' data-group="' + safeGroupName + '"'
+              + ' data-value="' + safeOptCode + '"';
+            var soldOutOverlay = isSoldOut
+              ? '<div class="absolute inset-0 flex items-center justify-center pointer-events-none">'
+                + '<span class="bg-rose-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-lifted" style="letter-spacing:0.5px">🚫 품절</span>'
+                + '</div>'
+              : '';
+            // 이미지 미사용 시 카드 높이를 텍스트 중심으로 자연스럽게 (aspect-square 미사용)
+            return ''
+              + '<' + tag + ' type="button"' + actionAttrs
+              +   ' class="' + (isSoldOut ? '' : 'pressable ') + cardCls + ' rounded-xl overflow-hidden text-left w-full transition touch-manipulation relative' + (useImages ? '' : ' py-3 px-3') + '">'
+              +   (isSel && !isSoldOut ? '<span class="absolute top-1.5 right-1.5 z-10 gradient-brand text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-lifted">✓</span>' : '')
+              +   thumbHtml
+              +   soldOutOverlay
+              +   (useImages
+                    ? '<div class="px-2 py-1.5 text-xs"><div class="font-semibold truncate ' + (isSoldOut ? 'text-slate-400' : 'text-slate-800') + '">' + esc(opt.name || opt.code) + '</div></div>'
+                    : '<div class="text-[13px] font-semibold ' + (isSoldOut ? 'text-slate-400' : 'text-slate-800') + ' text-center">' + esc(opt.name || opt.code) + '</div>')
+              + '</' + tag + '>';
+          }).join('');
+          var gridCols = useImages ? 'grid-cols-3 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3';
+          return ''
+            + '<div class="mt-4">'
+            +   '<label class="block text-[12px] font-semibold text-slate-700 mb-2">' + esc(gName) + ' <span class="text-rose-500">*</span></label>'
+            +   '<div class="grid ' + gridCols + ' gap-2">' + cardsHtml + '</div>'
+            + '</div>';
+        }).join('');
+      }
+
       var stTypeHtml = '';
       if (matching.length === 0) {
         stTypeHtml = '<div class="mt-3 text-xs text-slate-400">이 상품에 적용 가능한 스티커가 없습니다.</div>';
@@ -1485,6 +1631,7 @@
           '<h3 class="text-[15px] font-bold text-slate-900 mb-1">' + esc(p.product_name || '상품') + '</h3>' +
           '<p class="text-[12px] text-slate-400">수량 ' + (Number(p.quantity) || 1) + '개 · <span class="font-mono">' + esc(productCode) + '</span></p>' +
           boxHtml +       // 박스 패키지 선택 (해당 상품만)
+          customHtml +    // 자유 옵션 그룹 (수건 색상, 고리수건 타입 등)
           stTypeHtml +    // 스티커 선택
           stInputHtml +   // 스티커 직접입력
         '</div>'
@@ -1721,6 +1868,33 @@
         var boxLabel = box ? esc(box.name || box.code) : '<span class="text-rose-500">미선택</span>';
         boxRowHtml = '<div class="flex justify-between items-center"><span class="text-slate-500">박스 패키지</span><span class="text-slate-900 font-medium flex items-center">' + boxThumb + boxLabel + '</span></div>';
       }
+
+      // 자유 옵션 그룹 표시 (확인 화면) — 이미지 사용 그룹은 thumbnail, 미사용 그룹은 텍스트만
+      var customRowHtml = '';
+      var customGroupsConfirm = getCustomOptionGroupsForProduct(p.product_code);
+      var customGroupNamesConfirm = Object.keys(customGroupsConfirm);
+      if (customGroupNamesConfirm.length > 0) {
+        var selectedCustomConfirm = (ps.custom_options && typeof ps.custom_options === 'object') ? ps.custom_options : {};
+        customRowHtml = customGroupNamesConfirm.map(function(gName) {
+          var g = customGroupsConfirm[gName];
+          var useImagesConfirm = g.use_images !== false;
+          var selCode = selectedCustomConfirm[gName] || '';
+          var picked = (g.options || []).find(function(o){ return o.code === selCode; });
+          var valHtml = '<span class="text-rose-500">미선택</span>';
+          if (picked) {
+            var pickedName = esc(picked.name || picked.code || '');
+            if (useImagesConfirm) {
+              var thumbConfirm = picked.preview_image_url
+                ? '<img src="' + esc(picked.preview_image_url) + '" alt="opt" class="inline-block w-10 h-10 object-contain rounded-lg border border-slate-200 mr-2 align-middle" />'
+                : '<span class="inline-block w-10 h-10 rounded-lg border border-slate-200 mr-2 align-middle" style="background:' + esc(picked.color || '#F3F4F6') + '"></span>';
+              valHtml = thumbConfirm + pickedName;
+            } else {
+              valHtml = pickedName;
+            }
+          }
+          return '<div class="flex justify-between items-center"><span class="text-slate-500">' + esc(gName) + '</span><span class="text-slate-900 font-medium flex items-center">' + valHtml + '</span></div>';
+        }).join('');
+      }
       return (
         '<div class="surface p-4 mb-2">' +
           '<div class="flex items-center justify-between mb-2">' +
@@ -1728,6 +1902,7 @@
           '</div>' +
           '<div class="space-y-1.5 text-sm">' +
             boxRowHtml +
+            customRowHtml +
             '<div class="flex justify-between items-center"><span class="text-slate-500">스티커</span><span class="text-slate-900 font-medium flex items-center">' + stickerThumb + stickerLabel + '</span></div>' +
             (sticker ? '<div class="flex justify-between"><span class="text-slate-500">스티커정보</span><span class="text-slate-900 font-medium">' + inputLabel + '</span></div>' : '') +
           '</div>' +
@@ -2323,6 +2498,22 @@
         }
         break;
       }
+      case 'productCustomSelect': {
+        // 자유 옵션 그룹 선택 (수건 색상, 고리수건 타입 등)
+        const node = target.closest('[data-action="productCustomSelect"]') || target;
+        const idx = node.dataset.idx;
+        const groupName = node.dataset.group;
+        const val = node.dataset.value;
+        if (idx == null || !groupName) break;
+        const ps = ensureProductEntry(idx);
+        if (!ps.custom_options || typeof ps.custom_options !== 'object') ps.custom_options = {};
+        if (ps.custom_options[groupName] !== val) {
+          ps.custom_options[groupName] = val || null;
+          saveFormState();
+          renderCurrentStep();
+        }
+        break;
+      }
       case 'openStickerModal': {
         const idx = target.dataset.idx;
         const stId = target.dataset.value;
@@ -2556,6 +2747,17 @@
       // 박스 옵션 선택 정보 (있는 상품만)
       const boxOptions = getBoxOptionsForProduct(p.product_code);
       const box = (boxOptions.length && ps.box_code) ? boxOptions.find(function(o){ return o.code === ps.box_code; }) : null;
+      // 자유 옵션 그룹 — 그룹별 {code, name} 매핑으로 변환 (서버 저장 시 사람이 읽기 쉽도록)
+      const customGroups = getCustomOptionGroupsForProduct(p.product_code);
+      const customOptionsPayload = {};
+      for (const [gName, g] of Object.entries(customGroups)) {
+        const selCode = (ps.custom_options || {})[gName];
+        if (!selCode) continue;
+        const picked = (g.options || []).find(o => o.code === selCode);
+        customOptionsPayload[gName] = picked
+          ? { code: picked.code, name: picked.name || picked.code }
+          : { code: selCode, name: selCode };
+      }
       return {
         product_code: p.product_code,
         product_name: p.product_name,
@@ -2567,6 +2769,7 @@
         custom_values: ps.sticker_input === 'custom' ? (ps.sticker_fields || {}) : {},
         box_code: box ? box.code : null,
         box_name: box ? (box.name || box.code) : null,
+        custom_options: customOptionsPayload,  // { 그룹명: {code, name} } — 자유 옵션 선택
       };
     });
 
@@ -2577,8 +2780,8 @@
       desired_ship_date: representativeDate,
       products: productInputs,
       sticker_selections: productInputs
-        // 스티커 OR 박스 어느 하나라도 있으면 선택 row 로 남김
-        .filter(function(pi){ return pi.sticker_id || pi.box_code; })
+        // 스티커 OR 박스 OR 자유옵션 어느 하나라도 있으면 선택 row 로 남김
+        .filter(function(pi){ return pi.sticker_id || pi.box_code || (pi.custom_options && Object.keys(pi.custom_options).length > 0); })
         .map(function(pi){ return {
           product_code: pi.product_code,
           product_name: pi.product_name,
@@ -2588,6 +2791,7 @@
           custom_values: pi.custom_values,
           box_code: pi.box_code,
           box_name: pi.box_name,
+          custom_options: pi.custom_options || {},
         }; }),
       cash_receipt_yn: formState.cash_receipt_yn,
       receipt_type: formState.receipt_type,
@@ -2957,6 +3161,22 @@
       const boxLine = s.box_code
         ? '<div class="flex justify-between text-sm"><span class="text-slate-500">박스 패키지</span><span class="text-slate-900 font-medium">' + esc(s.box_name || s.box_code) + ' <span class="text-slate-400 font-mono text-[11px]">[' + esc(s.box_code) + ']</span></span></div>'
         : '';
+      // 자유 옵션 그룹 (수건 색상, 고리수건 타입 등) — 저장된 sticker_selections[i].custom_options 노출
+      //   schema: {그룹명: {code, name}} — 둘 다 노출 (name = 사람용, code = 운영용 fingerprint)
+      var customOptsLines = '';
+      if (s.custom_options && typeof s.custom_options === 'object') {
+        customOptsLines = Object.entries(s.custom_options).map(function(pair) {
+          var gName = pair[0];
+          var picked = pair[1] || {};
+          // 호환성: 과거 string-only 저장형도 처리
+          var name = (typeof picked === 'string') ? picked : (picked.name || picked.code || '');
+          var code = (typeof picked === 'string') ? picked : (picked.code || '');
+          if (!name && !code) return '';
+          return '<div class="flex justify-between text-sm"><span class="text-slate-500">' + esc(gName) + '</span><span class="text-slate-900 font-medium">' + esc(name)
+            + (code && code !== name ? ' <span class="text-slate-400 font-mono text-[11px]">[' + esc(code) + ']</span>' : '')
+            + '</span></div>';
+        }).join('');
+      }
       // 고객 입력 문구. 기본 fallback 키 'text' 는 '스티커 문구' 로 치환해서 보여줌.
       const FIELD_LABEL = { text: '스티커 문구' };
       const customVals = Object.entries(s.custom_values || {}).filter(function(pair){ return pair[1]; });
@@ -2979,7 +3199,7 @@
 
       return '<div class="surface p-4 mb-2">'
         + '<h4 class="text-[14px] font-bold text-slate-900 mb-2">' + esc(p.product_name || '상품') + ' <span class="text-[11px] font-medium text-slate-400">(수량 ' + (Number(p.quantity) || 1) + ')</span></h4>'
-        + '<div class="space-y-1.5">' + boxLine + stickerLine + '</div>'
+        + '<div class="space-y-1.5">' + boxLine + customOptsLines + stickerLine + '</div>'
         + customHtml
         + '</div>';
     }).join('');
