@@ -11810,7 +11810,7 @@ function openBgOrderEditByIdx(idx) {
 
 // 수정 모달 전역 캐시 (불필요한 재조회 방지)
 let _bgEditAllStickers = null;            // [{id, sticker_code, name, custom_fields, ...}]
-const _bgEditProductSettingsCache = new Map(); // productCode → { available_sticker_ids, available_box_options }
+const _bgEditProductSettingsCache = new Map(); // productCode → { available_sticker_ids, available_box_options, custom_options }
 
 /**
  * 정보입력현황 — 스티커 데이터 사전 로드 (custom_fields 라벨 lookup 용).
@@ -11889,13 +11889,25 @@ async function _loadBgEditStickersAndSettings(productCodes) {
     try {
       const r = await fetch(API + '/api/bg/products/' + encodeURIComponent(code) + '/settings');
       const s = (await r.json()).settings || {};
+      // custom_options 정규화 — legacy array 형식 자동 wrap
+      const rawCustom = (s.custom_options && typeof s.custom_options === 'object' && !Array.isArray(s.custom_options)) ? s.custom_options : {};
+      const customGroups = {};
+      for (const [gName, val] of Object.entries(rawCustom)) {
+        if (Array.isArray(val)) {
+          if (val.length) customGroups[gName] = { use_images: true, options: val };
+        } else if (val && typeof val === 'object') {
+          const opts = Array.isArray(val.options) ? val.options : [];
+          if (opts.length) customGroups[gName] = { use_images: val.use_images !== false, options: opts };
+        }
+      }
       _bgEditProductSettingsCache.set(code, {
         available_sticker_ids: s.available_sticker_ids || [],
         available_box_options: Array.isArray(s.available_box_options) ? s.available_box_options : [],
+        custom_options: customGroups,
       });
     } catch(e) {
       console.warn('settings fetch fail', code, e);
-      _bgEditProductSettingsCache.set(code, { available_sticker_ids: [], available_box_options: [] });
+      _bgEditProductSettingsCache.set(code, { available_sticker_ids: [], available_box_options: [], custom_options: {} });
     }
   }));
 }
@@ -12005,7 +12017,7 @@ function renderBgEditStickers() {
       ? `<div style="font-size:11px;color:var(--gray-500);margin-bottom:8px">📦 ${productName}${productCode ? ' <span style="font-family:monospace">(' + productCode + ')</span>' : ''}</div>`
       : '';
 
-    const settings = _bgEditProductSettingsCache.get(productCode) || { available_sticker_ids: [], available_box_options: [] };
+    const settings = _bgEditProductSettingsCache.get(productCode) || { available_sticker_ids: [], available_box_options: [], custom_options: {} };
 
     // 박스 드롭다운 (옵션 있을 때만)
     let boxBlock = '';
@@ -12022,6 +12034,34 @@ function renderBgEditStickers() {
           ${boxOpts}
         </select>
       </div>`;
+    }
+
+    // 자유 옵션 그룹 드롭다운 (그룹별 1개씩) — 수건 색상, 고리수건 타입 등.
+    //   sel.custom_options = {그룹명: {code,name} | 'code'(legacy)}.
+    //   각 그룹마다 select 드롭다운으로 admin 변경 가능.
+    let customBlock = '';
+    const customGroupNames = Object.keys(settings.custom_options || {});
+    if (customGroupNames.length > 0) {
+      const currentCustom = (s.custom_options && typeof s.custom_options === 'object') ? s.custom_options : {};
+      customBlock = customGroupNames.map(gName => {
+        const g = settings.custom_options[gName];
+        const opts = g.options || [];
+        const curVal = currentCustom[gName];
+        const curCode = (curVal && typeof curVal === 'object') ? (curVal.code || '') : (typeof curVal === 'string' ? curVal : '');
+        const optHtml = opts.map(opt => {
+          const sel = curCode === opt.code ? 'selected' : '';
+          const soldOut = opt.sold_out ? ' [🚫 품절]' : '';
+          return '<option value="' + (opt.code || '').replace(/"/g,'&quot;') + '"' + sel + (opt.sold_out ? ' disabled' : '') + '>' + (opt.name || opt.code) + soldOut + '</option>';
+        }).join('');
+        const safeGroupAttr = String(gName).replace(/"/g,'&quot;');
+        return `<div style="margin-bottom:6px">
+          <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">${gName}</label>
+          <select data-edit-sticker-idx="${idx}" data-edit-field="custom_option" data-group-name="${safeGroupAttr}" onchange="onBgEditStickerChange(this)" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px">
+            <option value="">선택안함</option>
+            ${optHtml}
+          </select>
+        </div>`;
+      }).join('');
     }
 
     // 스티커 드롭다운 — 해당 상품에 매핑된 스티커.
@@ -12080,6 +12120,7 @@ function renderBgEditStickers() {
     return `<div data-edit-row="${idx}" style="padding:10px;background:var(--gray-50);border-radius:6px;margin-bottom:8px;border-left:3px solid var(--primary)">
       ${productLabel}
       ${boxBlock}
+      ${customBlock}
       ${stickerBlock}
       ${fieldInputsHtml}
     </div>`;
@@ -12101,6 +12142,24 @@ function onBgEditStickerChange(el) {
     const settings = _bgEditProductSettingsCache.get(productCode);
     const opt = settings && settings.available_box_options.find(o => o.code === el.value);
     sels[idx].box_name = opt ? (opt.name || opt.code) : null;
+  } else if (field === 'custom_option') {
+    // 자유 옵션 그룹 — el.dataset.groupName 으로 그룹 식별. value 가 빈 문자열이면 해당 그룹 제거.
+    //   sticker_selections[i].custom_options = {그룹명: {code, name}} 형태로 저장 (고객 화면 schema 와 동일).
+    const groupName = el.dataset.groupName || '';
+    if (!groupName) return;
+    if (!sels[idx].custom_options || typeof sels[idx].custom_options !== 'object') sels[idx].custom_options = {};
+    const code = el.value || '';
+    if (!code) {
+      delete sels[idx].custom_options[groupName];
+    } else {
+      const productCode = sels[idx].product_code || '';
+      const settings = _bgEditProductSettingsCache.get(productCode);
+      const group = settings && settings.custom_options && settings.custom_options[groupName];
+      const opt = group && (group.options || []).find(o => o.code === code);
+      sels[idx].custom_options[groupName] = opt
+        ? { code: opt.code, name: opt.name || opt.code }
+        : { code, name: code };
+    }
   } else if (field === 'sticker_id') {
     const stickerId = el.value || null;
     sels[idx].sticker_id = stickerId;
