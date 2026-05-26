@@ -4395,6 +4395,62 @@ const server = http.createServer(async (req, res) => {
         }
         logAdminAccess(session, req, 'cleanup-orphan-ci', {});
         data = await scanAndCleanupOrphanCi({ execute: true });
+      } else if (pathname === '/api/admin/probe-barunson-db' && req.method === 'GET') {
+        // barunson DB (모바일 청첩장 시스템) 의 화환/꽃다발 데이터 접근 가능성 진단.
+        //   같은 SQL Server 다른 database. readonly_user 권한 + cross-DB query 가능 여부 확인.
+        //   바른손M카드 모바일 청첩장 → 하객이 화환/꽃다발/꽃바구니 구매 흐름.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const pp = await getPool();
+        const probes = {};
+        // 1) barunson DB 의 TB_Order 카운트
+        try {
+          const r1 = await pp.request().query(`SELECT COUNT(*) AS total FROM barunson.dbo.TB_Order WITH (NOLOCK)`);
+          probes.tb_order = { ok: true, total: r1.recordset[0]?.total };
+        } catch (e) {
+          probes.tb_order = { ok: false, error: e.message };
+        }
+        // 2) TB_Product_Category — 화환 카테고리 코드 식별
+        try {
+          const r2 = await pp.request().query(`
+            SELECT TOP 50 Product_Category_Code, Product_Category_Name
+            FROM barunson.dbo.TB_Product_Category WITH (NOLOCK)
+            ORDER BY Product_Category_Code
+          `);
+          probes.tb_product_category = { ok: true, samples: r2.recordset };
+        } catch (e) {
+          probes.tb_product_category = { ok: false, error: e.message };
+        }
+        // 3) TB_Product 의 카테고리별 분포 (화환 후보 추출)
+        try {
+          const r3 = await pp.request().query(`
+            SELECT TOP 30 Product_Category_Code, COUNT(*) AS cnt,
+              MIN(Product_Name) AS sample_name1, MAX(Product_Name) AS sample_name2
+            FROM barunson.dbo.TB_Product WITH (NOLOCK)
+            GROUP BY Product_Category_Code
+            ORDER BY cnt DESC
+          `);
+          probes.tb_product_by_category = { ok: true, samples: r3.recordset };
+        } catch (e) {
+          probes.tb_product_by_category = { ok: false, error: e.message };
+        }
+        // 4) 화환/꽃 키워드 직접 검색
+        try {
+          const r4 = await pp.request().query(`
+            SELECT TOP 30 Product_ID, Product_Code, Product_Name, Product_Category_Code
+            FROM barunson.dbo.TB_Product WITH (NOLOCK)
+            WHERE Product_Name LIKE N'%화환%' OR Product_Name LIKE N'%꽃다발%'
+              OR Product_Name LIKE N'%꽃바구니%' OR Product_Name LIKE N'%근조%'
+          `);
+          probes.flower_wreath_products = { ok: true, samples: r4.recordset };
+        } catch (e) {
+          probes.flower_wreath_products = { ok: false, error: e.message };
+        }
+        data = {
+          message: 'barunson DB 접근 진단. ok=true 면 cross-DB query 가능. 화환 카테고리 코드 식별 후 CATEGORY_FILTERS 에 추가하면 정보입력현황/대시보드에 통합 가능.',
+          probes,
+        };
       } else if (pathname === '/api/admin/discover-card-divs' && req.method === 'GET') {
         // S2_Card 의 Card_Div 분포 + 샘플 — 화환 등 미등록 카테고리 식별용.
         if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
