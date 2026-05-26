@@ -8269,10 +8269,25 @@ async function openBgProductForm(productId) {
           sold_out: !!opt.sold_out,
         }))
       : [];
-    // custom_options (자유 옵션 그룹) 로드
-    _bgCustomOptions = (s?.custom_options && typeof s.custom_options === 'object' && !Array.isArray(s.custom_options))
-      ? JSON.parse(JSON.stringify(s.custom_options))  // deep clone
-      : {};
+    // custom_options (자유 옵션 그룹) 로드 — 그룹별 { use_images, options } 객체 형태로 정규화.
+    //   legacy format ({groupName: [...options]}) 자동 변환 — use_images=true default 처리.
+    _bgCustomOptions = {};
+    if (s?.custom_options && typeof s.custom_options === 'object' && !Array.isArray(s.custom_options)) {
+      for (const [groupName, val] of Object.entries(s.custom_options)) {
+        if (Array.isArray(val)) {
+          // legacy: array → 자동 wrap (이미지 사용 default true)
+          _bgCustomOptions[groupName] = {
+            use_images: true,
+            options: JSON.parse(JSON.stringify(val)),
+          };
+        } else if (val && typeof val === 'object') {
+          _bgCustomOptions[groupName] = {
+            use_images: val.use_images !== false,  // default true
+            options: Array.isArray(val.options) ? JSON.parse(JSON.stringify(val.options)) : [],
+          };
+        }
+      }
+    }
     // 출고일 그룹 드롭다운 옵션 렌더.
     // 기본 그룹은 value="" (null) 로만 노출 — 관리자가 기본 그룹을 변경하더라도
     // 기존 상품들이 '자동으로 기본' 을 따라가도록 하기 위함. 기본 그룹 row 자체는
@@ -8368,7 +8383,9 @@ function bgBoxUpdate(i, field, value) {
 
 // ============================================
 // custom_options (자유 옵션 그룹) 편집
-//   _bgCustomOptions: { [그룹명]: [{code, name, preview_image_url, sold_out, color?}, ...] }
+//   _bgCustomOptions: { [그룹명]: { use_images: bool, options: [{code, name, preview_image_url, sold_out, color?}, ...] } }
+//
+//   use_images 토글 (그룹 헤더) 로 이미지 URL 필드 노출/숨김 결정.
 //   고객 화면: 그룹별로 dropdown / 카드 선택 UI 렌더 (Phase 2 에서 구현)
 // ============================================
 let _bgCustomOptions = {};
@@ -8386,7 +8403,9 @@ function renderBgCustomOptions() {
     return;
   }
   wrap.innerHTML = groups.map(groupName => {
-    const opts = _bgCustomOptions[groupName] || [];
+    const group = _bgCustomOptions[groupName] || { use_images: true, options: [] };
+    const useImages = group.use_images !== false;
+    const opts = Array.isArray(group.options) ? group.options : [];
     const optsHtml = opts.length ? opts.map((opt, i) => {
       const isSoldOut = !!opt.sold_out;
       return `
@@ -8409,20 +8428,24 @@ function renderBgCustomOptions() {
             <input type="checkbox" ${isSoldOut ? 'checked' : ''} onchange="bgCustomUpdateOption('${esc(groupName)}', ${i}, 'sold_out', this.checked); renderBgCustomOptions()" style="margin:0;cursor:pointer">
             ${isSoldOut ? '🚫 품절' : '품절 표시'}
           </label>
-          <input type="text" value="${(opt.preview_image_url || '').replace(/"/g, '&quot;')}" placeholder="이미지 URL (선택)"
+          ${useImages ? `<input type="text" value="${(opt.preview_image_url || '').replace(/"/g, '&quot;')}" placeholder="이미지 URL (선택)"
             oninput="bgCustomUpdateOption('${esc(groupName)}', ${i}, 'preview_image_url', this.value)"
-            style="flex:1;padding:3px 6px;border:1px solid var(--gray-200);border-radius:3px;font-size:10.5px;background:#fafafa">
+            style="flex:1;padding:3px 6px;border:1px solid var(--gray-200);border-radius:3px;font-size:10.5px;background:#fafafa">` : ''}
         </div>
       </div>`;
     }).join('') : '<div style="padding:8px;text-align:center;color:var(--gray-400);font-size:11px;background:#fff;border:1px dashed var(--gray-200);border-radius:4px">선택지 없음</div>';
     return `
     <div style="border:1px solid var(--gray-200);border-radius:8px;background:#f9fafb;padding:10px;display:flex;flex-direction:column;gap:8px">
-      <div style="display:flex;align-items:center;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <input type="text" value="${esc(groupName)}" placeholder="옵션 그룹명 (예: 수건 색상)"
           onchange="bgCustomRenameGroup('${esc(groupName)}', this.value)"
-          style="flex:1;padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;font-weight:600;background:#fff">
+          style="flex:1;min-width:160px;padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;font-weight:600;background:#fff">
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;padding:4px 10px;border:1px solid ${useImages ? 'var(--primary)' : 'var(--gray-300)'};background:${useImages ? '#eff6ff' : '#fff'};color:${useImages ? 'var(--primary)' : 'var(--gray-600)'};border-radius:4px;font-size:11px;font-weight:500;white-space:nowrap" title="체크 시 각 선택지에 이미지 URL 입력 필드가 노출됩니다">
+          <input type="checkbox" ${useImages ? 'checked' : ''} onchange="bgCustomToggleImages('${esc(groupName)}', this.checked)" style="margin:0;cursor:pointer">
+          🖼️ 이미지 사용
+        </label>
         <button type="button" onclick="bgCustomRemoveGroup('${esc(groupName)}')" title="이 그룹 전체 삭제"
-          style="padding:4px 10px;border:1px solid #fca5a5;background:#fee;color:#dc2626;border-radius:4px;font-size:11px;cursor:pointer">그룹 삭제</button>
+          style="padding:4px 10px;border:1px solid #fca5a5;background:#fee;color:#dc2626;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap">그룹 삭제</button>
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">${optsHtml}</div>
       <button type="button" onclick="bgCustomAddOption('${esc(groupName)}')" class="btn" style="font-size:11px;padding:4px 10px;width:100%">
@@ -8436,12 +8459,13 @@ function bgCustomAddGroup() {
   const name = (prompt('옵션 그룹명 (예: 수건 색상, 고리수건 타입, 향 등)')||'').trim();
   if (!name) return;
   if (_bgCustomOptions[name]) { alert('동일 이름의 그룹이 이미 있습니다.'); return; }
-  _bgCustomOptions[name] = [];
+  _bgCustomOptions[name] = { use_images: true, options: [] };
   renderBgCustomOptions();
 }
 
 function bgCustomRemoveGroup(name) {
-  if (!confirm(`'${name}' 옵션 그룹 전체를 삭제할까요? (선택지 ${(_bgCustomOptions[name]||[]).length}개도 함께)`)) return;
+  const opts = (_bgCustomOptions[name]?.options) || [];
+  if (!confirm(`'${name}' 옵션 그룹 전체를 삭제할까요? (선택지 ${opts.length}개도 함께)`)) return;
   delete _bgCustomOptions[name];
   renderBgCustomOptions();
 }
@@ -8460,21 +8484,29 @@ function bgCustomRenameGroup(oldName, newName) {
   renderBgCustomOptions();
 }
 
+function bgCustomToggleImages(groupName, useImages) {
+  if (!_bgCustomOptions[groupName]) return;
+  _bgCustomOptions[groupName].use_images = !!useImages;
+  renderBgCustomOptions();
+}
+
 function bgCustomAddOption(groupName) {
-  if (!_bgCustomOptions[groupName]) _bgCustomOptions[groupName] = [];
-  _bgCustomOptions[groupName].push({ code: '', name: '', color: '#FFFFFF', preview_image_url: '', sold_out: false });
+  if (!_bgCustomOptions[groupName]) _bgCustomOptions[groupName] = { use_images: true, options: [] };
+  if (!Array.isArray(_bgCustomOptions[groupName].options)) _bgCustomOptions[groupName].options = [];
+  _bgCustomOptions[groupName].options.push({ code: '', name: '', color: '#FFFFFF', preview_image_url: '', sold_out: false });
   renderBgCustomOptions();
 }
 
 function bgCustomRemoveOption(groupName, i) {
-  if (!_bgCustomOptions[groupName]) return;
-  _bgCustomOptions[groupName].splice(i, 1);
+  if (!_bgCustomOptions[groupName] || !Array.isArray(_bgCustomOptions[groupName].options)) return;
+  _bgCustomOptions[groupName].options.splice(i, 1);
   renderBgCustomOptions();
 }
 
 function bgCustomUpdateOption(groupName, i, field, value) {
-  if (!_bgCustomOptions[groupName] || !_bgCustomOptions[groupName][i]) return;
-  _bgCustomOptions[groupName][i][field] = value;
+  const g = _bgCustomOptions[groupName];
+  if (!g || !Array.isArray(g.options) || !g.options[i]) return;
+  g.options[i][field] = value;
 }
 
 /** 스티커 코드에서 상품 prefix 추출 (S1~S99 접미사 제거) */
@@ -8692,15 +8724,19 @@ async function saveBgProduct() {
   const shippingGroupId = (document.getElementById('bg-p-shipping-group')?.value || '').trim() || null;
 
   // custom_options 검증 — 그룹별로 빈 code 제외 + 중복 체크
+  //   schema: {groupName: {use_images: bool, options: [{code, name, color?, preview_image_url?, sold_out}]}}
+  //   use_images=false 인 그룹은 preview_image_url 필드 null 로 강제 정리 (UI 미노출 일관성).
   const customOptions = {};
-  for (const [groupName, opts] of Object.entries(_bgCustomOptions || {})) {
+  for (const [groupName, group] of Object.entries(_bgCustomOptions || {})) {
     if (!groupName.trim()) continue;
-    const cleaned = (opts || [])
+    const useImages = group?.use_images !== false; // default true
+    const opts = Array.isArray(group?.options) ? group.options : [];
+    const cleaned = opts
       .map(opt => ({
         code: (opt.code || '').trim(),
         name: (opt.name || '').trim(),
         color: opt.color || null,
-        preview_image_url: (opt.preview_image_url || '').trim() || null,
+        preview_image_url: useImages ? ((opt.preview_image_url || '').trim() || null) : null,
         sold_out: !!opt.sold_out,
       }))
       .filter(opt => opt.code);
@@ -8712,7 +8748,7 @@ async function saveBgProduct() {
       alert(`옵션 그룹 "${groupName}" 의 코드 중복: ${[...new Set(cdups)].join(', ')}`);
       return;
     }
-    customOptions[groupName] = cleaned;
+    customOptions[groupName] = { use_images: useImages, options: cleaned };
   }
 
   const body = {
