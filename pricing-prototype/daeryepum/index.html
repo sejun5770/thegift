@@ -1859,6 +1859,7 @@ nav.nav-loading a[href^="#"] {
             <th>연락처</th>
             <th>배송지</th>
             <th class="uni-col-ci" style="display:none">박스선택</th>
+            <th class="uni-col-ci" style="display:none" title="자유 옵션 그룹 선택값 (수건 색상, 고리수건 타입 등)">옵션선택</th>
             <th class="uni-col-ci" style="display:none">스티커코드</th>
             <th class="uni-col-ci" style="display:none">스티커명</th>
             <th class="uni-col-ci" style="display:none">문구</th>
@@ -9967,6 +9968,24 @@ function renderBgUnified() {
     const boxCell = sel?.box_code
       ? `<span style="font-family:monospace;font-size:12px">${esc(sel.box_code)}</span>`
       : '<span style="color:var(--gray-300)">-</span>';
+
+    // 자유 옵션 그룹 선택 — sel.custom_options = {그룹명: {code, name} | code} 형태.
+    //   legacy string-only 저장 형식도 호환. 여러 그룹 줄바꿈 분리.
+    const customOptsCell = (() => {
+      const co = sel?.custom_options;
+      if (!co || typeof co !== 'object') return '<span style="color:var(--gray-300)">-</span>';
+      const entries = Object.entries(co).map(([gName, val]) => {
+        if (!val) return null;
+        const name = (typeof val === 'string') ? val : (val.name || val.code || '');
+        const code = (typeof val === 'string') ? val : (val.code || '');
+        if (!name && !code) return null;
+        const codePart = (code && code !== name)
+          ? ` <span style="color:var(--gray-400);font-family:monospace;font-size:10.5px">[${esc(code)}]</span>`
+          : '';
+        return `<div><span style="color:var(--gray-500)">${esc(gName)}:</span> ${esc(name)}${codePart}</div>`;
+      }).filter(Boolean);
+      return entries.length ? entries.join('') : '<span style="color:var(--gray-300)">-</span>';
+    })();
     const stickerCode = sel?.sticker_code
       ? `<span style="font-family:monospace;font-size:12px">${esc(sel.sticker_code)}</span>`
       : '<span style="color:var(--gray-300)">-</span>';
@@ -10048,6 +10067,7 @@ function renderBgUnified() {
       <td style="font-size:12px;white-space:nowrap">${recvPhone}</td>
       <td style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${recvAddr}">${recvAddr}</td>
       <td class="uni-col-ci" style="font-size:12px${activeTab === 'unsubmitted' ? ';display:none' : ''}">${boxCell}</td>
+      <td class="uni-col-ci" style="font-size:11.5px;line-height:1.4${activeTab === 'unsubmitted' ? ';display:none' : ''}">${customOptsCell}</td>
       <td class="uni-col-ci" style="font-size:12px${activeTab === 'unsubmitted' ? ';display:none' : ''}">${stickerCode}</td>
       <td class="uni-col-ci" style="font-size:12px${activeTab === 'unsubmitted' ? ';display:none' : ''}">${stickerName}</td>
       <td class="uni-col-ci" style="font-size:12px;line-height:1.6${activeTab === 'unsubmitted' ? ';display:none' : ''}">${customText}</td>
@@ -11567,7 +11587,8 @@ function copyBgUnified() {
   const selectedRows = checked.map(cb => bgUnifiedRows[parseInt(cb.dataset.idx)]);
 
   // 23열 구조: A='', B=택배, C=일반, D=주문번호, E=수령인, F=연락처, G='', H=배송지, I='',
-  //            J=상품명, K=품목코드(상품설정 매핑 후), L=박스코드, M=스티커코드(수량), N='', O='',
+  //            J=상품명, K=품목코드(상품설정 매핑 후), L=박스코드, M=스티커코드(수량), N='',
+  //            O=옵션선택(자유 옵션 그룹 — '그룹명: 이름' 형태, ' / ' 구분),
   //            P=스티커 문구(고객 입력), Q=배송메세지(MSSQL recv_msg), R='', S='', T=주문수량,
   //            U='', V=희망출고일(빠른출고시 짙은빨강), W=희망출고일
   const buildCells = ({ order, ci, sel, product_code, product_name, product_qty }) => {
@@ -11592,6 +11613,19 @@ function copyBgUnified() {
       const qty = product_qty || sel.quantity;
       const qtyStr = qty ? `(${qty}개)` : '';
       cells[12] = `${sel.sticker_code}${qtyStr}`;
+    }
+    // O열(index 14) = 자유 옵션 그룹 선택 — '그룹명: 이름' 형태, 여러 그룹은 ' / ' 로 연결.
+    //   sel.custom_options = {그룹명: {code, name}} | {그룹명: 'code'(legacy)}.
+    //   TSV 안전: 탭/개행 → 공백 치환. 빈 객체면 셀 빈 채로 유지.
+    if (sel?.custom_options && typeof sel.custom_options === 'object') {
+      const safeStr = v => String(v).replace(/[\t\r\n]+/g, ' ').trim();
+      const parts = Object.entries(sel.custom_options).map(([gName, val]) => {
+        if (!val) return '';
+        const name = (typeof val === 'string') ? val : (val.name || val.code || '');
+        if (!name) return '';
+        return `${safeStr(gName)}: ${safeStr(name)}`;
+      }).filter(Boolean);
+      if (parts.length) cells[14] = parts.join(' / ');
     }
     // P열(index 15) = 고객이 입력한 스티커 문구 (custom_values)
     //   - sticker_input='custom' 일 때만 값 존재. 'none'/'선택안함'이면 빈 문자열.
