@@ -8410,16 +8410,13 @@ function renderBgCustomOptions() {
       const isSoldOut = !!opt.sold_out;
       return `
       <div style="background:#fff;padding:6px;border:1px solid var(--gray-200);border-radius:6px;${isSoldOut ? 'opacity:0.7' : ''}">
-        <div style="display:grid;grid-template-columns:110px 1fr 44px 28px;gap:6px;align-items:center">
+        <div style="display:grid;grid-template-columns:110px 1fr 28px;gap:6px;align-items:center">
           <input type="text" value="${(opt.code || '').replace(/"/g, '&quot;')}" placeholder="코드"
             oninput="bgCustomUpdateOption('${esc(groupName)}', ${i}, 'code', this.value)"
             style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;font-family:monospace">
           <input type="text" value="${(opt.name || '').replace(/"/g, '&quot;')}" placeholder="표시명 (예: 화이트)"
             oninput="bgCustomUpdateOption('${esc(groupName)}', ${i}, 'name', this.value)"
             style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
-          <input type="color" value="${opt.color || '#FFFFFF'}" title="색상 (선택)"
-            oninput="bgCustomUpdateOption('${esc(groupName)}', ${i}, 'color', this.value)"
-            style="width:44px;height:28px;padding:0;border:1px solid var(--gray-300);border-radius:4px;cursor:pointer">
           <button type="button" onclick="bgCustomRemoveOption('${esc(groupName)}', ${i})" title="삭제"
             style="border:none;background:#fee;color:#dc2626;width:28px;height:28px;border-radius:4px;cursor:pointer;font-size:14px;line-height:1">&times;</button>
         </div>
@@ -8493,7 +8490,7 @@ function bgCustomToggleImages(groupName, useImages) {
 function bgCustomAddOption(groupName) {
   if (!_bgCustomOptions[groupName]) _bgCustomOptions[groupName] = { use_images: true, options: [] };
   if (!Array.isArray(_bgCustomOptions[groupName].options)) _bgCustomOptions[groupName].options = [];
-  _bgCustomOptions[groupName].options.push({ code: '', name: '', color: '#FFFFFF', preview_image_url: '', sold_out: false });
+  _bgCustomOptions[groupName].options.push({ code: '', name: '', preview_image_url: '', sold_out: false });
   renderBgCustomOptions();
 }
 
@@ -8735,7 +8732,6 @@ async function saveBgProduct() {
       .map(opt => ({
         code: (opt.code || '').trim(),
         name: (opt.name || '').trim(),
-        color: opt.color || null,
         preview_image_url: useImages ? ((opt.preview_image_url || '').trim() || null) : null,
         sold_out: !!opt.sold_out,
       }))
