@@ -1522,6 +1522,24 @@ nav.nav-loading a[href^="#"] {
           </button>
         </div>
       </details>
+
+      <!-- 자유 옵션 그룹 (custom_options) — 수건 색상 / 고리수건 타입 등 generic -->
+      <details style="border:1px solid var(--gray-200);border-radius:8px;background:#fafafa" id="bg-p-custom-section">
+        <summary style="cursor:pointer;padding:10px 14px;font-size:13px;font-weight:600;color:var(--gray-700);list-style:disclosure-closed">
+          🎨 자유 옵션 그룹 <span id="bg-p-custom-group-count" style="color:var(--primary);font-weight:500">0</span>개
+          <span style="color:var(--gray-400);font-weight:400;font-size:11px;margin-left:6px">(수건 색상 / 고리수건 타입 등 신규 옵션 종류 자유 추가)</span>
+        </summary>
+        <div style="padding:6px 14px 12px">
+          <p style="font-size:11px;color:var(--gray-500);margin:0 0 8px;line-height:1.5">
+            박스/스티커 외에 추가로 선택받을 옵션을 자유롭게 정의합니다. (예: '수건 색상', '고리수건 타입', '향')<br>
+            각 그룹은 여러 선택지 (code/이름/이미지/품절) 를 가지며, 고객은 그룹별로 하나씩 선택합니다.
+          </p>
+          <div id="bg-p-custom-groups" style="display:flex;flex-direction:column;gap:10px"></div>
+          <button type="button" onclick="bgCustomAddGroup()" class="btn btn-primary" style="margin-top:8px;font-size:12px;padding:6px 12px;width:100%">
+            ➕ 새 옵션 그룹 추가
+          </button>
+        </div>
+      </details>
     </div>
 
     <!-- 푸터 -->
@@ -8240,6 +8258,10 @@ async function openBgProductForm(productId) {
           sold_out: !!opt.sold_out,
         }))
       : [];
+    // custom_options (자유 옵션 그룹) 로드
+    _bgCustomOptions = (s?.custom_options && typeof s.custom_options === 'object' && !Array.isArray(s.custom_options))
+      ? JSON.parse(JSON.stringify(s.custom_options))  // deep clone
+      : {};
     // 출고일 그룹 드롭다운 옵션 렌더.
     // 기본 그룹은 value="" (null) 로만 노출 — 관리자가 기본 그룹을 변경하더라도
     // 기존 상품들이 '자동으로 기본' 을 따라가도록 하기 위함. 기본 그룹 row 자체는
@@ -8263,6 +8285,7 @@ async function openBgProductForm(productId) {
     }
     renderBgStickerModal();
     renderBgBoxOptions();
+    renderBgCustomOptions();
   } catch(e) { console.error('openBgProductForm:', e); }
 
   document.getElementById('bg-product-modal').style.display = 'flex';
@@ -8330,6 +8353,117 @@ function bgBoxUpdate(i, field, value) {
   if (field === 'color') {
     // 컬러는 즉시 시각 피드백 필요 없음 (값만 저장)
   }
+}
+
+// ============================================
+// custom_options (자유 옵션 그룹) 편집
+//   _bgCustomOptions: { [그룹명]: [{code, name, preview_image_url, sold_out, color?}, ...] }
+//   고객 화면: 그룹별로 dropdown / 카드 선택 UI 렌더 (Phase 2 에서 구현)
+// ============================================
+let _bgCustomOptions = {};
+
+function renderBgCustomOptions() {
+  const wrap = document.getElementById('bg-p-custom-groups');
+  const countEl = document.getElementById('bg-p-custom-group-count');
+  const section = document.getElementById('bg-p-custom-section');
+  if (!wrap) return;
+  const groups = Object.keys(_bgCustomOptions);
+  countEl.textContent = groups.length;
+  if (groups.length > 0 && section && !section.open) section.open = true;
+  if (groups.length === 0) {
+    wrap.innerHTML = '<div style="padding:10px;text-align:center;color:var(--gray-400);font-size:12px;background:#fff;border:1px dashed var(--gray-200);border-radius:6px">옵션 그룹 없음 — 신규 옵션 종류가 필요한 상품에서만 추가</div>';
+    return;
+  }
+  wrap.innerHTML = groups.map(groupName => {
+    const opts = _bgCustomOptions[groupName] || [];
+    const optsHtml = opts.length ? opts.map((opt, i) => {
+      const isSoldOut = !!opt.sold_out;
+      return `
+      <div style="background:#fff;padding:6px;border:1px solid var(--gray-200);border-radius:6px;${isSoldOut ? 'opacity:0.7' : ''}">
+        <div style="display:grid;grid-template-columns:110px 1fr 44px 28px;gap:6px;align-items:center">
+          <input type="text" value="${(opt.code || '').replace(/"/g, '&quot;')}" placeholder="코드"
+            oninput="bgCustomUpdateOption('${esc(groupName)}', ${i}, 'code', this.value)"
+            style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;font-family:monospace">
+          <input type="text" value="${(opt.name || '').replace(/"/g, '&quot;')}" placeholder="표시명 (예: 화이트)"
+            oninput="bgCustomUpdateOption('${esc(groupName)}', ${i}, 'name', this.value)"
+            style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+          <input type="color" value="${opt.color || '#FFFFFF'}" title="색상 (선택)"
+            oninput="bgCustomUpdateOption('${esc(groupName)}', ${i}, 'color', this.value)"
+            style="width:44px;height:28px;padding:0;border:1px solid var(--gray-300);border-radius:4px;cursor:pointer">
+          <button type="button" onclick="bgCustomRemoveOption('${esc(groupName)}', ${i})" title="삭제"
+            style="border:none;background:#fee;color:#dc2626;width:28px;height:28px;border-radius:4px;cursor:pointer;font-size:14px;line-height:1">&times;</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:5px;font-size:10.5px;color:var(--gray-500)">
+          <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;padding:3px 8px;border-radius:4px;${isSoldOut ? 'background:#fee2e2;color:#b91c1c;font-weight:600' : 'background:#f3f4f6'};flex-shrink:0">
+            <input type="checkbox" ${isSoldOut ? 'checked' : ''} onchange="bgCustomUpdateOption('${esc(groupName)}', ${i}, 'sold_out', this.checked); renderBgCustomOptions()" style="margin:0;cursor:pointer">
+            ${isSoldOut ? '🚫 품절' : '품절 표시'}
+          </label>
+          <input type="text" value="${(opt.preview_image_url || '').replace(/"/g, '&quot;')}" placeholder="이미지 URL (선택)"
+            oninput="bgCustomUpdateOption('${esc(groupName)}', ${i}, 'preview_image_url', this.value)"
+            style="flex:1;padding:3px 6px;border:1px solid var(--gray-200);border-radius:3px;font-size:10.5px;background:#fafafa">
+        </div>
+      </div>`;
+    }).join('') : '<div style="padding:8px;text-align:center;color:var(--gray-400);font-size:11px;background:#fff;border:1px dashed var(--gray-200);border-radius:4px">선택지 없음</div>';
+    return `
+    <div style="border:1px solid var(--gray-200);border-radius:8px;background:#f9fafb;padding:10px;display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <input type="text" value="${esc(groupName)}" placeholder="옵션 그룹명 (예: 수건 색상)"
+          onchange="bgCustomRenameGroup('${esc(groupName)}', this.value)"
+          style="flex:1;padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;font-weight:600;background:#fff">
+        <button type="button" onclick="bgCustomRemoveGroup('${esc(groupName)}')" title="이 그룹 전체 삭제"
+          style="padding:4px 10px;border:1px solid #fca5a5;background:#fee;color:#dc2626;border-radius:4px;font-size:11px;cursor:pointer">그룹 삭제</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">${optsHtml}</div>
+      <button type="button" onclick="bgCustomAddOption('${esc(groupName)}')" class="btn" style="font-size:11px;padding:4px 10px;width:100%">
+        ➕ 선택지 추가
+      </button>
+    </div>`;
+  }).join('');
+}
+
+function bgCustomAddGroup() {
+  const name = (prompt('옵션 그룹명 (예: 수건 색상, 고리수건 타입, 향 등)')||'').trim();
+  if (!name) return;
+  if (_bgCustomOptions[name]) { alert('동일 이름의 그룹이 이미 있습니다.'); return; }
+  _bgCustomOptions[name] = [];
+  renderBgCustomOptions();
+}
+
+function bgCustomRemoveGroup(name) {
+  if (!confirm(`'${name}' 옵션 그룹 전체를 삭제할까요? (선택지 ${(_bgCustomOptions[name]||[]).length}개도 함께)`)) return;
+  delete _bgCustomOptions[name];
+  renderBgCustomOptions();
+}
+
+function bgCustomRenameGroup(oldName, newName) {
+  newName = (newName || '').trim();
+  if (!newName || newName === oldName) { renderBgCustomOptions(); return; }
+  if (_bgCustomOptions[newName]) { alert('동일 이름이 이미 있어 변경 불가. 다른 이름 사용.'); renderBgCustomOptions(); return; }
+  // 순서 보존 — 새 객체로 재구성
+  const newMap = {};
+  Object.keys(_bgCustomOptions).forEach(k => {
+    if (k === oldName) newMap[newName] = _bgCustomOptions[oldName];
+    else newMap[k] = _bgCustomOptions[k];
+  });
+  _bgCustomOptions = newMap;
+  renderBgCustomOptions();
+}
+
+function bgCustomAddOption(groupName) {
+  if (!_bgCustomOptions[groupName]) _bgCustomOptions[groupName] = [];
+  _bgCustomOptions[groupName].push({ code: '', name: '', color: '#FFFFFF', preview_image_url: '', sold_out: false });
+  renderBgCustomOptions();
+}
+
+function bgCustomRemoveOption(groupName, i) {
+  if (!_bgCustomOptions[groupName]) return;
+  _bgCustomOptions[groupName].splice(i, 1);
+  renderBgCustomOptions();
+}
+
+function bgCustomUpdateOption(groupName, i, field, value) {
+  if (!_bgCustomOptions[groupName] || !_bgCustomOptions[groupName][i]) return;
+  _bgCustomOptions[groupName][i][field] = value;
 }
 
 /** 스티커 코드에서 상품 prefix 추출 (S1~S99 접미사 제거) */
@@ -8546,11 +8680,36 @@ async function saveBgProduct() {
   // 출고일 그룹 (빈 문자열이면 null — 기본 그룹 사용)
   const shippingGroupId = (document.getElementById('bg-p-shipping-group')?.value || '').trim() || null;
 
+  // custom_options 검증 — 그룹별로 빈 code 제외 + 중복 체크
+  const customOptions = {};
+  for (const [groupName, opts] of Object.entries(_bgCustomOptions || {})) {
+    if (!groupName.trim()) continue;
+    const cleaned = (opts || [])
+      .map(opt => ({
+        code: (opt.code || '').trim(),
+        name: (opt.name || '').trim(),
+        color: opt.color || null,
+        preview_image_url: (opt.preview_image_url || '').trim() || null,
+        sold_out: !!opt.sold_out,
+      }))
+      .filter(opt => opt.code);
+    if (!cleaned.length) continue; // 빈 그룹은 저장 안 함
+    // 그룹 내 중복 코드 체크
+    const cc = cleaned.map(o => o.code);
+    const cdups = cc.filter((c, i) => cc.indexOf(c) !== i);
+    if (cdups.length) {
+      alert(`옵션 그룹 "${groupName}" 의 코드 중복: ${[...new Set(cdups)].join(', ')}`);
+      return;
+    }
+    customOptions[groupName] = cleaned;
+  }
+
   const body = {
     brand: brand || null,
     product_name: productName || null,
     available_sticker_ids: stickerIds,
     available_box_options: boxOptions,
+    custom_options: customOptions,
     shipping_group_id: shippingGroupId,
   };
 
