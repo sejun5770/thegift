@@ -650,11 +650,16 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
   // PUT /api/bg/products/:productId/settings
   if (productSettingsMatch && method === 'PUT') {
-    const body = await parseBody(req);
-    const settings = await store.upsertProductSettings(
-      decodeURIComponent(productSettingsMatch[1]), body
-    );
-    return json(res, settings);
+    try {
+      const body = await parseBody(req);
+      const settings = await store.upsertProductSettings(
+        decodeURIComponent(productSettingsMatch[1]), body
+      );
+      return json(res, settings);
+    } catch (err) {
+      console.error('[products/settings PUT] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
   }
 
   // DELETE /api/bg/products/:productId/settings
