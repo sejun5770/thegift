@@ -1478,9 +1478,15 @@ nav.nav-loading a[href^="#"] {
           <input type="text" id="bg-p-meta-name" placeholder="예: 비타민 답례품 30구" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
         </div>
       </div>
-      <div>
-        <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:4px">브랜드</label>
-        <input type="text" id="bg-p-meta-brand" placeholder="예: 바른손" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
+      <div style="display:grid;grid-template-columns:1fr 130px;gap:8px">
+        <div>
+          <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:4px">브랜드</label>
+          <input type="text" id="bg-p-meta-brand" placeholder="예: 바른손" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:4px" title="고객 화면에 표시될 장식 형태 명칭 (스티커/띠지/라벨 등). 비워두면 '스티커' 가 적용됩니다.">장식 명칭</label>
+          <input type="text" id="bg-p-meta-deco-label" placeholder="스티커" maxlength="16" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
+        </div>
       </div>
 
       <!-- 출고일 그룹 선택 -->
@@ -8260,6 +8266,9 @@ async function openBgProductForm(productId) {
     }
     if (brandInput) brandInput.value = s?.brand || '';
     if (nameInput) nameInput.value = s?.product_name || '';
+    // 장식 명칭 (decoration_label) — 비어있으면 placeholder '스티커' 그대로 보임
+    const decoInput = document.getElementById('bg-p-meta-deco-label');
+    if (decoInput) decoInput.value = s?.decoration_label || '';
     // 박스 옵션 로드 (없으면 빈 배열)
     _bgBoxOptions = Array.isArray(s?.available_box_options)
       ? s.available_box_options.map(opt => ({
@@ -8748,12 +8757,16 @@ async function saveBgProduct() {
     customOptions[groupName] = { use_images: useImages, options: cleaned };
   }
 
+  // 장식 명칭 — trim 후 빈 문자열이면 null 저장 → 고객 화면이 '스티커' fallback 적용
+  const decorationLabel = (document.getElementById('bg-p-meta-deco-label')?.value || '').trim().slice(0, 16) || null;
+
   const body = {
     brand: brand || null,
     product_name: productName || null,
     available_sticker_ids: stickerIds,
     available_box_options: boxOptions,
     custom_options: customOptions,
+    decoration_label: decorationLabel,
     shipping_group_id: shippingGroupId,
   };
 

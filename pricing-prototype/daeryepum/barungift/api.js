@@ -290,16 +290,18 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         });
       }
 
-      // 상품별 스티커 / 박스옵션 / 자유옵션그룹 매핑 + 합집합 계산
+      // 상품별 스티커 / 박스옵션 / 자유옵션그룹 / 장식명칭 매핑 + 합집합 계산
       // stickersByProduct: { product_code: [sticker, ...] } — 고객 화면에서 상품별 필터링에 사용
       // boxOptionsByProduct: { product_code: [{code,name,color,preview_image_url}, ...] } — 박스 패키지 선택용
       // customOptionsByProduct: { product_code: { groupName: {use_images, options:[...]} } } — 자유 옵션 그룹 (수건 색상 등)
+      // decorationLabelByProduct: { product_code: string } — 고객 화면 장식 명칭 (스티커/띠지/라벨…), 미설정시 '스티커'
       //
       // 매핑 lookup 은 모듈 상단 lookupProductSettings 사용 (ERP 변형 코드 fallback 자동 적용).
       const allMappedStickerIds = new Set();
       const stickersByProduct = {};
       const boxOptionsByProduct = {};
       const customOptionsByProduct = {};
+      const decorationLabelByProduct = {};
       const stickerById = new Map(allActiveStickers.map(s => [s.id, s]));
       for (const p of products) {
         if (!p.product_code) continue;
@@ -312,6 +314,9 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         // 박스 옵션 매핑 (없거나 비어있으면 빈 배열)
         const boxOpts = Array.isArray(ps?.available_box_options) ? ps.available_box_options : [];
         boxOptionsByProduct[p.product_code] = boxOpts;
+        // 장식 명칭 (decoration_label) — admin 이 자유 입력. 빈 문자열은 fallback 적용 위해 null 처리.
+        const decoLabel = (ps?.decoration_label || '').trim();
+        decorationLabelByProduct[p.product_code] = decoLabel || null;
         // 자유 옵션 그룹 매핑 — legacy array 형식 (값이 array) 도 호환
         //   normalize: { groupName: {use_images:bool, options:[...]} } 형태로 통일
         const rawCustom = (ps?.custom_options && typeof ps.custom_options === 'object' && !Array.isArray(ps.custom_options))
@@ -440,6 +445,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         stickers_by_product: stickersByProduct,
         box_options_by_product: boxOptionsByProduct, // { product_code: [{code,name,color,preview_image_url}] }
         custom_options_by_product: customOptionsByProduct, // { product_code: { groupName: {use_images, options:[...]} } }
+        decoration_label_by_product: decorationLabelByProduct, // { product_code: '스티커' | '띠지' | ... | null }
         existing_info: existingInfo,
         deliveries,  // 배송지별 답례품 수량 (나눔배송 안내용, 입력엔 영향 없음)
         virtual_account: virtualAccount,  // 주문 결제용 가상계좌 (결제대기 상태일 때만)

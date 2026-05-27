@@ -256,6 +256,7 @@ async function upsertProductSettings(productId, data) {
     available_sticker_ids: data.available_sticker_ids ?? [],
     available_box_options: data.available_box_options ?? [],
     custom_options: data.custom_options ?? {},  // {옵션그룹명: {use_images:bool, options:[{code,name,color?,preview_image_url?,sold_out}, ...]}}
+    decoration_label: data.decoration_label ?? null,  // 고객 화면 장식 명칭 (NULL → '스티커' fallback)
     shipping_group_id: data.shipping_group_id ?? null,
     express_available: data.express_available ?? (data.shipping_type === 'today_shipping'),
     express_fee: data.express_fee ?? 0,
