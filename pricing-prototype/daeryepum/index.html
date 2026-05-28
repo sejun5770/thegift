@@ -1839,6 +1839,7 @@ nav.nav-loading a[href^="#"] {
       <div style="flex:1"></div>
       <!-- 액션 버튼들 — 선택 상태에 따라 지능적으로 show/hide -->
       <button class="btn" id="uni-btn-copy" onclick="copyBgUnified()" style="padding:6px 12px;font-size:12px;display:none">📋 수집복사</button>
+      <button class="btn" id="uni-btn-copy-receipt" onclick="copyExpressReceiptInfo()" style="padding:6px 12px;font-size:12px;display:none;background:#fef3c7;border-color:#fbbf24;color:#92400e" title="선택된 빠른출고 주문의 현금영수증 정보만 복사 — 형식: 주문번호 / 주문자명 / 영수증정보"><span id="uni-btn-copy-receipt-label">⚡ 현금영수증 복사</span></button>
       <button class="btn" id="uni-btn-send-alimtalk" onclick="bulkSendAlimtalkViaSp()" style="padding:6px 12px;font-size:12px;display:none;border-color:#fbbf24;color:#92400e;background:#fef9c3" title="선택된 미입력 주문에 답례품 정보 입력 안내 알림톡 발송 (SP_GIFT_ORDER_BIZTALK_PROC)">💬 <span id="uni-btn-send-alimtalk-label">알림톡 발송</span></button>
       <button class="btn btn-primary" id="uni-btn-mark-processed" onclick="bulkProcessedAction(true)" style="padding:6px 12px;font-size:12px;display:none" title="선택된 주문을 주문수집 완료로 처리 (복사 없이 마킹만)">📋 <span id="uni-btn-mark-processed-label">수집처리</span></button>
       <button class="btn" id="uni-btn-unmark-processed" onclick="bulkProcessedAction(false)" style="padding:6px 12px;font-size:12px;display:none;border-color:#fbbf24;color:#92400e;background:#fef3c7" title="선택된 주문의 주문수집 상태를 되돌림">↺ <span id="uni-btn-unmark-processed-label">되돌리기</span></button>
@@ -10079,12 +10080,18 @@ function renderBgUnified() {
 
     // 요청사항 있는 주문 하이라이트 — 노란 배경 + 📝 아이콘 prefix. 운영자 주의 환기용.
     const hasRequest = !!(ci?.customer_request && String(ci.customer_request).trim() && !/^\[admin\]/.test(String(ci.customer_request)));
+    // 빠른출고 ⚡ prefix — ci.is_express 면 주문번호 좌측에 번개 표시 (운영자 우선처리 환기).
+    const isExpressOrder = !!ci?.is_express;
+    const expressPrefix = isExpressOrder
+      ? '<span title="빠른출고" style="color:#dc2626;font-weight:700;margin-right:2px">⚡</span>'
+      : '';
     const orderSeqStyle = hasRequest
       ? 'font-weight:700;white-space:nowrap;background:#fef3c7;color:#92400e;border-radius:4px;padding:2px 6px'
       : 'font-weight:600;white-space:nowrap';
-    const orderSeqContent = hasRequest
+    const orderSeqInner = hasRequest
       ? `<span title="${esc(String(ci.customer_request).slice(0, 200))}">📝 ${esc(order.order_seq)}</span>`
       : esc(order.order_seq);
+    const orderSeqContent = expressPrefix + orderSeqInner;
     html += `<tr class="${rowClass}" style="${borderStyle};cursor:pointer" onclick="_onUniRowClick(${rowIdx}, event)">
       <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()" onclick="event.stopPropagation()"></td>
       <td style="${orderSeqStyle}">${orderSeqContent}</td>
@@ -11107,6 +11114,8 @@ function updateBgUnifiedSelectedCount() {
 
   const activeTab = document.getElementById('uni-active-tab')?.value;
   const btnCopy = document.getElementById('uni-btn-copy');
+  const btnCopyReceipt = document.getElementById('uni-btn-copy-receipt');
+  const btnCopyReceiptLabel = document.getElementById('uni-btn-copy-receipt-label');
   const btnMark = document.getElementById('uni-btn-mark-processed');
   const btnUnmark = document.getElementById('uni-btn-unmark-processed');
   const btnDelete = document.getElementById('uni-btn-bulk-delete');
@@ -11130,6 +11139,7 @@ function updateBgUnifiedSelectedCount() {
   // 선택 0 → 모두 숨김
   if (cnt === 0) {
     if (btnCopy) btnCopy.style.display = 'none';
+    if (btnCopyReceipt) btnCopyReceipt.style.display = 'none';
     if (btnMark) btnMark.style.display = 'none';
     if (btnUnmark) btnUnmark.style.display = 'none';
     if (btnDelete) btnDelete.style.display = 'none';
@@ -11224,6 +11234,24 @@ function updateBgUnifiedSelectedCount() {
 
   // 수집복사: 항상 표시 (선택된 모든 행 대상)
   if (btnCopy) btnCopy.style.display = '';
+
+  // 현금영수증 복사: 선택된 행 중 빠른출고(is_express)+ci 있는 행이 1건 이상이면 노출.
+  //   같은 주문(order_seq) 의 multi-product row 는 dedupe — count 도 dedupe 기준.
+  if (btnCopyReceipt) {
+    const expressOrderIds = new Set();
+    checked.forEach(cb => {
+      const row = bgUnifiedRows[parseInt(cb.dataset.idx)];
+      if (row && row.ci && row.ci.is_express) {
+        expressOrderIds.add(String(row.order.order_seq));
+      }
+    });
+    if (expressOrderIds.size > 0) {
+      btnCopyReceipt.style.display = '';
+      if (btnCopyReceiptLabel) btnCopyReceiptLabel.textContent = `⚡ 현금영수증 복사 (${expressOrderIds.size}건)`;
+    } else {
+      btnCopyReceipt.style.display = 'none';
+    }
+  }
 
   if (activeTab === 'submitted') {
     // 처리 버튼: 미처리 건이 있을 때만 표시 (이미 처리된건 제외)
@@ -11763,6 +11791,69 @@ function copyBgUnified() {
       .catch(() => navigator.clipboard.writeText(tsv).then(onSuccess));
   } else {
     navigator.clipboard.writeText(tsv).then(onSuccess);
+  }
+}
+
+/**
+ * 빠른출고 주문의 현금영수증 정보만 복사 — 줄단위 텍스트로 클립보드 전송.
+ *
+ * 형식: `${order_seq} / ${주문자명} / ${영수증정보}`
+ *   영수증정보:
+ *     - 발행 (cash_receipt_yn=true) → '소득공제 01012345678' / '지출증빙 1234567890'
+ *     - 미발행 (cash_receipt_yn=false) → '미발행'
+ *
+ * 같은 주문(order_seq) 의 multi-product row 는 dedupe (1주문 = 1행).
+ * 빠른출고 + ci 있는 행만 대상 — 그 외는 무시.
+ */
+function copyExpressReceiptInfo() {
+  const checked = [...document.querySelectorAll('.uni-row-check:checked')];
+  if (!checked.length) { showToast('복사할 행을 선택해주세요'); return; }
+
+  const RECEIPT_LABEL = { personal: '소득공제', business: '지출증빙' };
+
+  // 주문번호 단위 dedupe (multi-product 한 주문에 여러 행 있을 수 있음)
+  const seen = new Set();
+  const lines = [];
+  for (const cb of checked) {
+    const row = bgUnifiedRows[parseInt(cb.dataset.idx)];
+    if (!row || !row.ci || !row.ci.is_express) continue; // 빠른출고 + ci 있는 행만
+    const seq = String(row.order.order_seq).replace(/^ETC-/, '');
+    if (seen.has(seq)) continue;
+    seen.add(seq);
+
+    // 주문자명 — order_name 우선, 없으면 recv_name(수령인) fallback
+    const customerName = (row.order.order_name || row.order.recv_name || '').trim();
+
+    // 영수증 정보 빌드
+    let receiptStr;
+    if (row.ci.cash_receipt_yn) {
+      const typeLabel = RECEIPT_LABEL[row.ci.receipt_type] || row.ci.receipt_type || '';
+      const num = (row.ci.receipt_number || '').trim();
+      receiptStr = (typeLabel + (num ? ' ' + num : '')).trim() || '발행';
+    } else {
+      receiptStr = '미발행';
+    }
+
+    lines.push(`${seq} / ${customerName} / ${receiptStr}`);
+  }
+
+  if (!lines.length) {
+    showToast('선택된 행에 빠른출고 + 입력완료 주문이 없습니다');
+    return;
+  }
+
+  const text = lines.join('\n');
+  const onSuccess = () => showToast(`${lines.length}건 현금영수증 정보 복사 완료`);
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).then(onSuccess, () => alert('클립보드 복사 실패 — 브라우저 권한 확인 필요'));
+  } else {
+    // legacy fallback
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); onSuccess(); } catch { alert('복사 실패'); }
+    document.body.removeChild(ta);
   }
 }
 
