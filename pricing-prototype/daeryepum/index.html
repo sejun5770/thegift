@@ -1432,6 +1432,7 @@ nav.nav-loading a[href^="#"] {
       <thead>
         <tr>
           <th style="width:36px">상태</th>
+          <th>거래처코드</th>
           <th>거래처명</th>
           <th>담당자</th>
           <th>연락처</th>
@@ -1443,7 +1444,7 @@ nav.nav-loading a[href^="#"] {
         </tr>
       </thead>
       <tbody id="vendors-tbody">
-        <tr><td colspan="9" style="text-align:center;color:var(--gray-400);padding:20px">로딩 중…</td></tr>
+        <tr><td colspan="10" style="text-align:center;color:var(--gray-400);padding:20px">로딩 중…</td></tr>
       </tbody>
     </table>
   </div>
@@ -1458,9 +1459,15 @@ nav.nav-loading a[href^="#"] {
     </div>
     <div style="padding:20px;display:flex;flex-direction:column;gap:14px">
       <input type="hidden" id="bg-vendor-id">
-      <div>
-        <label style="display:block;font-size:12px;color:var(--gray-600);margin-bottom:4px">거래처명 <span style="color:#dc2626">*</span></label>
-        <input type="text" id="bg-vendor-name" placeholder="예: 바른팜" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+      <div style="display:grid;grid-template-columns:1fr 160px;gap:8px">
+        <div>
+          <label style="display:block;font-size:12px;color:var(--gray-600);margin-bottom:4px">거래처명 <span style="color:#dc2626">*</span></label>
+          <input type="text" id="bg-vendor-name" placeholder="예: 바른팜" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;color:var(--gray-600);margin-bottom:4px" title="ERP/회계 연동용 식별 코드. 비워두면 코드 없이 운영됩니다.">거래처코드</label>
+          <input type="text" id="bg-vendor-code" placeholder="예: V001" maxlength="32" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;font-family:monospace">
+        </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <div>
@@ -8559,7 +8566,10 @@ async function openBgProductForm(productId) {
       const vSel = document.getElementById('bg-p-meta-vendor');
       if (vSel) {
         vSel.innerHTML = '<option value="">자체매입 (위탁 아님)</option>'
-          + vendors.map(v => `<option value="${esc(v.id)}">${esc(v.name)} (기본 ${Number(v.default_commission_rate || 0).toFixed(1)}%)</option>`).join('');
+          + vendors.map(v => {
+              const codePart = v.vendor_code ? `[${v.vendor_code}] ` : '';
+              return `<option value="${esc(v.id)}">${esc(codePart + v.name)} (기본 ${Number(v.default_commission_rate || 0).toFixed(1)}%)</option>`;
+            }).join('');
         vSel.value = s?.vendor_id || '';
       }
       const cInput = document.getElementById('bg-p-meta-commission');
@@ -9141,7 +9151,7 @@ async function loadBgVendors() {
       if (p.vendor_id) countByVendor[p.vendor_id] = (countByVendor[p.vendor_id] || 0) + 1;
     }
     if (!_bgVendorsList.length) {
-      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--gray-400);padding:20px">등록된 거래처가 없습니다. 우측 상단 "+ 거래처 추가" 버튼으로 등록하세요.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--gray-400);padding:20px">등록된 거래처가 없습니다. 우측 상단 "+ 거래처 추가" 버튼으로 등록하세요.</td></tr>';
       return;
     }
     tbody.innerHTML = _bgVendorsList.map(v => {
@@ -9150,8 +9160,12 @@ async function loadBgVendors() {
         ? '<span style="background:#dcfce7;color:#15803d;font-size:10.5px;font-weight:600;padding:2px 6px;border-radius:3px">활성</span>'
         : '<span style="background:#f3f4f6;color:#6b7280;font-size:10.5px;font-weight:600;padding:2px 6px;border-radius:3px">비활성</span>';
       const memo = v.memo ? esc(String(v.memo).slice(0, 30)) + (String(v.memo).length > 30 ? '…' : '') : '<span style="color:var(--gray-300)">-</span>';
+      const codeCell = v.vendor_code
+        ? `<span style="font-family:monospace;font-size:11.5px;background:#f3f4f6;padding:2px 6px;border-radius:3px;color:var(--gray-700)">${esc(v.vendor_code)}</span>`
+        : '<span style="color:var(--gray-300);font-size:11px">-</span>';
       return `<tr>
         <td>${statusBadge}</td>
+        <td>${codeCell}</td>
         <td style="font-weight:600">${esc(v.name)}</td>
         <td>${esc(v.contact_person || '-')}</td>
         <td>${esc(v.phone || '-')}</td>
@@ -9164,7 +9178,7 @@ async function loadBgVendors() {
     }).join('');
   } catch (e) {
     console.error('[vendors] load failed', e);
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#dc2626;padding:20px">로딩 실패: ${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:#dc2626;padding:20px">로딩 실패: ${esc(e.message)}</td></tr>`;
   }
 }
 
@@ -9178,6 +9192,7 @@ function openBgVendorForm(id) {
     if (!v) { alert('거래처를 찾을 수 없습니다'); return; }
     title.textContent = '거래처 수정 — ' + v.name;
     document.getElementById('bg-vendor-name').value = v.name || '';
+    document.getElementById('bg-vendor-code').value = v.vendor_code || '';
     document.getElementById('bg-vendor-contact').value = v.contact_person || '';
     document.getElementById('bg-vendor-phone').value = v.phone || '';
     document.getElementById('bg-vendor-email').value = v.email || '';
@@ -9187,7 +9202,7 @@ function openBgVendorForm(id) {
     if (delBtn) delBtn.style.display = '';
   } else {
     title.textContent = '거래처 추가';
-    ['bg-vendor-name','bg-vendor-contact','bg-vendor-phone','bg-vendor-email','bg-vendor-memo'].forEach(k => document.getElementById(k).value = '');
+    ['bg-vendor-name','bg-vendor-code','bg-vendor-contact','bg-vendor-phone','bg-vendor-email','bg-vendor-memo'].forEach(k => document.getElementById(k).value = '');
     document.getElementById('bg-vendor-commission').value = '';
     document.getElementById('bg-vendor-active').checked = true;
     if (delBtn) delBtn.style.display = 'none';
@@ -9203,6 +9218,7 @@ async function saveBgVendor() {
   const id = document.getElementById('bg-vendor-id').value;
   const body = {
     name: document.getElementById('bg-vendor-name').value.trim(),
+    vendor_code: document.getElementById('bg-vendor-code').value.trim() || null,
     contact_person: document.getElementById('bg-vendor-contact').value.trim() || null,
     phone: document.getElementById('bg-vendor-phone').value.trim() || null,
     email: document.getElementById('bg-vendor-email').value.trim() || null,

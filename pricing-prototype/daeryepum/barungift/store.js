@@ -923,8 +923,10 @@ async function getVendor(id) {
 }
 
 async function createVendor(data) {
+  const vendorCode = (data.vendor_code || '').trim() || null;
   const payload = {
     name: (data.name || '').trim(),
+    vendor_code: vendorCode,
     contact_person: data.contact_person || null,
     phone: data.phone || null,
     email: data.email || null,
@@ -936,6 +938,7 @@ async function createVendor(data) {
   if (USE_SUPABASE) return sbInsert('bg_vendors', payload);
   const list = readJson(FILES.vendors, []);
   if (list.some(v => v.name === payload.name)) throw new Error('이미 존재하는 거래처명입니다');
+  if (vendorCode && list.some(v => v.vendor_code === vendorCode)) throw new Error('이미 존재하는 거래처코드입니다');
   const local = { id: uuid(), ...payload, created_at: now(), updated_at: now() };
   list.push(local);
   writeJson(FILES.vendors, list);
@@ -946,6 +949,7 @@ async function updateVendor(id, data) {
   if (!id) throw new Error('id 필수');
   const patch = {};
   if (data.name !== undefined) patch.name = String(data.name).trim();
+  if (data.vendor_code !== undefined) patch.vendor_code = (String(data.vendor_code).trim() || null);
   if (data.contact_person !== undefined) patch.contact_person = data.contact_person || null;
   if (data.phone !== undefined) patch.phone = data.phone || null;
   if (data.email !== undefined) patch.email = data.email || null;
