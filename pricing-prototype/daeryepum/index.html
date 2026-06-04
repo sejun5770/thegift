@@ -282,6 +282,7 @@ nav.nav-loading a[href^="#"] {
   <a href="#bg-shipping" onclick="showPage('bg-shipping')">📅 출고일설정</a>
   <a href="#coupang-rfm" onclick="showPage('coupang-rfm')">🟥 로켓그로스</a>
   <a href="#bg-vendors" onclick="showPage('bg-vendors')">🤝 위탁업체</a>
+  <a href="#bg-settlements" onclick="showPage('bg-settlements')">💰 위탁정산</a>
   <a href="#admin-nav-settings" onclick="showPage('admin-nav-settings')" id="nav-link-admin-nav-settings" style="display:none">⚙️ GNB 설정</a>
   <div class="user-area" id="user-area"></div>
 </nav>
@@ -1497,6 +1498,112 @@ nav.nav-loading a[href^="#"] {
   </div>
 </div>
 
+<!-- ========== 위탁업체 정산 (Phase 2) ========== -->
+<div id="page-bg-settlements" class="page">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h2 style="margin:0">💰 위탁업체 정산</h2>
+    <button class="btn" onclick="loadBgSettlements()">🔄 새로고침</button>
+  </div>
+  <p style="color:var(--gray-500);font-size:13px;margin:0 0 16px">
+    희망 출고일 기준 위탁상품 매출의 정산 처리 현황입니다. 청첩장 동시구매 / 단독구매 구분 + 거래처별 / 기간별 / 정산상태별 필터 가능.
+  </p>
+
+  <!-- 필터 영역 -->
+  <div class="card" style="margin-bottom:14px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:end">
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:4px">거래처</label>
+        <select id="bgs-vendor" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;background:#fff">
+          <option value="">전체</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:4px">시작일 (희망출고)</label>
+        <input type="date" id="bgs-start" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:4px">종료일 (희망출고)</label>
+        <input type="date" id="bgs-end" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:4px">정산 상태</label>
+        <select id="bgs-status" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;background:#fff">
+          <option value="all">전체</option>
+          <option value="unsettled" selected>미정산</option>
+          <option value="settled">정산완료</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:4px">주문 유형</label>
+        <select id="bgs-order-type" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;background:#fff">
+          <option value="all">전체</option>
+          <option value="copurchase">청첩장 동시구매</option>
+          <option value="standalone">단독구매</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:4px">정렬</label>
+        <select id="bgs-sort" onchange="renderBgsTable()" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;background:#fff">
+          <option value="status_date">미정산 → 출고일↑</option>
+          <option value="date_asc">희망출고일 ↑</option>
+          <option value="date_desc">희망출고일 ↓</option>
+          <option value="amount_desc">정산금액 ↓</option>
+          <option value="vendor">거래처명</option>
+        </select>
+      </div>
+      <div>
+        <button class="btn btn-primary" onclick="loadBgSettlements()" style="width:100%;padding:7px 12px;font-size:13px">🔍 조회</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 요약 카드 -->
+  <div class="card-grid card-grid-4" id="bgs-summary-cards" style="margin-bottom:14px">
+    <div class="card"><h3>대상 건수</h3><div class="value" id="bgs-s-count">-</div><div class="sub" id="bgs-s-count-sub"></div></div>
+    <div class="card"><h3>총 매출</h3><div class="value" id="bgs-s-gross">-</div><div class="sub">수수료 차감 전</div></div>
+    <div class="card"><h3>총 수수료</h3><div class="value" id="bgs-s-commission">-</div><div class="sub" id="bgs-s-commission-sub">평균 수수료율</div></div>
+    <div class="card"><h3>정산 대상 금액</h3><div class="value" id="bgs-s-net">-</div><div class="sub" id="bgs-s-net-sub"></div></div>
+  </div>
+
+  <!-- 액션바 -->
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+      <input type="checkbox" id="bgs-select-all" onchange="bgsSelectAll(this)"> 전체선택
+    </label>
+    <span id="bgs-selected-count" style="font-size:12px;color:var(--gray-500)">0건 선택</span>
+    <div style="flex:1"></div>
+    <button class="btn btn-primary" id="bgs-btn-mark" onclick="bgsBulkMark()" style="display:none;padding:6px 12px;font-size:12px;background:#16a34a;border-color:#16a34a">✅ 정산처리</button>
+    <button class="btn" id="bgs-btn-unmark" onclick="bgsBulkUnmark()" style="display:none;padding:6px 12px;font-size:12px;border-color:#fbbf24;color:#92400e;background:#fef3c7">↺ 정산취소</button>
+    <button class="btn" id="bgs-btn-copy" onclick="bgsCopySelected()" style="display:none;padding:6px 12px;font-size:12px">📋 TSV 복사</button>
+  </div>
+
+  <!-- 테이블 -->
+  <div class="card" style="padding:0;overflow-x:auto">
+    <table class="data-table" id="bgs-table">
+      <thead>
+        <tr>
+          <th style="width:36px"><input type="checkbox" id="bgs-th-check" onchange="bgsSelectAll(this)"></th>
+          <th>상태</th>
+          <th>주문번호</th>
+          <th>유형</th>
+          <th>거래처</th>
+          <th>상품코드</th>
+          <th>상품명</th>
+          <th style="text-align:center">희망출고일</th>
+          <th style="text-align:center">수량</th>
+          <th style="text-align:right">매출</th>
+          <th style="text-align:center">수수료율</th>
+          <th style="text-align:right">수수료</th>
+          <th style="text-align:right">정산금액</th>
+          <th>정산일시</th>
+          <th style="width:80px">관리</th>
+        </tr>
+      </thead>
+      <tbody id="bgs-tbody"><tr><td colspan="15" style="text-align:center;color:var(--gray-400);padding:20px">조회 버튼을 눌러주세요.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
 <!-- ========== 바른기프트: 상품 설정 ========== -->
 <div id="page-bg-products" class="page">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
@@ -1515,9 +1622,22 @@ nav.nav-loading a[href^="#"] {
     </div>
   </div>
 
+  <!-- 매입/위탁 탭 -->
+  <div style="display:flex;gap:6px;margin-bottom:12px;border-bottom:1px solid var(--gray-200)">
+    <button class="btn" id="bg-p-tab-all" onclick="setBgProductTab('all')" style="border:0;border-bottom:2px solid var(--primary);border-radius:0;color:var(--primary);font-weight:600;padding:8px 14px;background:transparent">
+      📋 전체 <span id="bg-p-tab-cnt-all" style="font-size:11px;color:var(--gray-400);font-weight:400">(0)</span>
+    </button>
+    <button class="btn" id="bg-p-tab-owned" onclick="setBgProductTab('owned')" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">
+      🏭 자체매입 <span id="bg-p-tab-cnt-owned" style="font-size:11px;color:var(--gray-400);font-weight:400">(0)</span>
+    </button>
+    <button class="btn" id="bg-p-tab-consigned" onclick="setBgProductTab('consigned')" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">
+      🤝 위탁상품 <span id="bg-p-tab-cnt-consigned" style="font-size:11px;color:var(--gray-400);font-weight:400">(0)</span>
+    </button>
+  </div>
+
   <!-- 목록 -->
   <div class="card">
-    <h3 style="font-size:14px;font-weight:600;margin-bottom:12px">상품 설정 목록</h3>
+    <h3 id="bg-product-list-title" style="font-size:14px;font-weight:600;margin-bottom:12px">상품 설정 목록</h3>
     <table class="data-table" id="bg-product-table">
       <thead><tr>
         <th>품목코드</th>
@@ -1525,6 +1645,8 @@ nav.nav-loading a[href^="#"] {
         <th>제품명</th>
         <th>출고일 그룹</th>
         <th>스티커</th>
+        <th class="bg-p-col-vendor" style="display:none">거래처</th>
+        <th class="bg-p-col-vendor" style="display:none;text-align:right">수수료율</th>
         <th style="width:80px">관리</th>
       </tr></thead>
       <tbody id="bg-product-tbody"></tbody>
@@ -2397,6 +2519,7 @@ function showPage(name) {
   if (name === 'bg-unified') loadBgUnified();
   if (name === 'coupang-rfm') loadCoupangRfm();
   if (name === 'bg-vendors') loadBgVendors();
+  if (name === 'bg-settlements') initBgSettlements();
 }
 
 // --- Category Tabs ---
@@ -8277,15 +8400,34 @@ async function deleteBgSticker(id, name, code) {
 let bgProductSettings = [];
 let bgShippingGroupsCache = []; // 출고일 그룹 목록 캐시 (목록 렌더 시 그룹명 lookup 용)
 
+// 상품설정 탭 상태 — 'all' | 'owned' (자체매입) | 'consigned' (위탁)
+let _bgProductTab = 'all';
+
+function setBgProductTab(tab) {
+  _bgProductTab = tab;
+  // 탭 스타일 갱신
+  ['all','owned','consigned'].forEach(t => {
+    const btn = document.getElementById('bg-p-tab-' + t);
+    if (!btn) return;
+    const active = (t === tab);
+    btn.style.borderBottom = active ? '2px solid var(--primary)' : '2px solid transparent';
+    btn.style.color = active ? 'var(--primary)' : 'var(--gray-500)';
+    btn.style.fontWeight = active ? '600' : '500';
+  });
+  renderBgProducts();
+}
+
 async function loadBgProducts() {
   try {
-    // 상품 설정 + 출고일 그룹 동시 로드 (목록 렌더에 그룹명 표시 필요)
-    const [pr, gr] = await Promise.all([
+    // 상품 설정 + 출고일 그룹 + 거래처 동시 로드 (목록 렌더에 거래처명 표시 필요)
+    const [pr, gr, vr] = await Promise.all([
       fetch(API + '/api/bg/products/settings'),
       fetch(API + '/api/bg/shipping-groups'),
+      fetch(API + '/api/bg/vendors'),
     ]);
     bgProductSettings = (await pr.json()).settings || [];
     bgShippingGroupsCache = (await gr.json()).groups || [];
+    _bgVendorsCache = (await vr.json()).vendors || [];
     renderBgProducts();
   } catch(e) { console.error('loadBgProducts:', e); }
 }
@@ -8293,27 +8435,66 @@ async function loadBgProducts() {
 function renderBgProducts() {
   const tbody = document.getElementById('bg-product-tbody');
   const empty = document.getElementById('bg-product-empty');
-  if (!bgProductSettings.length) { tbody.innerHTML = ''; empty.classList.remove('hidden'); return; }
+  // 탭별 필터링
+  const allRows = bgProductSettings;
+  const ownedRows = allRows.filter(s => !s.vendor_id);       // 자체매입
+  const consignedRows = allRows.filter(s => !!s.vendor_id);  // 위탁
+  // 탭 카운트 갱신
+  const setCnt = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = '(' + n + ')'; };
+  setCnt('bg-p-tab-cnt-all', allRows.length);
+  setCnt('bg-p-tab-cnt-owned', ownedRows.length);
+  setCnt('bg-p-tab-cnt-consigned', consignedRows.length);
+  // 현재 탭에 따라 표시 행
+  const rows = _bgProductTab === 'owned' ? ownedRows : (_bgProductTab === 'consigned' ? consignedRows : allRows);
+  // 위탁 컬럼 (거래처/수수료율) 노출 — 위탁탭 또는 전체탭에서 노출. 자체매입 탭에선 숨김.
+  const showVendorCols = (_bgProductTab !== 'owned');
+  document.querySelectorAll('.bg-p-col-vendor').forEach(th => { th.style.display = showVendorCols ? '' : 'none'; });
+  // 타이틀
+  const titleEl = document.getElementById('bg-product-list-title');
+  if (titleEl) {
+    titleEl.textContent = _bgProductTab === 'owned' ? '🏭 자체매입 상품 목록'
+      : (_bgProductTab === 'consigned' ? '🤝 위탁 상품 목록' : '📋 전체 상품 설정 목록');
+  }
+  if (!rows.length) { tbody.innerHTML = ''; empty.classList.remove('hidden');
+    empty.textContent = _bgProductTab === 'owned' ? '자체매입 상품이 없습니다.'
+      : (_bgProductTab === 'consigned' ? '위탁 상품이 없습니다.' : '등록된 상품 설정이 없습니다.');
+    return;
+  }
   empty.classList.add('hidden');
-  // 그룹명 lookup map (shipping_group_id → name). 미지정/기본 그룹은 별도 처리.
+  // lookup maps
   const groupById = new Map(bgShippingGroupsCache.map(g => [g.id, g]));
   const defaultGroup = bgShippingGroupsCache.find(g => g.is_default);
-  tbody.innerHTML = bgProductSettings.map(s => {
-    // 출고일 그룹 표시:
-    //   - shipping_group_id 일치 → 해당 그룹명
-    //   - null/미지정 → '기본' 그룹명 (기본 그룹 변경 시 자동 추종)
+  const vendorById = new Map((_bgVendorsCache || []).map(v => [v.id, v]));
+  tbody.innerHTML = rows.map(s => {
     const matched = s.shipping_group_id ? groupById.get(s.shipping_group_id) : defaultGroup;
     const groupName = matched?.name || '기본 그룹';
     const isDefault = !s.shipping_group_id || (defaultGroup && s.shipping_group_id === defaultGroup.id);
     const groupBadge = isDefault
       ? `<span style="display:inline-block;padding:2px 8px;background:var(--gray-100);color:var(--gray-700);border-radius:10px;font-size:11px">${escapeHtml(groupName)} <span style="color:var(--gray-400)">(기본)</span></span>`
       : `<span style="display:inline-block;padding:2px 8px;background:#dbeafe;color:#1e40af;border-radius:10px;font-size:11px;font-weight:500">${escapeHtml(groupName)}</span>`;
+    // 위탁 정보 셀 (showVendorCols 일 때만 렌더)
+    let vendorCells = '';
+    if (showVendorCols) {
+      if (s.vendor_id) {
+        const v = vendorById.get(s.vendor_id);
+        const vendorBadge = v
+          ? `<span style="display:inline-block;padding:2px 8px;background:#fef3c7;color:#92400e;border-radius:10px;font-size:11px;font-weight:600">🤝 ${escapeHtml(v.name)}</span>`
+          : `<span style="color:#dc2626;font-size:11px" title="삭제된 거래처">⚠️ 미연결</span>`;
+        // 적용 수수료율: product override 우선, 없으면 vendor default
+        const cr = (s.commission_rate !== null && s.commission_rate !== undefined) ? Number(s.commission_rate) : (v ? Number(v.default_commission_rate || 0) : 0);
+        const crSource = (s.commission_rate !== null && s.commission_rate !== undefined) ? '' : ' <span style="color:var(--gray-400);font-size:10px">(거래처기본)</span>';
+        vendorCells = `<td>${vendorBadge}</td><td style="text-align:right;font-family:monospace">${cr.toFixed(1)}%${crSource}</td>`;
+      } else {
+        vendorCells = `<td><span style="color:var(--gray-400);font-size:11px">🏭 자체매입</span></td><td style="text-align:right;color:var(--gray-300)">-</td>`;
+      }
+    }
     return `<tr>
       <td style="font-family:monospace;font-size:11px">${s.product_id}</td>
       <td style="font-size:12px">${s.brand || '-'}</td>
       <td style="font-size:12px;font-weight:500">${s.product_name || '-'}</td>
       <td>${groupBadge}</td>
       <td>${(s.available_sticker_ids||[]).length}개</td>
+      ${vendorCells}
       <td>
         <button class="btn btn-sm" onclick="openBgProductForm('${s.product_id}')" title="편집">✏️</button>
         <button class="btn btn-sm" onclick="deleteBgProduct('${s.product_id}')" title="삭제" style="color:var(--red)">🗑️</button>
@@ -9056,6 +9237,237 @@ async function deleteBgVendor() {
     closeBgVendorForm();
     loadBgVendors();
   } catch (e) { alert(e.message); }
+}
+
+// ============================================
+// 위탁업체 정산 (Phase 2)
+// ============================================
+let _bgsItems = [];
+let _bgsSummary = null;
+
+async function initBgSettlements() {
+  // 거래처 dropdown 채우기 + 기본 기간 셋팅 (오늘 -7일 ~ +30일)
+  try {
+    const vr = await fetch(`${API}/api/bg/vendors?active_only=1`);
+    const vendors = (await vr.json()).vendors || [];
+    const sel = document.getElementById('bgs-vendor');
+    if (sel) {
+      sel.innerHTML = '<option value="">전체</option>'
+        + vendors.map(v => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join('');
+    }
+  } catch (e) { console.warn('[bg-settlements] vendor 로드 실패:', e.message); }
+  // 기본 기간: -7d ~ +30d
+  const fmt = d => d.toISOString().slice(0,10);
+  const today = new Date();
+  const start = new Date(today); start.setDate(start.getDate() - 7);
+  const end = new Date(today); end.setDate(end.getDate() + 30);
+  const sEl = document.getElementById('bgs-start');
+  const eEl = document.getElementById('bgs-end');
+  if (sEl && !sEl.value) sEl.value = fmt(start);
+  if (eEl && !eEl.value) eEl.value = fmt(end);
+  loadBgSettlements();
+}
+
+async function loadBgSettlements() {
+  const tbody = document.getElementById('bgs-tbody');
+  tbody.innerHTML = '<tr><td colspan="15" style="text-align:center;color:var(--gray-400);padding:20px">조회 중…</td></tr>';
+  const params = new URLSearchParams({
+    vendor_id: document.getElementById('bgs-vendor').value || '',
+    start_date: document.getElementById('bgs-start').value || '',
+    end_date: document.getElementById('bgs-end').value || '',
+    status: document.getElementById('bgs-status').value || 'all',
+    order_type: document.getElementById('bgs-order-type').value || 'all',
+  });
+  try {
+    const r = await fetch(`${API}/api/bg/vendor-settlements?${params}`);
+    const data = await r.json();
+    _bgsItems = Array.isArray(data.items) ? data.items : [];
+    _bgsSummary = data.summary || null;
+    renderBgsSummary();
+    renderBgsTable();
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="15" style="text-align:center;color:#dc2626;padding:20px">조회 실패: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+function renderBgsSummary() {
+  const s = _bgsSummary;
+  if (!s) return;
+  document.getElementById('bgs-s-count').textContent = (s.total_count || 0).toLocaleString() + '건';
+  document.getElementById('bgs-s-count-sub').textContent = `미정산 ${(s.unsettled_count||0).toLocaleString()} · 정산완료 ${(s.settled_count||0).toLocaleString()}`;
+  document.getElementById('bgs-s-gross').textContent = fmtKRW(s.gross_total || 0);
+  document.getElementById('bgs-s-commission').textContent = fmtKRW(s.commission_total || 0);
+  const avgRate = s.gross_total > 0 ? (s.commission_total / s.gross_total * 100).toFixed(2) : '0.00';
+  document.getElementById('bgs-s-commission-sub').textContent = `평균 수수료율 ${avgRate}%`;
+  document.getElementById('bgs-s-net').textContent = fmtKRW(s.net_total || 0);
+  document.getElementById('bgs-s-net-sub').textContent = `미정산 ${fmtKRW(s.unsettled_net||0)} · 정산완료 ${fmtKRW(s.settled_net||0)}`;
+}
+
+function _bgsSortedItems() {
+  const sort = document.getElementById('bgs-sort')?.value || 'status_date';
+  const arr = _bgsItems.slice();
+  switch (sort) {
+    case 'date_asc':
+      arr.sort((a,b) => String(a.desired_ship_date).localeCompare(String(b.desired_ship_date)));
+      break;
+    case 'date_desc':
+      arr.sort((a,b) => String(b.desired_ship_date).localeCompare(String(a.desired_ship_date)));
+      break;
+    case 'amount_desc':
+      arr.sort((a,b) => (b.net_amount||0) - (a.net_amount||0));
+      break;
+    case 'vendor':
+      arr.sort((a,b) => String(a.vendor_name||'').localeCompare(String(b.vendor_name||'')) || String(a.desired_ship_date).localeCompare(String(b.desired_ship_date)));
+      break;
+    case 'status_date':
+    default:
+      arr.sort((a,b) => {
+        const aSet = !!a.settled_at, bSet = !!b.settled_at;
+        if (aSet !== bSet) return aSet ? 1 : -1;
+        return String(a.desired_ship_date).localeCompare(String(b.desired_ship_date));
+      });
+  }
+  return arr;
+}
+
+function renderBgsTable() {
+  const tbody = document.getElementById('bgs-tbody');
+  const arr = _bgsSortedItems();
+  if (!arr.length) {
+    tbody.innerHTML = '<tr><td colspan="15" style="text-align:center;color:var(--gray-400);padding:20px">조회 결과가 없습니다.</td></tr>';
+    updateBgsActionBar();
+    return;
+  }
+  tbody.innerHTML = arr.map((it, idx) => {
+    const isSettled = !!it.settled_at;
+    const statusBadge = isSettled
+      ? '<span style="background:#dcfce7;color:#15803d;font-size:10.5px;font-weight:600;padding:2px 6px;border-radius:3px">✅ 정산완료</span>'
+      : '<span style="background:#fee2e2;color:#b91c1c;font-size:10.5px;font-weight:600;padding:2px 6px;border-radius:3px">⏳ 미정산</span>';
+    const typeBadge = it.is_copurchase
+      ? '<span style="background:#dbeafe;color:#1e40af;font-size:10.5px;font-weight:500;padding:2px 6px;border-radius:3px">💍 동시구매</span>'
+      : '<span style="background:#f3f4f6;color:#374151;font-size:10.5px;font-weight:500;padding:2px 6px;border-radius:3px">단독</span>';
+    const seqDisplay = String(it.order_seq);
+    const settledFmt = it.settled_at
+      ? new Date(it.settled_at).toLocaleString('ko-KR', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' })
+      : '<span style="color:var(--gray-300)">-</span>';
+    const actionBtn = isSettled
+      ? `<button class="btn" style="padding:3px 8px;font-size:11px;border-color:#fbbf24;color:#92400e;background:#fef3c7" onclick="bgsUnmarkOne(${idx})">↺ 취소</button>`
+      : `<button class="btn btn-primary" style="padding:3px 8px;font-size:11px;background:#16a34a;border-color:#16a34a" onclick="bgsMarkOne(${idx})">✅ 정산</button>`;
+    return `<tr data-bgs-idx="${idx}">
+      <td><input type="checkbox" class="bgs-row-check" data-idx="${idx}" onchange="updateBgsActionBar()"></td>
+      <td>${statusBadge}</td>
+      <td style="font-family:monospace;font-size:11px">${esc(seqDisplay)}</td>
+      <td>${typeBadge}</td>
+      <td style="font-size:12px;font-weight:600">${esc(it.vendor_name||'')}</td>
+      <td style="font-family:monospace;font-size:11px">${esc(it.product_code||'')}</td>
+      <td style="font-size:12px">${esc(it.product_name||'')}</td>
+      <td style="text-align:center;font-size:12px;white-space:nowrap">${esc(it.desired_ship_date||'')}</td>
+      <td style="text-align:center;font-size:12px">${Number(it.qty||0).toLocaleString()}</td>
+      <td style="text-align:right;font-family:monospace">${fmtKRW(it.gross_amount||0)}</td>
+      <td style="text-align:center;font-size:12px">${Number(it.commission_rate||0).toFixed(1)}%</td>
+      <td style="text-align:right;font-family:monospace;color:#dc2626">${fmtKRW(it.commission_amount||0)}</td>
+      <td style="text-align:right;font-family:monospace;font-weight:600;color:#16a34a">${fmtKRW(it.net_amount||0)}</td>
+      <td style="font-size:11px;white-space:nowrap">${settledFmt}</td>
+      <td>${actionBtn}</td>
+    </tr>`;
+  }).join('');
+  updateBgsActionBar();
+}
+
+function bgsSelectAll(srcEl) {
+  const checked = !!srcEl.checked;
+  document.querySelectorAll('.bgs-row-check').forEach(cb => { cb.checked = checked; });
+  const top = document.getElementById('bgs-select-all'); if (top) top.checked = checked;
+  const th = document.getElementById('bgs-th-check'); if (th) th.checked = checked;
+  updateBgsActionBar();
+}
+
+function updateBgsActionBar() {
+  const checked = [...document.querySelectorAll('.bgs-row-check:checked')];
+  const cnt = checked.length;
+  document.getElementById('bgs-selected-count').textContent = cnt + '건 선택';
+  const arr = _bgsSortedItems();
+  const sel = checked.map(cb => arr[parseInt(cb.dataset.idx)]).filter(Boolean);
+  const hasUnsettled = sel.some(it => !it.settled_at);
+  const hasSettled = sel.some(it => !!it.settled_at);
+  document.getElementById('bgs-btn-mark').style.display = (cnt > 0 && hasUnsettled) ? '' : 'none';
+  document.getElementById('bgs-btn-unmark').style.display = (cnt > 0 && hasSettled) ? '' : 'none';
+  document.getElementById('bgs-btn-copy').style.display = cnt > 0 ? '' : 'none';
+}
+
+async function bgsMarkOne(idx) {
+  const arr = _bgsSortedItems();
+  const it = arr[idx]; if (!it) return;
+  if (!confirm(`주문 ${it.order_seq} / ${it.vendor_name} / ${it.product_name} 정산 처리합니다. 계속할까요?`)) return;
+  await _bgsCallMark([it]);
+}
+async function bgsUnmarkOne(idx) {
+  const arr = _bgsSortedItems();
+  const it = arr[idx]; if (!it) return;
+  if (!confirm(`주문 ${it.order_seq} / ${it.product_name} 정산 취소합니다. 계속할까요?`)) return;
+  await _bgsCallUnmark([it]);
+}
+async function bgsBulkMark() {
+  const arr = _bgsSortedItems();
+  const sel = [...document.querySelectorAll('.bgs-row-check:checked')].map(cb => arr[parseInt(cb.dataset.idx)]).filter(it => it && !it.settled_at);
+  if (!sel.length) { alert('정산 대상 (미정산) 행을 선택해주세요'); return; }
+  if (!confirm(`${sel.length}건 일괄 정산 처리합니다. 계속할까요?`)) return;
+  await _bgsCallMark(sel);
+}
+async function bgsBulkUnmark() {
+  const arr = _bgsSortedItems();
+  const sel = [...document.querySelectorAll('.bgs-row-check:checked')].map(cb => arr[parseInt(cb.dataset.idx)]).filter(it => it && it.settled_at);
+  if (!sel.length) { alert('정산취소 대상 (정산완료) 행을 선택해주세요'); return; }
+  if (!confirm(`${sel.length}건 정산을 취소합니다. 계속할까요?`)) return;
+  await _bgsCallUnmark(sel);
+}
+async function _bgsCallMark(items) {
+  try {
+    const r = await fetch(`${API}/api/bg/vendor-settlements/mark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    });
+    const data = await r.json();
+    if (!r.ok || data.error) throw new Error(data.error || '정산 처리 실패');
+    showToast(`✅ ${data.marked || items.length}건 정산 처리 완료`);
+    loadBgSettlements();
+  } catch (e) { alert(e.message); }
+}
+async function _bgsCallUnmark(items) {
+  try {
+    const r = await fetch(`${API}/api/bg/vendor-settlements/unmark`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    });
+    const data = await r.json();
+    if (!r.ok || data.error) throw new Error(data.error || '정산 취소 실패');
+    showToast(`↺ ${data.removed || items.length}건 정산 취소 완료`);
+    loadBgSettlements();
+  } catch (e) { alert(e.message); }
+}
+
+function bgsCopySelected() {
+  const arr = _bgsSortedItems();
+  const sel = [...document.querySelectorAll('.bgs-row-check:checked')].map(cb => arr[parseInt(cb.dataset.idx)]).filter(Boolean);
+  if (!sel.length) { showToast('복사할 행을 선택해주세요'); return; }
+  const header = ['상태','주문번호','유형','거래처','상품코드','상품명','희망출고일','수량','매출','수수료율(%)','수수료','정산금액','정산일시'];
+  const rows = sel.map(it => [
+    it.settled_at ? '정산완료' : '미정산',
+    it.order_seq,
+    it.is_copurchase ? '동시구매' : '단독',
+    it.vendor_name||'',
+    it.product_code||'',
+    (it.product_name||'').replace(/[\t\r\n]+/g,' '),
+    it.desired_ship_date||'',
+    it.qty||0,
+    it.gross_amount||0,
+    Number(it.commission_rate||0).toFixed(2),
+    it.commission_amount||0,
+    it.net_amount||0,
+    it.settled_at ? new Date(it.settled_at).toLocaleString('ko-KR') : '',
+  ].join('\t'));
+  const tsv = [header.join('\t'), ...rows].join('\n');
+  navigator.clipboard.writeText(tsv).then(() => showToast(`${sel.length}건 클립보드 복사 완료`), () => alert('복사 실패'));
 }
 
 // ============================================

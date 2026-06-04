@@ -2077,6 +2077,311 @@ async function apiDashboardSummary(query) {
  *
  * 기간 차원: desired_ship_date 기준 (apiDashboardSummary 의 order_date 기준과 다름).
  */
+// ============================================
+// 위탁업체 정산 API (Phase 2)
+// ============================================
+
+/** ERP 변형 코드(예: TGJSD0104_A) → BASE 코드(TGJSD0104). 클라이언트 resolveBgMappedProductCode 와 동일. */
+function _baseProductCode(rawCode) {
+  if (!rawCode) return rawCode || '';
+  let cur = String(rawCode);
+  for (let i = 0; i < 3; i++) {
+    const m = cur.match(/^(.+)_[A-Za-z0-9]+$/);
+    if (!m || m[1] === cur) break;
+    cur = m[1];
+  }
+  return cur;
+}
+
+/**
+ * 위탁업체 정산 페이지 데이터 collector.
+ *
+ * Query params:
+ *   - vendor_id (optional) — 특정 거래처만
+ *   - start_date / end_date — 희망출고일 기준 (inclusive)
+ *   - status — 'all' | 'settled' | 'unsettled'
+ *   - order_type — 'all' | 'copurchase' | 'standalone'
+ *
+ * Return:
+ *   {
+ *     period, items: [
+ *       { order_id, order_seq, product_code, product_name, vendor_id, vendor_name,
+ *         desired_ship_date, is_copurchase, qty, gross_amount, commission_rate,
+ *         commission_amount, net_amount, settled_at }
+ *     ],
+ *     summary: { total_count, settled_count, unsettled_count,
+ *                gross_total, commission_total, net_total,
+ *                settled_net, unsettled_net }
+ *   }
+ */
+async function apiVendorSettlements(query) {
+  const startDate = query.start_date || fmtDate(addDays(today(), -30));
+  const endDate = query.end_date || fmtDate(addDays(today(), 31));
+  const filterVendorId = query.vendor_id || null;
+  const filterStatus = query.status || 'all';
+  const filterOrderType = query.order_type || 'all';
+
+  const empty = {
+    period: { start: startDate, end: endDate },
+    items: [],
+    summary: { total_count: 0, settled_count: 0, unsettled_count: 0,
+               gross_total: 0, commission_total: 0, net_total: 0,
+               settled_net: 0, unsettled_net: 0 },
+  };
+
+  const _bgStore = require('./barungift/store');
+
+  // 1) 위탁상품 매핑 (vendor_id 가진 상품 설정만)
+  const allProducts = await _bgStore.getAllProductSettings();
+  const consigned = allProducts.filter(s => s.vendor_id && (!filterVendorId || s.vendor_id === filterVendorId));
+  if (!consigned.length) return empty;
+  const productByCode = new Map(consigned.map(s => [s.product_id, s]));
+
+  // 2) 거래처 정보 (수수료율 fallback / name lookup)
+  const vendors = await _bgStore.listVendors();
+  const vendorById = new Map(vendors.map(v => [v.id, v]));
+
+  // 3) 기간 내 customer_info (희망출고일 지정된 것만)
+  const ciList = await _bgStore.getCustomerInfosWithShipDate();
+  const inWindow = ciList.filter(ci => {
+    const d = String(ci.desired_ship_date || '').slice(0, 10);
+    return d && d >= startDate && d <= endDate;
+  });
+  if (!inWindow.length) return empty;
+
+  // 4) order_seq 분리 (CARD/ETC)
+  const ciByCardSeq = new Map();
+  const ciByEtcSeq = new Map();
+  inWindow.forEach(ci => {
+    const oid = String(ci.order_id || '');
+    if (oid.startsWith('ETC-')) {
+      const seq = parseInt(oid.slice(4));
+      if (seq) ciByEtcSeq.set(seq, ci);
+    } else {
+      const seq = parseInt(oid);
+      if (seq) ciByCardSeq.set(seq, ci);
+    }
+  });
+
+  // 5) MSSQL 에서 (order_seq, product_code) 단위 매출 + 동시구매 여부 조회
+  const p = await getPool();
+  const queries = [];
+  if (ciByCardSeq.size) {
+    const inList = [...ciByCardSeq.keys()].join(',');
+    queries.push(p.request().query(`
+      WITH copurchase_orders AS (
+        SELECT DISTINCT coi2.order_seq
+        FROM custom_order_item coi2 WITH (NOLOCK)
+        INNER JOIN S2_Card c2 WITH (NOLOCK) ON coi2.card_seq = c2.Card_Seq
+        WHERE c2.Card_Div = 'A01'
+      )
+      SELECT
+        co.order_seq,
+        c.Card_Code AS product_code,
+        c.Card_Name AS product_name,
+        CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
+        ISNULL(SUM(coi.item_count), 0) AS qty,
+        ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)), 0) AS amount
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
+      WHERE ${D01_FILTER} AND co.order_seq IN (${inList})
+        AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5, 14)
+      GROUP BY co.order_seq, c.Card_Code, c.Card_Name, CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
+    `).then(r => r.recordset.map(row => ({ ...row, _src: 'CARD' }))));
+  }
+  if (ciByEtcSeq.size) {
+    const inList = [...ciByEtcSeq.keys()].join(',');
+    queries.push(p.request().query(`
+      WITH etc_copurchase_orders AS (
+        SELECT DISTINCT ei2.order_seq
+        FROM CUSTOM_ETC_ORDER_ITEM ei2 WITH (NOLOCK)
+        INNER JOIN S2_Card c2 WITH (NOLOCK) ON ei2.card_seq = c2.Card_Seq
+        WHERE c2.Card_Div = 'A01'
+      )
+      SELECT
+        o.order_seq,
+        c.Card_Code AS product_code,
+        c.Card_Name AS product_name,
+        CASE WHEN ecp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
+        ISNULL(SUM(oi.order_count), 0) AS qty,
+        ISNULL(SUM(${ETC_AMOUNT_EXPR}), 0) AS amount
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+      LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
+      ${ETC_COUPON_DIVISOR_JOIN_D01}
+      WHERE ${D01_FILTER} AND o.order_seq IN (${inList})
+        AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+      GROUP BY o.order_seq, c.Card_Code, c.Card_Name, CASE WHEN ecp.order_seq IS NOT NULL THEN 1 ELSE 0 END
+    `).then(r => r.recordset.map(row => ({ ...row, _src: 'ETC' }))));
+  }
+  const mssqlResults = (await Promise.all(queries)).flat();
+
+  // 6) 정산 마커 조회 (전체 한번에) — bg_vendor_settlement_marks
+  let marksMap = new Map(); // key = `${order_id}|${product_code}` → mark row
+  try {
+    const orderIds = [...inWindow.map(ci => ci.order_id)].filter(Boolean);
+    if (orderIds.length) {
+      const REST = process.env.SUPABASE_URL ? `${process.env.SUPABASE_URL}/rest/v1` : null;
+      if (REST) {
+        const inClause = orderIds.map(o => `"${o}"`).join(',');
+        const hdr = { apikey: process.env.SUPABASE_ANON_KEY, Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}` };
+        const url = `${REST}/bg_vendor_settlement_marks?select=*&order_id=in.(${encodeURIComponent(inClause)})&limit=10000`;
+        const r = await fetch(url, { headers: hdr });
+        if (r.ok) {
+          const rows = await r.json();
+          for (const m of rows) marksMap.set(`${m.order_id}|${m.product_code}`, m);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[vendor-settlements] marks fetch 실패:', e.message);
+  }
+
+  // 7) 필터링 + 통합 row 빌드 — MSSQL 결과 중 위탁상품에 해당하는 (order, product) 만 추출
+  const items = [];
+  for (const row of mssqlResults) {
+    const baseCode = _baseProductCode(row.product_code);
+    // 원본 또는 base 둘 다로 매핑 시도
+    const ps = productByCode.get(row.product_code) || productByCode.get(baseCode);
+    if (!ps) continue; // 위탁상품 아님 → 정산 대상 외
+
+    const ciMap = row._src === 'CARD' ? ciByCardSeq : ciByEtcSeq;
+    const ci = ciMap.get(row.order_seq);
+    if (!ci) continue;
+
+    const vendor = vendorById.get(ps.vendor_id);
+    if (!vendor) continue;
+
+    const isCopurchase = !!row.is_copurchase;
+    // 주문유형 필터
+    if (filterOrderType === 'copurchase' && !isCopurchase) continue;
+    if (filterOrderType === 'standalone' && isCopurchase) continue;
+
+    const grossAmount = Math.round(Number(row.amount) || 0);
+    // 수수료율: 상품 override 우선, 없으면 거래처 default
+    const commissionRate = (ps.commission_rate !== null && ps.commission_rate !== undefined)
+      ? Number(ps.commission_rate)
+      : Number(vendor.default_commission_rate || 0);
+    const commissionAmount = Math.round(grossAmount * (commissionRate / 100));
+    const netAmount = grossAmount - commissionAmount;
+
+    // 정산 상태
+    const markKey = `${ci.order_id}|${ps.product_id}`;
+    const mark = marksMap.get(markKey);
+    const settledAt = mark ? mark.settled_at : null;
+
+    // 정산상태 필터
+    if (filterStatus === 'settled' && !settledAt) continue;
+    if (filterStatus === 'unsettled' && settledAt) continue;
+
+    items.push({
+      order_id: ci.order_id,
+      order_seq: row.order_seq,
+      product_code: ps.product_id,
+      product_name: row.product_name,
+      vendor_id: vendor.id,
+      vendor_name: vendor.name,
+      desired_ship_date: String(ci.desired_ship_date).slice(0, 10),
+      is_copurchase: isCopurchase,
+      qty: Number(row.qty) || 0,
+      gross_amount: grossAmount,
+      commission_rate: commissionRate,
+      commission_amount: commissionAmount,
+      net_amount: netAmount,
+      settled_at: settledAt,
+      settled_by: mark?.settled_by || null,
+    });
+  }
+
+  // 정렬 기본: 미정산 우선 + 희망출고일 오름차순 (정산 작업 흐름과 일관)
+  items.sort((a, b) => {
+    const aSettled = !!a.settled_at;
+    const bSettled = !!b.settled_at;
+    if (aSettled !== bSettled) return aSettled ? 1 : -1;
+    return String(a.desired_ship_date).localeCompare(String(b.desired_ship_date));
+  });
+
+  // 요약 집계
+  const summary = items.reduce((acc, it) => {
+    acc.total_count += 1;
+    acc.gross_total += it.gross_amount;
+    acc.commission_total += it.commission_amount;
+    acc.net_total += it.net_amount;
+    if (it.settled_at) { acc.settled_count += 1; acc.settled_net += it.net_amount; }
+    else { acc.unsettled_count += 1; acc.unsettled_net += it.net_amount; }
+    return acc;
+  }, { total_count: 0, settled_count: 0, unsettled_count: 0,
+       gross_total: 0, commission_total: 0, net_total: 0,
+       settled_net: 0, unsettled_net: 0 });
+
+  return { period: { start: startDate, end: endDate }, items, summary };
+}
+
+/** 정산 처리 — bg_vendor_settlement_marks 에 row INSERT (snapshot). */
+async function apiVendorSettlementMark(body, session) {
+  if (!body || !Array.isArray(body.items) || !body.items.length) {
+    return { error: 'items 배열이 필요합니다 (order_id, product_code 포함)' };
+  }
+  const REST = process.env.SUPABASE_URL ? `${process.env.SUPABASE_URL}/rest/v1` : null;
+  if (!REST) return { error: 'Supabase 미설정' };
+  const hdr = {
+    apikey: process.env.SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json',
+    Prefer: 'resolution=merge-duplicates,return=representation',
+  };
+  const settledBy = session?.user?.user_id || session?.user?.id || 'admin';
+  const rows = body.items.map(it => ({
+    vendor_id: it.vendor_id,
+    order_id: it.order_id,
+    product_code: it.product_code,
+    desired_ship_date: it.desired_ship_date,
+    gross_amount: it.gross_amount || 0,
+    commission_rate: it.commission_rate || 0,
+    commission_amount: it.commission_amount || 0,
+    net_amount: it.net_amount || 0,
+    qty: it.qty || 0,
+    is_copurchase: !!it.is_copurchase,
+    settled_at: new Date().toISOString(),
+    settled_by: settledBy,
+    memo: it.memo || null,
+  }));
+  const url = `${REST}/bg_vendor_settlement_marks?on_conflict=order_id,product_code`;
+  const r = await fetch(url, { method: 'POST', headers: hdr, body: JSON.stringify(rows) });
+  if (!r.ok) {
+    const t = await r.text();
+    return { error: `정산 처리 실패 [${r.status}]: ${t.slice(0, 300)}` };
+  }
+  const inserted = await r.json();
+  return { ok: true, marked: inserted.length };
+}
+
+/** 정산 취소 — bg_vendor_settlement_marks 에서 row DELETE. */
+async function apiVendorSettlementUnmark(body, session) {
+  if (!body || !Array.isArray(body.items) || !body.items.length) {
+    return { error: 'items 배열이 필요합니다 (order_id, product_code 포함)' };
+  }
+  const REST = process.env.SUPABASE_URL ? `${process.env.SUPABASE_URL}/rest/v1` : null;
+  if (!REST) return { error: 'Supabase 미설정' };
+  const hdr = {
+    apikey: process.env.SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+    'Content-Type': 'application/json',
+  };
+  let removed = 0;
+  for (const it of body.items) {
+    if (!it.order_id || !it.product_code) continue;
+    const url = `${REST}/bg_vendor_settlement_marks?order_id=eq.${encodeURIComponent(it.order_id)}&product_code=eq.${encodeURIComponent(it.product_code)}`;
+    const r = await fetch(url, { method: 'DELETE', headers: hdr });
+    if (r.ok) removed += 1;
+  }
+  return { ok: true, removed };
+}
+
 async function apiDashboardByShipDate(query) {
   const p = await getPool();
   // 기본 윈도우: 오늘 ~ 30일 후
@@ -4041,6 +4346,18 @@ const server = http.createServer(async (req, res) => {
         data = await apiStickerAnalytics(parsed.query);
       } else if (pathname === '/api/dashboard/leadtime-3way') {
         data = await apiLeadtime3way(parsed.query);
+      } else if (pathname === '/api/bg/vendor-settlements') {
+        data = await apiVendorSettlements(parsed.query);
+      } else if (pathname === '/api/bg/vendor-settlements/mark' && req.method === 'POST') {
+        const body = await new Promise((resolve, reject) => {
+          let raw = ''; req.on('data', c => raw += c); req.on('end', () => { try { resolve(JSON.parse(raw||'{}')); } catch (e) { reject(e); } });
+        });
+        data = await apiVendorSettlementMark(body, session);
+      } else if (pathname === '/api/bg/vendor-settlements/unmark' && req.method === 'POST') {
+        const body = await new Promise((resolve, reject) => {
+          let raw = ''; req.on('data', c => raw += c); req.on('end', () => { try { resolve(JSON.parse(raw||'{}')); } catch (e) { reject(e); } });
+        });
+        data = await apiVendorSettlementUnmark(body, session);
       } else if (pathname === '/api/debug-order') {
         // 주문 원시 데이터 확인용 (order_seq 파라미터)
         const seq = parseInt(parsed.query.order_seq);
