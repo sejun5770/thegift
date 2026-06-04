@@ -96,6 +96,7 @@ const FILES = {
   customerInfo: path.join(DATA_DIR, 'bg_order_customer_info.json'),
   shippingConfig: path.join(DATA_DIR, 'bg_shipping_config.json'),
   alimtalkLog: path.join(DATA_DIR, 'bg_alimtalk_log.json'),
+  vendors: path.join(DATA_DIR, 'bg_vendors.json'),
 };
 
 function ensureDataDir() {
@@ -257,6 +258,8 @@ async function upsertProductSettings(productId, data) {
     available_box_options: data.available_box_options ?? [],
     custom_options: data.custom_options ?? {},  // {옵션그룹명: {use_images:bool, options:[{code,name,color?,preview_image_url?,sold_out}, ...]}}
     decoration_label: data.decoration_label ?? null,  // 고객 화면 장식 명칭 (NULL → '스티커' fallback)
+    vendor_id: data.vendor_id ?? null,                // 위탁 거래처 (NULL = 자체매입)
+    commission_rate: data.commission_rate !== undefined ? data.commission_rate : null,  // 상품 단위 수수료율 override
     shipping_group_id: data.shipping_group_id ?? null,
     express_available: data.express_available ?? (data.shipping_type === 'today_shipping'),
     express_fee: data.express_fee ?? 0,
@@ -893,6 +896,87 @@ async function getAlimtalkHistory(orderIds) {
   return result;
 }
 
+// ============================================
+// 위탁업체 (bg_vendors) CRUD — Phase 1
+// ============================================
+
+/**
+ * 거래처 목록 조회 — active 만 / 전체 옵션.
+ * @param {{ activeOnly?: boolean }} opts
+ */
+async function listVendors({ activeOnly = false } = {}) {
+  if (USE_SUPABASE) {
+    const filter = activeOnly ? 'is_active=eq.true&order=name.asc' : 'order=is_active.desc,name.asc';
+    return sbGet('bg_vendors', filter);
+  }
+  const rows = readJson(FILES.vendors, []);
+  return activeOnly ? rows.filter(v => v.is_active !== false) : rows;
+}
+
+async function getVendor(id) {
+  if (!id) return null;
+  if (USE_SUPABASE) {
+    const rows = await sbGet('bg_vendors', `id=eq.${encodeURIComponent(id)}`);
+    return rows[0] || null;
+  }
+  return (readJson(FILES.vendors, [])).find(v => v.id === id) || null;
+}
+
+async function createVendor(data) {
+  const payload = {
+    name: (data.name || '').trim(),
+    contact_person: data.contact_person || null,
+    phone: data.phone || null,
+    email: data.email || null,
+    default_commission_rate: Number(data.default_commission_rate) || 0,
+    memo: data.memo || null,
+    is_active: data.is_active !== false,
+  };
+  if (!payload.name) throw new Error('거래처명은 필수입니다');
+  if (USE_SUPABASE) return sbInsert('bg_vendors', payload);
+  const list = readJson(FILES.vendors, []);
+  if (list.some(v => v.name === payload.name)) throw new Error('이미 존재하는 거래처명입니다');
+  const local = { id: uuid(), ...payload, created_at: now(), updated_at: now() };
+  list.push(local);
+  writeJson(FILES.vendors, list);
+  return local;
+}
+
+async function updateVendor(id, data) {
+  if (!id) throw new Error('id 필수');
+  const patch = {};
+  if (data.name !== undefined) patch.name = String(data.name).trim();
+  if (data.contact_person !== undefined) patch.contact_person = data.contact_person || null;
+  if (data.phone !== undefined) patch.phone = data.phone || null;
+  if (data.email !== undefined) patch.email = data.email || null;
+  if (data.default_commission_rate !== undefined) patch.default_commission_rate = Number(data.default_commission_rate) || 0;
+  if (data.memo !== undefined) patch.memo = data.memo || null;
+  if (data.is_active !== undefined) patch.is_active = !!data.is_active;
+  patch.updated_at = now();
+  if (USE_SUPABASE) return sbUpdate('bg_vendors', `id=eq.${encodeURIComponent(id)}`, patch);
+  const list = readJson(FILES.vendors, []);
+  const idx = list.findIndex(v => v.id === id);
+  if (idx < 0) throw new Error('거래처를 찾을 수 없습니다');
+  list[idx] = { ...list[idx], ...patch };
+  writeJson(FILES.vendors, list);
+  return list[idx];
+}
+
+async function deleteVendor(id) {
+  if (!id) throw new Error('id 필수');
+  if (USE_SUPABASE) {
+    // 매핑된 상품이 있는지 확인 — 있으면 거절
+    const linked = await sbGet('bg_product_settings', `vendor_id=eq.${encodeURIComponent(id)}&select=product_id&limit=1`);
+    if (linked.length) throw new Error('이 거래처에 매핑된 상품이 있어 삭제할 수 없습니다. 먼저 상품설정에서 매핑을 해제해주세요.');
+    await sbDelete('bg_vendors', `id=eq.${encodeURIComponent(id)}`);
+    return { ok: true };
+  }
+  const list = readJson(FILES.vendors, []);
+  const next = list.filter(v => v.id !== id);
+  writeJson(FILES.vendors, next);
+  return { ok: true };
+}
+
 module.exports = {
   getAllStickers,
   getStickerById,
@@ -923,4 +1007,10 @@ module.exports = {
   deleteShippingGroup,
   logAlimtalkSend,
   getAlimtalkHistory,
+  // 위탁업체 (Phase 1)
+  listVendors,
+  getVendor,
+  createVendor,
+  updateVendor,
+  deleteVendor,
 };

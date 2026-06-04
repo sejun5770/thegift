@@ -695,6 +695,60 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     return json(res, { ok: true });
   }
 
+  // ============================================
+  // 위탁업체 (vendors) — Phase 1
+  // ============================================
+  // GET /api/bg/vendors?active_only=1
+  if (pathname === '/api/bg/vendors' && method === 'GET') {
+    try {
+      const activeOnly = query.active_only === '1' || query.active_only === 'true';
+      const vendors = await store.listVendors({ activeOnly });
+      return json(res, { vendors });
+    } catch (err) {
+      console.error('[vendors GET] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+  // POST /api/bg/vendors
+  if (pathname === '/api/bg/vendors' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const vendor = await store.createVendor(body);
+      return json(res, vendor, 201);
+    } catch (err) {
+      console.error('[vendors POST] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  // GET/PUT/DELETE /api/bg/vendors/:id
+  const vendorMatch = pathname.match(/^\/api\/bg\/vendors\/([^/]+)$/);
+  if (vendorMatch && method === 'GET') {
+    try {
+      const vendor = await store.getVendor(decodeURIComponent(vendorMatch[1]));
+      if (!vendor) return json(res, { error: '거래처를 찾을 수 없습니다' }, 404);
+      return json(res, vendor);
+    } catch (err) { return json(res, { error: err.message }, 500); }
+  }
+  if (vendorMatch && method === 'PUT') {
+    try {
+      const body = await parseBody(req);
+      const vendor = await store.updateVendor(decodeURIComponent(vendorMatch[1]), body);
+      return json(res, vendor);
+    } catch (err) {
+      console.error('[vendors PUT] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  if (vendorMatch && method === 'DELETE') {
+    try {
+      const result = await store.deleteVendor(decodeURIComponent(vendorMatch[1]));
+      return json(res, result);
+    } catch (err) {
+      console.error('[vendors DELETE] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+
   // GET /api/bg/orders/shipping?ids=1,2,3 — 복수 주문 배송정보 일괄 조회 (관리자)
   if (pathname === '/api/bg/orders/shipping' && method === 'GET') {
     const rawIds = (query.ids || '').split(',').map(s => s.trim()).filter(Boolean);

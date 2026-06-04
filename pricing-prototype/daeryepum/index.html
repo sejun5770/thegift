@@ -281,6 +281,7 @@ nav.nav-loading a[href^="#"] {
   <a href="#bg-products" onclick="showPage('bg-products')">⚙️ 상품설정</a>
   <a href="#bg-shipping" onclick="showPage('bg-shipping')">📅 출고일설정</a>
   <a href="#coupang-rfm" onclick="showPage('coupang-rfm')">🟥 로켓그로스</a>
+  <a href="#bg-vendors" onclick="showPage('bg-vendors')">🤝 위탁업체</a>
   <a href="#admin-nav-settings" onclick="showPage('admin-nav-settings')" id="nav-link-admin-nav-settings" style="display:none">⚙️ GNB 설정</a>
   <div class="user-area" id="user-area"></div>
 </nav>
@@ -1413,6 +1414,89 @@ nav.nav-loading a[href^="#"] {
   </div>
 </div>
 
+<!-- ========== 위탁업체 관리 (Phase 1) ========== -->
+<div id="page-bg-vendors" class="page">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+    <h2 style="margin:0">🤝 위탁업체 관리</h2>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" onclick="openBgVendorForm()">+ 거래처 추가</button>
+      <button class="btn" onclick="loadBgVendors()">🔄 새로고침</button>
+    </div>
+  </div>
+  <p style="color:var(--gray-500);font-size:13px;margin:0 0 16px">
+    위탁받은 답례품 상품의 거래처를 관리합니다. 등록한 거래처는 <b>⚙️ 상품설정</b> 페이지에서 품목별로 매핑할 수 있습니다.
+  </p>
+  <div class="card" style="padding:0;overflow-x:auto">
+    <table class="data-table" id="vendors-table">
+      <thead>
+        <tr>
+          <th style="width:36px">상태</th>
+          <th>거래처명</th>
+          <th>담당자</th>
+          <th>연락처</th>
+          <th>이메일</th>
+          <th style="text-align:right">기본 수수료율 (%)</th>
+          <th style="text-align:center">매핑 상품 수</th>
+          <th>비고</th>
+          <th style="width:120px">관리</th>
+        </tr>
+      </thead>
+      <tbody id="vendors-tbody">
+        <tr><td colspan="9" style="text-align:center;color:var(--gray-400);padding:20px">로딩 중…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 거래처 추가/수정 모달 -->
+<div id="bg-vendor-modal" onclick="if(event.target===this)closeBgVendorForm()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;max-width:480px;width:90%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
+      <h3 id="bg-vendor-modal-title" style="margin:0;font-size:16px">거래처 추가</h3>
+      <button onclick="closeBgVendorForm()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--gray-500)">&times;</button>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:14px">
+      <input type="hidden" id="bg-vendor-id">
+      <div>
+        <label style="display:block;font-size:12px;color:var(--gray-600);margin-bottom:4px">거래처명 <span style="color:#dc2626">*</span></label>
+        <input type="text" id="bg-vendor-name" placeholder="예: 바른팜" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div>
+          <label style="display:block;font-size:12px;color:var(--gray-600);margin-bottom:4px">담당자</label>
+          <input type="text" id="bg-vendor-contact" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;color:var(--gray-600);margin-bottom:4px">연락처</label>
+          <input type="text" id="bg-vendor-phone" placeholder="010-..." style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+        </div>
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;color:var(--gray-600);margin-bottom:4px">이메일 (정산용)</label>
+        <input type="email" id="bg-vendor-email" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;color:var(--gray-600);margin-bottom:4px" title="상품별 수수료율이 비어있을 때 적용되는 기본값입니다.">기본 수수료율 (%)</label>
+        <input type="number" id="bg-vendor-commission" min="0" max="100" step="0.1" placeholder="0" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+      </div>
+      <div>
+        <label style="display:block;font-size:12px;color:var(--gray-600);margin-bottom:4px">비고</label>
+        <textarea id="bg-vendor-memo" rows="3" placeholder="결제조건, 정산주기 등" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;resize:vertical"></textarea>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="bg-vendor-active" checked> 활성 (체크 해제 시 상품설정 드롭다운에서 제외)
+      </label>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:space-between;padding:16px 20px;border-top:1px solid var(--gray-200)">
+      <button class="btn" id="bg-vendor-delete-btn" onclick="deleteBgVendor()" style="border-color:#dc2626;color:#dc2626;display:none">🗑️ 삭제</button>
+      <div style="display:flex;gap:8px;margin-left:auto">
+        <button class="btn" onclick="closeBgVendorForm()">취소</button>
+        <button class="btn btn-primary" onclick="saveBgVendor()">저장</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ========== 바른기프트: 상품 설정 ========== -->
 <div id="page-bg-products" class="page">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
@@ -1486,6 +1570,21 @@ nav.nav-loading a[href^="#"] {
         <div>
           <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:4px" title="고객 화면에 표시될 장식 형태 명칭 (스티커/띠지/라벨 등). 비워두면 '스티커' 가 적용됩니다.">장식 명칭</label>
           <input type="text" id="bg-p-meta-deco-label" placeholder="스티커" maxlength="16" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
+        </div>
+      </div>
+
+      <!-- 위탁 거래처 매핑 — Phase 1 -->
+      <div style="display:grid;grid-template-columns:1fr 130px;gap:8px;background:#f9fafb;padding:10px;border-radius:8px;border:1px dashed var(--gray-300)">
+        <div>
+          <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:4px" title="이 상품을 위탁받은 거래처. 미선택 시 자체매입 상품으로 처리됩니다.">📦 위탁 거래처</label>
+          <select id="bg-p-meta-vendor" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px;background:#fff" onchange="onBgVendorChange(this.value)">
+            <option value="">자체매입 (위탁 아님)</option>
+            <!-- 동적 주입 -->
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:4px" title="이 상품에만 적용되는 수수료율. 비워두면 거래처 기본 수수료율이 적용됩니다.">수수료율 (%)</label>
+          <input type="number" id="bg-p-meta-commission" min="0" max="100" step="0.1" placeholder="거래처 기본" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
         </div>
       </div>
 
@@ -2297,6 +2396,7 @@ function showPage(name) {
   if (name === 'bg-shipping') loadBgShipping();
   if (name === 'bg-unified') loadBgUnified();
   if (name === 'coupang-rfm') loadCoupangRfm();
+  if (name === 'bg-vendors') loadBgVendors();
 }
 
 // --- Category Tabs ---
@@ -8270,6 +8370,26 @@ async function openBgProductForm(productId) {
     // 장식 명칭 (decoration_label) — 비어있으면 placeholder '스티커' 그대로 보임
     const decoInput = document.getElementById('bg-p-meta-deco-label');
     if (decoInput) decoInput.value = s?.decoration_label || '';
+    // 거래처 / 수수료율 dropdown 로드 + 현재 값 셋팅
+    try {
+      const vRes = await fetch(API + '/api/bg/vendors?active_only=1');
+      const vendors = (await vRes.json()).vendors || [];
+      _bgVendorsCache = vendors;
+      const vSel = document.getElementById('bg-p-meta-vendor');
+      if (vSel) {
+        vSel.innerHTML = '<option value="">자체매입 (위탁 아님)</option>'
+          + vendors.map(v => `<option value="${esc(v.id)}">${esc(v.name)} (기본 ${Number(v.default_commission_rate || 0).toFixed(1)}%)</option>`).join('');
+        vSel.value = s?.vendor_id || '';
+      }
+      const cInput = document.getElementById('bg-p-meta-commission');
+      if (cInput) {
+        cInput.value = (s?.commission_rate !== null && s?.commission_rate !== undefined) ? s.commission_rate : '';
+        const v = vendors.find(vv => vv.id === s?.vendor_id);
+        cInput.placeholder = v ? `거래처 기본 ${Number(v.default_commission_rate || 0).toFixed(1)}%` : '거래처 선택 시 기본 노출';
+      }
+    } catch (e) {
+      console.warn('[bg-product-form] vendor 로드 실패:', e.message);
+    }
     // 박스 옵션 로드 (없으면 빈 배열)
     _bgBoxOptions = Array.isArray(s?.available_box_options)
       ? s.available_box_options.map(opt => ({
@@ -8400,6 +8520,15 @@ function bgBoxUpdate(i, field, value) {
 //   고객 화면: 그룹별로 dropdown / 카드 선택 UI 렌더 (Phase 2 에서 구현)
 // ============================================
 let _bgCustomOptions = {};
+let _bgVendorsCache = [];
+
+/** 거래처 변경 시 수수료율 placeholder 갱신 (선택된 거래처 기본값 노출) */
+function onBgVendorChange(vendorId) {
+  const cInput = document.getElementById('bg-p-meta-commission');
+  if (!cInput) return;
+  const v = (_bgVendorsCache || []).find(vv => vv.id === vendorId);
+  cInput.placeholder = v ? `거래처 기본 ${Number(v.default_commission_rate || 0).toFixed(1)}%` : '거래처 선택 시 기본 노출';
+}
 
 function renderBgCustomOptions() {
   const wrap = document.getElementById('bg-p-custom-groups');
@@ -8761,6 +8890,11 @@ async function saveBgProduct() {
   // 장식 명칭 — trim 후 빈 문자열이면 null 저장 → 고객 화면이 '스티커' fallback 적용
   const decorationLabel = (document.getElementById('bg-p-meta-deco-label')?.value || '').trim().slice(0, 16) || null;
 
+  // 위탁 거래처 + 수수료율 (Phase 1) — vendor_id 미선택 시 NULL (자체매입), commission_rate 빈 값이면 NULL (거래처 default)
+  const vendorId = (document.getElementById('bg-p-meta-vendor')?.value || '').trim() || null;
+  const cmRaw = (document.getElementById('bg-p-meta-commission')?.value || '').trim();
+  const commissionRate = cmRaw === '' ? null : Math.max(0, Math.min(100, Number(cmRaw) || 0));
+
   const body = {
     brand: brand || null,
     product_name: productName || null,
@@ -8768,6 +8902,8 @@ async function saveBgProduct() {
     available_box_options: boxOptions,
     custom_options: customOptions,
     decoration_label: decorationLabel,
+    vendor_id: vendorId,
+    commission_rate: commissionRate,
     shipping_group_id: shippingGroupId,
   };
 
@@ -8800,6 +8936,129 @@ let bgShClosedCalMonth = new Date();
 let bgShClosedReasonTarget = null;
 let bgShPreviewMonth = new Date();
 let bgShPreviewSelected = null;
+
+// ============================================
+// 위탁업체 관리 (Phase 1)
+// ============================================
+let _bgVendorsList = [];
+
+async function loadBgVendors() {
+  const tbody = document.getElementById('vendors-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--gray-400);padding:20px">로딩 중…</td></tr>';
+  try {
+    // 거래처 목록 + 상품설정 (매핑 상품 수 계산용) 병렬 로드
+    const [vRes, pRes] = await Promise.all([
+      fetch(API + '/api/bg/vendors'),
+      bgProductSettings.length ? Promise.resolve(null) : fetch(API + '/api/bg/products/settings'),
+    ]);
+    _bgVendorsList = (await vRes.json()).vendors || [];
+    if (pRes) bgProductSettings = (await pRes.json()).settings || [];
+    // 거래처별 매핑 상품 수 카운트
+    const countByVendor = {};
+    for (const p of bgProductSettings) {
+      if (p.vendor_id) countByVendor[p.vendor_id] = (countByVendor[p.vendor_id] || 0) + 1;
+    }
+    if (!_bgVendorsList.length) {
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--gray-400);padding:20px">등록된 거래처가 없습니다. 우측 상단 "+ 거래처 추가" 버튼으로 등록하세요.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = _bgVendorsList.map(v => {
+      const cnt = countByVendor[v.id] || 0;
+      const statusBadge = v.is_active
+        ? '<span style="background:#dcfce7;color:#15803d;font-size:10.5px;font-weight:600;padding:2px 6px;border-radius:3px">활성</span>'
+        : '<span style="background:#f3f4f6;color:#6b7280;font-size:10.5px;font-weight:600;padding:2px 6px;border-radius:3px">비활성</span>';
+      const memo = v.memo ? esc(String(v.memo).slice(0, 30)) + (String(v.memo).length > 30 ? '…' : '') : '<span style="color:var(--gray-300)">-</span>';
+      return `<tr>
+        <td>${statusBadge}</td>
+        <td style="font-weight:600">${esc(v.name)}</td>
+        <td>${esc(v.contact_person || '-')}</td>
+        <td>${esc(v.phone || '-')}</td>
+        <td style="font-size:12px">${esc(v.email || '-')}</td>
+        <td style="text-align:right;font-family:monospace">${Number(v.default_commission_rate || 0).toFixed(1)}%</td>
+        <td style="text-align:center">${cnt > 0 ? '<b style="color:var(--primary)">' + cnt + '</b>개' : '<span style="color:var(--gray-400)">0개</span>'}</td>
+        <td style="font-size:12px;color:var(--gray-600)" title="${esc(v.memo || '')}">${memo}</td>
+        <td><button class="btn" style="padding:4px 10px;font-size:12px" onclick="openBgVendorForm('${esc(v.id)}')">수정</button></td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    console.error('[vendors] load failed', e);
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#dc2626;padding:20px">로딩 실패: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+function openBgVendorForm(id) {
+  const modal = document.getElementById('bg-vendor-modal');
+  const title = document.getElementById('bg-vendor-modal-title');
+  const delBtn = document.getElementById('bg-vendor-delete-btn');
+  document.getElementById('bg-vendor-id').value = id || '';
+  if (id) {
+    const v = _bgVendorsList.find(vv => vv.id === id);
+    if (!v) { alert('거래처를 찾을 수 없습니다'); return; }
+    title.textContent = '거래처 수정 — ' + v.name;
+    document.getElementById('bg-vendor-name').value = v.name || '';
+    document.getElementById('bg-vendor-contact').value = v.contact_person || '';
+    document.getElementById('bg-vendor-phone').value = v.phone || '';
+    document.getElementById('bg-vendor-email').value = v.email || '';
+    document.getElementById('bg-vendor-commission').value = v.default_commission_rate || 0;
+    document.getElementById('bg-vendor-memo').value = v.memo || '';
+    document.getElementById('bg-vendor-active').checked = v.is_active !== false;
+    if (delBtn) delBtn.style.display = '';
+  } else {
+    title.textContent = '거래처 추가';
+    ['bg-vendor-name','bg-vendor-contact','bg-vendor-phone','bg-vendor-email','bg-vendor-memo'].forEach(k => document.getElementById(k).value = '');
+    document.getElementById('bg-vendor-commission').value = '';
+    document.getElementById('bg-vendor-active').checked = true;
+    if (delBtn) delBtn.style.display = 'none';
+  }
+  modal.style.display = 'flex';
+}
+
+function closeBgVendorForm() {
+  document.getElementById('bg-vendor-modal').style.display = 'none';
+}
+
+async function saveBgVendor() {
+  const id = document.getElementById('bg-vendor-id').value;
+  const body = {
+    name: document.getElementById('bg-vendor-name').value.trim(),
+    contact_person: document.getElementById('bg-vendor-contact').value.trim() || null,
+    phone: document.getElementById('bg-vendor-phone').value.trim() || null,
+    email: document.getElementById('bg-vendor-email').value.trim() || null,
+    default_commission_rate: Math.max(0, Math.min(100, Number(document.getElementById('bg-vendor-commission').value) || 0)),
+    memo: document.getElementById('bg-vendor-memo').value.trim() || null,
+    is_active: document.getElementById('bg-vendor-active').checked,
+  };
+  if (!body.name) { alert('거래처명은 필수입니다'); return; }
+  try {
+    const url = id ? `${API}/api/bg/vendors/${encodeURIComponent(id)}` : `${API}/api/bg/vendors`;
+    const r = await fetch(url, {
+      method: id ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || '저장 실패'); }
+    showToast(id ? '거래처가 수정되었습니다' : '거래처가 추가되었습니다');
+    closeBgVendorForm();
+    loadBgVendors();
+  } catch (e) { alert(e.message); }
+}
+
+async function deleteBgVendor() {
+  const id = document.getElementById('bg-vendor-id').value;
+  if (!id) return;
+  const v = _bgVendorsList.find(vv => vv.id === id);
+  if (!confirm(`거래처 "${v?.name || ''}" 를 삭제할까요?\n매핑된 상품이 있으면 삭제할 수 없습니다.`)) return;
+  try {
+    const r = await fetch(`${API}/api/bg/vendors/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || '삭제 실패'); }
+    showToast('거래처가 삭제되었습니다');
+    closeBgVendorForm();
+    loadBgVendors();
+  } catch (e) { alert(e.message); }
+}
+
+// ============================================
 
 let _bgShGroups = [];
 
