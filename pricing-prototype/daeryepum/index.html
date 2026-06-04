@@ -1602,11 +1602,12 @@ nav.nav-loading a[href^="#"] {
           <th style="text-align:center">수수료율</th>
           <th style="text-align:right">수수료</th>
           <th style="text-align:right">정산금액</th>
+          <th style="text-align:center">결제수단</th>
           <th>정산일시</th>
           <th style="width:80px">관리</th>
         </tr>
       </thead>
-      <tbody id="bgs-tbody"><tr><td colspan="15" style="text-align:center;color:var(--gray-400);padding:20px">조회 버튼을 눌러주세요.</td></tr></tbody>
+      <tbody id="bgs-tbody"><tr><td colspan="16" style="text-align:center;color:var(--gray-400);padding:20px">조회 버튼을 눌러주세요.</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -9261,6 +9262,29 @@ async function deleteBgVendor() {
 let _bgsItems = [];
 let _bgsSummary = null;
 
+// 정산내역 전용 결제수단 라벨 (운영 요구 사양 반영)
+//   FirstMall settle_method (char(1)) 코드를 정산 보고서용 표기로 정규화.
+//   네이버페이/카카오페이 sub-method (카드/계좌이체/포인트) 는 DB 에 별도 컬럼 없음 →
+//   안내 차원에서 '-카드/계좌이체/포인트' suffix 만 표기 (실제 세부는 PG 정산서 참조).
+const BGS_SETTLE_METHOD_MAP = {
+  '0': '미설정',
+  '1': '무통장',
+  '2': '카드',
+  '3': '가상계좌',
+  '4': '실시간계좌이체',
+  '5': '휴대폰',
+  '6': '간편결제',
+  '7': '토스페이',
+  '8': 'npay - 카드/계좌이체/포인트',
+  '9': '카카오페이 - 카드/계좌이체/포인트',
+  'A': '해외카드',
+  'B': '적립금',
+};
+function bgsFormatSettleMethod(code) {
+  if (code == null || code === '') return '-';
+  return BGS_SETTLE_METHOD_MAP[String(code)] || `코드${code}`;
+}
+
 async function initBgSettlements() {
   // 거래처 dropdown 채우기 + 기본 기간 셋팅 (오늘 -7일 ~ +30일)
   try {
@@ -9286,7 +9310,7 @@ async function initBgSettlements() {
 
 async function loadBgSettlements() {
   const tbody = document.getElementById('bgs-tbody');
-  tbody.innerHTML = '<tr><td colspan="15" style="text-align:center;color:var(--gray-400);padding:20px">조회 중…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="16" style="text-align:center;color:var(--gray-400);padding:20px">조회 중…</td></tr>';
   const params = new URLSearchParams({
     vendor_id: document.getElementById('bgs-vendor').value || '',
     start_date: document.getElementById('bgs-start').value || '',
@@ -9302,7 +9326,7 @@ async function loadBgSettlements() {
     renderBgsSummary();
     renderBgsTable();
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="15" style="text-align:center;color:#dc2626;padding:20px">조회 실패: ${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="16" style="text-align:center;color:#dc2626;padding:20px">조회 실패: ${esc(e.message)}</td></tr>`;
   }
 }
 
@@ -9350,7 +9374,7 @@ function renderBgsTable() {
   const tbody = document.getElementById('bgs-tbody');
   const arr = _bgsSortedItems();
   if (!arr.length) {
-    tbody.innerHTML = '<tr><td colspan="15" style="text-align:center;color:var(--gray-400);padding:20px">조회 결과가 없습니다.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="16" style="text-align:center;color:var(--gray-400);padding:20px">조회 결과가 없습니다.</td></tr>';
     updateBgsActionBar();
     return;
   }
@@ -9383,6 +9407,7 @@ function renderBgsTable() {
       <td style="text-align:center;font-size:12px">${Number(it.commission_rate||0).toFixed(1)}%</td>
       <td style="text-align:right;font-family:monospace;color:#dc2626">${fmtKRW(it.commission_amount||0)}</td>
       <td style="text-align:right;font-family:monospace;font-weight:600;color:#16a34a">${fmtKRW(it.net_amount||0)}</td>
+      <td style="text-align:center;font-size:11.5px;white-space:nowrap" title="${esc('FirstMall settle_method=' + (it.settle_method||''))}">${esc(bgsFormatSettleMethod(it.settle_method))}</td>
       <td style="font-size:11px;white-space:nowrap">${settledFmt}</td>
       <td>${actionBtn}</td>
     </tr>`;
@@ -9466,7 +9491,7 @@ function bgsCopySelected() {
   const arr = _bgsSortedItems();
   const sel = [...document.querySelectorAll('.bgs-row-check:checked')].map(cb => arr[parseInt(cb.dataset.idx)]).filter(Boolean);
   if (!sel.length) { showToast('복사할 행을 선택해주세요'); return; }
-  const header = ['상태','주문번호','유형','거래처','상품코드','상품명','희망출고일','수량','매출','수수료율(%)','수수료','정산금액','정산일시'];
+  const header = ['상태','주문번호','유형','거래처','상품코드','상품명','희망출고일','수량','매출','수수료율(%)','수수료','정산금액','결제수단','정산일시'];
   const rows = sel.map(it => [
     it.settled_at ? '정산완료' : '미정산',
     it.order_seq,
@@ -9480,6 +9505,7 @@ function bgsCopySelected() {
     Number(it.commission_rate||0).toFixed(2),
     it.commission_amount||0,
     it.net_amount||0,
+    bgsFormatSettleMethod(it.settle_method),
     it.settled_at ? new Date(it.settled_at).toLocaleString('ko-KR') : '',
   ].join('\t'));
   const tsv = [header.join('\t'), ...rows].join('\n');

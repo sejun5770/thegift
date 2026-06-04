@@ -2181,7 +2181,8 @@ async function apiVendorSettlements(query) {
         c.Card_Name AS product_name,
         CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
         ISNULL(SUM(coi.item_count), 0) AS qty,
-        ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)), 0) AS amount
+        ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)), 0) AS amount,
+        MAX(co.settle_method) AS settle_method
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
@@ -2206,7 +2207,8 @@ async function apiVendorSettlements(query) {
         c.Card_Name AS product_name,
         CASE WHEN ecp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
         ISNULL(SUM(oi.order_count), 0) AS qty,
-        ISNULL(SUM(${ETC_AMOUNT_EXPR}), 0) AS amount
+        ISNULL(SUM(${ETC_AMOUNT_EXPR}), 0) AS amount,
+        MAX(o.settle_method) AS settle_method
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
@@ -2292,6 +2294,7 @@ async function apiVendorSettlements(query) {
       commission_rate: commissionRate,
       commission_amount: commissionAmount,
       net_amount: netAmount,
+      settle_method: row.settle_method != null ? String(row.settle_method) : null, // FirstMall char(1) 코드
       settled_at: settledAt,
       settled_by: mark?.settled_by || null,
     });
