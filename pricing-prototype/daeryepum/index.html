@@ -4357,14 +4357,14 @@ function analyzeSkuConcentration(productSales, total) {
   return { hhi, hhiLabel, top20Pct, top20Count, skuCount: entries.length };
 }
 
-/** 채널 mix 분석 — 자사몰 / 마켓플레이스 (네이버+쿠팡) / 제휴몰 비중 */
+/** 채널 mix 분석 — 자사몰 / 마켓플레이스 (네이버+쿠팡+쿠팡 로켓그로스) / 제휴몰 비중 */
 function analyzeChannelMix(bySite, total) {
   if (total <= 0) return { own: 0, market: 0, affiliate: 0, ownAmt: 0, marketAmt: 0, affiliateAmt: 0 };
   let own = 0, market = 0, affiliate = 0;
   Object.entries(bySite).forEach(([s, v]) => {
     const amt = v.total_amount || 0;
     if (s === '바른손카드') own += amt;
-    else if (s === '네이버' || s === '쿠팡') market += amt;
+    else if (s === '네이버' || s === '쿠팡' || s === '쿠팡 로켓그로스') market += amt;
     else if (isAffiliateSite(s)) affiliate += amt;
     else own += amt;
   });

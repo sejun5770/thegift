@@ -2006,6 +2006,51 @@ async function apiDashboardSummary(query) {
     console.warn('[summary] 네이버 주문 머지 실패 (무시):', e.message);
   }
 
+  // 쿠팡 로켓그로스 매출 (수동 입력 집계) 머지 — 일별 aggregate, '쿠팡 로켓그로스' 사이트 그룹.
+  //
+  // 데이터 특성:
+  //   · Wing API 가 RFM 매출 노출 안 해 운영자가 수동 입력 → coupang_rocket_growth_sales 테이블
+  //   · 일자당 1 row (vendor_item_id='_manual'), 상품 명세 없는 일별 합계
+  //   · net_amount 는 generated column (= sales_amount - refund_amount) — Wing 셀러센터 표시값과 일관
+  //   · 주문건수는 실제 주문 단위 데이터 없음 → row 수(=일자 수) 사용
+  //
+  // 컨벤션 정렬: apiDashboardComparison 의 getPeriodTotal 과 동일 패턴 — 채널별 합계 KPI
+  //   카드가 비교 카드와 어긋나지 않도록 통일 (amount=net_amount, qty=sales_qty gross, order_count=row수).
+  try {
+    const rfmStore = require('./coupang/rfm-store');
+    // endDate 는 exclusive — listSales 의 lte 와 맞추려 -1 일
+    const endIncl = endDate ? new Date(new Date(endDate).getTime() - 86400000).toISOString().slice(0, 10) : null;
+    const rgRows = await rfmStore.listSales({ startDate, endDate: endIncl });
+    if (rgRows && rgRows.length) {
+      for (const r of rgRows) {
+        const day = String(r.sale_date || '').slice(0, 10);
+        if (!day) continue;
+        const netAmount = Number(r.net_amount) || 0; // generated column = sales - refund
+        const grossQty = Number(r.sales_qty) || 0;   // getPeriodTotal 컨벤션과 일치 (gross)
+        // summary rows — 일별 단일 집계 row (상품별 분해 불가)
+        rows.push({
+          card_name: r.product_name || '쿠팡 로켓그로스 (일별 집계)',
+          card_code: 'ROCKET_GROWTH',
+          order_day: day,
+          site_name: '쿠팡 로켓그로스',
+          order_type: '단독주문',
+          order_count: 1, // 일별 1 entry (수동 입력 단위)
+          total_qty: grossQty,
+          total_amount: Math.round(netAmount),
+        });
+        // orderCounts — row 수 = 1/일 (수동 집계 단위)
+        orderCounts.push({
+          order_day: day,
+          site_name: '쿠팡 로켓그로스',
+          order_type: '단독주문',
+          distinct_order_count: 1,
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('[summary] 쿠팡 로켓그로스 머지 실패 (무시):', e.message);
+  }
+
   return { summary: rows, order_counts: orderCounts, express_daily: expressDaily };
 }
 
