@@ -814,6 +814,33 @@
     } catch (e) { /* orderData 미로딩 등 예외 상황 — 무시 */ }
   }
 
+  /** 멀티 그룹 출고일 검증 — 각 그룹마다 _activeCalGroupId 진입 후 유효성 체크. */
+  function validateShipDateMulti() {
+    if (!formState || !isMultiShippingGroups()) return;
+    const groups = getShippingGroups();
+    let changed = false;
+    for (const g of groups) {
+      const slot = formState.shipping_by_group?.[g.group_id];
+      if (!slot || !slot.ship_date) continue;
+      const prevCtx = _activeCalGroupId;
+      _activeCalGroupId = g.group_id;
+      try {
+        const min = getMinDate();
+        const max = getMaxDate();
+        const d = slot.ship_date;
+        if (d < min || d > max || isDateClosed(d)) {
+          console.warn(`[ship-date-multi] 그룹 "${g.group_name}" 복원값 범위 외 → 초기화:`, d);
+          slot.ship_date = '';
+          slot.ship_type = '';
+          calendarViewMonthByGroup[g.group_id] = null;
+          changed = true;
+        }
+      } catch (e) { /* ignore */ }
+      _activeCalGroupId = prevCtx;
+    }
+    if (changed) { try { saveFormState(); } catch (e) { /* ignore */ } }
+  }
+
   /**
    * HTML-escape 사용자 입력값. innerHTML/템플릿 리터럴 에 사용자 문자열을 삽입할 때
    * XSS 방지를 위해 필수. 숫자/boolean/null/undefined 도 안전하게 문자열화.
@@ -863,14 +890,91 @@
     return kst.getUTCHours() * 60 + kst.getUTCMinutes();
   }
 
+  // ─── 멀티 그룹 캘린더 렌더링 컨텍스트 ────────────────────────────
+  //   렌더링/이벤트 시점에 어떤 출고 그룹 기준인지 알기 위한 module-level 상태.
+  //   null = 단일 그룹 (formState.desired_ship_date 직접 사용 — 기존 동작)
+  //   string = 멀티 그룹 모드, 해당 group_id 의 state 사용 (formState.shipping_by_group[gid])
+  let _activeCalGroupId = null;
+  let calendarViewMonthByGroup = {}; // {group_id: 'YYYY-MM'}
+
+  function _ctxShipDate() {
+    if (_activeCalGroupId == null) return formState.desired_ship_date || '';
+    return formState.shipping_by_group?.[_activeCalGroupId]?.ship_date || '';
+  }
+  function _ctxShipType() {
+    if (_activeCalGroupId == null) return formState.shipping_type || '';
+    return formState.shipping_by_group?.[_activeCalGroupId]?.ship_type || '';
+  }
+  function _ctxSetShipping(date, type) {
+    if (_activeCalGroupId == null) {
+      formState.desired_ship_date = date;
+      formState.shipping_type = type;
+      return;
+    }
+    if (!formState.shipping_by_group) formState.shipping_by_group = {};
+    if (!formState.shipping_by_group[_activeCalGroupId]) formState.shipping_by_group[_activeCalGroupId] = {};
+    formState.shipping_by_group[_activeCalGroupId].ship_date = date;
+    formState.shipping_by_group[_activeCalGroupId].ship_type = type;
+  }
+  function _ctxViewMonth(setTo) {
+    if (_activeCalGroupId == null) {
+      if (setTo !== undefined) calendarViewMonth = setTo;
+      return calendarViewMonth;
+    }
+    if (setTo !== undefined) calendarViewMonthByGroup[_activeCalGroupId] = setTo;
+    return calendarViewMonthByGroup[_activeCalGroupId];
+  }
+
   function getSettings() {
-    // 공통 shipping_config (관리자 출고일 설정) + 상품별 product_settings 병합
-    // 출고 관련 설정은 글로벌 shipping_config 우선 (admin 설정이 실시간 반영)
-    // product_settings는 sticker 등 상품별 데이터만 실질적 의미
+    // 멀티 그룹 모드: 현재 active 그룹의 settings 사용
+    if (_activeCalGroupId != null) return getSettingsForGroup(_activeCalGroupId);
+    // 단일 그룹 (또는 컨텍스트 외부) — 기존 동작
     const product = orderData?.product_settings || {};
     const shc = orderData?.shipping_config || {};
-    // product first, shipping_config last → shipping_config overrides
     return { ...product, ...shc };
+  }
+
+  /**
+   * 이 주문에 사용된 unique 출고일 그룹 목록.
+   *   [{ group_id, group_name, is_default, config, product_codes: [...] }, ...]
+   *   서버가 안 내려준 경우 (구버전) → 단일 그룹으로 fallback.
+   */
+  function getShippingGroups() {
+    const groups = orderData?.shipping_groups_used;
+    if (Array.isArray(groups) && groups.length) return groups;
+    // fallback: 단일 그룹 (구버전 서버 응답)
+    return [{
+      group_id: orderData?.product_settings?.shipping_group_id || null,
+      group_name: '기본 그룹',
+      is_default: true,
+      config: orderData?.shipping_config || {},
+      product_codes: (orderData?.products || []).map(p => p.product_code).filter(Boolean),
+    }];
+  }
+
+  function isMultiShippingGroups() {
+    return getShippingGroups().length > 1;
+  }
+
+  /** 특정 그룹의 settings (config) — 단일/멀티 통합 lookup. */
+  function getSettingsForGroup(groupId) {
+    const groups = getShippingGroups();
+    const g = groups.find(gg => gg.group_id === groupId)
+           || groups.find(gg => gg.is_default)
+           || groups[0];
+    const product = orderData?.product_settings || {};
+    return { ...product, ...(g?.config || {}) };
+  }
+
+  /** 특정 상품의 출고일 그룹 id (멀티 그룹 주문에서 product → group 매핑). */
+  function getShippingGroupForProduct(productCode) {
+    const map = orderData?.shipping_group_by_product;
+    if (productCode && map && Object.prototype.hasOwnProperty.call(map, productCode)) {
+      return map[productCode] || null;
+    }
+    // fallback: 첫 그룹
+    const groups = getShippingGroups();
+    return groups[0]?.group_id || null;
   }
 
   /** 해당 날짜가 휴무일(출고불가)인지 확인 */
@@ -1028,7 +1132,23 @@
   }
 
   function getExpressFee() {
-    // 공통 shipping_config 우선, 없으면 상품별 product_settings 폴백
+    // 멀티 그룹 모드 & ctx 외부: 빠른출고로 선택된 모든 그룹의 fee 합산.
+    //   각 그룹의 ship_type === 'express' 인 경우만 그 그룹 config.express_fee 누적.
+    if (_activeCalGroupId == null && isMultiShippingGroups()) {
+      const groups = getShippingGroups();
+      let total = 0;
+      for (const g of groups) {
+        const gst = formState.shipping_by_group?.[g.group_id]?.ship_type;
+        if (gst === 'express') total += parseInt(g.config?.express_fee) || 0;
+      }
+      return total;
+    }
+    // 단일 그룹 또는 ctx 내부: 활성 그룹 / 공통 config 의 fee
+    if (_activeCalGroupId != null) {
+      const groups = getShippingGroups();
+      const g = groups.find(gg => gg.group_id === _activeCalGroupId);
+      return parseInt(g?.config?.express_fee) || 0;
+    }
     return orderData?.shipping_config?.express_fee
       ?? orderData?.product_settings?.express_fee
       ?? 0;
@@ -1091,6 +1211,10 @@
 
   function getTotalAmount() {
     // 추가비용(빠른출고)만 반환. 주문 원금은 포함하지 않음.
+    // 멀티 그룹: 어떤 그룹이라도 express 면 getExpressFee 가 합산 fee 반환 → 그대로 사용.
+    if (isMultiShippingGroups()) {
+      return getExpressFee(); // 0 이면 누구도 express 안 고른 상태
+    }
     return formState.shipping_type === 'express' ? getExpressFee() : 0;
   }
 
@@ -1235,7 +1359,23 @@
         return true;
       }
       case 1: {
-        // 희망출고일 — 날짜 + shipping_type 둘 다 확정 필요
+        // 희망출고일 — 단일/멀티 그룹 분기.
+        if (isMultiShippingGroups()) {
+          // 멀티 그룹: 각 그룹마다 date + ship_type 모두 확정 필요
+          const groups = getShippingGroups();
+          for (const g of groups) {
+            const slot = formState.shipping_by_group?.[g.group_id];
+            if (!slot || !slot.ship_date || !slot.ship_type) return false;
+            // 해당 그룹 기준으로 date close 검증
+            const prevCtx = _activeCalGroupId;
+            _activeCalGroupId = g.group_id;
+            const closed = isDateClosed(slot.ship_date);
+            _activeCalGroupId = prevCtx;
+            if (closed) return false;
+          }
+          return true;
+        }
+        // 단일 그룹: 기존 검증
         const required = isDateRequired();
         if (required) {
           if (!formState.desired_ship_date || isDateClosed(formState.desired_ship_date)) return false;
@@ -1380,6 +1520,8 @@
   }
 
   function renderStep1() {
+    // 멀티 그룹 주문이면 그룹별 분리 렌더로 dispatch
+    if (isMultiShippingGroups()) return renderStep1MultiGroup();
     // 진입시마다 이전 선택값을 관리자 최신 설정 기준으로 재검증 (무효하면 초기화)
     validateShipDate();
 
@@ -1426,6 +1568,71 @@
 
         <!-- 인라인 캘린더 -->
         ${renderCalendar()}
+      </div>
+    `;
+  }
+
+  /**
+   * 멀티 출고일 그룹 주문 — Step1 을 그룹별 카드 + 캘린더로 렌더.
+   *   사전 안내 배너 + 각 그룹마다 (그룹명 / 해당 상품 / 캘린더) 섹션.
+   *   각 캘린더는 _activeCalGroupId 컨텍스트 진입 후 renderCalendar() 호출.
+   */
+  function renderStep1MultiGroup() {
+    validateShipDateMulti();
+    const groups = getShippingGroups();
+    const productByCode = new Map();
+    (orderData?.products || []).forEach(p => productByCode.set(p.product_code, p));
+
+    const sections = groups.map(g => {
+      // 각 그룹별로 ctx 진입 후 렌더 (캘린더 내부는 _ctxShipDate / _ctxViewMonth 사용)
+      const prev = _activeCalGroupId;
+      _activeCalGroupId = g.group_id;
+      // 그룹별 데이터 미리 계산
+      const slot = formState.shipping_by_group?.[g.group_id] || {};
+      const calHtml = renderCalendar();
+      _activeCalGroupId = prev;
+
+      const productLines = (g.product_codes || []).map(pc => {
+        const p = productByCode.get(pc);
+        return p ? `<span class="inline-block text-[11.5px] text-slate-600 bg-white px-2 py-1 rounded-md border border-slate-200 mr-1 mb-1">${esc(p.product_name || pc)} <span class="text-slate-400 font-mono">(${esc(pc)})</span></span>` : '';
+      }).join('');
+
+      const isPicked = !!slot.ship_date;
+      const statusBadge = isPicked
+        ? `<span class="inline-flex items-center gap-1 text-[11px] font-bold bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">✓ ${esc(slot.ship_date)} ${slot.ship_type === 'express' ? '· ⚡빠른출고' : '· 📦일반'}</span>`
+        : `<span class="inline-flex items-center gap-1 text-[11px] font-bold bg-rose-50 text-rose-600 px-2 py-1 rounded-full">출고일 선택 필요</span>`;
+
+      return `
+        <div class="surface mb-4 overflow-hidden" style="border-left:3px solid var(--brand-500, #6366f1)">
+          <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/50">
+            <div class="flex items-center justify-between gap-2 flex-wrap mb-2">
+              <h3 class="text-[14px] font-bold text-slate-900">📅 ${esc(g.group_name || '출고 그룹')}</h3>
+              ${statusBadge}
+            </div>
+            <div class="flex flex-wrap">${productLines}</div>
+          </div>
+          <div class="p-2">${calHtml}</div>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="fade-in">
+        <h2 class="text-xl font-bold text-slate-900 mb-1 tracking-tight">희망 출고일</h2>
+        <p class="text-sm text-slate-500 mb-4">출고일을 선택해 주세요.</p>
+
+        <!-- 사전 안내 -->
+        <div class="rounded-2xl mb-4 p-4" style="background:linear-gradient(135deg,rgba(245,158,11,0.10),rgba(217,119,6,0.05));border:1px solid rgba(245,158,11,0.25)">
+          <div class="flex items-start gap-2.5">
+            <span class="text-lg flex-shrink-0" style="line-height:1.3">⚠️</span>
+            <div class="flex-1">
+              <p class="text-[13px] font-bold text-amber-800 mb-1">서로 다른 출고일 정책의 상품이 포함되어 있습니다</p>
+              <p class="text-[12px] text-amber-700 leading-relaxed">아래 ${groups.length}개 그룹에 대해 <b>각각</b> 희망 출고일을 선택해 주세요. 그룹마다 출고 정책 (리드타임 · 휴무일 · 빠른출고 가능 여부 등) 이 다를 수 있습니다.</p>
+            </div>
+          </div>
+        </div>
+
+        ${sections}
       </div>
     `;
   }
@@ -2058,12 +2265,16 @@
     var expr = getExpressRange();
     var norm = getNormalRange();
     var expressFee = getExpressFee();
+    var ctxGroupId = _activeCalGroupId; // 멀티그룹 모드일 때 버튼에 임베드
+    var groupDataAttr = ctxGroupId ? ' data-group="' + (String(ctxGroupId).replace(/"/g, '&quot;')) + '"' : '';
 
-    if (!calendarViewMonth) {
-      calendarViewMonth = (formState.desired_ship_date || min).substring(0, 7);
+    var viewMonth = _ctxViewMonth();
+    if (!viewMonth) {
+      viewMonth = (_ctxShipDate() || min).substring(0, 7);
+      _ctxViewMonth(viewMonth);
     }
 
-    var parts = calendarViewMonth.split('-');
+    var parts = viewMonth.split('-');
     var yr = parseInt(parts[0]);
     var mo = parseInt(parts[1]);
 
@@ -2071,8 +2282,8 @@
     var daysInMonth = new Date(yr, mo, 0).getDate();
     var minMonth = min.substring(0, 7);
     var maxMonth = max.substring(0, 7);
-    var canPrev = calendarViewMonth > minMonth;
-    var canNext = calendarViewMonth < maxMonth;
+    var canPrev = viewMonth > minMonth;
+    var canNext = viewMonth < maxMonth;
 
     var totalCells = Math.ceil((firstDow + daysInMonth) / 7) * 7;
     var rows = '';
@@ -2090,7 +2301,7 @@
         var isClosed = zone === 'closed';
         var isExpressDay = zone === 'express';
         // 방어로직: 휴무/범위밖 날짜는 절대 선택 상태로 표시하지 않음
-        var isSel = formState.desired_ship_date === ds && !isClosed;
+        var isSel = _ctxShipDate() === ds && !isClosed;
         var isToday = ds === todayStr();
         var isSun = col === 0, isSat = col === 6;
         // 기본 클래스 — 원형 셀
@@ -2109,7 +2320,7 @@
         if (isClosed) {
           row += '<td class="py-1 text-center"><span class="' + cls + '">' + dayNum + '</span></td>';
         } else {
-          row += '<td class="py-1 text-center"><button type="button" data-action="calDay" data-date="' + ds + '" class="pressable w-full flex justify-center"><span class="' + cls + '">' + dayNum + '</span></button></td>';
+          row += '<td class="py-1 text-center"><button type="button" data-action="calDay" data-date="' + ds + '"' + groupDataAttr + ' class="pressable w-full flex justify-center"><span class="' + cls + '">' + dayNum + '</span></button></td>';
         }
       }
     }
@@ -2126,7 +2337,7 @@
 
     // 선택한 날짜 기반 동적 비용 안내
     var selectedInfo = '';
-    var selectedDate = formState.desired_ship_date;
+    var selectedDate = _ctxShipDate();
     var selectedZone = getDateZone(selectedDate);
     if (selectedDate && selectedZone !== 'closed') {
       var dateLabel = formatDate(selectedDate);
@@ -2150,13 +2361,14 @@
       selectedInfo = '<p class="text-center text-[11px] text-slate-400 mt-3 pt-3 border-t border-slate-100">출고일을 선택해주세요</p>';
     }
 
-    return '<div class="surface overflow-hidden mb-4" id="calendarWidget">'
+    var calWidgetId = ctxGroupId ? 'calendarWidget-' + String(ctxGroupId).replace(/[^a-zA-Z0-9_-]/g, '_') : 'calendarWidget';
+    return '<div class="surface overflow-hidden mb-4" id="' + calWidgetId + '">'
       + '<div class="flex items-center justify-between px-4 py-3.5 border-b border-slate-100">'
-      + '<button type="button" data-action="calNav" data-dir="-1" class="pressable p-2 rounded-xl ' + (canPrev ? 'hover:bg-slate-100 text-slate-700' : 'text-slate-200 pointer-events-none') + '">'
+      + '<button type="button" data-action="calNav" data-dir="-1"' + groupDataAttr + ' class="pressable p-2 rounded-xl ' + (canPrev ? 'hover:bg-slate-100 text-slate-700' : 'text-slate-200 pointer-events-none') + '">'
       + '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"/></svg>'
       + '</button>'
       + '<span class="text-[15px] font-bold text-slate-900">' + yr + '년 ' + mo + '월</span>'
-      + '<button type="button" data-action="calNav" data-dir="1" class="pressable p-2 rounded-xl ' + (canNext ? 'hover:bg-slate-100 text-slate-700' : 'text-slate-200 pointer-events-none') + '">'
+      + '<button type="button" data-action="calNav" data-dir="1"' + groupDataAttr + ' class="pressable p-2 rounded-xl ' + (canNext ? 'hover:bg-slate-100 text-slate-700' : 'text-slate-200 pointer-events-none') + '">'
       + '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/></svg>'
       + '</button>'
       + '</div>'
@@ -2686,39 +2898,50 @@
       case 'calNav': {
         var dir = parseInt(target.dataset.dir || '0');
         if (!dir) break;
-        var cp = calendarViewMonth.split('-');
+        // 멀티 그룹 모드: 이 버튼이 속한 group ctx 로 임시 진입
+        var navGroupId = (target.closest('[data-group]') && target.closest('[data-group]').dataset.group) || null;
+        var prevCtxNav = _activeCalGroupId;
+        _activeCalGroupId = navGroupId || null;
+        var curView = _ctxViewMonth() || (_ctxShipDate() || todayStr()).substring(0, 7);
+        var cp = curView.split('-');
         var ny = parseInt(cp[0]), nm = parseInt(cp[1]) + dir;
         if (nm > 12) { ny++; nm = 1; }
         if (nm < 1) { ny--; nm = 12; }
-        calendarViewMonth = ny + '-' + String(nm).padStart(2, '0');
-        patchCalendar();
+        _ctxViewMonth(ny + '-' + String(nm).padStart(2, '0'));
+        _activeCalGroupId = prevCtxNav;
+        // 멀티 그룹 모드는 단일 calendarWidget id 가 아니라 전체 step 재렌더가 가장 안전
+        if (navGroupId) renderCurrentStep(); else patchCalendar();
         break;
       }
       case 'calDay': {
         var ds = target.closest('[data-date]') ? target.closest('[data-date]').dataset.date : target.dataset.date;
         if (!ds) break;
+        // 멀티 그룹: 클릭된 그룹 ctx 진입
+        var dayGroupId = (target.closest('[data-group]') && target.closest('[data-group]').dataset.group) || null;
+        var prevCtxDay = _activeCalGroupId;
+        _activeCalGroupId = dayGroupId || null;
         var zone = getDateZone(ds);
-        if (zone === 'closed') break; // 선택 불가
-        // 존에 따라 shipping_type 자동 결정 + 날짜 저장
-        var prevShippingType = formState.shipping_type;
-        formState.desired_ship_date = ds;
-        formState.shipping_type = zone; // 'express' or 'normal'
-        // 일반출고 전환시 현금영수증 state 초기화 (결제 금액 없어지면 무의미)
-        if (zone === 'normal' && formState.cash_receipt_yn) {
-          formState.cash_receipt_yn = false;
-          formState.receipt_type = null;
-          formState.receipt_number = '';
+        if (zone === 'closed') { _activeCalGroupId = prevCtxDay; break; }
+        // 존에 따라 shipping_type 자동 결정 + 날짜 저장 (ctx 별 store)
+        var prevShippingType = _ctxShipType();
+        _ctxSetShipping(ds, zone);
+        // 현금영수증 / shipping_type 부수 처리는 단일 그룹 모드에서만 실행 (멀티는 그룹별 zone 합산 별도)
+        if (!dayGroupId) {
+          if (zone === 'normal' && formState.cash_receipt_yn) {
+            formState.cash_receipt_yn = false;
+            formState.receipt_type = null;
+            formState.receipt_number = '';
+          }
+          if (zone === 'express' && prevShippingType !== 'express') {
+            formState.cash_receipt_yn = true;
+            if (!formState.receipt_type) formState.receipt_type = 'personal';
+          }
         }
-        // 빠른출고 최초 전환시 현금영수증 발행을 기본값(활성)으로 설정.
-        // 같은 express 안에서 날짜만 바꿀 때는 사용자가 Step 2 에서 끈 선택을 존중.
-        if (zone === 'express' && prevShippingType !== 'express') {
-          formState.cash_receipt_yn = true;
-          if (!formState.receipt_type) formState.receipt_type = 'personal'; // 소득공제용 기본
-        }
+        _activeCalGroupId = prevCtxDay;
         saveFormState();
         updateNavButtons();
-        patchCalendar();
-        // 프로그레스바 — 결제정보 스텝 노출 여부가 shipping_type 으로 바뀌므로 재렌더
+        // 멀티 그룹: 전체 Step 재렌더 (각 그룹 카드의 선택 표시 갱신)
+        if (dayGroupId) renderCurrentStep(); else patchCalendar();
         renderStepIndicator();
         break;
       }
@@ -2809,8 +3032,22 @@
 
     const products = orderData?.products || [];
     const fallbackDate = getMinDate();
-    // 주문 단위 단일 출고일 (모든 상품에 동일 적용)
+    const isMultiShipping = isMultiShippingGroups();
+    // 주문 단위 단일 출고일 (단일 그룹 모드) / 그룹별 일자 모음 (멀티 그룹 모드)
     const orderShipDate = formState.desired_ship_date || (isDateRequired() ? null : fallbackDate);
+    // 멀티 그룹용 헬퍼: 상품 → 해당 그룹의 ship_date / ship_type
+    function _shipDateForProduct(productCode) {
+      if (!isMultiShipping) return orderShipDate;
+      const gid = getShippingGroupForProduct(productCode);
+      const slot = formState.shipping_by_group?.[gid] || {};
+      return slot.ship_date || orderShipDate || fallbackDate;
+    }
+    function _shipTypeForProduct(productCode) {
+      if (!isMultiShipping) return formState.shipping_type || 'normal';
+      const gid = getShippingGroupForProduct(productCode);
+      const slot = formState.shipping_by_group?.[gid] || {};
+      return slot.ship_type || 'normal';
+    }
     const productInputs = products.map(function(p, i) {
       const ps = formState.products[String(i)] || {};
       const matching = getStickersForProduct(p.product_code);
@@ -2829,26 +3066,47 @@
           ? { code: picked.code, name: picked.name || picked.code }
           : { code: selCode, name: selCode };
       }
+      // 상품의 실제 출고일/유형 (멀티 그룹 분기)
+      const productShipDate = _shipDateForProduct(p.product_code);
+      const productShipType = _shipTypeForProduct(p.product_code);
       return {
         product_code: p.product_code,
         product_name: p.product_name,
         quantity: p.quantity,
-        desired_ship_date: orderShipDate,  // 주문 단위 공통 출고일
+        desired_ship_date: productShipDate,
+        shipping_type: productShipType,            // 'express' | 'normal'
+        is_express: productShipType === 'express',
+        shipping_group_id: isMultiShipping ? (getShippingGroupForProduct(p.product_code) || null) : null,
         sticker_id: sticker ? sticker.id : null,
         sticker_name: sticker ? sticker.name : null,
         sticker_input: ps.sticker_input || 'none',
         custom_values: ps.sticker_input === 'custom' ? (ps.sticker_fields || {}) : {},
         box_code: box ? box.code : null,
         box_name: box ? (box.name || box.code) : null,
-        custom_options: customOptionsPayload,  // { 그룹명: {code, name} } — 자유 옵션 선택
+        custom_options: customOptionsPayload,
       };
     });
 
-    const representativeDate = orderShipDate || fallbackDate;
+    // 멀티 그룹: top-level 대표값 = 가장 이른 출고일, 어느 그룹이라도 express 면 true
+    let representativeDate;
+    let topLevelIsExpress;
+    let topLevelExpressFee;
+    if (isMultiShipping) {
+      const dates = productInputs.map(pi => pi.desired_ship_date).filter(Boolean);
+      representativeDate = dates.length ? dates.sort()[0] : fallbackDate;
+      topLevelIsExpress = productInputs.some(pi => pi.is_express);
+      topLevelExpressFee = getExpressFee(); // 모든 express 그룹 fee 합산
+    } else {
+      representativeDate = orderShipDate || fallbackDate;
+      topLevelIsExpress = formState.shipping_type === 'express';
+      topLevelExpressFee = topLevelIsExpress ? getExpressFee() : 0;
+    }
+
     const payload = {
-      is_express: formState.shipping_type === 'express',
-      express_fee: formState.shipping_type === 'express' ? getExpressFee() : 0,
+      is_express: topLevelIsExpress,
+      express_fee: topLevelExpressFee,
       desired_ship_date: representativeDate,
+      shipping_by_group: isMultiShipping ? (formState.shipping_by_group || {}) : null, // 멀티 그룹 메타데이터 (감사/표시용)
       products: productInputs,
       sticker_selections: productInputs
         // 스티커 OR 박스 OR 자유옵션 어느 하나라도 있으면 선택 row 로 남김
@@ -2857,6 +3115,9 @@
           product_code: pi.product_code,
           product_name: pi.product_name,
           quantity: pi.quantity,
+          desired_ship_date: pi.desired_ship_date,      // 상품별 출고일 (멀티 그룹 시 그룹마다 다를 수 있음)
+          is_express: pi.is_express,                    // 상품별 빠른출고 여부
+          shipping_group_id: pi.shipping_group_id,      // 상품의 출고일 그룹 (멀티 그룹 식별용, single=null)
           sticker_id: pi.sticker_id,
           sticker_name: pi.sticker_name,
           custom_values: pi.custom_values,

@@ -290,11 +290,12 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         });
       }
 
-      // 상품별 스티커 / 박스옵션 / 자유옵션그룹 / 장식명칭 매핑 + 합집합 계산
+      // 상품별 스티커 / 박스옵션 / 자유옵션그룹 / 장식명칭 / 출고일그룹 매핑 + 합집합 계산
       // stickersByProduct: { product_code: [sticker, ...] } — 고객 화면에서 상품별 필터링에 사용
       // boxOptionsByProduct: { product_code: [{code,name,color,preview_image_url}, ...] } — 박스 패키지 선택용
       // customOptionsByProduct: { product_code: { groupName: {use_images, options:[...]} } } — 자유 옵션 그룹 (수건 색상 등)
       // decorationLabelByProduct: { product_code: string } — 고객 화면 장식 명칭 (스티커/띠지/라벨…), 미설정시 '스티커'
+      // shippingGroupByProduct: { product_code: shipping_group_id|null } — 상품별 출고일 그룹 (멀티 그룹 주문 지원)
       //
       // 매핑 lookup 은 모듈 상단 lookupProductSettings 사용 (ERP 변형 코드 fallback 자동 적용).
       const allMappedStickerIds = new Set();
@@ -302,6 +303,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const boxOptionsByProduct = {};
       const customOptionsByProduct = {};
       const decorationLabelByProduct = {};
+      const shippingGroupByProduct = {};
       const stickerById = new Map(allActiveStickers.map(s => [s.id, s]));
       for (const p of products) {
         if (!p.product_code) continue;
@@ -317,6 +319,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         // 장식 명칭 (decoration_label) — admin 이 자유 입력. 빈 문자열은 fallback 적용 위해 null 처리.
         const decoLabel = (ps?.decoration_label || '').trim();
         decorationLabelByProduct[p.product_code] = decoLabel || null;
+        // 출고일 그룹 — 상품별로 다를 수 있음 (null = 기본 그룹)
+        shippingGroupByProduct[p.product_code] = ps?.shipping_group_id || null;
         // 자유 옵션 그룹 매핑 — legacy array 형식 (값이 array) 도 호환
         //   normalize: { groupName: {use_images:bool, options:[...]} } 형태로 통일
         const rawCustom = (ps?.custom_options && typeof ps.custom_options === 'object' && !Array.isArray(ps.custom_options))
@@ -439,8 +443,31 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         products,
         product_settings: productSettings,
         // 첫번째 상품의 shipping_group_id 기반으로 출고일 config 결정.
-        // 여러 상품이 다른 그룹에 속하는 경우는 현재 첫 상품 기준 (추후 확장 가능).
+        // 단일 그룹 주문은 기존 동작 그대로 — backward compat.
         shipping_config: await store.getShippingConfig(productSettings?.shipping_group_id || null),
+        // 멀티 그룹 주문 지원 — 이 주문에 사용된 unique 출고 그룹별 config 모두 응답.
+        //   shipping_groups_used: [{ group_id, group_name, is_default, config, product_codes: [...] }]
+        //   group_id 가 null = '기본 그룹' (운영자 default 그룹). product 별 매핑은 shipping_group_by_product 사용.
+        shipping_groups_used: await (async () => {
+          const uniqueGroupIds = [...new Set(Object.values(shippingGroupByProduct))];
+          const groups = await store.getShippingGroups().catch(() => []);
+          const groupMetaById = new Map(groups.map(g => [g.id, g]));
+          const defaultMeta = groups.find(g => g.is_default) || null;
+          const result = [];
+          for (const gid of uniqueGroupIds) {
+            const meta = gid ? groupMetaById.get(gid) : defaultMeta;
+            const cfg = await store.getShippingConfig(gid);
+            result.push({
+              group_id: gid || null,
+              group_name: meta?.name || '기본 그룹',
+              is_default: !!meta?.is_default || gid == null,
+              config: cfg,
+              product_codes: Object.keys(shippingGroupByProduct).filter(pc => shippingGroupByProduct[pc] === gid),
+            });
+          }
+          return result;
+        })(),
+        shipping_group_by_product: shippingGroupByProduct, // { product_code: group_id|null }
         available_stickers: availableStickers,
         stickers_by_product: stickersByProduct,
         box_options_by_product: boxOptionsByProduct, // { product_code: [{code,name,color,preview_image_url}] }
