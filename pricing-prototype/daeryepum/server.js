@@ -2385,6 +2385,113 @@ async function apiVendorSettlementUnmark(body, session) {
   return { ok: true, removed };
 }
 
+/**
+ * 위탁업체 대시보드 — apiVendorSettlements 결과를 한번 더 집계해 KPI / 시계열 / TOP 등 응답.
+ *
+ * Query: start_date, end_date, vendor_id (optional)
+ * 응답:
+ *   {
+ *     period,
+ *     kpi: { total_count, gross_total, commission_total, net_total,
+ *            settled_net, unsettled_net, copurchase_net, standalone_net,
+ *            vendor_count, product_count },
+ *     by_vendor: [{ vendor_id, vendor_name, total_count, gross_total,
+ *                   commission_total, net_total, settled_net, unsettled_net }],
+ *     by_day: [{ date, gross, commission, net, count }],  // 희망출고일 기준
+ *     by_type: { copurchase: {count, net}, standalone: {count, net} },
+ *     top_products: [{ product_code, product_name, vendor_name, count, gross, net }]
+ *   }
+ */
+async function apiVendorDashboard(query) {
+  // apiVendorSettlements 로 raw items + 기간 가져옴 (필터 일관성)
+  const result = await apiVendorSettlements({ ...query, status: 'all', order_type: 'all' });
+  const items = Array.isArray(result.items) ? result.items : [];
+
+  const empty = {
+    period: result.period,
+    kpi: {
+      total_count: 0, gross_total: 0, commission_total: 0, net_total: 0,
+      settled_net: 0, unsettled_net: 0,
+      copurchase_net: 0, standalone_net: 0,
+      vendor_count: 0, product_count: 0,
+    },
+    by_vendor: [], by_day: [], by_type: { copurchase: { count: 0, net: 0 }, standalone: { count: 0, net: 0 } }, top_products: [],
+  };
+  if (!items.length) return empty;
+
+  // by_vendor 집계
+  const vendorMap = new Map();
+  const dayMap = new Map();
+  const productMap = new Map();
+  let copurchaseCount = 0, copurchaseNet = 0;
+  let standaloneCount = 0, standaloneNet = 0;
+  let grossTotal = 0, commissionTotal = 0, netTotal = 0, settledNet = 0, unsettledNet = 0;
+
+  for (const it of items) {
+    const gross = Number(it.gross_amount) || 0;
+    const com = Number(it.commission_amount) || 0;
+    const net = Number(it.net_amount) || 0;
+    grossTotal += gross; commissionTotal += com; netTotal += net;
+    if (it.settled_at) settledNet += net; else unsettledNet += net;
+    if (it.is_copurchase) { copurchaseCount += 1; copurchaseNet += net; }
+    else { standaloneCount += 1; standaloneNet += net; }
+
+    // vendor
+    const vKey = it.vendor_id || '_unknown';
+    if (!vendorMap.has(vKey)) {
+      vendorMap.set(vKey, {
+        vendor_id: it.vendor_id, vendor_name: it.vendor_name || '미상',
+        total_count: 0, gross_total: 0, commission_total: 0, net_total: 0,
+        settled_net: 0, unsettled_net: 0,
+      });
+    }
+    const v = vendorMap.get(vKey);
+    v.total_count += 1; v.gross_total += gross; v.commission_total += com; v.net_total += net;
+    if (it.settled_at) v.settled_net += net; else v.unsettled_net += net;
+
+    // by_day (희망출고일 기준)
+    const day = it.desired_ship_date || '';
+    if (day) {
+      if (!dayMap.has(day)) dayMap.set(day, { date: day, gross: 0, commission: 0, net: 0, count: 0 });
+      const d = dayMap.get(day);
+      d.gross += gross; d.commission += com; d.net += net; d.count += 1;
+    }
+
+    // top_products
+    const pKey = it.product_code + '|' + it.vendor_id;
+    if (!productMap.has(pKey)) {
+      productMap.set(pKey, {
+        product_code: it.product_code, product_name: it.product_name,
+        vendor_name: it.vendor_name, count: 0, gross: 0, net: 0,
+      });
+    }
+    const p = productMap.get(pKey);
+    p.count += 1; p.gross += gross; p.net += net;
+  }
+
+  const by_vendor = [...vendorMap.values()].sort((a, b) => b.net_total - a.net_total);
+  const by_day = [...dayMap.values()].sort((a, b) => a.date.localeCompare(b.date));
+  const top_products = [...productMap.values()].sort((a, b) => b.net - a.net).slice(0, 10);
+
+  return {
+    period: result.period,
+    kpi: {
+      total_count: items.length,
+      gross_total: grossTotal, commission_total: commissionTotal, net_total: netTotal,
+      settled_net: settledNet, unsettled_net: unsettledNet,
+      copurchase_net: copurchaseNet, standalone_net: standaloneNet,
+      vendor_count: vendorMap.size, product_count: productMap.size,
+    },
+    by_vendor,
+    by_day,
+    by_type: {
+      copurchase: { count: copurchaseCount, net: copurchaseNet },
+      standalone: { count: standaloneCount, net: standaloneNet },
+    },
+    top_products,
+  };
+}
+
 async function apiDashboardByShipDate(query) {
   const p = await getPool();
   // 기본 윈도우: 오늘 ~ 30일 후
@@ -4351,6 +4458,8 @@ const server = http.createServer(async (req, res) => {
         data = await apiLeadtime3way(parsed.query);
       } else if (pathname === '/api/bg/vendor-settlements') {
         data = await apiVendorSettlements(parsed.query);
+      } else if (pathname === '/api/bg/vendor-dashboard') {
+        data = await apiVendorDashboard(parsed.query);
       } else if (pathname === '/api/bg/vendor-settlements/mark' && req.method === 'POST') {
         const body = await new Promise((resolve, reject) => {
           let raw = ''; req.on('data', c => raw += c); req.on('end', () => { try { resolve(JSON.parse(raw||'{}')); } catch (e) { reject(e); } });

@@ -283,6 +283,7 @@ nav.nav-loading a[href^="#"] {
   <a href="#coupang-rfm" onclick="showPage('coupang-rfm')">🟥 로켓그로스</a>
   <a href="#bg-vendors" onclick="showPage('bg-vendors')">🤝 위탁업체</a>
   <a href="#bg-settlements" onclick="showPage('bg-settlements')">💰 위탁정산</a>
+  <a href="#bg-vendor-dashboard" onclick="showPage('bg-vendor-dashboard')">📈 위탁 대시보드</a>
   <a href="#admin-nav-settings" onclick="showPage('admin-nav-settings')" id="nav-link-admin-nav-settings" style="display:none">⚙️ GNB 설정</a>
   <div class="user-area" id="user-area"></div>
 </nav>
@@ -332,6 +333,20 @@ nav.nav-loading a[href^="#"] {
     </div>
     <div class="card" style="padding:0;overflow-x:auto">
       <table class="data-table" id="sales-table"></table>
+    </div>
+  </div>
+
+  <!-- 위탁상품 단락 (Phase 3) — 위탁 대시보드 핵심 KPI 요약 + 풀 페이지 링크 -->
+  <div class="section">
+    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>🤝 위탁상품 요약</span>
+      <a href="#bg-vendor-dashboard" onclick="showPage('bg-vendor-dashboard')" style="font-size:12px;color:var(--primary);text-decoration:none;font-weight:500">전체 보기 →</a>
+    </div>
+    <div class="card-grid card-grid-4" id="dash-vendor-summary">
+      <div class="card"><h3>위탁 매출</h3><div class="value" id="dash-vendor-gross">-</div><div class="sub" id="dash-vendor-gross-sub">최근 30일</div></div>
+      <div class="card"><h3>거래처 수수료</h3><div class="value" id="dash-vendor-commission">-</div><div class="sub" id="dash-vendor-commission-sub">평균 수수료율</div></div>
+      <div class="card"><h3>정산 대상 금액</h3><div class="value" id="dash-vendor-net">-</div><div class="sub" id="dash-vendor-net-sub"></div></div>
+      <div class="card"><h3>미정산 잔액</h3><div class="value" id="dash-vendor-unsettled" style="color:#dc2626">-</div><div class="sub" id="dash-vendor-unsettled-sub"></div></div>
     </div>
   </div>
 
@@ -1617,6 +1632,91 @@ nav.nav-loading a[href^="#"] {
   </div>
 </div>
 
+<!-- ========== 위탁 대시보드 (Phase 3) ========== -->
+<div id="page-bg-vendor-dashboard" class="page">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <h2 style="margin:0">📈 위탁업체 대시보드</h2>
+    <button class="btn" onclick="loadBgVendorDashboard()">🔄 새로고침</button>
+  </div>
+  <p style="color:var(--gray-500);font-size:13px;margin:0 0 16px">
+    희망 출고일 기준 위탁상품 매출/수수료/정산 잔액을 거래처/일자/유형별로 집계합니다.
+  </p>
+
+  <!-- 필터 -->
+  <div class="card" style="margin-bottom:14px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;align-items:end">
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:4px">거래처</label>
+        <select id="bvd-vendor" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;background:#fff">
+          <option value="">전체</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:4px">시작일 (희망출고)</label>
+        <input type="date" id="bvd-start" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:4px">종료일 (희망출고)</label>
+        <input type="date" id="bvd-end" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+      </div>
+      <div>
+        <button class="btn btn-primary" onclick="loadBgVendorDashboard()" style="width:100%;padding:7px 12px;font-size:13px">🔍 조회</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- KPI 카드 -->
+  <div class="card-grid card-grid-4" style="margin-bottom:14px">
+    <div class="card"><h3>대상 건수</h3><div class="value" id="bvd-k-count">-</div><div class="sub" id="bvd-k-count-sub"></div></div>
+    <div class="card"><h3>총 매출</h3><div class="value" id="bvd-k-gross">-</div><div class="sub">수수료 차감 전</div></div>
+    <div class="card"><h3>총 수수료</h3><div class="value" id="bvd-k-commission">-</div><div class="sub" id="bvd-k-commission-sub"></div></div>
+    <div class="card"><h3>정산 대상 금액</h3><div class="value" id="bvd-k-net">-</div><div class="sub" id="bvd-k-net-sub"></div></div>
+  </div>
+
+  <!-- 동시/단독 비중 + TOP 상품 -->
+  <div style="display:grid;grid-template-columns:1fr 2fr;gap:14px;margin-bottom:14px">
+    <div class="card">
+      <h3 style="font-size:14px;font-weight:600;margin-bottom:12px">💍 동시구매 · 🛍️ 단독구매 비중</h3>
+      <div id="bvd-type-mix" style="font-size:12px;color:var(--gray-700)"></div>
+    </div>
+    <div class="card">
+      <h3 style="font-size:14px;font-weight:600;margin-bottom:12px">🏆 TOP 10 상품 (정산금액 기준)</h3>
+      <div style="overflow-x:auto">
+        <table class="data-table" id="bvd-top-products">
+          <thead><tr><th style="width:32px">#</th><th>상품코드</th><th>상품명</th><th>거래처</th><th style="text-align:center">건수</th><th style="text-align:right">매출</th><th style="text-align:right">정산금액</th></tr></thead>
+          <tbody id="bvd-top-products-tbody"><tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">데이터 없음</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 거래처별 매출 / 수수료 / 정산 -->
+  <div class="card" style="margin-bottom:14px">
+    <h3 style="font-size:14px;font-weight:600;margin-bottom:12px">🤝 거래처별 매출 · 수수료 · 정산</h3>
+    <div style="overflow-x:auto">
+      <table class="data-table" id="bvd-vendor-table">
+        <thead><tr>
+          <th>거래처</th>
+          <th style="text-align:center">건수</th>
+          <th style="text-align:right">매출</th>
+          <th style="text-align:right">수수료</th>
+          <th style="text-align:right">정산금액</th>
+          <th style="text-align:right">미정산</th>
+          <th style="text-align:right">정산완료</th>
+        </tr></thead>
+        <tbody id="bvd-vendor-tbody"><tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">데이터 없음</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 일별 시계열 -->
+  <div class="card">
+    <h3 style="font-size:14px;font-weight:600;margin-bottom:12px">📅 일별 시계열 (희망출고일 기준)</h3>
+    <div id="bvd-by-day-bars" style="display:flex;align-items:flex-end;gap:4px;overflow-x:auto;padding:8px 0 4px;min-height:160px"></div>
+    <div id="bvd-by-day-labels" style="display:flex;gap:4px;overflow-x:auto;font-size:10px;color:var(--gray-500);margin-top:4px"></div>
+  </div>
+</div>
+
 <!-- ========== 바른기프트: 상품 설정 ========== -->
 <div id="page-bg-products" class="page">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
@@ -2533,6 +2633,7 @@ function showPage(name) {
   if (name === 'coupang-rfm') loadCoupangRfm();
   if (name === 'bg-vendors') loadBgVendors();
   if (name === 'bg-settlements') initBgSettlements();
+  if (name === 'bg-vendor-dashboard') initBgVendorDashboard();
 }
 
 // --- Category Tabs ---
@@ -4561,7 +4662,31 @@ async function loadDashboard() {
     loadLeadtime3way();
     // 희망출고일별 매출 — 기본 향후 30일 프리셋으로 초기 로드 (사용자가 별도 변경 가능)
     setBsdPreset('next-30');
+    // 위탁상품 요약 단락 (Phase 3) — 별도 비동기 로드 (메인 KPI 영향 없음)
+    loadDashVendorSummary();
   } catch(e) { console.error(e); showToast('대시보드 로딩 실패: ' + e.message); }
+}
+
+/** 대시보드 위탁상품 단락 — 위탁 대시보드 API 호출해 4 카드 채움. 기간 = 대시보드 기간 그대로. */
+async function loadDashVendorSummary() {
+  const start = document.getElementById('dash-start')?.value;
+  const end = document.getElementById('dash-end')?.value;
+  if (!start || !end) return;
+  try {
+    const r = await fetch(`${API}/api/bg/vendor-dashboard?start_date=${encodeURIComponent(start)}&end_date=${encodeURIComponent(end)}`);
+    const data = await r.json();
+    const k = data.kpi || {};
+    document.getElementById('dash-vendor-gross').textContent = fmtKRW(k.gross_total || 0);
+    document.getElementById('dash-vendor-gross-sub').textContent = `${(k.total_count||0).toLocaleString()}건 · ${k.vendor_count||0}개 거래처`;
+    document.getElementById('dash-vendor-commission').textContent = fmtKRW(k.commission_total || 0);
+    const avgRate = k.gross_total > 0 ? (k.commission_total / k.gross_total * 100).toFixed(2) : '0.00';
+    document.getElementById('dash-vendor-commission-sub').textContent = `평균 수수료율 ${avgRate}%`;
+    document.getElementById('dash-vendor-net').textContent = fmtKRW(k.net_total || 0);
+    document.getElementById('dash-vendor-net-sub').textContent = `매출 - 수수료`;
+    document.getElementById('dash-vendor-unsettled').textContent = fmtKRW(k.unsettled_net || 0);
+    const settledPct = k.net_total > 0 ? Math.round(k.settled_net / k.net_total * 100) : 0;
+    document.getElementById('dash-vendor-unsettled-sub').textContent = `정산 완료 ${settledPct}%`;
+  } catch (e) { console.warn('[dash-vendor-summary] load failed:', e.message); }
 }
 
 // ============================================
@@ -9572,6 +9697,140 @@ function bgsCopySelected() {
 }
 
 // ============================================
+// 위탁업체 대시보드 (Phase 3)
+// ============================================
+
+async function initBgVendorDashboard() {
+  // 거래처 드롭다운 + 기본 기간 (-7d ~ +30d)
+  try {
+    const vr = await fetch(`${API}/api/bg/vendors?active_only=1`);
+    const vendors = (await vr.json()).vendors || [];
+    const sel = document.getElementById('bvd-vendor');
+    if (sel) {
+      sel.innerHTML = '<option value="">전체</option>'
+        + vendors.map(v => `<option value="${esc(v.id)}">${esc(v.name)}</option>`).join('');
+    }
+  } catch (e) { console.warn('[bvd] vendor 로드 실패:', e.message); }
+  const fmt = d => d.toISOString().slice(0,10);
+  const today = new Date();
+  const start = new Date(today); start.setDate(start.getDate() - 7);
+  const end = new Date(today); end.setDate(end.getDate() + 30);
+  const sEl = document.getElementById('bvd-start');
+  const eEl = document.getElementById('bvd-end');
+  if (sEl && !sEl.value) sEl.value = fmt(start);
+  if (eEl && !eEl.value) eEl.value = fmt(end);
+  loadBgVendorDashboard();
+}
+
+async function loadBgVendorDashboard() {
+  const params = new URLSearchParams({
+    vendor_id: document.getElementById('bvd-vendor')?.value || '',
+    start_date: document.getElementById('bvd-start')?.value || '',
+    end_date: document.getElementById('bvd-end')?.value || '',
+  });
+  // 로딩 표시
+  document.getElementById('bvd-vendor-tbody').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">로딩 중…</td></tr>';
+  document.getElementById('bvd-top-products-tbody').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">로딩 중…</td></tr>';
+  document.getElementById('bvd-by-day-bars').innerHTML = '';
+  document.getElementById('bvd-by-day-labels').innerHTML = '';
+  try {
+    const r = await fetch(`${API}/api/bg/vendor-dashboard?${params}`);
+    const data = await r.json();
+    renderBvdKpi(data.kpi || {});
+    renderBvdTypeMix(data.by_type || {}, data.kpi || {});
+    renderBvdVendorTable(data.by_vendor || []);
+    renderBvdTopProducts(data.top_products || []);
+    renderBvdByDay(data.by_day || []);
+  } catch (e) {
+    console.error('[bvd] load failed', e);
+    showToast('대시보드 로딩 실패: ' + e.message);
+  }
+}
+
+function renderBvdKpi(k) {
+  document.getElementById('bvd-k-count').textContent = (k.total_count || 0).toLocaleString() + '건';
+  document.getElementById('bvd-k-count-sub').textContent = `거래처 ${k.vendor_count||0}개 · 상품 ${k.product_count||0}종`;
+  document.getElementById('bvd-k-gross').textContent = fmtKRW(k.gross_total || 0);
+  document.getElementById('bvd-k-commission').textContent = fmtKRW(k.commission_total || 0);
+  const avgRate = k.gross_total > 0 ? (k.commission_total / k.gross_total * 100).toFixed(2) : '0.00';
+  document.getElementById('bvd-k-commission-sub').textContent = `평균 수수료율 ${avgRate}%`;
+  document.getElementById('bvd-k-net').textContent = fmtKRW(k.net_total || 0);
+  document.getElementById('bvd-k-net-sub').textContent = `미정산 ${fmtKRW(k.unsettled_net||0)} · 정산완료 ${fmtKRW(k.settled_net||0)}`;
+}
+
+function renderBvdTypeMix(byType, kpi) {
+  const co = byType.copurchase || { count: 0, net: 0 };
+  const st = byType.standalone || { count: 0, net: 0 };
+  const total = (co.net || 0) + (st.net || 0);
+  const coPct = total > 0 ? Math.round(co.net / total * 100) : 0;
+  const stPct = 100 - coPct;
+  const el = document.getElementById('bvd-type-mix');
+  if (!total) {
+    el.innerHTML = '<div style="color:var(--gray-400);text-align:center;padding:20px">데이터 없음</div>';
+    return;
+  }
+  el.innerHTML = `
+    <div style="display:flex;height:18px;border-radius:4px;overflow:hidden;margin-bottom:10px">
+      <div style="width:${coPct}%;background:#3b82f6" title="동시구매 ${coPct}%"></div>
+      <div style="width:${stPct}%;background:#94a3b8" title="단독구매 ${stPct}%"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-bottom:8px;font-size:12px">
+      <div><span style="display:inline-block;width:10px;height:10px;background:#3b82f6;border-radius:2px;margin-right:5px"></span><b>💍 동시구매 ${coPct}%</b></div>
+      <div><span style="display:inline-block;width:10px;height:10px;background:#94a3b8;border-radius:2px;margin-right:5px"></span><b>🛍️ 단독구매 ${stPct}%</b></div>
+    </div>
+    <div style="font-size:11px;color:var(--gray-500);line-height:1.6">
+      <div>💍 동시구매: <b>${co.count.toLocaleString()}건</b> · 정산금액 <b>${fmtKRW(co.net)}</b></div>
+      <div>🛍️ 단독구매: <b>${st.count.toLocaleString()}건</b> · 정산금액 <b>${fmtKRW(st.net)}</b></div>
+    </div>
+  `;
+}
+
+function renderBvdVendorTable(rows) {
+  const tbody = document.getElementById('bvd-vendor-tbody');
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">데이터 없음</td></tr>'; return; }
+  tbody.innerHTML = rows.map(r => `<tr>
+    <td style="font-weight:600">${esc(r.vendor_name||'미상')}</td>
+    <td style="text-align:center;font-size:12px">${r.total_count.toLocaleString()}</td>
+    <td style="text-align:right;font-family:monospace">${fmtKRW(r.gross_total)}</td>
+    <td style="text-align:right;font-family:monospace;color:#dc2626">${fmtKRW(r.commission_total)}</td>
+    <td style="text-align:right;font-family:monospace;font-weight:600;color:#16a34a">${fmtKRW(r.net_total)}</td>
+    <td style="text-align:right;font-family:monospace;color:#b91c1c">${fmtKRW(r.unsettled_net)}</td>
+    <td style="text-align:right;font-family:monospace;color:#15803d">${fmtKRW(r.settled_net)}</td>
+  </tr>`).join('');
+}
+
+function renderBvdTopProducts(rows) {
+  const tbody = document.getElementById('bvd-top-products-tbody');
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">데이터 없음</td></tr>'; return; }
+  tbody.innerHTML = rows.map((r, i) => `<tr>
+    <td style="text-align:center;color:var(--gray-500);font-size:11px">${i+1}</td>
+    <td style="font-family:monospace;font-size:11px">${esc(r.product_code||'')}</td>
+    <td style="font-size:12px">${esc(r.product_name||'')}</td>
+    <td style="font-size:12px">${esc(r.vendor_name||'미상')}</td>
+    <td style="text-align:center;font-size:12px">${r.count.toLocaleString()}</td>
+    <td style="text-align:right;font-family:monospace">${fmtKRW(r.gross)}</td>
+    <td style="text-align:right;font-family:monospace;font-weight:600;color:#16a34a">${fmtKRW(r.net)}</td>
+  </tr>`).join('');
+}
+
+function renderBvdByDay(rows) {
+  const wrapBars = document.getElementById('bvd-by-day-bars');
+  const wrapLabels = document.getElementById('bvd-by-day-labels');
+  if (!rows.length) { wrapBars.innerHTML = '<div style="color:var(--gray-400);text-align:center;padding:40px;width:100%">데이터 없음</div>'; wrapLabels.innerHTML = ''; return; }
+  const maxNet = Math.max(...rows.map(r => r.net || 0), 1);
+  wrapBars.innerHTML = rows.map(r => {
+    const pct = Math.max(2, Math.round((r.net || 0) / maxNet * 100));
+    const safeDate = esc(r.date || '');
+    const tooltip = `${safeDate} · ${r.count}건 · 정산 ${fmtKRW(r.net)} · 수수료 ${fmtKRW(r.commission)}`;
+    return `<div style="flex:1 0 28px;min-width:28px;display:flex;flex-direction:column;justify-content:flex-end;align-items:center" title="${esc(tooltip)}">
+      <div style="width:100%;height:${pct}%;background:linear-gradient(180deg,#10b981,#059669);border-radius:3px 3px 0 0;min-height:4px"></div>
+    </div>`;
+  }).join('');
+  wrapLabels.innerHTML = rows.map(r => {
+    const md = (r.date || '').slice(5).replace('-', '/');
+    return `<div style="flex:1 0 28px;min-width:28px;text-align:center;white-space:nowrap;font-size:9px">${esc(md)}</div>`;
+  }).join('');
+}
 
 let _bgShGroups = [];
 
