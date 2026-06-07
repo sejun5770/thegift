@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>거래처 정산 포털 — 바른기프트</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --brand-600: #4f46e5; --brand-700: #4338ca;
+      --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0;
+      --slate-400: #94a3b8; --slate-500: #64748b; --slate-700: #334155; --slate-900: #0f172a;
+      --emerald-500: #10b981; --emerald-700: #047857;
+      --rose-500: #f43f5e; --rose-700: #be123c;
+      --amber-100: #fef3c7; --amber-700: #b45309;
+    }
+    html, body { height: 100%; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", sans-serif; background: var(--slate-50); color: var(--slate-900); font-size: 14px; line-height: 1.5; }
+    .container { max-width: 1100px; margin: 0 auto; padding: 16px; }
+    header { background: linear-gradient(135deg, var(--brand-600), var(--brand-700)); color: white; padding: 24px 16px; margin: -16px -16px 16px; border-radius: 0; }
+    header h1 { font-size: 18px; font-weight: 700; opacity: 0.85; margin-bottom: 6px; }
+    header .vname { font-size: 22px; font-weight: 700; }
+    header .vinfo { font-size: 12px; opacity: 0.7; margin-top: 4px; }
+    .card { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .kpi { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    .kpi h3 { font-size: 11px; color: var(--slate-500); font-weight: 600; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .kpi .v { font-size: 22px; font-weight: 700; color: var(--slate-900); }
+    .kpi .sub { font-size: 11px; color: var(--slate-500); margin-top: 4px; }
+    .kpi.urgent .v { color: var(--rose-700); }
+    .kpi.good .v { color: var(--emerald-700); }
+    .filters { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; background: white; padding: 12px; border-radius: 12px; margin-bottom: 12px; }
+    .filters label { display: block; font-size: 11px; color: var(--slate-500); margin-bottom: 2px; }
+    .filters input, .filters select, .filters button { padding: 6px 8px; border: 1px solid var(--slate-200); border-radius: 6px; font-size: 13px; background: white; }
+    .filters button { background: var(--brand-600); color: white; border-color: var(--brand-600); cursor: pointer; font-weight: 600; padding: 7px 14px; }
+    .filters button:hover { background: var(--brand-700); }
+    .tabs { display: flex; gap: 6px; margin-bottom: 8px; border-bottom: 1px solid var(--slate-200); }
+    .tab { padding: 8px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; cursor: pointer; font-size: 13px; color: var(--slate-500); font-weight: 500; }
+    .tab.active { color: var(--brand-600); border-bottom-color: var(--brand-600); font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid var(--slate-100); text-align: left; }
+    th { background: var(--slate-50); font-weight: 600; color: var(--slate-700); font-size: 11px; }
+    .table-wrap { background: white; border-radius: 12px; padding: 0; overflow-x: auto; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    .badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 10.5px; font-weight: 600; white-space: nowrap; }
+    .b-settled { background: #dcfce7; color: var(--emerald-700); }
+    .b-unsettled { background: #fee2e2; color: var(--rose-700); }
+    .b-co { background: #dbeafe; color: #1e40af; }
+    .b-st { background: #f3f4f6; color: #374151; }
+    .text-right { text-align: right; }
+    .text-center { text-align: center; }
+    .mono { font-family: ui-monospace, "SF Mono", monospace; }
+    .download-btn { background: white; color: var(--slate-700); border: 1px solid var(--slate-200); padding: 7px 14px; font-size: 12px; cursor: pointer; border-radius: 6px; }
+    .download-btn:hover { background: var(--slate-50); }
+    #err { background: #fef2f2; color: var(--rose-700); padding: 16px; border-radius: 8px; margin-top: 20px; border: 1px solid #fecaca; }
+    #loading { color: var(--slate-500); text-align: center; padding: 40px; }
+    footer { margin-top: 24px; padding: 16px; text-align: center; font-size: 11px; color: var(--slate-400); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>거래처 정산 포털</h1>
+      <div class="vname" id="hdr-vname">로딩 중…</div>
+      <div class="vinfo" id="hdr-vinfo"></div>
+    </header>
+
+    <div id="loading">데이터를 불러오는 중…</div>
+    <div id="err" style="display:none"></div>
+
+    <div id="main" style="display:none">
+      <div class="filters">
+        <div>
+          <label>시작일 (희망출고)</label>
+          <input type="date" id="f-start">
+        </div>
+        <div>
+          <label>종료일 (희망출고)</label>
+          <input type="date" id="f-end">
+        </div>
+        <button onclick="loadPortal()">🔍 조회</button>
+        <div style="flex:1"></div>
+        <button class="download-btn" onclick="downloadTsv()">📥 TSV 다운로드</button>
+      </div>
+
+      <div class="kpi-grid" id="kpi-cards"></div>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="all" onclick="setTab('all')">📋 전체 <span id="cnt-all"></span></button>
+        <button class="tab" data-tab="unsettled" onclick="setTab('unsettled')">⏳ 미정산 <span id="cnt-unsettled"></span></button>
+        <button class="tab" data-tab="settled" onclick="setTab('settled')">✅ 정산완료 <span id="cnt-settled"></span></button>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>상태</th>
+              <th>주문번호</th>
+              <th>유형</th>
+              <th>상품</th>
+              <th class="text-center">희망출고일</th>
+              <th class="text-center">수량</th>
+              <th class="text-right">매출</th>
+              <th class="text-center">수수료율</th>
+              <th class="text-right">수수료</th>
+              <th class="text-right">정산금액</th>
+              <th>정산일시</th>
+            </tr>
+          </thead>
+          <tbody id="settlements-tbody"></tbody>
+        </table>
+      </div>
+
+      <footer>
+        본 페이지는 거래처 정산 조회 전용입니다. 정산 명세서·세금계산서 발행 등 공식 절차는 별도 안내드립니다.<br>
+        문의: <a href="tel:1644-0708" style="color:var(--brand-600)">1644-0708</a>
+      </footer>
+    </div>
+  </div>
+
+<script>
+(function() {
+  // BASE_PATH 자동 감지 — /c/barungift/* 같은 prefix 환경 호환
+  function getBase() {
+    const m = location.pathname.match(/^(.*?)(?:\/vendor-portal)?$/);
+    return (m && m[1]) || '';
+  }
+  const API = getBase().replace(/\/$/, '');
+  const token = new URLSearchParams(location.search).get('token') || '';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const fmtKRW = (n) => '₩' + Math.round(Number(n)||0).toLocaleString();
+
+  let _data = null;
+  let _currentTab = 'all';
+
+  function setErr(msg) {
+    $('loading').style.display = 'none';
+    $('main').style.display = 'none';
+    $('err').style.display = 'block';
+    $('err').textContent = msg;
+  }
+
+  function setTab(tab) {
+    _currentTab = tab;
+    document.querySelectorAll('.tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.tab === tab);
+    });
+    renderTable();
+  }
+  window.setTab = setTab;
+
+  function getFilteredSettlements() {
+    const items = (_data && _data.settlements) || [];
+    if (_currentTab === 'settled') return items.filter(it => !!it.settled_at);
+    if (_currentTab === 'unsettled') return items.filter(it => !it.settled_at);
+    return items;
+  }
+
+  function renderTable() {
+    const items = getFilteredSettlements();
+    const tbody = $('settlements-tbody');
+    if (!items.length) {
+      tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:#94a3b8;padding:20px">해당 항목이 없습니다.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = items.map(it => {
+      const statusBadge = it.settled_at
+        ? '<span class="badge b-settled">✅ 정산완료</span>'
+        : '<span class="badge b-unsettled">⏳ 미정산</span>';
+      const typeBadge = it.is_copurchase
+        ? '<span class="badge b-co">💍 동시</span>'
+        : '<span class="badge b-st">단독</span>';
+      const settledFmt = it.settled_at
+        ? new Date(it.settled_at).toLocaleString('ko-KR', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' })
+        : '<span style="color:#cbd5e1">-</span>';
+      return `<tr>
+        <td>${statusBadge}</td>
+        <td class="mono" style="font-size:11px">${esc(it.order_seq)}</td>
+        <td>${typeBadge}</td>
+        <td>${esc(it.product_name||'')} <span class="mono" style="color:#94a3b8;font-size:10.5px">[${esc(it.product_code||'')}]</span></td>
+        <td class="text-center mono" style="white-space:nowrap">${esc(it.desired_ship_date||'')}</td>
+        <td class="text-center">${Number(it.qty||0).toLocaleString()}</td>
+        <td class="text-right mono">${fmtKRW(it.gross_amount||0)}</td>
+        <td class="text-center">${Number(it.commission_rate||0).toFixed(1)}%</td>
+        <td class="text-right mono" style="color:#dc2626">${fmtKRW(it.commission_amount||0)}</td>
+        <td class="text-right mono" style="font-weight:600;color:#16a34a">${fmtKRW(it.net_amount||0)}</td>
+        <td style="font-size:11px;white-space:nowrap">${settledFmt}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  function renderKpi() {
+    const k = (_data && _data.kpi) || {};
+    const items = (_data && _data.settlements) || [];
+    const setCnt = (id, n) => { const el = $(id); if (el) el.textContent = '(' + (n||0).toLocaleString() + ')'; };
+    setCnt('cnt-all', items.length);
+    setCnt('cnt-unsettled', items.filter(it => !it.settled_at).length);
+    setCnt('cnt-settled', items.filter(it => !!it.settled_at).length);
+
+    const avgRate = k.gross_total > 0 ? (k.commission_total / k.gross_total * 100).toFixed(2) : '0.00';
+    const settledPct = k.net_total > 0 ? Math.round((k.settled_net||0) / k.net_total * 100) : 0;
+    $('kpi-cards').innerHTML = `
+      <div class="kpi"><h3>대상 건수</h3><div class="v">${(k.total_count||0).toLocaleString()}건</div><div class="sub">상품 ${k.product_count||0}종</div></div>
+      <div class="kpi"><h3>총 매출</h3><div class="v">${fmtKRW(k.gross_total||0)}</div><div class="sub">수수료 차감 전</div></div>
+      <div class="kpi"><h3>총 수수료</h3><div class="v">${fmtKRW(k.commission_total||0)}</div><div class="sub">평균 수수료율 ${avgRate}%</div></div>
+      <div class="kpi good"><h3>정산 대상 금액</h3><div class="v">${fmtKRW(k.net_total||0)}</div><div class="sub">정산 완료 ${settledPct}%</div></div>
+      <div class="kpi urgent"><h3>미정산 잔액</h3><div class="v">${fmtKRW(k.unsettled_net||0)}</div><div class="sub">정산 대기 중</div></div>
+      <div class="kpi good"><h3>정산 완료</h3><div class="v">${fmtKRW(k.settled_net||0)}</div><div class="sub">처리 완료</div></div>
+    `;
+  }
+
+  function renderHeader() {
+    const v = (_data && _data.vendor) || {};
+    $('hdr-vname').textContent = v.name || '거래처';
+    const parts = [];
+    if (v.vendor_code) parts.push(`코드 ${v.vendor_code}`);
+    if (v.contact_person) parts.push(`담당 ${v.contact_person}`);
+    if (typeof v.default_commission_rate === 'number') parts.push(`기본 수수료율 ${Number(v.default_commission_rate).toFixed(1)}%`);
+    const period = (_data && _data.period) ? `${_data.period.start} ~ ${_data.period.end}` : '';
+    if (period) parts.push(`조회기간 ${period}`);
+    $('hdr-vinfo').textContent = parts.join(' · ');
+  }
+
+  function downloadTsv() {
+    const items = getFilteredSettlements();
+    if (!items.length) { alert('다운로드할 항목이 없습니다.'); return; }
+    const header = ['상태','주문번호','유형','상품코드','상품명','희망출고일','수량','매출','수수료율(%)','수수료','정산금액','정산일시'];
+    const rows = items.map(it => [
+      it.settled_at ? '정산완료' : '미정산',
+      it.order_seq,
+      it.is_copurchase ? '동시구매' : '단독',
+      it.product_code||'',
+      (it.product_name||'').replace(/[\t\r\n]+/g,' '),
+      it.desired_ship_date||'',
+      it.qty||0,
+      it.gross_amount||0,
+      Number(it.commission_rate||0).toFixed(2),
+      it.commission_amount||0,
+      it.net_amount||0,
+      it.settled_at ? new Date(it.settled_at).toLocaleString('ko-KR') : '',
+    ].join('\t'));
+    const tsv = '﻿' + [header.join('\t'), ...rows].join('\n'); // BOM for Excel UTF-8
+    const vname = (_data?.vendor?.name || 'vendor').replace(/[\\/:*?"<>|]/g, '_');
+    const today = new Date().toISOString().slice(0,10);
+    const blob = new Blob([tsv], { type: 'text/tab-separated-values;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `정산내역_${vname}_${today}.tsv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  window.downloadTsv = downloadTsv;
+
+  async function loadPortal() {
+    if (!token) { setErr('유효한 접속 링크가 아닙니다. (토큰 누락)'); return; }
+    $('loading').style.display = 'block';
+    $('main').style.display = 'none';
+    $('err').style.display = 'none';
+    const start = $('f-start').value || '';
+    const end = $('f-end').value || '';
+    const params = new URLSearchParams({ token });
+    if (start) params.set('start_date', start);
+    if (end) params.set('end_date', end);
+    try {
+      const r = await fetch(`${API}/api/bg/vendor-portal?${params}`);
+      const data = await r.json();
+      if (!r.ok || data.error) {
+        setErr(data.error || '데이터 조회 실패');
+        return;
+      }
+      _data = data;
+      // 첫 로드 시 기간 기본값 (-7d ~ +30d) 설정
+      if (!$('f-start').value && data.period) $('f-start').value = data.period.start;
+      if (!$('f-end').value && data.period) $('f-end').value = data.period.end;
+      $('loading').style.display = 'none';
+      $('main').style.display = 'block';
+      renderHeader();
+      renderKpi();
+      renderTable();
+    } catch (e) {
+      setErr('네트워크 오류: ' + e.message);
+    }
+  }
+  window.loadPortal = loadPortal;
+
+  // 기본 기간 셋팅 (-7d ~ +30d)
+  const fmt = d => d.toISOString().slice(0,10);
+  const today = new Date();
+  const start = new Date(today); start.setDate(start.getDate() - 7);
+  const end = new Date(today); end.setDate(end.getDate() + 30);
+  $('f-start').value = fmt(start);
+  $('f-end').value = fmt(end);
+
+  loadPortal();
+})();
+</script>
+</body>
+</html>

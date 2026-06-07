@@ -97,6 +97,7 @@ const FILES = {
   shippingConfig: path.join(DATA_DIR, 'bg_shipping_config.json'),
   alimtalkLog: path.join(DATA_DIR, 'bg_alimtalk_log.json'),
   vendors: path.join(DATA_DIR, 'bg_vendors.json'),
+  vendorPortalTokens: path.join(DATA_DIR, 'bg_vendor_portal_tokens.json'),
 };
 
 function ensureDataDir() {
@@ -988,6 +989,97 @@ async function deleteVendor(id) {
   return { ok: true };
 }
 
+// ============================================
+// 거래처 포털 토큰 (bg_vendor_portal_tokens) — Phase 4 (외부 거래처 접근)
+// ============================================
+
+/** UUID v4 hex (32자) — crypto.randomUUID 사용. URL-safe. */
+function _generatePortalToken() {
+  // node 14+: crypto.randomUUID. dashes 제거 → 32 hex chars.
+  const { randomUUID } = require('crypto');
+  return randomUUID().replace(/-/g, '');
+}
+
+async function listVendorPortalTokens(vendorId) {
+  if (!vendorId) return [];
+  if (USE_SUPABASE) {
+    return sbGet('bg_vendor_portal_tokens', `vendor_id=eq.${encodeURIComponent(vendorId)}&order=created_at.desc`);
+  }
+  return (readJson(FILES.vendorPortalTokens, []))
+    .filter(t => t.vendor_id === vendorId);
+}
+
+async function createVendorPortalToken(vendorId, { expires_at = null, created_by = null, memo = null } = {}) {
+  if (!vendorId) throw new Error('vendor_id 필수');
+  const token = _generatePortalToken();
+  const row = { token, vendor_id: vendorId, expires_at, created_by, memo };
+  if (USE_SUPABASE) return sbInsert('bg_vendor_portal_tokens', row);
+  if (!FILES.vendorPortalTokens) FILES.vendorPortalTokens = path.join(DATA_DIR, 'bg_vendor_portal_tokens.json');
+  const list = readJson(FILES.vendorPortalTokens, []);
+  const local = { id: uuid(), ...row, access_count: 0, created_at: now() };
+  list.push(local);
+  writeJson(FILES.vendorPortalTokens, list);
+  return local;
+}
+
+async function revokeVendorPortalToken(id, revoked_by = null) {
+  if (!id) throw new Error('id 필수');
+  const patch = { revoked_at: now(), revoked_by };
+  if (USE_SUPABASE) return sbUpdate('bg_vendor_portal_tokens', `id=eq.${encodeURIComponent(id)}`, patch);
+  if (!FILES.vendorPortalTokens) FILES.vendorPortalTokens = path.join(DATA_DIR, 'bg_vendor_portal_tokens.json');
+  const list = readJson(FILES.vendorPortalTokens, []);
+  const idx = list.findIndex(t => t.id === id);
+  if (idx < 0) throw new Error('토큰을 찾을 수 없습니다');
+  list[idx] = { ...list[idx], ...patch };
+  writeJson(FILES.vendorPortalTokens, list);
+  return list[idx];
+}
+
+/** 토큰으로 거래처 조회 — 만료/무효 검증 후 vendor 반환. 실패 시 null. */
+async function getVendorByPortalToken(token) {
+  if (!token) return null;
+  let row = null;
+  if (USE_SUPABASE) {
+    const rows = await sbGet('bg_vendor_portal_tokens', `token=eq.${encodeURIComponent(token)}&limit=1`);
+    row = rows[0];
+  } else {
+    if (!FILES.vendorPortalTokens) FILES.vendorPortalTokens = path.join(DATA_DIR, 'bg_vendor_portal_tokens.json');
+    row = (readJson(FILES.vendorPortalTokens, [])).find(t => t.token === token);
+  }
+  if (!row) return null;
+  if (row.revoked_at) return null;
+  if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) return null;
+  // 유효 — vendor 조회
+  const vendor = await getVendor(row.vendor_id);
+  if (!vendor || vendor.is_active === false) return null;
+  return { vendor, token_row: row };
+}
+
+/** 접속 카운트/시각 갱신 (fire-and-forget). */
+async function touchVendorPortalToken(tokenRowId) {
+  if (!tokenRowId) return;
+  // Supabase: 단순 PATCH (race 약간 있지만 통계용이라 허용)
+  if (USE_SUPABASE) {
+    try {
+      const existing = await sbGet('bg_vendor_portal_tokens', `id=eq.${encodeURIComponent(tokenRowId)}&limit=1`);
+      const cur = existing[0];
+      if (!cur) return;
+      await sbUpdate('bg_vendor_portal_tokens', `id=eq.${encodeURIComponent(tokenRowId)}`, {
+        last_accessed_at: now(),
+        access_count: (cur.access_count || 0) + 1,
+      });
+    } catch (e) { console.warn('[touchVendorPortalToken] 실패 (무시):', e.message); }
+    return;
+  }
+  if (!FILES.vendorPortalTokens) FILES.vendorPortalTokens = path.join(DATA_DIR, 'bg_vendor_portal_tokens.json');
+  const list = readJson(FILES.vendorPortalTokens, []);
+  const idx = list.findIndex(t => t.id === tokenRowId);
+  if (idx < 0) return;
+  list[idx].last_accessed_at = now();
+  list[idx].access_count = (list[idx].access_count || 0) + 1;
+  writeJson(FILES.vendorPortalTokens, list);
+}
+
 module.exports = {
   getAllStickers,
   getStickerById,
@@ -1024,4 +1116,10 @@ module.exports = {
   createVendor,
   updateVendor,
   deleteVendor,
+  // 거래처 포털 토큰 (Phase 4)
+  listVendorPortalTokens,
+  createVendorPortalToken,
+  revokeVendorPortalToken,
+  getVendorByPortalToken,
+  touchVendorPortalToken,
 };

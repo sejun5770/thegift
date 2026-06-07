@@ -1520,6 +1520,60 @@ nav.nav-loading a[href^="#"] {
   </div>
 </div>
 
+<!-- 거래처 포털 토큰 관리 모달 (Phase 4) -->
+<div id="bg-vendor-portal-modal" onclick="if(event.target===this)closeBgVendorPortalTokens()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;max-width:680px;width:95%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
+      <h3 style="margin:0;font-size:16px">🔗 거래처 포털 링크 — <span id="bg-portal-vendor-name">-</span></h3>
+      <button onclick="closeBgVendorPortalTokens()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--gray-500)">&times;</button>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:14px">
+      <input type="hidden" id="bg-portal-vendor-id">
+      <p style="font-size:13px;color:var(--gray-600);margin:0;background:#fef3c7;padding:10px;border-radius:6px;border:1px solid #fde68a">
+        ⚠️ 발급된 링크는 거래처에 공유 후 본인 정산 내역 조회에만 사용됩니다. 외부 노출 위험이 있으니 만료일 설정 + 이메일 직접 발송 권장. 토큰은 한 번 발급되면 같은 값으로 다시 볼 수 없어요 (DB 에서 직접 조회는 가능).
+      </p>
+
+      <!-- 새 토큰 발급 -->
+      <div style="display:grid;grid-template-columns:140px 1fr 110px;gap:8px;align-items:end;background:#f9fafb;padding:10px;border-radius:8px;border:1px dashed var(--gray-300)">
+        <div>
+          <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:3px">만료 기간 (일)</label>
+          <select id="bg-portal-expires-days" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;background:#fff">
+            <option value="7">7일</option>
+            <option value="30" selected>30일</option>
+            <option value="90">90일</option>
+            <option value="365">1년</option>
+            <option value="0">영구 (위험)</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:3px">메모 (선택)</label>
+          <input type="text" id="bg-portal-memo" placeholder="예: 정산 보고용" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+        </div>
+        <button class="btn btn-primary" onclick="createBgVendorPortalToken()" style="padding:7px 12px;font-size:13px">+ 발급</button>
+      </div>
+
+      <!-- 토큰 목록 -->
+      <div style="overflow-x:auto">
+        <table class="data-table">
+          <thead><tr>
+            <th>상태</th>
+            <th>토큰</th>
+            <th>만료일</th>
+            <th>마지막 접속</th>
+            <th style="text-align:center">접속수</th>
+            <th>메모</th>
+            <th style="width:160px">관리</th>
+          </tr></thead>
+          <tbody id="bg-portal-tokens-tbody"><tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">로딩 중…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:16px 20px;border-top:1px solid var(--gray-200)">
+      <button class="btn" onclick="closeBgVendorPortalTokens()">닫기</button>
+    </div>
+  </div>
+</div>
+
 <!-- ========== 위탁업체 정산 (Phase 2) ========== -->
 <div id="page-bg-settlements" class="page">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -9304,7 +9358,10 @@ async function loadBgVendors() {
         <td style="text-align:right;font-family:monospace">${Number(v.default_commission_rate || 0).toFixed(1)}%</td>
         <td style="text-align:center">${cnt > 0 ? '<b style="color:var(--primary)">' + cnt + '</b>개' : '<span style="color:var(--gray-400)">0개</span>'}</td>
         <td style="font-size:12px;color:var(--gray-600)" title="${esc(v.memo || '')}">${memo}</td>
-        <td><button class="btn" style="padding:4px 10px;font-size:12px" onclick="openBgVendorForm('${esc(v.id)}')">수정</button></td>
+        <td style="white-space:nowrap">
+          <button class="btn" style="padding:4px 10px;font-size:12px" onclick="openBgVendorForm('${esc(v.id)}')">수정</button>
+          <button class="btn" style="padding:4px 10px;font-size:12px;margin-left:4px;background:#fff7ed;border-color:#fb923c;color:#c2410c" onclick="openBgVendorPortalTokens('${esc(v.id)}', '${esc(v.name)}')" title="거래처 외부 포털 접속 링크 발급/관리">🔗 포털</button>
+        </td>
       </tr>`;
     }).join('');
   } catch (e) {
@@ -9383,6 +9440,124 @@ async function deleteBgVendor() {
     showToast('거래처가 삭제되었습니다');
     closeBgVendorForm();
     loadBgVendors();
+  } catch (e) { alert(e.message); }
+}
+
+// ============================================
+// 거래처 포털 토큰 관리 (Phase 4)
+// ============================================
+let _bgPortalTokens = [];
+
+function openBgVendorPortalTokens(vendorId, vendorName) {
+  document.getElementById('bg-portal-vendor-id').value = vendorId;
+  document.getElementById('bg-portal-vendor-name').textContent = vendorName || '';
+  document.getElementById('bg-portal-memo').value = '';
+  document.getElementById('bg-vendor-portal-modal').style.display = 'flex';
+  loadBgVendorPortalTokens();
+}
+
+function closeBgVendorPortalTokens() {
+  document.getElementById('bg-vendor-portal-modal').style.display = 'none';
+}
+
+async function loadBgVendorPortalTokens() {
+  const vendorId = document.getElementById('bg-portal-vendor-id').value;
+  if (!vendorId) return;
+  const tbody = document.getElementById('bg-portal-tokens-tbody');
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">로딩 중…</td></tr>';
+  try {
+    const r = await fetch(`${API}/api/bg/vendors/${encodeURIComponent(vendorId)}/portal-tokens`);
+    _bgPortalTokens = (await r.json()).tokens || [];
+    renderBgVendorPortalTokens();
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#dc2626;padding:16px">${esc(e.message)}</td></tr>`;
+  }
+}
+
+function renderBgVendorPortalTokens() {
+  const tbody = document.getElementById('bg-portal-tokens-tbody');
+  if (!_bgPortalTokens.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">발급된 토큰이 없습니다. 위에서 새로 발급하세요.</td></tr>';
+    return;
+  }
+  const now = new Date();
+  tbody.innerHTML = _bgPortalTokens.map(t => {
+    const isRevoked = !!t.revoked_at;
+    const isExpired = t.expires_at && new Date(t.expires_at) < now;
+    let statusBadge;
+    if (isRevoked) statusBadge = '<span style="background:#f3f4f6;color:#6b7280;font-size:10.5px;font-weight:600;padding:2px 6px;border-radius:3px">↺ 무효화</span>';
+    else if (isExpired) statusBadge = '<span style="background:#fee2e2;color:#b91c1c;font-size:10.5px;font-weight:600;padding:2px 6px;border-radius:3px">⌛ 만료</span>';
+    else statusBadge = '<span style="background:#dcfce7;color:#15803d;font-size:10.5px;font-weight:600;padding:2px 6px;border-radius:3px">✅ 활성</span>';
+
+    const tokenPreview = `${t.token.slice(0, 8)}...${t.token.slice(-4)}`;
+    const expFmt = t.expires_at ? new Date(t.expires_at).toLocaleString('ko-KR', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '<span style="color:var(--gray-400)">영구</span>';
+    const lastFmt = t.last_accessed_at ? new Date(t.last_accessed_at).toLocaleString('ko-KR', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '<span style="color:var(--gray-400)">-</span>';
+    const memo = t.memo ? esc(t.memo) : '<span style="color:var(--gray-400)">-</span>';
+
+    const portalUrl = `${location.origin}${location.pathname.replace(/[^/]*$/, '')}vendor-portal?token=${encodeURIComponent(t.token)}`;
+    const canCopy = !isRevoked && !isExpired;
+    const actions = canCopy ? `
+      <button class="btn" style="padding:3px 8px;font-size:11px" onclick="copyBgVendorPortalLink('${esc(t.token)}')">📋 링크복사</button>
+      <button class="btn" style="padding:3px 8px;font-size:11px;border-color:#dc2626;color:#dc2626;margin-left:3px" onclick="revokeBgVendorPortalToken('${esc(t.id)}')">↺ 무효화</button>
+    ` : '<span style="color:var(--gray-400);font-size:11px">-</span>';
+
+    return `<tr>
+      <td>${statusBadge}</td>
+      <td><span style="font-family:monospace;font-size:11px;background:#f3f4f6;padding:2px 6px;border-radius:3px" title="${esc(t.token)}">${esc(tokenPreview)}</span></td>
+      <td style="font-size:11.5px;white-space:nowrap">${expFmt}</td>
+      <td style="font-size:11.5px;white-space:nowrap">${lastFmt}</td>
+      <td style="text-align:center;font-size:12px">${t.access_count || 0}</td>
+      <td style="font-size:12px;color:var(--gray-600)">${memo}</td>
+      <td style="white-space:nowrap">${actions}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function createBgVendorPortalToken() {
+  const vendorId = document.getElementById('bg-portal-vendor-id').value;
+  const expiresDays = parseInt(document.getElementById('bg-portal-expires-days').value);
+  const memo = document.getElementById('bg-portal-memo').value.trim() || null;
+  if (!vendorId) return;
+  if (expiresDays === 0 && !confirm('만료 없는 영구 토큰을 발급합니다.\n외부 유출 위험이 있으니 신중히 사용하세요. 계속할까요?')) return;
+  try {
+    const r = await fetch(`${API}/api/bg/vendors/${encodeURIComponent(vendorId)}/portal-tokens`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expires_days: expiresDays, memo }),
+    });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || '발급 실패'); }
+    const token = await r.json();
+    const portalUrl = `${location.origin}${location.pathname.replace(/[^/]*$/, '')}vendor-portal?token=${encodeURIComponent(token.token)}`;
+    document.getElementById('bg-portal-memo').value = '';
+    // 발급 직후 클립보드 자동 복사
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(portalUrl).then(
+        () => showToast('🔗 새 포털 링크가 발급되어 클립보드에 복사되었습니다'),
+        () => showToast('🔗 새 포털 링크가 발급되었습니다 (클립보드 복사 실패)')
+      );
+    }
+    loadBgVendorPortalTokens();
+  } catch (e) { alert('토큰 발급 실패: ' + e.message); }
+}
+
+function copyBgVendorPortalLink(token) {
+  const url = `${location.origin}${location.pathname.replace(/[^/]*$/, '')}vendor-portal?token=${encodeURIComponent(token)}`;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(url).then(
+      () => showToast('🔗 포털 링크가 클립보드에 복사되었습니다'),
+      () => alert('복사 실패 — 수동으로 복사하세요:\n' + url)
+    );
+  } else {
+    prompt('포털 링크 (Ctrl+C 로 복사하세요):', url);
+  }
+}
+
+async function revokeBgVendorPortalToken(tokenId) {
+  if (!confirm('이 토큰을 무효화합니다. 거래처가 더 이상 접속할 수 없게 되며, 되돌릴 수 없습니다. 계속할까요?')) return;
+  try {
+    const r = await fetch(`${API}/api/bg/vendor-portal-tokens/${encodeURIComponent(tokenId)}/revoke`, { method: 'POST' });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || '무효화 실패'); }
+    showToast('↺ 토큰이 무효화되었습니다');
+    loadBgVendorPortalTokens();
   } catch (e) { alert(e.message); }
 }
 

@@ -776,6 +776,45 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
   }
 
+  // ============================================
+  // 거래처 포털 토큰 (Phase 4 — 외부 거래처 접근)
+  // ============================================
+  // GET /api/bg/vendors/:id/portal-tokens — admin 발급된 토큰 목록
+  const portalTokensMatch = pathname.match(/^\/api\/bg\/vendors\/([^/]+)\/portal-tokens$/);
+  if (portalTokensMatch && method === 'GET') {
+    try {
+      const tokens = await store.listVendorPortalTokens(decodeURIComponent(portalTokensMatch[1]));
+      return json(res, { tokens });
+    } catch (err) { return json(res, { error: err.message }, 500); }
+  }
+  // POST /api/bg/vendors/:id/portal-tokens — admin 새 토큰 발급. body: { expires_days?, memo? }
+  if (portalTokensMatch && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const expiresDays = body.expires_days != null ? Number(body.expires_days) : 30; // default 30일
+      const expires_at = (expiresDays > 0)
+        ? new Date(Date.now() + expiresDays * 86400000).toISOString()
+        : null; // 0 = 영구
+      const created_by = req._session?.user?.user_id || req._session?.user?.id || 'admin';
+      const token = await store.createVendorPortalToken(decodeURIComponent(portalTokensMatch[1]), {
+        expires_at, created_by, memo: body.memo || null,
+      });
+      return json(res, token, 201);
+    } catch (err) {
+      console.error('[portal-tokens POST] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  // POST /api/bg/vendor-portal-tokens/:id/revoke — admin 토큰 무효화
+  const portalRevokeMatch = pathname.match(/^\/api\/bg\/vendor-portal-tokens\/([^/]+)\/revoke$/);
+  if (portalRevokeMatch && method === 'POST') {
+    try {
+      const revoked_by = req._session?.user?.user_id || req._session?.user?.id || 'admin';
+      const result = await store.revokeVendorPortalToken(decodeURIComponent(portalRevokeMatch[1]), revoked_by);
+      return json(res, result);
+    } catch (err) { return json(res, { error: err.message }, 400); }
+  }
+
   // GET /api/bg/orders/shipping?ids=1,2,3 — 복수 주문 배송정보 일괄 조회 (관리자)
   if (pathname === '/api/bg/orders/shipping' && method === 'GET') {
     const rawIds = (query.ids || '').split(',').map(s => s.trim()).filter(Boolean);

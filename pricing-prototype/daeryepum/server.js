@@ -2492,6 +2492,58 @@ async function apiVendorDashboard(query) {
   };
 }
 
+/**
+ * 거래처 외부 포털 — 토큰 기반 자기 정산 조회.
+ *   public endpoint (인증 없음 — 토큰만으로 권한 식별).
+ *   토큰 검증 후 vendor_id 추출 → apiVendorDashboard(vendor_id) 호출 + vendor 정보 포함.
+ *   유효하지 않은 토큰: 401 패턴으로 { error } 반환.
+ */
+async function apiVendorPortal(query) {
+  const token = query.token;
+  if (!token) return { error: '토큰이 필요합니다.', status: 401 };
+  const _bgStore = require('./barungift/store');
+  const result = await _bgStore.getVendorByPortalToken(token);
+  if (!result) return { error: '유효하지 않거나 만료된 토큰입니다.', status: 401 };
+  const { vendor, token_row } = result;
+  // 접속 추적 (fire-and-forget, await 안 함)
+  _bgStore.touchVendorPortalToken(token_row.id).catch(() => {});
+  // 거래처 한정 대시보드 데이터
+  const dashboard = await apiVendorDashboard({
+    vendor_id: vendor.id,
+    start_date: query.start_date,
+    end_date: query.end_date,
+  });
+  // 정산 내역 (테이블 표시용)
+  const settlements = await apiVendorSettlements({
+    vendor_id: vendor.id,
+    start_date: query.start_date,
+    end_date: query.end_date,
+    status: query.status || 'all',
+    order_type: query.order_type || 'all',
+  });
+  return {
+    vendor: {
+      id: vendor.id,
+      name: vendor.name,
+      vendor_code: vendor.vendor_code || null,
+      contact_person: vendor.contact_person,
+      email: vendor.email,
+      default_commission_rate: vendor.default_commission_rate,
+    },
+    token_info: {
+      expires_at: token_row.expires_at,
+      last_accessed_at: token_row.last_accessed_at,
+      access_count: token_row.access_count,
+    },
+    period: dashboard.period,
+    kpi: dashboard.kpi,
+    by_day: dashboard.by_day,
+    by_type: dashboard.by_type,
+    top_products: dashboard.top_products,
+    settlements: settlements.items,
+  };
+}
+
 async function apiDashboardByShipDate(query) {
   const p = await getPool();
   // 기본 윈도우: 오늘 ~ 30일 후
@@ -4394,6 +4446,13 @@ const server = http.createServer(async (req, res) => {
     res.end(bgHtml);
     return;
   }
+  // 거래처 외부 포털 (정적 HTML) - 토큰으로 자체 인증, 세션 불필요
+  if (pathname === '/vendor-portal') {
+    const portalHtml = fs.readFileSync(path.join(__dirname, 'barungift', 'vendor-portal.html'), 'utf-8');
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(portalHtml);
+    return;
+  }
   // API 라우트
   if (pathname.startsWith('/api/bg/')) {
     const handled = await handleBarungiftApi(pathname, req, res, parsed.query, { getPool, sql, session });
@@ -4460,6 +4519,14 @@ const server = http.createServer(async (req, res) => {
         data = await apiVendorSettlements(parsed.query);
       } else if (pathname === '/api/bg/vendor-dashboard') {
         data = await apiVendorDashboard(parsed.query);
+      } else if (pathname === '/api/bg/vendor-portal') {
+        // public — 토큰 기반 거래처 자기 정산 조회 (인증 X, 토큰만으로 접근)
+        data = await apiVendorPortal(parsed.query);
+        if (data && data.status) {
+          res.writeHead(data.status, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: data.error }));
+          return;
+        }
       } else if (pathname === '/api/bg/vendor-settlements/mark' && req.method === 'POST') {
         const body = await new Promise((resolve, reject) => {
           let raw = ''; req.on('data', c => raw += c); req.on('end', () => { try { resolve(JSON.parse(raw||'{}')); } catch (e) { reject(e); } });
