@@ -11040,8 +11040,9 @@ function renderBgUnified() {
 
   if (sortMode === 'ship_date_asc') {
     bgUnifiedRows.sort((a, b) => {
-      const dA = a.ci?.desired_ship_date || '';
-      const dB = b.ci?.desired_ship_date || '';
+      // product 단위 출고일 우선 (멀티 그룹 호환) — sel.desired_ship_date > ci.desired_ship_date
+      const dA = a.sel?.desired_ship_date || a.ci?.desired_ship_date || '';
+      const dB = b.sel?.desired_ship_date || b.ci?.desired_ship_date || '';
       if (!dA && dB) return 1;
       if (dA && !dB) return -1;
       if (dA !== dB) return dA.localeCompare(dB);
@@ -11237,8 +11238,18 @@ function renderBgUnified() {
           return `<span style="color:var(--gray-500)">${esc(e.label)}:</span> ${esc(String(e.value))}`;
         }).join('<br>')
       : '<span style="color:var(--gray-300)">-</span>';
-    const shipDate = ci?.desired_ship_date ? esc(ci.desired_ship_date) : '<span style="color:var(--gray-300)">-</span>';
-    const shipType = ci ? (ci.is_express
+    // product 단위 출고일/빠른출고 표시 (멀티 출고일 그룹 주문 호환):
+    //   sel.desired_ship_date / sel.is_express 우선 (멀티 그룹은 product 별로 다름)
+    //   없으면 ci.desired_ship_date / ci.is_express fallback (단일 그룹 / 구버전 호환)
+    const rowShipDate = sel?.desired_ship_date || ci?.desired_ship_date || '';
+    const rowIsExpress = (typeof sel?.is_express === 'boolean') ? sel.is_express : !!ci?.is_express;
+    const isMultiGroupRow = !!(sel?.shipping_group_id && ci?.desired_ship_date && sel.desired_ship_date && sel.desired_ship_date !== ci.desired_ship_date);
+    const shipDate = rowShipDate
+      ? (isMultiGroupRow
+          ? `<span title="이 상품의 출고그룹별 출고일">📅 ${esc(rowShipDate)}</span>`
+          : esc(rowShipDate))
+      : '<span style="color:var(--gray-300)">-</span>';
+    const shipType = ci ? (rowIsExpress
       ? '<span style="color:#dc2626;font-weight:600">⚡ 빠른출고</span>'
       : '일반') : '<span style="color:var(--gray-300)">-</span>';
     const receiptText = ci ? (ci.cash_receipt_yn
@@ -12957,15 +12968,20 @@ function copyBgUnified() {
     }
     // T열 = 주문수량 — 나눔배송 대응 (product_qty 우선, sel.quantity 는 주문 전체라 폴백용)
     cells[19] = product_qty || sel?.quantity || '';
-    if (ci?.is_express) cells[21] = ci.desired_ship_date || '';
-    cells[22] = ci?.desired_ship_date || '';
+    // V/W열 = 출고일 — product 단위 (멀티 그룹 호환): sel.desired_ship_date 우선, 없으면 ci.desired_ship_date
+    const tsvShipDate = sel?.desired_ship_date || ci?.desired_ship_date || '';
+    const tsvIsExpress = (typeof sel?.is_express === 'boolean') ? sel.is_express : !!ci?.is_express;
+    if (tsvIsExpress) cells[21] = tsvShipDate;
+    cells[22] = tsvShipDate;
     return cells;
   };
 
   const htmlRows = selectedRows.map(row => {
     const cells = buildCells(row);
+    // V열(빠른출고 출고일) 빨간색 강조 — product 단위 is_express (멀티 그룹 호환)
+    const rowIsExpress = (typeof row.sel?.is_express === 'boolean') ? row.sel.is_express : !!row.ci?.is_express;
     return '<tr>' + cells.map((val, ci) => {
-      const style = (ci === 21 && row.ci?.is_express) ? ' style="color:#8B0000;font-weight:bold"' : '';
+      const style = (ci === 21 && rowIsExpress) ? ' style="color:#8B0000;font-weight:bold"' : '';
       return `<td${style}>${val}</td>`;
     }).join('') + '</tr>';
   }).join('');

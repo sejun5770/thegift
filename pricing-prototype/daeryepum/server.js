@@ -2094,6 +2094,55 @@ function _baseProductCode(rawCode) {
 }
 
 /**
+ * customer_info 의 product 단위 출고일 lookup — 멀티 출고일 그룹 주문 호환.
+ *
+ * 우선순위:
+ *   1) sticker_selections[i].desired_ship_date (product 별 정확)
+ *      → 멀티 그룹 주문에서 그룹마다 다른 날짜 가능. order-info.html submit 시 채움.
+ *   2) ci.desired_ship_date (단일 그룹 / 구버전 호환)
+ *
+ * @returns 'YYYY-MM-DD' or ''
+ */
+function _shipDateForSel(ci, productCode, baseCode) {
+  if (!ci) return '';
+  const sels = Array.isArray(ci.sticker_selections) ? ci.sticker_selections : [];
+  for (const sel of sels) {
+    if (!sel || !sel.product_code) continue;
+    if (sel.product_code === productCode || sel.product_code === baseCode) {
+      if (sel.desired_ship_date) return String(sel.desired_ship_date).slice(0, 10);
+    }
+  }
+  return String(ci.desired_ship_date || '').slice(0, 10);
+}
+
+/** product 단위 is_express lookup — sticker_selection 우선, fallback ci.is_express. */
+function _isExpressForSel(ci, productCode, baseCode) {
+  if (!ci) return false;
+  const sels = Array.isArray(ci.sticker_selections) ? ci.sticker_selections : [];
+  for (const sel of sels) {
+    if (!sel || !sel.product_code) continue;
+    if (sel.product_code === productCode || sel.product_code === baseCode) {
+      if (typeof sel.is_express === 'boolean') return sel.is_express;
+    }
+  }
+  return !!ci.is_express;
+}
+
+/**
+ * ci 가 (기간 윈도우) 안에 있는지 — 멀티 그룹 호환.
+ *   ci.desired_ship_date 또는 어느 sticker_selection.desired_ship_date 가 윈도우 내면 true.
+ */
+function _ciInDateWindow(ci, startDate, endDate) {
+  const dates = [];
+  if (ci.desired_ship_date) dates.push(String(ci.desired_ship_date).slice(0, 10));
+  const sels = Array.isArray(ci.sticker_selections) ? ci.sticker_selections : [];
+  for (const sel of sels) {
+    if (sel && sel.desired_ship_date) dates.push(String(sel.desired_ship_date).slice(0, 10));
+  }
+  return dates.some(d => d && d >= startDate && d <= endDate);
+}
+
+/**
  * 위탁업체 정산 페이지 데이터 collector.
  *
  * Query params:
@@ -2141,12 +2190,11 @@ async function apiVendorSettlements(query) {
   const vendors = await _bgStore.listVendors();
   const vendorById = new Map(vendors.map(v => [v.id, v]));
 
-  // 3) 기간 내 customer_info (희망출고일 지정된 것만)
+  // 3) 기간 내 customer_info — 멀티 그룹 호환:
+  //    ci.desired_ship_date 또는 어느 sticker_selection.desired_ship_date 라도 윈도우 내면 포함.
+  //    product-level 윈도우 외 검증은 7) row 빌드에서 다시 적용 (보수적).
   const ciList = await _bgStore.getCustomerInfosWithShipDate();
-  const inWindow = ciList.filter(ci => {
-    const d = String(ci.desired_ship_date || '').slice(0, 10);
-    return d && d >= startDate && d <= endDate;
-  });
+  const inWindow = ciList.filter(ci => _ciInDateWindow(ci, startDate, endDate));
   if (!inWindow.length) return empty;
 
   // 4) order_seq 분리 (CARD/ETC)
@@ -2244,6 +2292,8 @@ async function apiVendorSettlements(query) {
   }
 
   // 7) 필터링 + 통합 row 빌드 — MSSQL 결과 중 위탁상품에 해당하는 (order, product) 만 추출
+  //    멀티 그룹 호환: 각 product 의 실제 출고일을 sticker_selection 우선 lookup.
+  //    윈도우 외 product 는 (다른 product 가 윈도우 내라 ci 자체는 inWindow 였더라도) skip.
   const items = [];
   for (const row of mssqlResults) {
     const baseCode = _baseProductCode(row.product_code);
@@ -2257,6 +2307,12 @@ async function apiVendorSettlements(query) {
 
     const vendor = vendorById.get(ps.vendor_id);
     if (!vendor) continue;
+
+    // product 단위 출고일 (멀티 그룹 호환)
+    const productShipDate = _shipDateForSel(ci, ps.product_id, baseCode);
+    // 윈도우 외 product 는 skip
+    if (!productShipDate || productShipDate < startDate || productShipDate > endDate) continue;
+    const productIsExpress = _isExpressForSel(ci, ps.product_id, baseCode);
 
     const isCopurchase = !!row.is_copurchase;
     // 주문유형 필터
@@ -2287,7 +2343,8 @@ async function apiVendorSettlements(query) {
       product_name: row.product_name,
       vendor_id: vendor.id,
       vendor_name: vendor.name,
-      desired_ship_date: String(ci.desired_ship_date).slice(0, 10),
+      desired_ship_date: productShipDate,            // product 단위 실제 출고일
+      is_express: productIsExpress,                  // product 단위 빠른출고 여부
       is_copurchase: isCopurchase,
       qty: Number(row.qty) || 0,
       gross_amount: grossAmount,
@@ -2560,11 +2617,15 @@ async function apiDashboardByShipDate(query) {
     return { ...empty, error: 'customer_info: ' + e.message };
   }
 
-  // 기간 필터 (JS 측, ship_date 는 'YYYY-MM-DD' 문자열)
-  const inWindow = cInfos.filter(ci => {
-    const d = String(ci.desired_ship_date || '').slice(0, 10);
-    return d && d >= startDate && d < endDate;
-  });
+  // 기간 필터 (JS 측, ship_date 는 'YYYY-MM-DD' 문자열) — 멀티 그룹 호환:
+  //   ci.desired_ship_date (대표) 또는 어느 sticker_selection.desired_ship_date 라도 윈도우 내면 포함.
+  //   endDate exclusive — _ciInDateWindow 는 inclusive 라 endDate-1d 까지로 조정.
+  const endInclusive = (() => {
+    if (!endDate) return endDate;
+    const d = new Date(endDate); d.setDate(d.getDate() - 1);
+    return d.toISOString().slice(0, 10);
+  })();
+  const inWindow = cInfos.filter(ci => _ciInDateWindow(ci, startDate, endInclusive));
   if (!inWindow.length) return empty;
 
   // order_id → ci 매핑 (ETC-/raw 접두어 분리)
