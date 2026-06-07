@@ -236,8 +236,9 @@ async function syncRecent({ daysBack = 7, status } = {}) {
       for (const [order_id, { row, selections }] of grouped) {
         // 출고일 — ordered_at 기준 11시 컷오프, 토/일 스킵
         const shipDate = calcCoupangShipDate(row.ordered_at);
-        // 스티커 없음 (sticker_code null) 행은 자동으로 제본완료(bound) 까지 진행.
-        const finalSelections = autoAdvanceNoStickerSelections(selections);
+        // 정책 변경: 정보입력 완료(stub upsert) 시점에 자동 bound 진행 제거.
+        //   쿠팡 일반주문도 운영자가 수집처리 시점에 워크플로우 진행하도록 일관 적용.
+        const finalSelections = selections;
         stubs.push({
           order_id,
           is_express: false,
@@ -259,10 +260,10 @@ async function syncRecent({ daysBack = 7, status } = {}) {
       //   processed_at / customer_request / express 관련 운영 필드는 미터치.
       //   sticker_code null 인 행도 자동 진행 timestamps 가 있으면 patch (기존 데이터 보정).
       for (const stub of stubs) {
+        // 정책 변경: 자동 bound timestamp 제거 — sticker_code/box_code 또는 desired_ship_date 만 enrichment 조건.
         const hasEnrich = stub.desired_ship_date
           || (Array.isArray(stub.sticker_selections) && stub.sticker_selections.some(s =>
             s.sticker_code || s.box_code
-            || s.sticker_completed_at || s.printed_at || s.bound_at  // 자동 진행 적용된 행
           ));
         if (!hasEnrich) continue;
         try {

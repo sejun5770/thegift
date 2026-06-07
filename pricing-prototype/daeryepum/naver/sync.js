@@ -219,8 +219,9 @@ async function syncRecent({ daysBack = 7 } = {}) {
           }
         }
         // 출고일은 운영팀 수동 입력 — sync 시점에 자동 설정 안 함.
-        // 스티커 없음 (sticker_code null) 행은 자동으로 제본완료(bound) 까지 진행.
-        const finalSelections = autoAdvanceNoStickerSelections(sticker_selections);
+        // 정책 변경: 정보입력 완료(stub upsert) 시점에 자동 bound 진행 제거.
+        //   운영자가 수집처리 시점에 워크플로우 진행하도록 일관 적용 (쿠팡 sync 와 동일).
+        const finalSelections = sticker_selections;
         stubs.push({
           order_id,
           is_express: false, express_fee: 0,
@@ -237,11 +238,10 @@ async function syncRecent({ daysBack = 7 } = {}) {
       // enrichment PATCH — ignore-duplicates 라 기존 빈 stub 은 위 upsert 로 안 채워짐.
       //   sticker_selections 만 patch (desired_ship_date / processed_at / customer_request 등은 운영팀 수동 입력값 보존).
       //   매 sync 마다 호출 → 옵션 변경 시 자동 반영, idempotent.
-      //   sticker_code null 인 행도 자동 진행 timestamps 가 있으면 patch (기존 데이터 보정).
+      //   정책 변경: 자동 bound timestamp 조건 제거 — 옵션 데이터 변경만 patch 트리거.
       for (const stub of stubs) {
         const hasEnrich = Array.isArray(stub.sticker_selections) && stub.sticker_selections.some(s =>
           s.sticker_code || s.box_code || (s.custom_values && Object.keys(s.custom_values).length)
-          || s.sticker_completed_at || s.printed_at || s.bound_at  // 자동 진행 적용된 행
         );
         if (!hasEnrich) continue;
         try {

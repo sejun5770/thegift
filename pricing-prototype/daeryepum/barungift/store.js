@@ -321,19 +321,16 @@ async function saveCustomerInfo(orderId, data) {
   // L7: express_fee 음수/NaN 가드 — 입력 검증으로 잘못된 데이터 저장 방지
   const sanitizedExpressFee = Math.max(0, parseInt(data.express_fee, 10) || 0);
 
-  // 스티커 없음 (sticker_code null) 행은 자동으로 제본완료(bound) 까지 진행 (운영팀 정책)
-  const { autoAdvanceNoStickerSelections } = require('./workflow-store');
-  const advancedSelections = autoAdvanceNoStickerSelections(
-    data.sticker_selections || [],
-    'system:no-sticker'
-  );
+  // 정책: 정보입력완료 시점에는 워크플로우 timestamp 를 자동으로 추가하지 않음.
+  //   스티커 없음 행의 자동 bound 진행은 수집처리(setProcessed) 시점으로 이동 (운영팀 정책 변경).
+  //   sticker_selections 는 클라이언트 전달 그대로 저장.
 
   const info = {
     order_id: orderId,
     is_express: data.is_express || false,
     express_fee: sanitizedExpressFee,
     desired_ship_date: data.desired_ship_date,
-    sticker_selections: advancedSelections,
+    sticker_selections: data.sticker_selections || [],
     cash_receipt_yn: data.cash_receipt_yn || false,
     receipt_type: data.receipt_type || null,
     receipt_number: data.receipt_number || null,
@@ -421,11 +418,8 @@ async function updateCustomerInfo(orderId, data) {
   for (const k of allowed) { if (k in data) patch[k] = data[k]; }
   // L7: express_fee 음수/NaN 가드
   if ('express_fee' in patch) patch.express_fee = Math.max(0, parseInt(patch.express_fee, 10) || 0);
-  // 스티커 없음 행 자동 진행 (saveCustomerInfo 와 동일 정책)
-  if ('sticker_selections' in patch) {
-    const { autoAdvanceNoStickerSelections } = require('./workflow-store');
-    patch.sticker_selections = autoAdvanceNoStickerSelections(patch.sticker_selections, 'system:no-sticker');
-  }
+  // 정책: admin 수정 시점에도 자동 워크플로우 진행 안 함 — saveCustomerInfo 와 동일.
+  //   sticker 없음 행 자동 bound 진행은 수집처리(setProcessed) 시점에서만 수행.
   patch.updated_at = now();
 
   const existing = await getCustomerInfo(orderId);
@@ -523,6 +517,14 @@ async function setProcessed(orderId, data) {
 
   if (USE_SUPABASE) {
     const existing = await sbGet('bg_order_customer_info', `order_id=eq.${encodeURIComponent(orderId)}`);
+    // 정책: 수집처리(wantProcessed=true) 시점에 sticker 없음 행을 자동 bound 까지 진행.
+    //   이전엔 정보입력 완료 (saveCustomerInfo) 에서 진행 → 운영팀이 미수집 상태인데도 자동
+    //   제본완료로 넘어가 사후 워크플로우 분류 문제. 수집 완료를 자동 진행의 트리거로 변경.
+    if (wantProcessed && existing && existing.length && existing[0].sticker_selections) {
+      const { autoAdvanceNoStickerSelections } = require('./workflow-store');
+      const advanced = autoAdvanceNoStickerSelections(existing[0].sticker_selections, 'system:no-sticker:processed');
+      patch.sticker_selections = advanced;
+    }
     if (!existing || !existing.length) {
       // 쿠팡 주문 ci stub 자동 생성 안전망 — 동기화 전 처리해도 자동으로 만들어 줌.
       //   (sync.js 가 normally 만들지만 이전 동기화/배포 격차로 누락된 row 에 대비)
@@ -575,6 +577,11 @@ async function setProcessed(orderId, data) {
     } else {
       throw new Error('NOT_FOUND');
     }
+  }
+  // JSON 폴백에서도 수집처리(wantProcessed=true) 시 sticker 없음 행 자동 진행 (Supabase 경로와 일관)
+  if (wantProcessed && Array.isArray(infos[idx]?.sticker_selections)) {
+    const { autoAdvanceNoStickerSelections } = require('./workflow-store');
+    patch.sticker_selections = autoAdvanceNoStickerSelections(infos[idx].sticker_selections, 'system:no-sticker:processed');
   }
   infos[idx] = { ...infos[idx], ...patch };
   writeJson(FILES.customerInfo, infos);
