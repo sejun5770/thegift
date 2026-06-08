@@ -425,6 +425,37 @@ async function updateCustomerInfo(orderId, data) {
 
   const existing = await getCustomerInfo(orderId);
 
+  // 멀티 출고일 그룹 호환 — admin 이 ci.desired_ship_date / is_express 만 수정해도 정보입력현황 UI 가
+  // sel.desired_ship_date / sel.is_express 우선 표시라 옛값이 그대로 보이는 문제 방지.
+  //
+  // 동기화 정책 (단일 그룹 sel 만 적용, 멀티 그룹 sel 은 보존):
+  //   patch 에 desired_ship_date / is_express 가 있고 sticker_selections 가 있으면,
+  //   각 sel 중:
+  //     - sel.shipping_group_id 가 명시된 멀티 그룹 sel → 그대로 (그룹별 독립)
+  //     - 그 외 (단일 그룹 / 구버전) → 옛 ci 값과 같았던 경우만 새 값으로 sync
+  if (Array.isArray(patch.sticker_selections) && (('desired_ship_date' in patch) || ('is_express' in patch))) {
+    const hasDate = 'desired_ship_date' in patch;
+    const hasExp = 'is_express' in patch;
+    const newDate = patch.desired_ship_date || null;
+    const newExp = !!patch.is_express;
+    const oldDate = existing?.desired_ship_date ? String(existing.desired_ship_date).slice(0, 10) : null;
+    const oldExp = !!existing?.is_express;
+    patch.sticker_selections = patch.sticker_selections.map(sel => {
+      if (!sel) return sel;
+      if (sel.shipping_group_id) return sel; // 멀티 그룹 보존
+      const out = { ...sel };
+      if (hasDate) {
+        const selDate = sel.desired_ship_date ? String(sel.desired_ship_date).slice(0, 10) : null;
+        if (!selDate || selDate === oldDate) out.desired_ship_date = newDate;
+      }
+      if (hasExp) {
+        const selExp = typeof sel.is_express === 'boolean' ? sel.is_express : null;
+        if (selExp === null || selExp === oldExp) out.is_express = newExp;
+      }
+      return out;
+    });
+  }
+
   if (USE_SUPABASE) {
     if (existing) {
       return sbUpdate('bg_order_customer_info', `order_id=eq.${encodeURIComponent(orderId)}`, patch);
