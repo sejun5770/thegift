@@ -5668,6 +5668,81 @@ const server = http.createServer(async (req, res) => {
           etc_distribution: etcDist.recordset,
           card_samples_per_method: cardSamples.recordset,
         };
+      } else if (pathname === '/api/debug-status-seq') {
+        // status_seq 분포 분석 — STATUS_MAP 매핑 검증용.
+        //   URL: /api/debug-status-seq?days=90
+        //   각 status_seq 별 건수 + 샘플 order_seq 5개씩 + 최근 settle_date 까지 노출.
+        //   CARD/ETC 분리 — 매핑 정확도 진단.
+        logAdminAccess(session, req, 'debug-status-seq', { days: parsed.query.days });
+        const pp = await getPool();
+        const days = parseInt(parsed.query.days) || 90;
+        const ssq = parsed.query.status_seq != null ? parseInt(parsed.query.status_seq) : null;
+        const sampleCount = parseInt(parsed.query.samples) || 5;
+
+        // CARD 분포
+        const cardDist = await pp.request().input('days', sql.Int, days).query(`
+          SELECT
+            co.status_seq,
+            COUNT(*) AS cnt,
+            SUM(CASE WHEN co.settle_date IS NOT NULL THEN 1 ELSE 0 END) AS settled_cnt,
+            MIN(CONVERT(varchar(19), co.order_date, 120)) AS min_order_date,
+            MAX(CONVERT(varchar(19), co.order_date, 120)) AS max_order_date
+          FROM custom_order co WITH (NOLOCK)
+          WHERE co.order_date >= DATEADD(day, -@days, GETDATE())
+          GROUP BY co.status_seq
+          ORDER BY co.status_seq
+        `);
+        // ETC 분포
+        const etcDist = await pp.request().input('days', sql.Int, days).query(`
+          SELECT
+            o.status_seq,
+            COUNT(*) AS cnt,
+            SUM(CASE WHEN o.settle_date IS NOT NULL THEN 1 ELSE 0 END) AS settled_cnt,
+            MIN(CONVERT(varchar(19), o.order_date, 120)) AS min_order_date,
+            MAX(CONVERT(varchar(19), o.order_date, 120)) AS max_order_date
+          FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+          WHERE o.order_date >= DATEADD(day, -@days, GETDATE())
+          GROUP BY o.status_seq
+          ORDER BY o.status_seq
+        `);
+
+        // 특정 status_seq 샘플 (필터 없으면 모든 status 의 N건)
+        // 운영자가 admin 화면에서 그 주문 확인하면 status 실제 의미 파악 가능
+        const cardSamplesReq = pp.request().input('days', sql.Int, days).input('n', sql.Int, sampleCount);
+        if (ssq != null) cardSamplesReq.input('ssq', sql.Int, ssq);
+        const cardSamples = await cardSamplesReq.query(`
+          SELECT TOP (@n) co.order_seq, co.status_seq,
+            CONVERT(varchar(19), co.order_date, 120) AS order_date,
+            CONVERT(varchar(19), co.settle_date, 120) AS settle_date,
+            co.order_name, co.settle_price
+          FROM custom_order co WITH (NOLOCK)
+          WHERE co.order_date >= DATEADD(day, -@days, GETDATE())
+            ${ssq != null ? 'AND co.status_seq = @ssq' : ''}
+          ORDER BY co.order_date DESC
+        `);
+        const etcSamplesReq = pp.request().input('days', sql.Int, days).input('n', sql.Int, sampleCount);
+        if (ssq != null) etcSamplesReq.input('ssq', sql.Int, ssq);
+        const etcSamples = await etcSamplesReq.query(`
+          SELECT TOP (@n) o.order_seq, o.status_seq,
+            CONVERT(varchar(19), o.order_date, 120) AS order_date,
+            CONVERT(varchar(19), o.settle_date, 120) AS settle_date,
+            o.order_name, o.settle_price
+          FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+          WHERE o.order_date >= DATEADD(day, -@days, GETDATE())
+            ${ssq != null ? 'AND o.status_seq = @ssq' : ''}
+          ORDER BY o.order_date DESC
+        `);
+
+        data = {
+          period_days: days,
+          filter_status_seq: ssq,
+          hint: '각 status_seq 별 분포 + 샘플 order_seq 확인. ' +
+                'admin 화면(FirstMall) 에서 샘플 주문번호 직접 확인해 status 의 실제 의미 검증.',
+          card_distribution: cardDist.recordset,
+          etc_distribution: etcDist.recordset,
+          card_samples: cardSamples.recordset,
+          etc_samples: etcSamples.recordset,
+        };
       } else if (pathname === '/api/debug-payment-discovery') {
         // 결제수단 컬럼/테이블 자동 탐색 — MSSQL 스키마에서 payment 관련 의심 컬럼+테이블 식별.
         //   주문조회 엑셀에 결제수단 추가 위해 어디 컬럼인지 모를 때 사용.
