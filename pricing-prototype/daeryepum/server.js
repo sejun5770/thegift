@@ -769,8 +769,13 @@ async function apiOrders(query) {
         c.Card_Name AS card_name,
         c.Card_Code AS card_code,
         ISNULL(NULLIF(c.Unit_Value, 0), 1) AS unit_value,  -- 판매단위 수량 (인쇄수량 산식: item_count × unit_value)
-        ISNULL(di.dd_count, coi.item_count) AS item_count,
-        CAST(coi.item_sale_price AS float) * ISNULL(di.dd_count, coi.item_count) / ${cardUnitDivisor} AS item_amount,
+        -- dd_count (DELIVERY_INFO_DETAIL 의 '답례품' row 수량) 는 답례품(D01) 전용.
+        --   같은 주문에 답례품 + 데코소품/청첩장 있을 때 다른 카테고리에 답례품 수량이
+        --   그대로 적용되던 오류 fix — D01 만 dd_count 사용, 그 외는 coi.item_count 그대로.
+        CASE WHEN c.Card_Div = 'D01' THEN ISNULL(di.dd_count, coi.item_count) ELSE coi.item_count END AS item_count,
+        CAST(coi.item_sale_price AS float) *
+          (CASE WHEN c.Card_Div = 'D01' THEN ISNULL(di.dd_count, coi.item_count) ELSE coi.item_count END)
+          / ${cardUnitDivisor} AS item_amount,
         co.settle_price,
         0 AS coupon_price,
         co.status_seq,
