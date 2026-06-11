@@ -4620,9 +4620,14 @@ const server = http.createServer(async (req, res) => {
             WHERE o.order_seq = @seq
           `);
           const card = await pp.request().input('seq', sql.Int, seq).query(`
-            SELECT co.order_seq, co.order_date, co.settle_price, co.company_Seq, co.status_seq,
+            SELECT co.order_seq, co.order_date,
+              CONVERT(varchar(19), co.settle_date, 120) AS settle_date,
+              co.settle_price, co.settle_method, co.settle_status,
+              co.company_Seq, co.status_seq, co.order_name, co.member_id,
+              co.last_total_price, co.order_total_price,
+              co.coupon_price, co.point_price, co.delivery_price,
               coi.item_sale_price, coi.item_count, coi.card_seq,
-              c.Card_Name, c.Card_Code, c.Card_Div,
+              c.Card_Name, c.Card_Code, c.Card_Div, c.Unit_Value,
               ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name
             FROM custom_order co WITH (NOLOCK)
             INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
@@ -4630,6 +4635,17 @@ const server = http.createServer(async (req, res) => {
             LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
             WHERE co.order_seq = @seq
           `);
+          // toss_vaccount — 가상계좌 발급 정보 (결제대기/가상계좌 진단)
+          let vbank = { recordset: [] };
+          try {
+            vbank = await pp.request().input('seq', sql.Int, seq).query(`
+              SELECT order_type, vacct_seq, bank_name, vacct_number, vacct_name,
+                CONVERT(varchar(19), due_date, 120) AS due_date,
+                settle_price, status, CONVERT(varchar(19), created_at, 120) AS created_at
+              FROM toss_vaccount WITH (NOLOCK) WHERE order_seq = @seq
+              ORDER BY vacct_seq DESC
+            `);
+          } catch (e) { /* toss_vaccount 없을 수도 — 무시 */ }
           // 배송지 정보 (컬럼 전체 조회)
           const delivery = await pp.request().input('seq', sql.Int, seq).query(`
             SELECT * FROM DELIVERY_INFO WITH (NOLOCK) WHERE ORDER_SEQ = @seq
@@ -4644,6 +4660,7 @@ const server = http.createServer(async (req, res) => {
           `);
           data = {
             etc: etc.recordset, card: card.recordset,
+            toss_vaccount: vbank.recordset,
             delivery: delivery.recordset,
             deliveryDetailColumns: Object.keys(ddCols.recordset.columns || {}),
             deliveryDetail: deliveryDetail.recordset
