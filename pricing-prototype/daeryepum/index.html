@@ -10638,16 +10638,19 @@ async function loadBgUnified() {
   showBgUnifiedSkeleton('1/3 데이터 조회 시작...');
   document.getElementById('uni-table-wrap').style.display = 'none';
 
-  // 기간 필터: 기본 최근 3개월 (90일).
-  //   customer_info 가 있는 옛날 주문은 별도 by-IDs 로직으로 추가 fetch (merge).
+  // 기간 필터: 기본 오늘 ~ 2개월 후 (향후 출고 일정 가시화).
+  //   customer_info 가 있는 옛날 주문은 별도 by-IDs 로직으로 추가 fetch (merge) — 옛 주문도 보임.
   //   운영자가 input 으로 narrow 가능 (기존 값 보존).
   const today = fmt(new Date());
-  const startDefault = fmt(new Date(Date.now() - 90 * 86400000));
+  const endDateDefault = new Date();
+  endDateDefault.setMonth(endDateDefault.getMonth() + 2);
+  const endDefault = fmt(endDateDefault);
   const startEl = document.getElementById('uni-start');
   const endEl = document.getElementById('uni-end');
-  // 이전 fix 에서 hidden input 으로 강제된 값들 (2024-01-01) 초기화 → 새 기본값(90d) 적용
-  if (!startEl.value || startEl.value === '2024-01-01') startEl.value = startDefault;
-  if (!endEl.value) endEl.value = today;
+  // 이전 fix 의 강제값들 초기화 — 새 기본값 (today ~ +2개월) 적용
+  const STALE_DEFAULTS = ['2024-01-01']; // 호환성: 옛 강제값 감지
+  if (!startEl.value || STALE_DEFAULTS.includes(startEl.value)) startEl.value = today;
+  if (!endEl.value) endEl.value = endDefault;
   const start = startEl.value;
   const end = endEl.value;
   const $loading = document.getElementById('uni-loading');
