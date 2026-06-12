@@ -5185,9 +5185,9 @@ const server = http.createServer(async (req, res) => {
         data = {
           period_days: days,
           probe_order_seq: orderSeqInt || null,
-          hint: 'com_products_by_div 의 Card_Div 값 확인 — D01 외 다른 값이면 현재 답례품 카테고리에서 누락. ' +
-                'specific_order_match 에 row 있으면 위탁답례품 주문이 3246585 임을 확인. ' +
-                'CATEGORY_FILTERS.daeryepum 을 (D01 OR Card_Code LIKE \\'COM[_]%\\') 로 확장하면 통합 가능.',
+          hint: "com_products_by_div 의 Card_Div 값 확인 — D01 외 다른 값이면 현재 답례품 카테고리에서 누락. " +
+                "specific_order_match 에 row 있으면 위탁답례품 주문이 3246585 임을 확인. " +
+                "CATEGORY_FILTERS.daeryepum 을 (D01 OR Card_Code LIKE 'COM[_]%') 로 확장하면 통합 가능.",
           ...results,
         };
       } else if (pathname === '/api/admin/search-order-deep' && req.method === 'GET') {
