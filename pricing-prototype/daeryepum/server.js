@@ -5084,6 +5084,143 @@ const server = http.createServer(async (req, res) => {
           message: 'barunson DB 접근 진단. ok=true 면 cross-DB query 가능. 화환 카테고리 코드 식별 후 CATEGORY_FILTERS 에 추가하면 정보입력현황/대시보드에 통합 가능.',
           probes,
         };
+      } else if (pathname === '/api/admin/search-order-deep' && req.method === 'GET') {
+        // 휴대폰 / 이름 / 주문번호로 모든 가능 DB·테이블 깊이 검색.
+        //   URL: /api/admin/search-order-deep?phone=010-4103-2321&name=김현지&order_seq=3246585
+        //   bar_shop1 (CUSTOM_ETC_ORDER, custom_order, DELIVERY_INFO) + barunson DB 검색.
+        //   주문 못 찾을 때 마지막 진단.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const pp = await getPool();
+        const phone = (parsed.query.phone || '').trim();
+        const name = (parsed.query.name || '').trim();
+        const orderSeq = (parsed.query.order_seq || '').trim();
+        const orderSeqInt = parseInt(orderSeq) || 0;
+        // 휴대폰 정규화 — '-' 제거한 숫자만
+        const phoneDigits = phone.replace(/[^0-9]/g, '');
+        const results = {};
+
+        async function _tryQuery(label, query, inputs = {}) {
+          try {
+            const req = pp.request();
+            for (const [k, v] of Object.entries(inputs)) req.input(k, v.type, v.value);
+            const r = await req.query(query);
+            return { ok: true, rows: r.recordset };
+          } catch (e) {
+            return { ok: false, error: e.message };
+          }
+        }
+
+        // 1) bar_shop1 ETC — order_seq + phone + name
+        if (orderSeqInt || phoneDigits || name) {
+          const conds = [];
+          if (orderSeqInt) conds.push('o.order_seq = @oseq');
+          if (phoneDigits) conds.push("REPLACE(REPLACE(o.recv_hphone, '-', ''), ' ', '') LIKE @phLike OR REPLACE(REPLACE(o.order_hphone, '-', ''), ' ', '') LIKE @phLike");
+          if (name) conds.push("o.order_name = @nm OR o.recv_name = @nm");
+          if (conds.length) {
+            results.etc = await _tryQuery('CUSTOM_ETC_ORDER', `
+              SELECT TOP 20 o.order_seq, o.company_Seq, o.status_seq,
+                CONVERT(varchar(19), o.order_date, 120) AS order_date,
+                CONVERT(varchar(19), o.settle_date, 120) AS settle_date,
+                o.order_name, o.recv_name, o.recv_hphone, o.order_hphone,
+                o.settle_price, o.settle_method
+              FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+              WHERE ${conds.join(' OR ')}
+              ORDER BY o.order_date DESC
+            `, {
+              oseq: { type: sql.Int, value: orderSeqInt },
+              phLike: { type: sql.VarChar, value: phoneDigits ? `%${phoneDigits}%` : '' },
+              nm: { type: sql.NVarChar, value: name },
+            });
+          }
+        }
+
+        // 2) bar_shop1 CARD — order_seq + member_id + order_name
+        if (orderSeqInt || name) {
+          const conds = [];
+          if (orderSeqInt) conds.push('co.order_seq = @oseq');
+          if (name) conds.push('co.order_name = @nm');
+          if (conds.length) {
+            results.card = await _tryQuery('custom_order', `
+              SELECT TOP 20 co.order_seq, co.company_Seq, co.status_seq,
+                CONVERT(varchar(19), co.order_date, 120) AS order_date,
+                CONVERT(varchar(19), co.settle_date, 120) AS settle_date,
+                co.order_name, co.member_id, co.settle_price, co.settle_method
+              FROM custom_order co WITH (NOLOCK)
+              WHERE ${conds.join(' OR ')}
+              ORDER BY co.order_date DESC
+            `, {
+              oseq: { type: sql.Int, value: orderSeqInt },
+              nm: { type: sql.NVarChar, value: name },
+            });
+          }
+        }
+
+        // 3) bar_shop1 DELIVERY_INFO — 휴대폰/이름 매치 (CARD 의 배송지 인덱스)
+        if (phoneDigits || name) {
+          const conds = [];
+          if (phoneDigits) conds.push("REPLACE(REPLACE(di.HPHONE, '-', ''), ' ', '') LIKE @phLike");
+          if (name) conds.push("di.NAME = @nm");
+          if (conds.length) {
+            results.delivery_info = await _tryQuery('DELIVERY_INFO', `
+              SELECT TOP 20 di.ID, di.ORDER_SEQ, di.DELIVERY_SEQ, di.NAME, di.HPHONE, di.ADDR
+              FROM DELIVERY_INFO di WITH (NOLOCK)
+              WHERE ${conds.join(' OR ')}
+              ORDER BY di.ID DESC
+            `, {
+              phLike: { type: sql.VarChar, value: phoneDigits ? `%${phoneDigits}%` : '' },
+              nm: { type: sql.NVarChar, value: name },
+            });
+          }
+        }
+
+        // 4) barunson DB TB_Order — order_seq 매치 (스키마 추정)
+        if (orderSeqInt) {
+          const guessQueries = [
+            `SELECT TOP 5 * FROM barunson.dbo.TB_Order WITH (NOLOCK) WHERE Order_ID = @oseq`,
+            `SELECT TOP 5 * FROM barunson.dbo.TB_Order WITH (NOLOCK) WHERE OrderID = @oseq`,
+            `SELECT TOP 5 * FROM barunson.dbo.TB_Order WITH (NOLOCK) WHERE OrderNo = @oseq`,
+            `SELECT TOP 5 * FROM barunson.dbo.TB_Order WITH (NOLOCK) WHERE order_seq = @oseq`,
+          ];
+          const barunsonHits = [];
+          for (const q of guessQueries) {
+            try {
+              const r = await pp.request().input('oseq', sql.Int, orderSeqInt).query(q);
+              if (r.recordset && r.recordset.length) barunsonHits.push({ query: q, rows: r.recordset });
+            } catch (e) { /* 컬럼 없음 — skip */ }
+          }
+          results.barunson_tb_order = { ok: true, hits: barunsonHits };
+        }
+
+        // 5) 정보입력현황 (Supabase bg_order_customer_info) — 같은 order_id 패턴
+        try {
+          const _bgStore = require('./barungift/store');
+          const candidates = [];
+          if (orderSeq) {
+            candidates.push(orderSeq);
+            candidates.push(`ETC-${orderSeq}`);
+            candidates.push(`CP-${orderSeq}`);
+            candidates.push(`NV-${orderSeq}`);
+          }
+          const bgHits = [];
+          for (const cid of candidates) {
+            try {
+              const ci = await _bgStore.getCustomerInfo(cid);
+              if (ci) bgHits.push({ order_id: cid, ci });
+            } catch (e) { /* ignore */ }
+          }
+          results.bg_customer_info = { ok: true, hits: bgHits };
+        } catch (e) {
+          results.bg_customer_info = { ok: false, error: e.message };
+        }
+
+        data = {
+          query: { phone, phone_digits: phoneDigits, name, order_seq: orderSeq },
+          hint: '주문번호 / 이름 / 전화 어느 하나라도 매치되는 row 검색. ' +
+                '못 찾으면 다른 시스템 (Supabase coupang_orders/naver_orders) 도 별도 확인 필요.',
+          results,
+        };
       } else if (pathname === '/api/admin/unmapped-sites' && req.method === 'GET') {
         // 매출 통과 주문 중 site_name 이 숫자 raw 로 표시되는 (= SiteInfo/COMPANY 매핑 누락) company_Seq 분포.
         //   URL: /api/admin/unmapped-sites?days=90
