@@ -5084,6 +5084,112 @@ const server = http.createServer(async (req, res) => {
           message: 'barunson DB 접근 진단. ok=true 면 cross-DB query 가능. 화환 카테고리 코드 식별 후 CATEGORY_FILTERS 에 추가하면 정보입력현황/대시보드에 통합 가능.',
           probes,
         };
+      } else if (pathname === '/api/admin/probe-com-products' && req.method === 'GET') {
+        // 위탁답례품(COM_ 시작 Card_Code) 상품 분포 진단.
+        //   현재 CATEGORY_FILTERS.daeryepum 은 Card_Div='D01' 만 → COM_ 이 D01 아니면 누락.
+        //   URL: /api/admin/probe-com-products?days=90&order_seq=3246585
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const pp = await getPool();
+        const days = parseInt(parsed.query.days) || 90;
+        const orderSeqInt = parseInt(parsed.query.order_seq) || 0;
+        const results = {};
+
+        // 1) S2_Card 에서 COM_ 시작 상품 분포 + Card_Div 별 그룹화
+        try {
+          const r = await pp.request().query(`
+            SELECT Card_Div, COUNT(*) AS cnt,
+              MIN(Card_Code) AS first_code, MAX(Card_Code) AS last_code,
+              MIN(Card_Name) AS first_name, MAX(Card_Name) AS last_name
+            FROM S2_Card WITH (NOLOCK)
+            WHERE Card_Code LIKE 'COM[_]%'
+            GROUP BY Card_Div
+            ORDER BY cnt DESC
+          `);
+          results.com_products_by_div = r.recordset;
+        } catch (e) { results.com_products_by_div = { error: e.message }; }
+
+        // 2) 샘플 상품 30개 (Card_Code / Card_Name / Card_Div / Unit_Value)
+        try {
+          const r = await pp.request().query(`
+            SELECT TOP 30 Card_Seq, Card_Code, Card_Name, Card_Div, Unit_Value
+            FROM S2_Card WITH (NOLOCK)
+            WHERE Card_Code LIKE 'COM[_]%'
+            ORDER BY Card_Seq DESC
+          `);
+          results.com_product_samples = r.recordset;
+        } catch (e) { results.com_product_samples = { error: e.message }; }
+
+        // 3) 최근 90일 COM_ 상품 주문 분포 (ETC + CARD)
+        try {
+          const r = await pp.request().input('days', sql.Int, days).query(`
+            SELECT 'ETC' AS src, COUNT(DISTINCT o.order_seq) AS order_cnt,
+              ISNULL(SUM(oi.order_count), 0) AS total_qty,
+              MIN(CONVERT(varchar(10), o.order_date, 120)) AS first_date,
+              MAX(CONVERT(varchar(10), o.order_date, 120)) AS last_date
+            FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+            INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+            INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+            WHERE c.Card_Code LIKE 'COM[_]%'
+              AND o.order_date >= DATEADD(day, -@days, GETDATE())
+              AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+            UNION ALL
+            SELECT 'CARD' AS src, COUNT(DISTINCT co.order_seq) AS order_cnt,
+              ISNULL(SUM(coi.item_count), 0) AS total_qty,
+              MIN(CONVERT(varchar(10), co.order_date, 120)) AS first_date,
+              MAX(CONVERT(varchar(10), co.order_date, 120)) AS last_date
+            FROM custom_order co WITH (NOLOCK)
+            INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+            INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+            WHERE c.Card_Code LIKE 'COM[_]%'
+              AND co.order_date >= DATEADD(day, -@days, GETDATE())
+              AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
+          `);
+          results.recent_com_orders = r.recordset;
+        } catch (e) { results.recent_com_orders = { error: e.message }; }
+
+        // 4) 특정 order_seq 매치 (3246585 등) — COM_ 상품 포함된 ETC/CARD 주문 직접 조회
+        if (orderSeqInt) {
+          try {
+            const r1 = await pp.request().input('seq', sql.Int, orderSeqInt).query(`
+              SELECT 'ETC' AS src, o.order_seq, o.order_date, o.settle_date, o.status_seq,
+                o.order_name, o.recv_name, o.recv_hphone, o.settle_price,
+                c.Card_Code, c.Card_Name, c.Card_Div, c.Unit_Value,
+                oi.order_count AS item_count, oi.card_sale_price
+              FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+              INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+              INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+              WHERE o.order_seq = @seq AND c.Card_Code LIKE 'COM[_]%'
+            `);
+            const r2 = await pp.request().input('seq', sql.Int, orderSeqInt).query(`
+              SELECT 'CARD' AS src, co.order_seq, co.order_date, co.settle_date, co.status_seq,
+                co.order_name, co.member_id, co.settle_price,
+                c.Card_Code, c.Card_Name, c.Card_Div, c.Unit_Value,
+                coi.item_count, coi.item_sale_price
+              FROM custom_order co WITH (NOLOCK)
+              INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+              INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+              WHERE co.order_seq = @seq AND c.Card_Code LIKE 'COM[_]%'
+            `);
+            results.specific_order_match = {
+              etc: r1.recordset,
+              card: r2.recordset,
+            };
+          } catch (e) { results.specific_order_match = { error: e.message }; }
+        }
+
+        // 5) 현재 CATEGORY_FILTERS 노출
+        results.current_category_filters = Object.entries(CATEGORY_FILTERS).map(([k, v]) => ({ key: k, filter: v.filter }));
+
+        data = {
+          period_days: days,
+          probe_order_seq: orderSeqInt || null,
+          hint: 'com_products_by_div 의 Card_Div 값 확인 — D01 외 다른 값이면 현재 답례품 카테고리에서 누락. ' +
+                'specific_order_match 에 row 있으면 위탁답례품 주문이 3246585 임을 확인. ' +
+                'CATEGORY_FILTERS.daeryepum 을 (D01 OR Card_Code LIKE \\'COM[_]%\\') 로 확장하면 통합 가능.',
+          ...results,
+        };
       } else if (pathname === '/api/admin/search-order-deep' && req.method === 'GET') {
         // 휴대폰 / 이름 / 주문번호로 모든 가능 DB·테이블 깊이 검색.
         //   URL: /api/admin/search-order-deep?phone=010-4103-2321&name=김현지&order_seq=3246585
