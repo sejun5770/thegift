@@ -5084,6 +5084,84 @@ const server = http.createServer(async (req, res) => {
           message: 'barunson DB 접근 진단. ok=true 면 cross-DB query 가능. 화환 카테고리 코드 식별 후 CATEGORY_FILTERS 에 추가하면 정보입력현황/대시보드에 통합 가능.',
           probes,
         };
+      } else if (pathname === '/api/admin/probe-order-items' && req.method === 'GET') {
+        // 특정 주문의 모든 item 정보 raw 조회 — S2_Card / barunson.TB_Product LEFT JOIN.
+        //   주문은 존재하는데 주문조회에 안 잡히는 케이스 진단용 (S2_Card 미매핑 상품 등).
+        //   URL: /api/admin/probe-order-items?order_seq=3246585
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const pp = await getPool();
+        const orderSeqInt = parseInt(parsed.query.order_seq) || 0;
+        if (!orderSeqInt) { data = { error: 'order_seq 필수' }; }
+        else {
+          const results = { order_seq: orderSeqInt };
+          // 1) CUSTOM_ETC_ORDER_ITEM + LEFT JOIN S2_Card — 매핑 누락 즉시 보임
+          try {
+            const r = await pp.request().input('seq', sql.Int, orderSeqInt).query(`
+              SELECT oi.order_seq, oi.card_seq, oi.order_count, oi.card_sale_price,
+                c.Card_Code, c.Card_Name, c.Card_Div, c.Unit_Value,
+                CASE WHEN c.Card_Seq IS NULL THEN 1 ELSE 0 END AS s2_card_unmapped
+              FROM CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK)
+              LEFT JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+              WHERE oi.order_seq = @seq
+            `);
+            results.etc_items = r.recordset;
+          } catch (e) { results.etc_items = { error: e.message }; }
+
+          // 2) custom_order_item + LEFT JOIN S2_Card
+          try {
+            const r = await pp.request().input('seq', sql.Int, orderSeqInt).query(`
+              SELECT coi.order_seq, coi.card_seq, coi.item_count, coi.item_sale_price,
+                c.Card_Code, c.Card_Name, c.Card_Div, c.Unit_Value,
+                CASE WHEN c.Card_Seq IS NULL THEN 1 ELSE 0 END AS s2_card_unmapped
+              FROM custom_order_item coi WITH (NOLOCK)
+              LEFT JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+              WHERE coi.order_seq = @seq
+            `);
+            results.card_items = r.recordset;
+          } catch (e) { results.card_items = { error: e.message }; }
+
+          // 3) 매핑 누락 card_seq 들 — barunson.TB_Product 에서 찾기
+          const unmappedSeqs = [
+            ...((Array.isArray(results.etc_items) ? results.etc_items : []).filter(r => r.s2_card_unmapped).map(r => r.card_seq)),
+            ...((Array.isArray(results.card_items) ? results.card_items : []).filter(r => r.s2_card_unmapped).map(r => r.card_seq)),
+          ].filter(Boolean);
+          if (unmappedSeqs.length) {
+            const inList = unmappedSeqs.join(',');
+            // 다양한 PK 가능성 — TB_Product 의 Product_ID / Product_Code / 다른 컬럼 시도
+            const tries = [
+              `SELECT TOP 30 * FROM barunson.dbo.TB_Product WITH (NOLOCK) WHERE Product_ID IN (${inList})`,
+              `SELECT TOP 30 * FROM barunson.dbo.TB_Product WITH (NOLOCK) WHERE Product_Seq IN (${inList})`,
+            ];
+            const tbProductHits = [];
+            for (const sqlText of tries) {
+              try {
+                const r = await pp.request().query(sqlText);
+                if (r.recordset && r.recordset.length) {
+                  tbProductHits.push({ query: sqlText, rows: r.recordset });
+                }
+              } catch (e) { /* skip */ }
+            }
+            results.unmapped_card_seqs = unmappedSeqs;
+            results.tb_product_lookup = tbProductHits;
+          }
+
+          // 4) CUSTOM_ETC_ORDER_ITEM 모든 컬럼도 추가로 보기 (Card_Code 같은 컬럼이 item 에 직접 있을 수 있음)
+          try {
+            const r = await pp.request().input('seq', sql.Int, orderSeqInt).query(`
+              SELECT TOP 20 * FROM CUSTOM_ETC_ORDER_ITEM WITH (NOLOCK) WHERE order_seq = @seq
+            `);
+            results.etc_items_raw = r.recordset;
+          } catch (e) { results.etc_items_raw = { error: e.message }; }
+
+          data = {
+            hint: 's2_card_unmapped=1 인 item 이 있으면 그 상품이 S2_Card 에 미등록. ' +
+                  'tb_product_lookup 에 row 있으면 barunson.TB_Product 에 별도 등록. ' +
+                  'apiOrders 의 INNER JOIN S2_Card 가 이 row 들을 누락시킴 — LEFT JOIN 또는 UNION 으로 수정 필요.',
+            ...results,
+          };
+        }
       } else if (pathname === '/api/admin/probe-com-products' && req.method === 'GET') {
         // 위탁답례품(COM_ 시작 Card_Code) 상품 분포 진단.
         //   현재 CATEGORY_FILTERS.daeryepum 은 Card_Div='D01' 만 → COM_ 이 D01 아니면 누락.
