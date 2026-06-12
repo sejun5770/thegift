@@ -5084,6 +5084,57 @@ const server = http.createServer(async (req, res) => {
           message: 'barunson DB 접근 진단. ok=true 면 cross-DB query 가능. 화환 카테고리 코드 식별 후 CATEGORY_FILTERS 에 추가하면 정보입력현황/대시보드에 통합 가능.',
           probes,
         };
+      } else if (pathname === '/api/admin/find-order-everywhere' && req.method === 'GET') {
+        // bar_shop1 의 모든 테이블 중 ORDER_SEQ / order_seq 컬럼이 있는 곳에서 매치 검색.
+        //   header 는 있는데 item 이 안 보이는 케이스 (3246585) 추적용 — 별도 B2B item 테이블 식별.
+        //   URL: /api/admin/find-order-everywhere?order_seq=3246585
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const pp = await getPool();
+        const orderSeqInt = parseInt(parsed.query.order_seq) || 0;
+        if (!orderSeqInt) { data = { error: 'order_seq 필수' }; }
+        else {
+          // 1) ORDER_SEQ 또는 order_seq 컬럼이 있는 모든 테이블 찾기
+          const tblCols = await pp.request().query(`
+            SELECT t.TABLE_SCHEMA, t.TABLE_NAME, c.COLUMN_NAME, c.DATA_TYPE
+            FROM INFORMATION_SCHEMA.TABLES t
+            INNER JOIN INFORMATION_SCHEMA.COLUMNS c
+              ON c.TABLE_SCHEMA = t.TABLE_SCHEMA AND c.TABLE_NAME = t.TABLE_NAME
+            WHERE t.TABLE_TYPE = 'BASE TABLE'
+              AND c.COLUMN_NAME IN ('ORDER_SEQ', 'order_seq', 'OrderSeq', 'Order_Seq')
+            ORDER BY t.TABLE_SCHEMA, t.TABLE_NAME
+          `);
+
+          // 2) 각 테이블에서 매치 시도 — TOP 5 row 추출
+          const matches = [];
+          for (const tcol of tblCols.recordset) {
+            const fullName = `[${tcol.TABLE_SCHEMA}].[${tcol.TABLE_NAME}]`;
+            try {
+              const q = `SELECT TOP 5 * FROM ${fullName} WITH (NOLOCK) WHERE [${tcol.COLUMN_NAME}] = @seq`;
+              const r = await pp.request().input('seq', sql.Int, orderSeqInt).query(q);
+              if (r.recordset && r.recordset.length) {
+                matches.push({
+                  table: fullName,
+                  column: tcol.COLUMN_NAME,
+                  row_count: r.recordset.length,
+                  rows: r.recordset,
+                });
+              }
+            } catch (e) {
+              // 권한 / 컬럼 에러 — skip
+            }
+          }
+
+          data = {
+            order_seq: orderSeqInt,
+            tables_with_order_seq_col: tblCols.recordset.map(r => `${r.TABLE_SCHEMA}.${r.TABLE_NAME}.${r.COLUMN_NAME}`),
+            total_tables_checked: tblCols.recordset.length,
+            matched_tables: matches,
+            hint: '매치 테이블에서 item / order_item 패턴 찾기. ' +
+                  '바른손몰 B2B 별도 schema 일 경우 그 테이블명 식별 후 apiOrders UNION 추가 필요.',
+          };
+        }
       } else if (pathname === '/api/admin/probe-order-items' && req.method === 'GET') {
         // 특정 주문의 모든 item 정보 raw 조회 — S2_Card / barunson.TB_Product LEFT JOIN.
         //   주문은 존재하는데 주문조회에 안 잡히는 케이스 진단용 (S2_Card 미매핑 상품 등).
