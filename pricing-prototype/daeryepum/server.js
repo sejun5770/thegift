@@ -5075,6 +5075,84 @@ const server = http.createServer(async (req, res) => {
           message: 'barunson DB 접근 진단. ok=true 면 cross-DB query 가능. 화환 카테고리 코드 식별 후 CATEGORY_FILTERS 에 추가하면 정보입력현황/대시보드에 통합 가능.',
           probes,
         };
+      } else if (pathname === '/api/admin/probe-barunson-order' && req.method === 'GET') {
+        // barunson DB 의 TB_Order 등에서 특정 order_seq / order_id 검색.
+        //   URL: /api/admin/probe-barunson-order?id=3246585
+        //   1) TB_Order 의 컬럼 구조 조회 (어떤 컬럼이 PK 인지)
+        //   2) id 가 들어갈 만한 모든 컬럼에서 검색 (숫자형 컬럼 우선)
+        //   3) 매칭 row 의 전체 컬럼 노출
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const pp = await getPool();
+        const probeId = (parsed.query.id || '').trim();
+        if (!probeId) { data = { error: 'id 파라미터 필수 (예: ?id=3246585)' }; }
+        else {
+          const probes = {};
+          // 1) TB_Order 컬럼 구조
+          try {
+            const cols = await pp.request().query(`
+              SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE
+              FROM barunson.INFORMATION_SCHEMA.COLUMNS
+              WHERE TABLE_NAME = 'TB_Order'
+              ORDER BY ORDINAL_POSITION
+            `);
+            probes.tb_order_columns = { ok: true, columns: cols.recordset };
+          } catch (e) {
+            probes.tb_order_columns = { ok: false, error: e.message };
+          }
+          // 2) ID 가 들어갈 수 있는 모든 컬럼에서 직접 검색 — *_id, *_seq, *_no, *_code, *_num 끝 컬럼
+          //    INT 형이라면 = 비교, 문자형이면 = 비교 (numeric str), LIKE 도 시도
+          try {
+            const idCols = await pp.request().input('id', sql.VarChar, probeId).query(`
+              SELECT TOP 20 COLUMN_NAME, DATA_TYPE
+              FROM barunson.INFORMATION_SCHEMA.COLUMNS
+              WHERE TABLE_NAME = 'TB_Order'
+                AND (
+                  COLUMN_NAME LIKE '%[_]id' OR COLUMN_NAME LIKE 'ID' OR
+                  COLUMN_NAME LIKE '%[_]seq' OR COLUMN_NAME LIKE '%[_]no' OR
+                  COLUMN_NAME LIKE '%[_]code' OR COLUMN_NAME LIKE '%[_]num' OR
+                  COLUMN_NAME LIKE '%order%' OR COLUMN_NAME = 'OrderID' OR
+                  COLUMN_NAME LIKE 'Card_%'
+                )
+            `);
+            probes.candidate_columns = { ok: true, columns: idCols.recordset };
+          } catch (e) {
+            probes.candidate_columns = { ok: false, error: e.message };
+          }
+          // 3) 일반적 PK 후보로 매칭 시도 — 동적 SQL 위험 회피 위해 try/catch 다중 attempts
+          const tryQueries = [
+            { hint: 'Order_ID/OrderID 정수 매치',
+              sql: `SELECT TOP 5 * FROM barunson.dbo.TB_Order WITH (NOLOCK) WHERE Order_ID = @id OR OrderID = @id` },
+            { hint: 'OrderNo 정수 매치',
+              sql: `SELECT TOP 5 * FROM barunson.dbo.TB_Order WITH (NOLOCK) WHERE OrderNo = @id` },
+            { hint: 'order_seq 정수 매치',
+              sql: `SELECT TOP 5 * FROM barunson.dbo.TB_Order WITH (NOLOCK) WHERE order_seq = @id` },
+            { hint: 'Order_Code 문자 매치',
+              sql: `SELECT TOP 5 * FROM barunson.dbo.TB_Order WITH (NOLOCK) WHERE Order_Code = @idStr OR OrderCode = @idStr` },
+          ];
+          const matches = [];
+          for (const q of tryQueries) {
+            try {
+              const r = await pp.request()
+                .input('id', sql.Int, parseInt(probeId) || 0)
+                .input('idStr', sql.VarChar, probeId)
+                .query(q.sql);
+              if (r.recordset && r.recordset.length) {
+                matches.push({ hint: q.hint, rows: r.recordset });
+              }
+            } catch (e) {
+              // 컬럼 없으면 SQL error — skip
+            }
+          }
+          probes.matched = matches;
+          data = {
+            probe_id: probeId,
+            hint: 'tb_order_columns 보고 정확한 컬럼명 확인 → matched 에 row 있으면 그 컬럼이 PK. ' +
+                  '바른손몰 ETC 또는 별도 시스템인지 판정.',
+            ...probes,
+          };
+        }
       } else if (pathname === '/api/admin/discover-card-divs' && req.method === 'GET') {
         // S2_Card 의 Card_Div 분포 + 샘플 — 화환 등 미등록 카테고리 식별용.
         if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
