@@ -2226,6 +2226,7 @@ nav.nav-loading a[href^="#"] {
       <span id="uni-row-count" style="font-size:13px;color:var(--gray-500);flex-shrink:0"></span>
       <div style="flex:1"></div>
       <!-- 액션 버튼들 — 선택 상태에 따라 지능적으로 show/hide -->
+      <button class="btn" onclick="openBgManualOrderForm()" style="padding:6px 12px;font-size:12px;background:#fef3c7;border-color:#fbbf24;color:#92400e" title="MSSQL 동기화 사고 등으로 시스템에 안 잡힌 주문을 수동 등록합니다 (정보입력현황 + 워크플로우 통합)">➕ 수동 주문 등록</button>
       <button class="btn" id="uni-btn-copy" onclick="copyBgUnified()" style="padding:6px 12px;font-size:12px;display:none">📋 수집복사</button>
       <button class="btn" id="uni-btn-copy-receipt" onclick="copyExpressReceiptInfo()" style="padding:6px 12px;font-size:12px;display:none;background:#fef3c7;border-color:#fbbf24;color:#92400e" title="선택된 빠른출고 주문의 현금영수증 정보만 복사 — 형식: 주문번호 / 주문자명 / 영수증정보"><span id="uni-btn-copy-receipt-label">⚡ 현금영수증 복사</span></button>
       <button class="btn" id="uni-btn-send-alimtalk" onclick="bulkSendAlimtalkViaSp()" style="padding:6px 12px;font-size:12px;display:none;border-color:#fbbf24;color:#92400e;background:#fef9c3" title="선택된 미입력 주문에 답례품 정보 입력 안내 알림톡 발송 (SP_GIFT_ORDER_BIZTALK_PROC)">💬 <span id="uni-btn-send-alimtalk-label">알림톡 발송</span></button>
@@ -2273,6 +2274,139 @@ nav.nav-loading a[href^="#"] {
 </div><!-- end .container -->
 
 <!-- 고객입력 수정 모달 -->
+<!-- 수동 주문 등록 모달 (MSSQL 누락 사고 케이스) -->
+<div id="bg-manual-order-modal" onclick="if(event.target===this)closeBgManualOrderForm()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;max-width:780px;width:95%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
+      <h3 id="bg-manual-modal-title" style="margin:0;font-size:16px">➕ 수동 주문 등록</h3>
+      <button onclick="closeBgManualOrderForm()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--gray-500)">&times;</button>
+    </div>
+    <div style="padding:18px 20px;overflow-y:auto;display:flex;flex-direction:column;gap:14px">
+      <input type="hidden" id="bg-manual-mode" value="create">
+      <input type="hidden" id="bg-manual-original-id">
+
+      <div style="background:#fef3c7;padding:10px 12px;border-radius:8px;border:1px solid #fde68a;font-size:12.5px;color:#92400e;line-height:1.6">
+        ⚠️ MSSQL 동기화 사고 등으로 시스템에 잡히지 않은 주문을 수동 등록합니다. 원본 시스템에서 데이터가 복구되면 별도 정리가 필요할 수 있어요.
+      </div>
+
+      <!-- 기본 정보 -->
+      <div style="display:grid;grid-template-columns:160px 1fr 140px;gap:10px">
+        <div>
+          <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">주문번호 *</label>
+          <input type="text" id="bg-manual-order-id" placeholder="예: 3246585 또는 MAN-001" style="width:100%;padding:7px 9px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;font-family:monospace">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">카테고리</label>
+          <select id="bg-manual-category" style="width:100%;padding:7px 9px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;background:#fff">
+            <option value="daeryepum">답례품</option>
+            <option value="deco">데코소품</option>
+            <option value="flower">꽃다발</option>
+            <option value="consignment">위탁답례품</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">상태</label>
+          <select id="bg-manual-status-seq" style="width:100%;padding:7px 9px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;background:#fff">
+            <option value="4">4=결제확인</option>
+            <option value="6">6=제작준비</option>
+            <option value="12">12=배송완료</option>
+            <option value="14">14=포장완료</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 주문자 + 주문일 -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 200px;gap:10px">
+        <div>
+          <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">주문자명 *</label>
+          <input type="text" id="bg-manual-order-name" style="width:100%;padding:7px 9px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">주문자 연락처</label>
+          <input type="text" id="bg-manual-order-hphone" placeholder="010-..." style="width:100%;padding:7px 9px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">주문일시</label>
+          <input type="datetime-local" id="bg-manual-order-date" style="width:100%;padding:7px 9px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+        </div>
+      </div>
+
+      <!-- 수령인 -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 130px;gap:10px">
+        <div>
+          <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">수령인명</label>
+          <input type="text" id="bg-manual-recv-name" style="width:100%;padding:7px 9px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">수령인 연락처</label>
+          <input type="text" id="bg-manual-recv-hphone" placeholder="010-..." style="width:100%;padding:7px 9px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">우편번호</label>
+          <input type="text" id="bg-manual-recv-zip" style="width:100%;padding:7px 9px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;font-family:monospace">
+        </div>
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">배송 주소 (도로명 + 상세)</label>
+        <input type="text" id="bg-manual-recv-address" style="width:100%;padding:7px 9px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+      </div>
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">배송 메시지</label>
+        <input type="text" id="bg-manual-recv-msg" placeholder="예: 부재 시 경비실에 맡겨주세요" style="width:100%;padding:7px 9px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+      </div>
+
+      <!-- 결제 -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px">
+        <div>
+          <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">총 결제금액</label>
+          <input type="number" id="bg-manual-settle-price" min="0" style="width:100%;padding:7px 9px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;font-family:monospace;text-align:right">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">결제수단</label>
+          <select id="bg-manual-settle-method" style="width:100%;padding:7px 9px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;background:#fff">
+            <option value="">선택</option>
+            <option value="1">무통장</option>
+            <option value="2">카드</option>
+            <option value="3">가상계좌</option>
+            <option value="8">npay (네이버페이)</option>
+            <option value="9">카카오페이</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">사이트명</label>
+          <input type="text" id="bg-manual-site-name" placeholder="예: 바른손몰 B2B" style="width:100%;padding:7px 9px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">company_seq</label>
+          <input type="text" id="bg-manual-company-seq" placeholder="예: 7886" style="width:100%;padding:7px 9px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;font-family:monospace">
+        </div>
+      </div>
+
+      <!-- 상품 -->
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <label style="font-size:13px;font-weight:600;color:var(--gray-700)">📦 상품 목록</label>
+          <button type="button" class="btn" onclick="bgManualAddItem()" style="padding:4px 10px;font-size:11px">+ 상품 추가</button>
+        </div>
+        <div id="bg-manual-items" style="display:flex;flex-direction:column;gap:6px"></div>
+      </div>
+
+      <!-- 사고 메모 -->
+      <div>
+        <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">사고 메모 (어디서/어떻게 누락됐는지)</label>
+        <textarea id="bg-manual-source-memo" rows="2" placeholder="예: bhands_b2b — CUSTOM_ETC_ORDER_ITEM 누락 / heejun.kim admin 메모 확인" style="width:100%;padding:7px 9px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;resize:vertical"></textarea>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:space-between;padding:14px 20px;border-top:1px solid var(--gray-200)">
+      <button class="btn" id="bg-manual-delete-btn" onclick="deleteBgManualOrder()" style="border-color:#dc2626;color:#dc2626;display:none">🗑️ 삭제</button>
+      <div style="display:flex;gap:8px;margin-left:auto">
+        <button class="btn" onclick="closeBgManualOrderForm()">취소</button>
+        <button class="btn btn-primary" onclick="saveBgManualOrder()">저장</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="bg-order-edit-modal" onclick="if(event.target===this)closeBgOrderEdit()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:12px;max-width:560px;width:90%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
@@ -10626,6 +10760,193 @@ function showBgUnifiedSkeleton(stepText) {
 function setBgUnifiedProgress(stepText) {
   const prog = document.querySelector('#uni-loading .loading-progress');
   if (prog) prog.textContent = stepText;
+}
+
+// ============================================
+// 수동 주문 등록 (MSSQL 누락 사고 케이스)
+// ============================================
+let _bgManualItems = []; // [{product_code, product_name, quantity, unit_price}]
+
+function openBgManualOrderForm(orderId) {
+  const modal = document.getElementById('bg-manual-order-modal');
+  const title = document.getElementById('bg-manual-modal-title');
+  const delBtn = document.getElementById('bg-manual-delete-btn');
+
+  if (orderId) {
+    // 수정 모드 — fetch 후 채우기
+    title.textContent = '➕ 수동 주문 수정 — ' + orderId;
+    document.getElementById('bg-manual-mode').value = 'update';
+    document.getElementById('bg-manual-original-id').value = orderId;
+    if (delBtn) delBtn.style.display = '';
+    fetch(`${API}/api/bg/manual-orders/${encodeURIComponent(orderId)}`)
+      .then(r => r.json())
+      .then(o => _populateBgManualForm(o))
+      .catch(e => alert('주문 불러오기 실패: ' + e.message));
+  } else {
+    // 신규 모드 — 빈 폼
+    title.textContent = '➕ 수동 주문 등록';
+    document.getElementById('bg-manual-mode').value = 'create';
+    document.getElementById('bg-manual-original-id').value = '';
+    if (delBtn) delBtn.style.display = 'none';
+    // 빈 폼 초기화
+    ['bg-manual-order-id','bg-manual-order-name','bg-manual-order-hphone',
+     'bg-manual-recv-name','bg-manual-recv-hphone','bg-manual-recv-address',
+     'bg-manual-recv-zip','bg-manual-recv-msg','bg-manual-site-name',
+     'bg-manual-company-seq','bg-manual-source-memo'].forEach(k => {
+      const el = document.getElementById(k); if (el) el.value = '';
+    });
+    document.getElementById('bg-manual-settle-price').value = '0';
+    document.getElementById('bg-manual-settle-method').value = '';
+    document.getElementById('bg-manual-category').value = 'daeryepum';
+    document.getElementById('bg-manual-status-seq').value = '4';
+    // 주문일시 = 지금
+    const now = new Date();
+    const localISO = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    document.getElementById('bg-manual-order-date').value = localISO;
+    _bgManualItems = [];
+    bgManualAddItem(); // 빈 행 1개로 시작
+  }
+  modal.style.display = 'flex';
+}
+
+function _populateBgManualForm(o) {
+  if (!o) return;
+  document.getElementById('bg-manual-order-id').value = o.order_id || '';
+  document.getElementById('bg-manual-order-name').value = o.order_name || '';
+  document.getElementById('bg-manual-order-hphone').value = o.order_hphone || '';
+  document.getElementById('bg-manual-recv-name').value = o.recv_name || '';
+  document.getElementById('bg-manual-recv-hphone').value = o.recv_hphone || '';
+  document.getElementById('bg-manual-recv-address').value = o.recv_address || '';
+  document.getElementById('bg-manual-recv-zip').value = o.recv_zip || '';
+  document.getElementById('bg-manual-recv-msg').value = o.recv_msg || '';
+  document.getElementById('bg-manual-settle-price').value = o.settle_price || 0;
+  document.getElementById('bg-manual-settle-method').value = o.settle_method || '';
+  document.getElementById('bg-manual-site-name').value = o.site_name || '';
+  document.getElementById('bg-manual-company-seq').value = o.company_seq || '';
+  document.getElementById('bg-manual-category').value = o.category || 'daeryepum';
+  document.getElementById('bg-manual-status-seq').value = String(o.status_seq || 4);
+  document.getElementById('bg-manual-source-memo').value = o.source_memo || '';
+  // 주문일시 (TIMESTAMPTZ → datetime-local)
+  if (o.order_date) {
+    const d = new Date(o.order_date);
+    const localISO = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    document.getElementById('bg-manual-order-date').value = localISO;
+  }
+  _bgManualItems = Array.isArray(o.items) ? o.items.map(it => ({ ...it })) : [];
+  if (!_bgManualItems.length) _bgManualItems.push({ product_code: '', product_name: '', quantity: 1, unit_price: 0 });
+  renderBgManualItems();
+}
+
+function closeBgManualOrderForm() {
+  document.getElementById('bg-manual-order-modal').style.display = 'none';
+}
+
+function bgManualAddItem() {
+  _bgManualItems.push({ product_code: '', product_name: '', quantity: 1, unit_price: 0 });
+  renderBgManualItems();
+}
+
+function bgManualRemoveItem(idx) {
+  _bgManualItems.splice(idx, 1);
+  if (!_bgManualItems.length) bgManualAddItem();
+  else renderBgManualItems();
+}
+
+function bgManualUpdateItem(idx, field, value) {
+  if (!_bgManualItems[idx]) return;
+  if (field === 'quantity' || field === 'unit_price') {
+    _bgManualItems[idx][field] = Math.max(0, parseInt(value, 10) || 0);
+  } else {
+    _bgManualItems[idx][field] = value;
+  }
+}
+
+function renderBgManualItems() {
+  const wrap = document.getElementById('bg-manual-items');
+  if (!wrap) return;
+  wrap.innerHTML = _bgManualItems.map((it, i) => `
+    <div style="display:grid;grid-template-columns:140px 1fr 90px 110px 30px;gap:6px;align-items:center;background:#f9fafb;padding:6px;border:1px solid var(--gray-200);border-radius:6px">
+      <input type="text" value="${escapeHtml(it.product_code||'')}" placeholder="상품코드"
+        oninput="bgManualUpdateItem(${i}, 'product_code', this.value)"
+        style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;font-family:monospace">
+      <input type="text" value="${escapeHtml(it.product_name||'')}" placeholder="상품명"
+        oninput="bgManualUpdateItem(${i}, 'product_name', this.value)"
+        style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+      <input type="number" value="${it.quantity||0}" placeholder="수량" min="0"
+        oninput="bgManualUpdateItem(${i}, 'quantity', this.value)"
+        style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;text-align:right">
+      <input type="number" value="${it.unit_price||0}" placeholder="단가" min="0"
+        oninput="bgManualUpdateItem(${i}, 'unit_price', this.value)"
+        style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;text-align:right;font-family:monospace">
+      <button type="button" onclick="bgManualRemoveItem(${i})" title="삭제"
+        style="border:none;background:#fee;color:#dc2626;width:28px;height:28px;border-radius:4px;cursor:pointer;font-size:14px;line-height:1">&times;</button>
+    </div>
+  `).join('');
+}
+
+async function saveBgManualOrder() {
+  const mode = document.getElementById('bg-manual-mode').value;
+  const originalId = document.getElementById('bg-manual-original-id').value;
+  const newOrderId = document.getElementById('bg-manual-order-id').value.trim();
+  const orderName = document.getElementById('bg-manual-order-name').value.trim();
+  if (!newOrderId) { alert('주문번호를 입력해주세요'); return; }
+  if (!orderName) { alert('주문자명을 입력해주세요'); return; }
+
+  // datetime-local → ISO
+  const orderDateLocal = document.getElementById('bg-manual-order-date').value;
+  const orderDateISO = orderDateLocal ? new Date(orderDateLocal).toISOString() : new Date().toISOString();
+
+  const body = {
+    order_id: newOrderId,
+    order_name: orderName,
+    order_hphone: document.getElementById('bg-manual-order-hphone').value.trim() || null,
+    recv_name: document.getElementById('bg-manual-recv-name').value.trim() || orderName,
+    recv_hphone: document.getElementById('bg-manual-recv-hphone').value.trim() || null,
+    recv_address: document.getElementById('bg-manual-recv-address').value.trim() || null,
+    recv_zip: document.getElementById('bg-manual-recv-zip').value.trim() || null,
+    recv_msg: document.getElementById('bg-manual-recv-msg').value.trim() || null,
+    order_date: orderDateISO,
+    settle_price: Math.max(0, parseInt(document.getElementById('bg-manual-settle-price').value, 10) || 0),
+    settle_method: document.getElementById('bg-manual-settle-method').value || null,
+    status_seq: parseInt(document.getElementById('bg-manual-status-seq').value, 10) || 4,
+    items: _bgManualItems.filter(it => (it.product_code || '').trim() || (it.product_name || '').trim()),
+    site_name: document.getElementById('bg-manual-site-name').value.trim() || null,
+    company_seq: document.getElementById('bg-manual-company-seq').value.trim() || null,
+    category: document.getElementById('bg-manual-category').value,
+    source_memo: document.getElementById('bg-manual-source-memo').value.trim() || null,
+  };
+
+  try {
+    let r;
+    if (mode === 'update' && originalId) {
+      r = await fetch(`${API}/api/bg/manual-orders/${encodeURIComponent(originalId)}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } else {
+      r = await fetch(`${API}/api/bg/manual-orders`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    }
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || '저장 실패'); }
+    showToast(mode === 'update' ? '수동 주문이 수정되었습니다' : '수동 주문이 등록되었습니다');
+    closeBgManualOrderForm();
+    loadBgUnified(); // 목록 reload
+  } catch (e) { alert('저장 실패: ' + e.message); }
+}
+
+async function deleteBgManualOrder() {
+  const orderId = document.getElementById('bg-manual-original-id').value;
+  if (!orderId) return;
+  if (!confirm(`수동 주문 "${orderId}" 를 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`)) return;
+  try {
+    const r = await fetch(`${API}/api/bg/manual-orders/${encodeURIComponent(orderId)}`, { method: 'DELETE' });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || '삭제 실패'); }
+    showToast('수동 주문이 삭제되었습니다');
+    closeBgManualOrderForm();
+    loadBgUnified();
+  } catch (e) { alert(e.message); }
 }
 
 // 활성 fetch 들의 AbortController — 중첩 호출 시 이전 응답 무시 (race condition 방지).

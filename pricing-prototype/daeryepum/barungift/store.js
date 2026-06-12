@@ -98,6 +98,7 @@ const FILES = {
   alimtalkLog: path.join(DATA_DIR, 'bg_alimtalk_log.json'),
   vendors: path.join(DATA_DIR, 'bg_vendors.json'),
   vendorPortalTokens: path.join(DATA_DIR, 'bg_vendor_portal_tokens.json'),
+  manualOrders: path.join(DATA_DIR, 'bg_manual_orders.json'),
 };
 
 function ensureDataDir() {
@@ -1111,6 +1112,113 @@ async function touchVendorPortalToken(tokenRowId) {
   writeJson(FILES.vendorPortalTokens, list);
 }
 
+// ============================================
+// 수동 주문 등록 (bg_manual_orders) — MSSQL 누락 사고 케이스 대응
+// ============================================
+
+/**
+ * 수동 주문 목록 조회.
+ * @param {{ category?: string, start_date?: string, end_date?: string }} opts
+ */
+async function listManualOrders({ category = null, startDate = null, endDate = null } = {}) {
+  if (USE_SUPABASE) {
+    const filters = [];
+    if (category) filters.push(`category=eq.${encodeURIComponent(category)}`);
+    if (startDate) filters.push(`order_date=gte.${encodeURIComponent(startDate)}`);
+    if (endDate) filters.push(`order_date=lte.${encodeURIComponent(endDate + 'T23:59:59')}`);
+    filters.push('order=order_date.desc');
+    return sbGet('bg_manual_orders', filters.join('&'));
+  }
+  const rows = readJson(FILES.manualOrders, []);
+  return rows.filter(r => {
+    if (category && r.category !== category) return false;
+    if (startDate && (r.order_date || '') < startDate) return false;
+    if (endDate && (r.order_date || '') > endDate + 'T23:59:59') return false;
+    return true;
+  });
+}
+
+async function getManualOrder(orderId) {
+  if (!orderId) return null;
+  if (USE_SUPABASE) {
+    const rows = await sbGet('bg_manual_orders', `order_id=eq.${encodeURIComponent(orderId)}`);
+    return rows[0] || null;
+  }
+  return (readJson(FILES.manualOrders, [])).find(r => r.order_id === orderId) || null;
+}
+
+async function createManualOrder(data) {
+  const orderId = (data.order_id || '').trim();
+  if (!orderId) throw new Error('order_id 필수 (실제 missing order_seq 또는 임시 ID)');
+  if (!data.order_name || !String(data.order_name).trim()) throw new Error('order_name 필수');
+
+  const payload = {
+    order_id: orderId,
+    order_name: String(data.order_name).trim(),
+    order_hphone: data.order_hphone || null,
+    order_email: data.order_email || null,
+    recv_name: data.recv_name || data.order_name || null,
+    recv_hphone: data.recv_hphone || data.order_hphone || null,
+    recv_address: data.recv_address || null,
+    recv_zip: data.recv_zip || null,
+    recv_msg: data.recv_msg || null,
+    order_date: data.order_date || new Date().toISOString(),
+    settle_price: Math.max(0, parseInt(data.settle_price, 10) || 0),
+    settle_method: data.settle_method || null,
+    status_seq: parseInt(data.status_seq, 10) || 4,
+    items: Array.isArray(data.items) ? data.items : [],
+    site_name: data.site_name || null,
+    company_seq: data.company_seq || null,
+    category: data.category || 'daeryepum',
+    source_memo: data.source_memo || null,
+    created_by: data.created_by || null,
+  };
+
+  if (USE_SUPABASE) return sbInsert('bg_manual_orders', payload);
+  const list = readJson(FILES.manualOrders, []);
+  if (list.some(r => r.order_id === orderId)) throw new Error('이미 존재하는 order_id');
+  const local = { id: uuid(), ...payload, created_at: now(), updated_at: now() };
+  list.push(local);
+  writeJson(FILES.manualOrders, list);
+  return local;
+}
+
+async function updateManualOrder(orderId, data) {
+  if (!orderId) throw new Error('order_id 필수');
+  const patch = {};
+  const allowed = [
+    'order_name', 'order_hphone', 'order_email',
+    'recv_name', 'recv_hphone', 'recv_address', 'recv_zip', 'recv_msg',
+    'order_date', 'settle_price', 'settle_method', 'status_seq',
+    'items', 'site_name', 'company_seq', 'category', 'source_memo',
+  ];
+  for (const k of allowed) { if (k in data) patch[k] = data[k]; }
+  if ('settle_price' in patch) patch.settle_price = Math.max(0, parseInt(patch.settle_price, 10) || 0);
+  if ('status_seq' in patch) patch.status_seq = parseInt(patch.status_seq, 10) || 4;
+  if ('items' in patch && !Array.isArray(patch.items)) patch.items = [];
+  patch.updated_at = now();
+
+  if (USE_SUPABASE) return sbUpdate('bg_manual_orders', `order_id=eq.${encodeURIComponent(orderId)}`, patch);
+  const list = readJson(FILES.manualOrders, []);
+  const idx = list.findIndex(r => r.order_id === orderId);
+  if (idx < 0) throw new Error('주문을 찾을 수 없습니다');
+  list[idx] = { ...list[idx], ...patch };
+  writeJson(FILES.manualOrders, list);
+  return list[idx];
+}
+
+async function deleteManualOrder(orderId) {
+  if (!orderId) throw new Error('order_id 필수');
+  if (USE_SUPABASE) {
+    await sbDelete('bg_manual_orders', `order_id=eq.${encodeURIComponent(orderId)}`);
+    return { ok: true };
+  }
+  const list = readJson(FILES.manualOrders, []);
+  const next = list.filter(r => r.order_id !== orderId);
+  writeJson(FILES.manualOrders, next);
+  return { ok: true };
+}
+
 module.exports = {
   getAllStickers,
   getStickerById,
@@ -1153,4 +1261,10 @@ module.exports = {
   revokeVendorPortalToken,
   getVendorByPortalToken,
   touchVendorPortalToken,
+  // 수동 주문 등록 (사고 케이스용)
+  listManualOrders,
+  getManualOrder,
+  createManualOrder,
+  updateManualOrder,
+  deleteManualOrder,
 };

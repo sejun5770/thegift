@@ -805,6 +805,64 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       return json(res, { error: err.message }, 400);
     }
   }
+  // ============================================
+  // 수동 주문 등록 (MSSQL 누락 사고 케이스 대응)
+  // ============================================
+  // GET /api/bg/manual-orders?category=&start_date=&end_date=
+  if (pathname === '/api/bg/manual-orders' && method === 'GET') {
+    try {
+      const orders = await store.listManualOrders({
+        category: query.category || null,
+        startDate: query.start_date || null,
+        endDate: query.end_date || null,
+      });
+      return json(res, { orders });
+    } catch (err) {
+      console.error('[manual-orders GET] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+  // POST /api/bg/manual-orders
+  if (pathname === '/api/bg/manual-orders' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      body.created_by = req._session?.user?.user_id || req._session?.user?.id || 'admin';
+      const order = await store.createManualOrder(body);
+      return json(res, order, 201);
+    } catch (err) {
+      console.error('[manual-orders POST] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  // GET/PUT/DELETE /api/bg/manual-orders/:order_id
+  const manualOrderMatch = pathname.match(/^\/api\/bg\/manual-orders\/([^/]+)$/);
+  if (manualOrderMatch && method === 'GET') {
+    try {
+      const order = await store.getManualOrder(decodeURIComponent(manualOrderMatch[1]));
+      if (!order) return json(res, { error: '주문을 찾을 수 없습니다' }, 404);
+      return json(res, order);
+    } catch (err) { return json(res, { error: err.message }, 500); }
+  }
+  if (manualOrderMatch && method === 'PUT') {
+    try {
+      const body = await parseBody(req);
+      const order = await store.updateManualOrder(decodeURIComponent(manualOrderMatch[1]), body);
+      return json(res, order);
+    } catch (err) {
+      console.error('[manual-orders PUT] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  if (manualOrderMatch && method === 'DELETE') {
+    try {
+      const result = await store.deleteManualOrder(decodeURIComponent(manualOrderMatch[1]));
+      return json(res, result);
+    } catch (err) {
+      console.error('[manual-orders DELETE] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+
   // POST /api/bg/vendor-portal-tokens/:id/revoke — admin 토큰 무효화
   const portalRevokeMatch = pathname.match(/^\/api\/bg\/vendor-portal-tokens\/([^/]+)\/revoke$/);
   if (portalRevokeMatch && method === 'POST') {
