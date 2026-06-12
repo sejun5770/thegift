@@ -453,12 +453,21 @@ async function getPool() {
 
 // 제휴사명 캐시: company_Seq → COMPANY_NAME
 const companyNameMap = {};
-// site_name이 숫자(제휴사 코드)인 경우 "제휴사명(코드)" 형태로 변환
+// 하드코딩 매핑 (운영팀 확인된 사이트, DB 등록 누락 보정용).
+//   '바른손몰 B2B' 등 — COMPANY/SiteInfo 에 등록되기 전까지 fallback.
+//   추후 DB 등록 시 hardcoded 우선이라 일관 유지.
+const HARDCODED_SITE_NAMES = {
+  '2715': '바른손몰 B2B',
+};
+// site_name이 숫자(제휴사 코드)인 경우 변환:
+//   1순위 hardcoded map → 2순위 DB companyNameMap → 3순위 '미등록(코드)' fallback (운영자 식별성 ↑)
 function formatSiteName(siteName) {
   if (!siteName) return siteName;
   const s = String(siteName).trim();
-  if (/^\d+$/.test(s) && companyNameMap[s]) {
-    return `${companyNameMap[s]}(${s})`;
+  if (/^\d+$/.test(s)) {
+    if (HARDCODED_SITE_NAMES[s]) return `${HARDCODED_SITE_NAMES[s]}(${s})`;
+    if (companyNameMap[s]) return `${companyNameMap[s]}(${s})`;
+    return `미등록 사이트(${s})`;
   }
   return siteName;
 }
@@ -5074,6 +5083,78 @@ const server = http.createServer(async (req, res) => {
         data = {
           message: 'barunson DB 접근 진단. ok=true 면 cross-DB query 가능. 화환 카테고리 코드 식별 후 CATEGORY_FILTERS 에 추가하면 정보입력현황/대시보드에 통합 가능.',
           probes,
+        };
+      } else if (pathname === '/api/admin/unmapped-sites' && req.method === 'GET') {
+        // 매출 통과 주문 중 site_name 이 숫자 raw 로 표시되는 (= SiteInfo/COMPANY 매핑 누락) company_Seq 분포.
+        //   URL: /api/admin/unmapped-sites?days=90
+        //   응답: CARD/ETC 각각의 미매핑 company_Seq + 건수 + 매출 + 샘플 order_seq + Card_Div 분포
+        //   운영팀이 이 목록 보고 SiteInfo / COMPANY 에 등록하거나 HARDCODED_SITE_NAMES 에 추가 결정.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const pp = await getPool();
+        const days = parseInt(parsed.query.days) || 90;
+
+        // 매핑 있는 company_Seq 집합 (companyNameMap 캐시 + hardcoded)
+        const mappedSet = new Set([
+          ...Object.keys(companyNameMap),
+          ...Object.keys(HARDCODED_SITE_NAMES),
+        ]);
+
+        async function _unmappedDist(table, dateCol, statusFilter) {
+          const r = await pp.request().input('days', sql.Int, days).query(`
+            SELECT
+              o.company_Seq,
+              COUNT(DISTINCT o.order_seq) AS order_cnt,
+              ISNULL(SUM(o.settle_price), 0) AS total_settle_price,
+              MIN(CONVERT(varchar(10), o.${dateCol}, 120)) AS first_date,
+              MAX(CONVERT(varchar(10), o.${dateCol}, 120)) AS last_date
+            FROM ${table} o WITH (NOLOCK)
+            LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+            WHERE o.${dateCol} >= DATEADD(day, -@days, GETDATE())
+              AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+              AND si.SiteName IS NULL  -- SiteInfo 미매핑
+              AND o.company_Seq IS NOT NULL
+            GROUP BY o.company_Seq
+            ORDER BY order_cnt DESC
+          `);
+          // application-side: HARDCODED + DB companyNameMap 매핑된 코드는 제거 (정말 raw 로 표시되는 것만)
+          return r.recordset.filter(row => !mappedSet.has(String(row.company_Seq)));
+        }
+
+        async function _samples(table, dateCol, companySeqs) {
+          if (!companySeqs.length) return [];
+          const inList = companySeqs.map(c => parseInt(c)).filter(Boolean).join(',');
+          if (!inList) return [];
+          const r = await pp.request().input('days', sql.Int, days).query(`
+            SELECT TOP 30 o.company_Seq, o.order_seq,
+              CONVERT(varchar(19), o.${dateCol}, 120) AS order_date,
+              o.status_seq, o.order_name, o.settle_price
+            FROM ${table} o WITH (NOLOCK)
+            WHERE o.${dateCol} >= DATEADD(day, -@days, GETDATE())
+              AND o.company_Seq IN (${inList})
+              AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+            ORDER BY o.order_date DESC
+          `);
+          return r.recordset;
+        }
+
+        const cardDist = await _unmappedDist('custom_order', 'order_date').catch(e => ({ error: e.message }));
+        const etcDist = await _unmappedDist('CUSTOM_ETC_ORDER', 'order_date').catch(e => ({ error: e.message }));
+        const cardSamples = Array.isArray(cardDist) ? await _samples('custom_order', 'order_date', cardDist.map(r => r.company_Seq)) : [];
+        const etcSamples = Array.isArray(etcDist) ? await _samples('CUSTOM_ETC_ORDER', 'order_date', etcDist.map(r => r.company_Seq)) : [];
+
+        data = {
+          period_days: days,
+          hint: 'site_name 이 운영자에게 raw 숫자 코드로 노출되고 있는 company_Seq 목록. ' +
+                '운영팀이 이 코드를 식별 후 (1) SiteInfo 에 직접 등록 또는 (2) ' +
+                'server.js HARDCODED_SITE_NAMES 에 추가하면 "사이트명(코드)" 형식으로 노출됨.',
+          mapped_company_seqs_in_cache: Object.keys(companyNameMap).length,
+          hardcoded_mappings: HARDCODED_SITE_NAMES,
+          card_unmapped: cardDist,
+          card_samples: cardSamples,
+          etc_unmapped: etcDist,
+          etc_samples: etcSamples,
         };
       } else if (pathname === '/api/admin/probe-barunson-order' && req.method === 'GET') {
         // barunson DB 의 TB_Order 등에서 특정 order_seq / order_id 검색.
