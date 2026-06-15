@@ -444,7 +444,7 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- 빠른출고 추가 분석 — 채택율(전환율) / 시간대 / 요일 / 누적비용 -->
-  <div class="section">
+  <div class="section" data-dash-only="daeryepum">
     <div class="section-title">⚡ 빠른출고 분석 <span style="font-size:11px;color:var(--gray-500);font-weight:400;margin-left:6px">조회 기간 정보입력 완료 기준</span></div>
     <div class="card-grid card-grid-2">
       <!-- KPI 박스 (좌) — 채택율, 누적 추가비용 -->
@@ -583,7 +583,7 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- 📅 3-way 리드타임 (주문 / 희망출고 / 예식) — CI 입력완료~출고완료 모든 stage -->
-  <div class="section">
+  <div class="section" data-dash-only="daeryepum">
     <div class="section-title">📅 3-way 리드타임 분석 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(주문일 → 희망출고일 → 예식일 · 정보입력 이후 모든 stage 포함)</span></div>
     <div class="card">
       <div id="lt3-summary" style="font-size:12px;color:var(--gray-500);margin-bottom:12px">로딩 중...</div>
@@ -593,7 +593,7 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- 🎨 스티커 / 💬 메시지 분석 — CI 입력완료~출고완료 모든 stage 의 sticker_selections JSONB 분석 -->
-  <div class="section">
+  <div class="section" data-dash-only="daeryepum">
     <div class="section-title">🎨 스티커 · 💬 메시지 분석 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(정보입력 이후 모든 stage 포함 · 스티커작업/인쇄/제본/포장/출고)</span></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
       <!-- 좌: 상품별 스티커 타입 인기도 -->
@@ -610,7 +610,7 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- 희망출고일별 매출 (정보입력 완료 기준) — 매출 데이터와 기간 차원이 다름 (order_date vs desired_ship_date) -->
-  <div class="section">
+  <div class="section" data-dash-only="daeryepum">
     <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <span>📅 희망출고일별 매출 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(고객 정보입력 완료된 주문 기준)</span></span>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;font-weight:400">
@@ -720,7 +720,7 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- Marketing Analytics -->
-  <div class="section">
+  <div class="section" data-dash-only="daeryepum">
     <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <span>📊 마케팅 분석</span>
       <div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400">
@@ -889,7 +889,7 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- 전환율 + 샘플 -->
-  <div class="section">
+  <div class="section" data-dash-only="daeryepum">
     <div class="resp-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
       <!-- 주차별 전환율 -->
       <div class="card" style="position:relative">
@@ -4857,6 +4857,11 @@ function setDashCategory(cat) {
     const parent = vendorSection.closest('.section');
     if (parent) parent.style.display = (cat === 'daeryepum') ? '' : 'none';
   }
+  // 답례품 전용 섹션 (data-dash-only="daeryepum") 토글:
+  //   빠른출고/3-way 리드타임/스티커·메시지/희망출고일별 매출/마케팅/전환율+샘플
+  document.querySelectorAll('[data-dash-only="daeryepum"]').forEach(el => {
+    el.style.display = (cat === 'daeryepum') ? '' : 'none';
+  });
   loadDashboard();
 }
 
@@ -5153,15 +5158,17 @@ function renderSummary(summary, lt, orderCounts) {
     </ul>
   </div>`;
 
-  // ③ 채널 진단
-  fb += `<div>
-    <div style="font-weight:700;color:${colorChannel};margin-bottom:2px">🔄 채널 진단</div>
-    <ul style="margin:2px 0;padding-left:18px">
-      <li>자사몰 (바른손카드) <b>${channelMix.own}%</b> · ${fmtKRW(channelMix.ownAmt)} — ${channelMix.own > 70 ? '메인 채널 견고, 외부 의존도 낮음 (양호)' : channelMix.own > 50 ? '주요 채널이나 다채널 분산 진행 중' : '다채널 분산 우세 (자사몰 강화 검토)'}</li>
-      <li>마켓플레이스 (네이버/쿠팡) <b>${channelMix.market}%</b> · ${fmtKRW(channelMix.marketAmt)} — ${channelMix.market < 5 ? '진입 초기 (임계점 5% 미달)' : channelMix.market < 15 ? '성장 단계 (안정 운영 구간 진입)' : '주요 채널 위치 (광고 효율 최적화 단계)'}</li>
-      <li>제휴몰 (33곳) <b>${channelMix.affiliate}%</b> · ${fmtKRW(channelMix.affiliateAmt)} — ${channelMix.affiliate > 25 ? '네트워크 효과 우수 (개별 편중도 점검 권장)' : channelMix.affiliate > 10 ? '제휴 분산 양호' : '제휴 활성화 여지'}</li>
-    </ul>
-  </div>`;
+  // ③ 채널 진단 — 답례품 카테고리 한정 (데코소품은 자사몰 위주라 채널 분포 의미 적음)
+  if (dashCategory === 'daeryepum') {
+    fb += `<div>
+      <div style="font-weight:700;color:${colorChannel};margin-bottom:2px">🔄 채널 진단</div>
+      <ul style="margin:2px 0;padding-left:18px">
+        <li>자사몰 (바른손카드) <b>${channelMix.own}%</b> · ${fmtKRW(channelMix.ownAmt)} — ${channelMix.own > 70 ? '메인 채널 견고, 외부 의존도 낮음 (양호)' : channelMix.own > 50 ? '주요 채널이나 다채널 분산 진행 중' : '다채널 분산 우세 (자사몰 강화 검토)'}</li>
+        <li>마켓플레이스 (네이버/쿠팡) <b>${channelMix.market}%</b> · ${fmtKRW(channelMix.marketAmt)} — ${channelMix.market < 5 ? '진입 초기 (임계점 5% 미달)' : channelMix.market < 15 ? '성장 단계 (안정 운영 구간 진입)' : '주요 채널 위치 (광고 효율 최적화 단계)'}</li>
+        <li>제휴몰 (33곳) <b>${channelMix.affiliate}%</b> · ${fmtKRW(channelMix.affiliateAmt)} — ${channelMix.affiliate > 25 ? '네트워크 효과 우수 (개별 편중도 점검 권장)' : channelMix.affiliate > 10 ? '제휴 분산 양호' : '제휴 활성화 여지'}</li>
+      </ul>
+    </div>`;
+  }
 
   // ④ 운영 효율
   fb += `<div>
