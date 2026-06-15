@@ -398,7 +398,7 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- 결제대기 / 빠른출고 보조 KPI (매출 집계 정책엔 포함되지 않음) -->
-  <div class="section">
+  <div class="section" data-dash-only="daeryepum">
     <div class="section-title">⏳ 결제대기 · ⚡ 빠른출고</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div class="card" style="padding:14px 16px;border-left:3px solid #3b82f6">
@@ -517,7 +517,7 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- Forecast: 예식일 기반 이동평균 -->
-  <div class="section">
+  <div class="section" data-dash-only="daeryepum">
     <div class="section-title">
       <span>🔮 답례품 매출 예측 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(예식 4주 윈도우 가중이동평균 · 주차 기준 일~토)</span> <span class="tooltip-wrap" style="position:relative;cursor:help;vertical-align:middle;margin-left:4px">
         <span style="font-size:12px;color:var(--primary);border:1px solid var(--primary);border-radius:50%;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center">?</span>
@@ -3422,10 +3422,11 @@ function psInitial(name) {
 function fmtNumK(n) { return (n || 0).toLocaleString('ko-KR'); }
 function fmtKRW(n) { return fmtNumK(n) + '원'; }
 
-/** 페이지 접속 시 상품 목록 최초 로드 */
+/** 페이지 접속 시 상품 목록 최초 로드 — 대시보드 카테고리 탭에 맞춰 분기 */
 async function loadPsProductList() {
   try {
-    const res = await fetch(`${API}/api/bg/products/sales-list?days=180`);
+    const cat = (typeof dashCategory !== 'undefined' && dashCategory) ? dashCategory : 'daeryepum';
+    const res = await fetch(`${API}/api/bg/products/sales-list?days=180&category=${encodeURIComponent(cat)}`);
     _psAllProducts = await res.json();
   } catch (e) {
     console.error('[loadPsProductList]', e);
@@ -4859,9 +4860,14 @@ function setDashCategory(cat) {
   }
   // 답례품 전용 섹션 (data-dash-only="daeryepum") 토글:
   //   빠른출고/3-way 리드타임/스티커·메시지/희망출고일별 매출/마케팅/전환율+샘플
+  //   결제대기·빠른출고 / 답례품 매출 예측 (예식 기반)
   document.querySelectorAll('[data-dash-only="daeryepum"]').forEach(el => {
     el.style.display = (cat === 'daeryepum') ? '' : 'none';
   });
+  // 상품별 판매통계 — 카테고리별 다른 상품군이므로 선택 초기화 + 목록 reload
+  if (typeof _psSelected !== 'undefined') _psSelected.clear();
+  if (typeof renderPsChips === 'function') renderPsChips();
+  if (typeof loadPsProductList === 'function') loadPsProductList();
   loadDashboard();
 }
 

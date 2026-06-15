@@ -623,12 +623,24 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     return json(res, { settings: await store.getAllProductSettings() });
   }
 
-  // GET /api/bg/products/sales-list - 판매 이력 있는 D01 상품 목록 (상품별 판매통계 선택기용)
+  // GET /api/bg/products/sales-list - 판매 이력 있는 카테고리별 상품 목록 (상품별 판매통계 선택기용)
+  //   query.category: daeryepum(기본, D01) / deco(C29 + 2026_qr%) / flower(D02)
+  //   대시보드 카테고리 탭과 동일 필터 적용 — 데코 탭에서 답례품 상품 안 보이게.
   if (pathname === '/api/bg/products/sales-list' && method === 'GET') {
     try {
       const days = Math.max(1, Math.min(365, parseInt(query.days) || 180));
       const startDate = new Date(Date.now() - days * 86400000);
       const startStr = startDate.toISOString().slice(0, 10);
+      // 카테고리 분기 — server.js CATEGORY_FILTERS 와 동일 정책
+      const CAT_FILTERS = {
+        daeryepum: `c.Card_Div = 'D01'`,
+        deco:      `(c.Card_Div = 'C29' OR c.Card_Code LIKE '2026_qr%')`,
+        flower:    `c.Card_Div = 'D02'`,
+      };
+      const catFilter = CAT_FILTERS[query.category] || CAT_FILTERS.daeryepum;
+      // 데코는 Unit_Value 가 1 인 경우가 있어 분모 적용시 매출 왜곡 발생 → skip
+      const skipUnitValue = query.category === 'deco';
+      const cardUnitDivisor = skipUnitValue ? '1' : 'ISNULL(NULLIF(c.Unit_Value, 0), 1)';
       const pool = await getPool();
       const r = await pool.request().input('s', sql.VarChar, startStr).query(`
         WITH card_agg AS (
@@ -637,7 +649,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
                  SUM(
                    CASE WHEN si.SiteName IS NULL
                         THEN CAST(coi.item_sale_price AS float) * coi.item_count
-                             / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                             / ${cardUnitDivisor}
                         ELSE CAST(coi.item_sale_price AS float)
                    END
                  ) AS revenue,
@@ -646,7 +658,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
           INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
           INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
           LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
-          WHERE c.Card_Div = 'D01' AND co.order_date >= @s
+          WHERE ${catFilter} AND co.order_date >= @s
             AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 14)
           GROUP BY c.Card_Code
         ),
@@ -656,7 +668,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
                  SUM(
                    CASE WHEN si.SiteName IS NULL
                         THEN CAST(ei.card_sale_price AS float) * ei.order_count
-                             / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                             / ${cardUnitDivisor}
                              - ISNULL(o.coupon_price, 0)
                         ELSE CAST(ei.card_sale_price AS float) - ISNULL(o.coupon_price, 0)
                    END
@@ -666,8 +678,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
           INNER JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON o.order_seq = ei.order_seq
           INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
           LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
-          WHERE c.Card_Div = 'D01' AND o.order_date >= @s
-            AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 14, 15)
+          WHERE ${catFilter} AND o.order_date >= @s
+            AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
           GROUP BY c.Card_Code
         )
         SELECT code, MAX(name) AS name,
