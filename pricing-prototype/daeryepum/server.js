@@ -2801,6 +2801,14 @@ async function apiDashboardByShipDate(query) {
  *   UI 에서 명시 필요.
  */
 async function apiExpressAnalysis(query) {
+  // 카테고리 분기 (shadowing) — apiDashboardComparison 와 동일.
+  const categoryCfg = CATEGORY_FILTERS[query.category] || CATEGORY_FILTERS.daeryepum;
+  const skipUnitValue = query.category === 'deco';
+  const D01_FILTER = categoryCfg.filter;
+  const ETC_AMOUNT_EXPR = etcAmountExpr({ skipUnitValue });
+  const _cpdFilter = categoryCfg.filter.replace(/\bc\./g, 'c_cpd.');
+  const ETC_COUPON_DIVISOR_JOIN_D01 = etcCouponDivisorJoin(_cpdFilter);
+  const cardUnitDivisor = skipUnitValue ? '1' : 'ISNULL(NULLIF(c.Unit_Value, 0), 1)';
   const startDate = query.start_date || fmtDate(addDays(today(), -30));
   const endDate = query.end_date || fmtDate(addDays(today(), 1));
   const empty = {
@@ -2872,8 +2880,16 @@ async function apiExpressAnalysis(query) {
   }
 }
 
-async function apiForecast() {
+async function apiForecast(query = {}) {
   const p = await getPool();
+  // 카테고리 분기 — module-level 상수 shadowing (apiDashboardComparison 와 동일 패턴).
+  const categoryCfg = CATEGORY_FILTERS[query.category] || CATEGORY_FILTERS.daeryepum;
+  const skipUnitValue = query.category === 'deco';
+  const D01_FILTER = categoryCfg.filter;
+  const ETC_AMOUNT_EXPR = etcAmountExpr({ skipUnitValue });
+  const _cpdFilter = categoryCfg.filter.replace(/\bc\./g, 'c_cpd.');
+  const ETC_COUPON_DIVISOR_JOIN_D01 = etcCouponDivisorJoin(_cpdFilter);
+  const cardUnitDivisor = skipUnitValue ? '1' : 'ISNULL(NULLIF(c.Unit_Value, 0), 1)';
   const todayStr = fmtDate(today());
 
   const todayDate = today();
@@ -3151,7 +3167,15 @@ function getISOWeek(d) {
   return 1 + Math.round(((date - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
 }
 
-async function apiLeadtime() {
+async function apiLeadtime(query = {}) {
+  // 카테고리 분기 — apiDashboardComparison/Summary 와 동일 패턴 (shadowing).
+  const categoryCfg = CATEGORY_FILTERS[query.category] || CATEGORY_FILTERS.daeryepum;
+  const skipUnitValue = query.category === 'deco';
+  const D01_FILTER = categoryCfg.filter;
+  const ETC_AMOUNT_EXPR = etcAmountExpr({ skipUnitValue });
+  const _cpdFilter = categoryCfg.filter.replace(/\bc\./g, 'c_cpd.');
+  const ETC_COUPON_DIVISOR_JOIN_D01 = etcCouponDivisorJoin(_cpdFilter);
+  const cardUnitDivisor = skipUnitValue ? '1' : 'ISNULL(NULLIF(c.Unit_Value, 0), 1)';
   // 실패시 프론트가 'undefined일' 안 뜨도록 number 0 으로 폴백 (renderLeadtime 가 typeof === 'number' 체크).
   const FALLBACK = { avg_days: null, median_days: null, total_samples: 0, distribution: {}, error: null };
   let p;
@@ -3298,8 +3322,16 @@ async function apiLeadtime() {
 }
 
 // === 주차별 전환율 (예식수 vs 답례품 주문수) ===
-async function apiConversion() {
+async function apiConversion(query = {}) {
   const p = await getPool();
+  // 카테고리 분기 (shadowing).
+  const categoryCfg = CATEGORY_FILTERS[query.category] || CATEGORY_FILTERS.daeryepum;
+  const skipUnitValue = query.category === 'deco';
+  const D01_FILTER = categoryCfg.filter;
+  const ETC_AMOUNT_EXPR = etcAmountExpr({ skipUnitValue });
+  const _cpdFilter = categoryCfg.filter.replace(/\bc\./g, 'c_cpd.');
+  const ETC_COUPON_DIVISOR_JOIN_D01 = etcCouponDivisorJoin(_cpdFilter);
+  const cardUnitDivisor = skipUnitValue ? '1' : 'ISNULL(NULLIF(c.Unit_Value, 0), 1)';
   // 최근 12주 범위
   const todayDate = today();
   const thisSunday = addDays(todayDate, -todayDate.getDay()); // 이번 주 일요일
@@ -3971,8 +4003,16 @@ async function apiStickerAnalytics(query) {
 }
 
 // === 샘플 주문 (수량=1) 일별 추이 ===
-async function apiSamples() {
+async function apiSamples(query = {}) {
   const p = await getPool();
+  // 카테고리 분기 (shadowing).
+  const categoryCfg = CATEGORY_FILTERS[query.category] || CATEGORY_FILTERS.daeryepum;
+  const skipUnitValue = query.category === 'deco';
+  const D01_FILTER = categoryCfg.filter;
+  const ETC_AMOUNT_EXPR = etcAmountExpr({ skipUnitValue });
+  const _cpdFilter = categoryCfg.filter.replace(/\bc\./g, 'c_cpd.');
+  const ETC_COUPON_DIVISOR_JOIN_D01 = etcCouponDivisorJoin(_cpdFilter);
+  const cardUnitDivisor = skipUnitValue ? '1' : 'ISNULL(NULLIF(c.Unit_Value, 0), 1)';
   const endDate = fmtDate(addDays(today(), 1));
   const startDate = fmtDate(addDays(today(), -30));
 
@@ -4606,15 +4646,15 @@ const server = http.createServer(async (req, res) => {
       } else if (pathname === '/api/dashboard/by-ship-date') {
         data = await apiDashboardByShipDate(parsed.query);
       } else if (pathname === '/api/dashboard/forecast') {
-        data = await apiForecast();
+        data = await apiForecast(parsed.query);
       } else if (pathname === '/api/dashboard/leadtime') {
-        data = await apiLeadtime();
+        data = await apiLeadtime(parsed.query);
       } else if (pathname === '/api/dashboard/marketing') {
         data = await apiMarketing(parsed.query);
       } else if (pathname === '/api/dashboard/conversion') {
-        data = await apiConversion();
+        data = await apiConversion(parsed.query);
       } else if (pathname === '/api/dashboard/samples') {
-        data = await apiSamples();
+        data = await apiSamples(parsed.query);
       } else if (pathname === '/api/dashboard/sticker-analytics') {
         data = await apiStickerAnalytics(parsed.query);
       } else if (pathname === '/api/dashboard/leadtime-3way') {
