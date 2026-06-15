@@ -1226,8 +1226,19 @@ async function apiProductStats(query) {
   };
 }
 
-async function apiDashboardComparison() {
+async function apiDashboardComparison(query = {}) {
   const p = await getPool();
+  // 카테고리별 필터 + amount 계산식 (apiOrders / apiDashboardSummary 와 동일 패턴).
+  //   함수 안에서 module-level 상수 D01_FILTER / ETC_AMOUNT_EXPR /
+  //   ETC_COUPON_DIVISOR_JOIN_D01 를 shadow 해 SQL template literal 이 자동으로 카테고리별 값 사용.
+  const categoryCfg = CATEGORY_FILTERS[query.category] || CATEGORY_FILTERS.daeryepum;
+  const skipUnitValue = query.category === 'deco';
+  const D01_FILTER = categoryCfg.filter;
+  const ETC_AMOUNT_EXPR = etcAmountExpr({ skipUnitValue });
+  const _cpdFilter = categoryCfg.filter.replace(/\bc\./g, 'c_cpd.');
+  const ETC_COUPON_DIVISOR_JOIN_D01 = etcCouponDivisorJoin(_cpdFilter);
+  const cardUnitDivisor = skipUnitValue ? '1' : 'ISNULL(NULLIF(c.Unit_Value, 0), 1)';
+
   const todayDate = today();
   const todayStr = fmtDate(todayDate);
   const tomorrowStr = fmtDate(addDays(todayDate, 1));
@@ -1309,7 +1320,7 @@ async function apiDashboardComparison() {
             ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
             CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
             COUNT(DISTINCT co.order_seq) AS order_count,
-            ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)),0) AS total_amount,
+            ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ${cardUnitDivisor}),0) AS total_amount,
             ISNULL(SUM(coi.item_count),0) AS total_qty
           FROM custom_order co WITH (NOLOCK)
           INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
@@ -1327,7 +1338,7 @@ async function apiDashboardComparison() {
         .query(`
           SELECT amount, orders, qty FROM (
             SELECT
-              ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)),0) AS amount,
+              ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ${cardUnitDivisor}),0) AS amount,
               COUNT(DISTINCT co.order_seq) AS orders,
               ISNULL(SUM(coi.item_count),0) AS qty
             FROM custom_order co WITH (NOLOCK)
@@ -4587,7 +4598,7 @@ const server = http.createServer(async (req, res) => {
       if (pathname === '/api/orders') {
         data = await apiOrders(parsed.query);
       } else if (pathname === '/api/dashboard/comparison') {
-        data = await apiDashboardComparison();
+        data = await apiDashboardComparison(parsed.query);
       } else if (pathname === '/api/dashboard/summary') {
         data = await apiDashboardSummary(parsed.query);
       } else if (pathname === '/api/dashboard/express-analysis') {
