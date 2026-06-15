@@ -4840,6 +4840,12 @@ function resetAdminNavSettings() {
 //   탭으로 전환. loadDashboard 가 모든 fetch URL 에 category=X 로 전달.
 let dashCategory = 'daeryepum';
 
+// 카테고리별 라벨 — 피드백 텍스트에서 "답례품" / "데코소품" 동적 치환용.
+function dashCategoryLabel() {
+  return dashCategory === 'deco' ? '데코소품' : '답례품';
+}
+function dashIsDaeryepum() { return dashCategory === 'daeryepum'; }
+
 function setDashCategory(cat) {
   if (dashCategory === cat) return;
   dashCategory = cat;
@@ -5105,7 +5111,7 @@ function renderSummary(summary, lt, orderCounts) {
   const ltDiag = ltMed === 0 ? '데이터 부족'
               : ltMed <= 7 ? '급주문형 (재고·물류 대응력 핵심)'
               : ltMed <= 14 ? '단기 계획형'
-              : ltMed <= 21 ? '청첩장 발송 연동 계획형'
+              : ltMed <= 21 ? (dashIsDaeryepum() ? '청첩장 발송 연동 계획형' : '중기 계획형')
               : '사전 준비형 (얼리버드 할인 기회)';
 
   // 데이터 기반 액션 아이템 자동 생성 — 운영자가 보고 바로 실행 가능한 형태로.
@@ -5118,7 +5124,7 @@ function renderSummary(summary, lt, orderCounts) {
   if (channelMix.market < 5 && channelMix.market >= 0) {
     actions.push(`<b>마켓플레이스 진입 초기</b> (네이버+쿠팡 ${channelMix.market}%) — 5% 임계점 돌파 시 광고효율 급격 향상 구간, 월 ROAS 200% 가드레일 하 광고 집행 확대`);
   }
-  if (cpPct > 0 && cpPct < 10) {
+  if (dashIsDaeryepum() && cpPct > 0 && cpPct < 10) {
     actions.push(`<b>청첩장 동시구매 ${cpPct}% (cross-sell 잠재 미흡)</b> — 청첩장 결제 직후 답례품 추천 모달, 장바구니 1+1 번들 노출로 ${Math.min(cpPct + 5, 15)}% 목표`);
   }
   if (volatility.cv > 50) {
@@ -5181,7 +5187,7 @@ function renderSummary(summary, lt, orderCounts) {
     <div style="font-weight:700;color:${colorOps};margin-bottom:2px">⚡ 운영 효율</div>
     <ul style="margin:2px 0;padding-left:18px">
       <li>리드타임 P50 <b>${ltMed}일</b> — ${ltDiag}</li>`;
-  if (copurchaseAmt > 0 || standaloneAmt > 0) {
+  if (dashIsDaeryepum() && (copurchaseAmt > 0 || standaloneAmt > 0)) {
     const cpDiag = cpPct < 10 ? 'cross-sell 잠재 미흡 (개선 여지 큼)'
                  : cpPct < 30 ? 'cross-sell 적정 구간'
                  : cpPct < 60 ? 'cross-sell 효과적'
@@ -5578,23 +5584,28 @@ function renderComparison(cmp) {
   let feedback = '';
   if (t.total_amount > y.total_amount) {
     feedback = `<strong>오늘 매출이 어제보다 ${pct}% 증가</strong>했습니다. `;
-    if (isWeekend) feedback += '주말은 웨딩 시즌 피크 타임으로, 예식 당일 주문이 집중되는 경향이 있습니다. ';
-    else if (dayOfWeek === 1) feedback += '월요일은 주말 예식 후 답례품 후속 주문이 발생하는 시점입니다. ';
+    if (isWeekend && dashIsDaeryepum()) feedback += '주말은 웨딩 시즌 피크 타임으로, 예식 당일 주문이 집중되는 경향이 있습니다. ';
+    else if (dayOfWeek === 1 && dashIsDaeryepum()) feedback += '월요일은 주말 예식 후 답례품 후속 주문이 발생하는 시점입니다. ';
     else feedback += `${dayNames[dayOfWeek]}요일 기준 현재 ${hour}시까지의 누적 매출입니다. 하루가 마감되면 추가 주문이 반영됩니다. `;
   } else if (t.total_amount < y.total_amount) {
     feedback = `<strong>오늘 매출이 어제 대비 ${Math.abs(pct)}% 감소</strong>했습니다. `;
-    if (hour < 14) feedback += `아직 오후 주문이 반영되지 않은 ${hour}시 기준입니다. 웨딩업계 특성상 점심~저녁 시간대(12~20시) 주문 비중이 높아 마감 시 회복 가능성이 있습니다. `;
-    else feedback += '오후 시간대에도 주문이 부진한 상황입니다. 프로모션이나 타임세일 검토를 권장합니다. ';
+    if (hour < 14) {
+      feedback += dashIsDaeryepum()
+        ? `아직 오후 주문이 반영되지 않은 ${hour}시 기준입니다. 웨딩업계 특성상 점심~저녁 시간대(12~20시) 주문 비중이 높아 마감 시 회복 가능성이 있습니다. `
+        : `아직 오후 주문이 반영되지 않은 ${hour}시 기준입니다. 마감 시 추가 주문이 반영될 수 있습니다. `;
+    } else feedback += '오후 시간대에도 주문이 부진한 상황입니다. 프로모션이나 타임세일 검토를 권장합니다. ';
   } else {
     feedback = '<strong>오늘과 어제 매출이 동일</strong>합니다. ';
   }
 
-  // 시즌 피드백
+  // 시즌 피드백 — 답례품은 웨딩 시즌, 데코소품은 일반 계절 패턴
   const month = now.getMonth() + 1;
-  if (month >= 3 && month <= 6) feedback += '🌸 <strong>봄 웨딩 시즌</strong>(3~6월)은 연간 최대 성수기입니다. 전체 예식의 약 40%가 이 기간에 집중됩니다.';
-  else if (month >= 9 && month <= 11) feedback += '🍂 <strong>가을 웨딩 시즌</strong>(9~11월)으로 두 번째 성수기입니다. 주말 예식장 예약률이 90%를 상회합니다.';
-  else if (month === 7 || month === 8) feedback += '☀️ <strong>여름 비수기</strong>로 주문량이 감소하는 시기입니다. 하반기 가을 시즌을 대비한 마케팅 준비 시점입니다.';
-  else feedback += '❄️ <strong>겨울 비수기</strong>입니다. 봄 시즌 사전 주문이 시작되는 2월부터 점진적 증가가 예상됩니다.';
+  if (dashIsDaeryepum()) {
+    if (month >= 3 && month <= 6) feedback += '🌸 <strong>봄 웨딩 시즌</strong>(3~6월)은 연간 최대 성수기입니다. 전체 예식의 약 40%가 이 기간에 집중됩니다.';
+    else if (month >= 9 && month <= 11) feedback += '🍂 <strong>가을 웨딩 시즌</strong>(9~11월)으로 두 번째 성수기입니다. 주말 예식장 예약률이 90%를 상회합니다.';
+    else if (month === 7 || month === 8) feedback += '☀️ <strong>여름 비수기</strong>로 주문량이 감소하는 시기입니다. 하반기 가을 시즌을 대비한 마케팅 준비 시점입니다.';
+    else feedback += '❄️ <strong>겨울 비수기</strong>입니다. 봄 시즌 사전 주문이 시작되는 2월부터 점진적 증가가 예상됩니다.';
+  }
 
   document.getElementById('cmp-feedback').innerHTML = feedback;
 
@@ -5650,14 +5661,22 @@ function renderComparison(cmp) {
   } else {
     wowFeedback = `이번주 일~${dow}(${periodDays}일) 누적 기준 WoW <strong>${wowPct > 0 ? wowPct+'% 성장' : Math.abs(wowPct)+'% 감소'}</strong>. `;
     if (wowPct > 20) wowFeedback += '지난주 대비 큰 폭의 성장세로, 시즌 진입 또는 마케팅 효과가 반영된 것으로 보입니다. ';
-    else if (wowPct > 0) wowFeedback += '소폭 성장 중입니다. 웨딩 시즌 진행에 따른 자연 증가로 판단됩니다. ';
+    else if (wowPct > 0) {
+      wowFeedback += dashIsDaeryepum()
+        ? '소폭 성장 중입니다. 웨딩 시즌 진행에 따른 자연 증가로 판단됩니다. '
+        : '소폭 성장 중입니다. ';
+    }
     else if (wowPct > -20) wowFeedback += '소폭 하락이나 정상 변동 범위입니다. 동기간 편차가 ±15% 이내이면 안정적입니다. ';
     else wowFeedback += '지난주 대비 큰 폭의 감소입니다. 시즌 전환기이거나 외부 요인(연휴, 날씨 등)을 확인해보세요. ';
   }
   // 주중 위치 코멘트 (누적이라 의미 약간 다름)
   if (periodDays <= 2) wowFeedback += '📌 주 초반(1~2일)은 표본이 작아 변동성이 큽니다. 주 중후반에 트렌드가 명확해집니다.';
   else if (periodDays <= 5) wowFeedback += '📌 주 중반은 동기간 비교의 신뢰도가 높아지는 시점입니다.';
-  else wowFeedback += '📌 주말 누적은 주중 예약 마감 + 당일 예식 주문이 합산돼 WoW 변동폭이 가장 큽니다.';
+  else {
+    wowFeedback += dashIsDaeryepum()
+      ? '📌 주말 누적은 주중 예약 마감 + 당일 예식 주문이 합산돼 WoW 변동폭이 가장 큽니다.'
+      : '📌 주말 누적은 변동폭이 가장 큰 구간입니다.';
+  }
 
   document.getElementById('wow-feedback').innerHTML = wowFeedback;
 }
@@ -5845,11 +5864,19 @@ function renderLeadtime(lt) {
   const preWeddingCnt = preWeddingLabels.reduce((s, k) => s + (dist[k] || 0), 0);
   const preWeddingPct = totalCnt > 0 ? Math.round(preWeddingCnt / totalCnt * 100) : 0;
 
-  let feedback = `예식 전 주문 기준 중앙값 <strong>${lt.median_days}일</strong>(평균 <strong>${lt.avg_days}일</strong>) — 답례품은 평균적으로 예식 약 ${Math.round(lt.median_days/7)}주 전에 주문됩니다. `;
+  const catLabel = dashCategoryLabel();
+  let feedback = `예식 전 주문 기준 중앙값 <strong>${lt.median_days}일</strong>(평균 <strong>${lt.avg_days}일</strong>) — ${catLabel}은 평균적으로 예식 약 ${Math.round(lt.median_days/7)}주 전에 주문됩니다. `;
   feedback += `전체 ${fmtNum(totalCnt)}건 중 예식 전 주문이 ${fmtNum(preWeddingCnt)}건(${preWeddingPct}%)이며, 가장 비중 큰 구간은 <strong>${topBucket[0]}</strong>(${fmtNum(topBucket[1])}건, ${topPct}%) 입니다.<br>`;
   if (lt.median_days <= 14) feedback += '리드타임이 짧아 <strong>급주문 비율</strong>이 높습니다. 재고 관리에 주의가 필요합니다.';
-  else if (lt.median_days <= 30) feedback += '웨딩업계 평균(2~4주)에 부합하는 건강한 리드타임입니다. 청첩장 발송 시점과 맞물리는 패턴입니다.';
-  else feedback += '리드타임이 길어 <strong>사전 계획형 주문</strong>이 많습니다. 조기 주문 할인 프로모션이 효과적일 수 있습니다.';
+  else if (lt.median_days <= 30) {
+    feedback += dashIsDaeryepum()
+      ? '웨딩업계 평균(2~4주)에 부합하는 건강한 리드타임입니다. 청첩장 발송 시점과 맞물리는 패턴입니다.'
+      : '평균 2~4주의 안정적 리드타임입니다.';
+  } else feedback += '리드타임이 길어 <strong>사전 계획형 주문</strong>이 많습니다. 조기 주문 할인 프로모션이 효과적일 수 있습니다.';
+  // 데코소품은 예식과 연관도가 약함을 안내 (lead_days 의미 약화 가능)
+  if (!dashIsDaeryepum()) {
+    feedback += `<br><span style="color:#92400e;font-size:11px">⚠️ 데코소품 구매자의 예식일 매칭은 회원 ID 기반 추정값으로, 본인 예식과 직접 연관되지 않을 수 있습니다.</span>`;
+  }
   document.getElementById('lt-feedback').innerHTML = feedback;
 }
 
