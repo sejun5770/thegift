@@ -1441,12 +1441,14 @@ async function apiDashboardComparison(query = {}) {
         console.warn(`[getPeriodTotal] ${siteName} 머지 실패 (무시):`, e.message);
       }
     }
-    await mergeMarketplace(
+    // 쿠팡 / 네이버 / 쿠팡 로켓그로스 — 답례품 전용 채널. 데코소품/꽃다발 카테고리에서는 제외.
+    const _isDaeryepumCmp = !query.category || query.category === 'daeryepum';
+    if (_isDaeryepumCmp) await mergeMarketplace(
       '쿠팡',
       () => require('./coupang/store').listCoupangOrders({ startStr, endStr, byPaid: false }),
       r => `${r.coupang_order_id}::${r.shipment_box_id}`,
     );
-    await mergeMarketplace(
+    if (_isDaeryepumCmp) await mergeMarketplace(
       '네이버',
       () => require('./naver/store').listNaverOrders({ startStr, endStr, byPaid: false }),
       r => `${r.product_order_id}`,
@@ -1456,7 +1458,7 @@ async function apiDashboardComparison(query = {}) {
     //   보고 수동 입력 (Coupang Open API RFM endpoint 미공개). order_count 는 row 수
     //   (=일자 수) 사용 — 정확한 주문 수는 알 수 없음.
     //   endStr 는 exclusive 라 rfm listSales 의 lte 와 맞추려 -1 일.
-    try {
+    if (_isDaeryepumCmp) try {
       const rfmStore = require('./coupang/rfm-store');
       const endIncl = endStr ? new Date(new Date(endStr).getTime() - 86400000).toISOString().slice(0, 10) : null;
       const rfmRows = await rfmStore.listSales({ startDate: startStr, endDate: endIncl });
@@ -1953,7 +1955,9 @@ async function apiDashboardSummary(query) {
 
   // 쿠팡 주문 일별 합산 — 답례품 카테고리 한정. 대시보드 사이트별 매출에 '쿠팡' 그룹 노출.
   //   apiDashboardSummary 의 summary/orderCounts 와 동일 schema 로 정규화해 push.
-  try {
+  //   쿠팡/네이버/로켓그로스 는 답례품 전용 채널 — 데코소품/꽃다발 탭에서는 제외.
+  const _isDaeryepumCategory = !query.category || query.category === 'daeryepum';
+  if (_isDaeryepumCategory) try {
     const coupangStore = require('./coupang/store');
     const coupangRows = await coupangStore.listCoupangOrders({
       startStr: startDate, endStr: endDate, byPaid: false,
@@ -2002,8 +2006,8 @@ async function apiDashboardSummary(query) {
     console.warn('[summary] 쿠팡 주문 머지 실패 (무시):', e.message);
   }
 
-  // 네이버 스마트스토어 일별 합산 — 쿠팡과 동일 패턴, '네이버' 사이트 그룹.
-  try {
+  // 네이버 스마트스토어 일별 합산 — 쿠팡과 동일 패턴, '네이버' 사이트 그룹. 답례품 전용.
+  if (_isDaeryepumCategory) try {
     const naverStore = require('./naver/store');
     const naverRows = await naverStore.listNaverOrders({
       startStr: startDate, endStr: endDate, byPaid: false,
@@ -2049,7 +2053,7 @@ async function apiDashboardSummary(query) {
     console.warn('[summary] 네이버 주문 머지 실패 (무시):', e.message);
   }
 
-  // 쿠팡 로켓그로스 매출 (수동 입력 집계) 머지 — 일별 aggregate, '쿠팡 로켓그로스' 사이트 그룹.
+  // 쿠팡 로켓그로스 매출 (수동 입력 집계) 머지 — 일별 aggregate, '쿠팡 로켓그로스' 사이트 그룹. 답례품 전용.
   //
   // 데이터 특성:
   //   · Wing API 가 RFM 매출 노출 안 해 운영자가 수동 입력 → coupang_rocket_growth_sales 테이블
@@ -2059,7 +2063,7 @@ async function apiDashboardSummary(query) {
   //
   // 컨벤션 정렬: apiDashboardComparison 의 getPeriodTotal 과 동일 패턴 — 채널별 합계 KPI
   //   카드가 비교 카드와 어긋나지 않도록 통일 (amount=net_amount, qty=sales_qty gross, order_count=row수).
-  try {
+  if (_isDaeryepumCategory) try {
     const rfmStore = require('./coupang/rfm-store');
     // endDate 는 exclusive — listSales 의 lte 와 맞추려 -1 일
     const endIncl = endDate ? new Date(new Date(endDate).getTime() - 86400000).toISOString().slice(0, 10) : null;
