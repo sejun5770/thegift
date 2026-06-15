@@ -1005,12 +1005,17 @@ function etcCouponDivisorJoin(input = 'D01') {
   ) ecd ON o.order_seq = ecd.order_seq`;
 }
 
-/** ETC 행 단위 매출 식 — outer 에 ecd.item_count alias (etcCouponDivisorJoin 결과) 가 있어야 함. */
-function etcAmountExpr(cardDiv = 'D01') {
+/** ETC 행 단위 매출 식 (집계용, 쿠폰 차감 포함) — outer 에 ecd.item_count alias 필요.
+ *   skipUnitValue: 데코소품(C29/2026_qr) 처럼 단위가격 무시인 카테고리에서 true.
+ *   호환성: 옛 호출 etcAmountExpr('D01') 또는 etcAmountExpr({skipUnitValue:true}) 둘 다 지원.
+ */
+function etcAmountExpr(arg = 'D01') {
+  const skipUnitValue = (typeof arg === 'object' && arg !== null) ? !!arg.skipUnitValue : false;
+  const unitDivisor = skipUnitValue ? '1' : 'ISNULL(NULLIF(c.Unit_Value, 0), 1)';
   return `
   CASE
     WHEN si.SiteName IS NULL
-    THEN CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+    THEN CAST(oi.card_sale_price AS float) * oi.order_count / ${unitDivisor}
          - ISNULL(o.coupon_price, 0) * 1.0 / NULLIF(ecd.item_count, 0)
     ELSE CAST(oi.card_sale_price AS float)
          - ISNULL(o.coupon_price, 0) * 1.0 / NULLIF(ecd.item_count, 0)
@@ -1712,6 +1717,19 @@ async function apiDashboardSummary(query) {
   const startDate = query.start_date || fmtDate(addDays(today(), -30));
   const endDate = query.end_date || fmtDate(addDays(today(), 1));
 
+  // 카테고리별 필터 + amount 계산식 (apiOrders 와 동일 패턴).
+  //   daeryepum (default): Card_Div='D01', unit_value 적용
+  //   deco: Card_Div='C29' OR Card_Code LIKE '2026_qr%', unit_value 무시 (1상품=1set)
+  //   flower: Card_Div='D02', unit_value 적용
+  const categoryCfg = CATEGORY_FILTERS[query.category] || CATEGORY_FILTERS.daeryepum;
+  const categoryFilter = categoryCfg.filter;
+  const skipUnitValue = query.category === 'deco';
+  const etcAmountExprForCat = etcAmountExpr({ skipUnitValue });
+  // 쿠폰 분배 분모도 카테고리 전체 filter 적용 (이전엔 D01 고정 → 데코주문 분배 오류)
+  const cpdFilter = categoryFilter.replace(/\bc\./g, 'c_cpd.');
+  const etcCouponDivisorForCategory = etcCouponDivisorJoin(cpdFilter);
+  const cardUnitDivisor = skipUnitValue ? '1' : 'ISNULL(NULLIF(c.Unit_Value, 0), 1)';
+
   // 두 메인 쿼리(상품×사이트×유형 매출 + 일×사이트×유형 주문건수) 는 독립 → 병렬 실행 (CodeReview-H2).
   const [result, countResult] = await Promise.all([
     p.request()
@@ -1738,14 +1756,14 @@ async function apiDashboardSummary(query) {
           CASE WHEN ecp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END AS order_type,
           COUNT(DISTINCT o.order_seq) AS order_count,
           SUM(oi.order_count) AS total_qty,
-          SUM(${ETC_AMOUNT_EXPR}) AS total_amount
+          SUM(${etcAmountExprForCat}) AS total_amount
         FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
         INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
         LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
-        ${ETC_COUPON_DIVISOR_JOIN_D01}
-        WHERE ${D01_FILTER} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+        ${etcCouponDivisorForCategory}
+        WHERE ${categoryFilter} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
         GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)),
           CASE WHEN ecp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
 
@@ -1759,13 +1777,13 @@ async function apiDashboardSummary(query) {
           CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END AS order_type,
           COUNT(DISTINCT co.order_seq),
           SUM(coi.item_count),
-          SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1))
+          SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ${cardUnitDivisor})
         FROM custom_order co WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
         LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
-        WHERE ${D01_FILTER} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+        WHERE ${categoryFilter} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
         GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
           CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
 
@@ -1797,7 +1815,7 @@ async function apiDashboardSummary(query) {
         INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
         LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
-        WHERE ${D01_FILTER} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+        WHERE ${categoryFilter} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
         GROUP BY CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)),
           CASE WHEN ecp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
 
@@ -1813,7 +1831,7 @@ async function apiDashboardSummary(query) {
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
         LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
-        WHERE ${D01_FILTER} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+        WHERE ${categoryFilter} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
         GROUP BY CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
           CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
       `),

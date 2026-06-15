@@ -291,6 +291,16 @@ nav.nav-loading a[href^="#"] {
 <div class="container">
 <!-- ========== DASHBOARD ========== -->
 <div id="page-dashboard" class="page active">
+  <!-- 카테고리 탭 -->
+  <div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--gray-200)">
+    <button class="btn" id="dash-tab-daeryepum" onclick="setDashCategory('daeryepum')" style="border:0;border-bottom:2px solid var(--primary);border-radius:0;color:var(--primary);font-weight:600;padding:8px 14px;background:transparent">
+      🎁 답례품
+    </button>
+    <button class="btn" id="dash-tab-deco" onclick="setDashCategory('deco')" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">
+      📦 데코소품
+    </button>
+  </div>
+
   <!-- 대시보드 기간 조회 -->
   <div class="toolbar" style="margin-bottom:20px">
     <input type="date" id="dash-start" />
@@ -4825,17 +4835,43 @@ function resetAdminNavSettings() {
   document.getElementById('ans-status').style.color = 'var(--gray-500)';
 }
 
+// 대시보드 카테고리 — 'daeryepum' | 'deco'
+//   탭으로 전환. loadDashboard 가 모든 fetch URL 에 category=X 로 전달.
+let dashCategory = 'daeryepum';
+
+function setDashCategory(cat) {
+  if (dashCategory === cat) return;
+  dashCategory = cat;
+  // 탭 스타일 갱신
+  ['daeryepum', 'deco'].forEach(c => {
+    const btn = document.getElementById('dash-tab-' + c);
+    if (!btn) return;
+    const active = (c === cat);
+    btn.style.borderBottom = active ? '2px solid var(--primary)' : '2px solid transparent';
+    btn.style.color = active ? 'var(--primary)' : 'var(--gray-500)';
+    btn.style.fontWeight = active ? '600' : '500';
+  });
+  // 위탁상품 단락은 답례품 탭에서만 노출 (위탁 정산 = 답례품 한정 운영 정책)
+  const vendorSection = document.getElementById('dash-vendor-summary');
+  if (vendorSection) {
+    const parent = vendorSection.closest('.section');
+    if (parent) parent.style.display = (cat === 'daeryepum') ? '' : 'none';
+  }
+  loadDashboard();
+}
+
 async function loadDashboard() {
   showDashboardSkeleton();
   const dashStart = document.getElementById('dash-start').value;
   const dashEndPlus = fmt(new Date(new Date(document.getElementById('dash-end').value).getTime()+86400000));
+  const catParam = `category=${encodeURIComponent(dashCategory)}`;
   try {
     const [cmp, forecast, leadtime, summary, expressAnalysis] = await Promise.all([
-      fetch(`${API}/api/dashboard/comparison`).then(r=>r.json()),
-      fetch(`${API}/api/dashboard/forecast`).then(r=>r.json()),
-      fetch(`${API}/api/dashboard/leadtime`).then(r=>r.json()),
-      fetch(`${API}/api/dashboard/summary?start_date=${dashStart}&end_date=${dashEndPlus}`).then(r=>r.json()),
-      fetch(`${API}/api/dashboard/express-analysis?start_date=${dashStart}&end_date=${document.getElementById('dash-end').value}`).then(r=>r.json()),
+      fetch(`${API}/api/dashboard/comparison?${catParam}`).then(r=>r.json()),
+      fetch(`${API}/api/dashboard/forecast?${catParam}`).then(r=>r.json()),
+      fetch(`${API}/api/dashboard/leadtime?${catParam}`).then(r=>r.json()),
+      fetch(`${API}/api/dashboard/summary?${catParam}&start_date=${dashStart}&end_date=${dashEndPlus}`).then(r=>r.json()),
+      fetch(`${API}/api/dashboard/express-analysis?${catParam}&start_date=${dashStart}&end_date=${document.getElementById('dash-end').value}`).then(r=>r.json()),
     ]);
     const summaryRows = summary.summary || summary;
     const orderCounts = summary.order_counts || [];
@@ -4848,16 +4884,16 @@ async function loadDashboard() {
     // 마케팅 분석 (별도 로드 - 무거운 쿼리)
     loadMarketing();
     // 전환율 + 샘플 (별도 로드)
-    fetch(`${API}/api/dashboard/conversion`).then(r=>r.json()).then(renderConversion).catch(e=>console.warn('Conversion load failed:', e));
-    fetch(`${API}/api/dashboard/samples`).then(r=>r.json()).then(renderSamples).catch(e=>console.warn('Samples load failed:', e));
+    fetch(`${API}/api/dashboard/conversion?${catParam}`).then(r=>r.json()).then(renderConversion).catch(e=>console.warn('Conversion load failed:', e));
+    fetch(`${API}/api/dashboard/samples?${catParam}`).then(r=>r.json()).then(renderSamples).catch(e=>console.warn('Samples load failed:', e));
     // 스티커 · 메시지 분석 (정보입력 완료 주문 기준)
     loadStickerAnalytics();
     // 3-way 리드타임 분석 (주문/희망출고/예식)
     loadLeadtime3way();
     // 희망출고일별 매출 — 기본 향후 30일 프리셋으로 초기 로드 (사용자가 별도 변경 가능)
     setBsdPreset('next-30');
-    // 위탁상품 요약 단락 (Phase 3) — 별도 비동기 로드 (메인 KPI 영향 없음)
-    loadDashVendorSummary();
+    // 위탁상품 요약 단락 — 답례품 탭에서만
+    if (dashCategory === 'daeryepum') loadDashVendorSummary();
   } catch(e) { console.error(e); showToast('대시보드 로딩 실패: ' + e.message); }
 }
 
