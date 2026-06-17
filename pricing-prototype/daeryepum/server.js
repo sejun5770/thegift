@@ -478,13 +478,17 @@ function formatSiteName(siteName) {
 //   이전 deco 필터는 'Card_Code LIKE 2026_%' prefix 였으나 photo_print_* 등 누락 발생 →
 //   Card_Div 기준으로 정정 (C29 는 운영 진단으로 확인).
 //   QR 스티커(2026_qr*) 는 C29 가 아닌 별도 Card_Div 에 있어 OR 조건 추가 (운영 요청).
+// 답례품 필터: D01 (자체매입) + COM_ prefix (위탁답례품)
+//   위탁답례품 상품은 S2_Card.Card_Code 가 'COM_' 으로 시작하며 Card_Div != 'D01' 인 경우 다수.
+//   주문조회 / 정보입력 / 대시보드 모두 답례품 통합 노출 (사용자 합의: 2026-06-17, 주문 3246815 케이스).
+const DAERYEPUM_FILTER_SQL = `(c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')`;
 const CATEGORY_FILTERS = {
-  daeryepum: { label: '답례품', filter: `c.Card_Div = 'D01'` },
+  daeryepum: { label: '답례품', filter: DAERYEPUM_FILTER_SQL },
   deco:      { label: '데코소품', filter: `(c.Card_Div = 'C29' OR c.Card_Code LIKE '2026_qr%')` },
   flower:    { label: '꽃다발', filter: `c.Card_Div = 'D02'` },
 };
-// D01 category = 답례품 (기본, 대시보드용)
-const D01_FILTER = `c.Card_Div = 'D01'`;
+// 모듈 레벨 D01_FILTER — 위탁답례품 포함 답례품 기본 필터로 alias
+const D01_FILTER = DAERYEPUM_FILTER_SQL;
 
 // --- JSON 파일 스토리지 ---
 // /app/data 디렉토리는 Docker Manager 볼륨 마운트 경로 (배포 시 데이터 보존)
@@ -693,7 +697,7 @@ async function apiOrders(query) {
   const skipUnitValue = query.category === 'deco';
   const etcAmountGross = etcAmountGrossExpr({ skipUnitValue });
   // 쿠폰 분배 분모도 카테고리 전체 filter 로 정정 (이전엔 D01 만 고정 → 데코주문에서 쿠폰 분배 오류)
-  const cpdFilter = (categoryCfg.filter || `c.Card_Div = 'D01'`).replace(/\bc\./g, 'c_cpd.');
+  const cpdFilter = (categoryCfg.filter || DAERYEPUM_FILTER_SQL).replace(/\bc\./g, 'c_cpd.');
   const etcCouponDivisorForCategory = etcCouponDivisorJoin(cpdFilter);
   const cardUnitDivisor = skipUnitValue ? '1' : 'ISNULL(NULLIF(c.Unit_Value, 0), 1)';
 

@@ -7,9 +7,10 @@ const { logAccess, getRecentLogs } = require('./audit-log');
 const { check: rlCheck, rateLimitResponse, LIMITS: RL_LIMITS } = require('./rate-limit');
 const signedUrl = require('./signed-url');
 
-// 답례품 필터 SQL 조건 (관리자 통합현황과 동일: S2_Card.Card_Div = 'D01')
+// 답례품 필터 SQL 조건 — 자체매입 (Card_Div='D01') + 위탁답례품 (Card_Code LIKE 'COM_%')
 // custom_order_item + S2_Card JOIN 후 사용. c 에일리어스 사용.
-const DAERYEPUM_WHERE = `c.Card_Div = 'D01'`;
+// 위탁답례품은 Card_Div 가 D01 아닌 경우 다수 — 별도 prefix 매칭 추가 (2026-06-17 합의).
+const DAERYEPUM_WHERE = `(c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')`;
 
 // 알림톡 SP 권한 가용성 캐시 (process-level).
 //   null = 미시도 / 미확인
@@ -632,8 +633,9 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const startDate = new Date(Date.now() - days * 86400000);
       const startStr = startDate.toISOString().slice(0, 10);
       // 카테고리 분기 — server.js CATEGORY_FILTERS 와 동일 정책
+      // 답례품: 자체매입 (D01) + 위탁답례품 (COM_ prefix)
       const CAT_FILTERS = {
-        daeryepum: `c.Card_Div = 'D01'`,
+        daeryepum: `(c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')`,
         deco:      `(c.Card_Div = 'C29' OR c.Card_Code LIKE '2026_qr%')`,
         flower:    `c.Card_Div = 'D02'`,
       };
