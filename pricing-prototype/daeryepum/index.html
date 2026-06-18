@@ -1872,11 +1872,11 @@ nav.nav-loading a[href^="#"] {
         </div>
       </div>
 
-      <!-- 고객 로고 첨부 허용 — migration 026 -->
+      <!-- 고객 이미지 첨부 허용 — migration 026 (로고 외 일반 이미지도 가능) -->
       <div style="display:flex;align-items:center;gap:8px;background:#fef3c7;padding:9px 12px;border-radius:8px;border:1px dashed #fbbf24">
         <input type="checkbox" id="bg-p-meta-allow-logo" style="margin:0;width:16px;height:16px;cursor:pointer">
-        <label for="bg-p-meta-allow-logo" style="font-size:12px;color:#92400e;cursor:pointer;line-height:1.4" title="고객이 스티커 입력 단계에서 회사 로고 (PNG/JPG, ≤5MB) 를 첨부할 수 있게 됩니다.">
-          🏢 <b>고객 로고 첨부 허용</b> — 스티커 입력 모드에 '로고 첨부' 옵션 노출 (PNG/JPG, 최대 5MB)
+        <label for="bg-p-meta-allow-logo" style="font-size:12px;color:#92400e;cursor:pointer;line-height:1.4" title="고객이 스티커 입력 단계에서 이미지 (PNG/JPG, ≤5MB) 를 첨부할 수 있게 됩니다.">
+          📷 <b>고객 이미지 첨부 허용</b> — 스티커 입력 모드에 '이미지 첨부' 옵션 노출 (PNG/JPG, 최대 5MB)
         </label>
       </div>
 
@@ -11668,7 +11668,7 @@ function renderBgUnified() {
       const sizeKb = sel.logo_size ? Math.round(sel.logo_size / 1024) + 'KB' : '';
       logoIndicator = `<div style="margin-top:6px;display:flex;align-items:center;gap:6px;padding:3px 6px;background:#fef3c7;border:1px solid #fbbf24;border-radius:4px;font-size:11px">
         <img src="${esc(sel.logo_url)}" alt="logo" style="width:16px;height:16px;object-fit:contain;border-radius:2px;background:#fff" />
-        <a href="${esc(sel.logo_url)}" target="_blank" rel="noopener" download="${fn}" style="color:#92400e;font-weight:600;text-decoration:none" onclick="event.stopPropagation()" title="새 탭에서 열기 / 다운로드">🏢 ${fn}${sizeKb ? ' (' + sizeKb + ')' : ''}</a>
+        <a href="${esc(sel.logo_url)}" target="_blank" rel="noopener" download="${fn}" style="color:#92400e;font-weight:600;text-decoration:none" onclick="event.stopPropagation()" title="새 탭에서 열기 / 다운로드">📷 ${fn}${sizeKb ? ' (' + sizeKb + ')' : ''}</a>
       </div>`;
     }
     const customText = customTextBody + logoIndicator;
@@ -11736,11 +11736,11 @@ function renderBgUnified() {
     const expressPrefix = isExpressOrder
       ? '<span title="빠른출고" style="color:#dc2626;font-weight:700;margin-right:2px">⚡</span>'
       : '';
-    // 로고 첨부 🏢 prefix (migration 026) — 행 단위 sel.logo_url 있을 때만.
-    //   주문 안의 여러 상품 중 로고 첨부된 상품 행에만 표시 (멀티 상품 주문 대응).
-    //   ⚡ 와 함께 노출 가능 (둘 다 있으면 ⚡🏢 순).
+    // 이미지 첨부 📷 prefix (migration 026) — 행 단위 sel.logo_url 있을 때만.
+    //   주문 안의 여러 상품 중 이미지 첨부된 상품 행에만 표시 (멀티 상품 주문 대응).
+    //   ⚡ 와 함께 노출 가능 (둘 다 있으면 ⚡📷 순).
     const logoPrefix = sel?.logo_url
-      ? '<span title="회사 로고 첨부됨 — 문구 셀에서 다운로드" style="color:#d97706;font-weight:700;margin-right:2px">🏢</span>'
+      ? '<span title="이미지 첨부됨 — 문구 셀에서 다운로드" style="color:#d97706;font-weight:700;margin-right:2px">📷</span>'
       : '';
     const orderSeqStyle = hasRequest
       ? 'font-weight:700;white-space:nowrap;background:#fef3c7;color:#92400e;border-radius:4px;padding:2px 6px'
@@ -13389,7 +13389,7 @@ function copyBgUnified() {
     //   - 스티커 custom_fields 정의 순서대로, '필드라벨: 값' 형태로 연결 (' / ' 구분).
     //   - default 단일 'text' 필드는 라벨 없이 값만 (기존 동작 유지, 가독성).
     //   - TSV/HTML 브레이크 방지: 탭/개행은 공백으로 치환.
-    //   - 로고 첨부 (migration 026): logo_url 있으면 문구 끝에 '🏢 로고: {url}' append.
+    //   - 이미지 첨부 (migration 026): logo_url 있으면 문구 끝에 '📷 이미지: {url}' append.
     //     인쇄팀이 TSV 붙여넣은 시트에서 URL 클릭으로 다운로드 가능.
     if (sel?.custom_values) {
       const entries = _getStickerFieldEntries(sel);
@@ -13404,7 +13404,7 @@ function copyBgUnified() {
       }
     }
     if (sel?.logo_url) {
-      const logoTag = `🏢 로고: ${String(sel.logo_url).replace(/[\t\r\n]+/g, ' ').trim()}`;
+      const logoTag = `📷 이미지: ${String(sel.logo_url).replace(/[\t\r\n]+/g, ' ').trim()}`;
       cells[15] = cells[15] ? `${cells[15]} / ${logoTag}` : logoTag;
     }
     // Q열(index 16) = 배송메세지 (MSSQL recv_msg — ETC: o.recv_msg / CARD: di.DELIVERY_MEMO)
