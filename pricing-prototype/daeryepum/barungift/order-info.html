@@ -1180,6 +1180,91 @@
     return formState.products[idx];
   }
 
+  // ============================================
+  // 로고 첨부 (migration 026) — Supabase Storage 업로드/삭제
+  // ============================================
+  /**
+   * 파일을 raw octet-stream 으로 server endpoint 에 POST.
+   *   서버: /api/bg/sticker-logo/upload
+   *   응답: { logo_url, logo_filename, logo_size, logo_mime }
+   */
+  async function uploadStickerLogo(idx, file) {
+    const ps = ensureProductEntry(idx);
+    const products = orderData?.products || [];
+    const product = products[Number(idx)];
+    const productCode = product?.product_code || '';
+    const groupId = ps.shipping_group_id || 'default';
+
+    // 클라이언트 검증 (서버에서도 재검증)
+    const ALLOWED = ['image/png', 'image/jpeg'];
+    if (!ALLOWED.includes(file.type)) {
+      alert('PNG / JPG 파일만 업로드 가능합니다.');
+      return;
+    }
+    const MAX_BYTES = 5 * 1024 * 1024;
+    if (file.size > MAX_BYTES) {
+      alert('최대 5MB 까지 업로드 가능합니다.');
+      return;
+    }
+
+    const $progress = document.getElementById('logo-progress-' + idx);
+    if ($progress) {
+      $progress.classList.remove('hidden');
+      $progress.textContent = '업로드 중... (' + Math.round(file.size / 1024) + 'KB)';
+    }
+
+    try {
+      const params = new URLSearchParams({
+        order_id: orderData?.order_id || '',
+        product_code: productCode,
+        group_id: groupId,
+      });
+      const r = await fetch(API + '/api/bg/sticker-logo/upload?' + params, {
+        method: 'POST',
+        headers: {
+          'Content-Type': file.type,
+          'X-Filename': encodeURIComponent(file.name || 'logo'),
+        },
+        body: file,
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || '업로드 실패');
+
+      ps.logo_url = data.logo_url;
+      ps.logo_filename = file.name || data.logo_filename || '로고';
+      ps.logo_size = data.logo_size;
+      ps.logo_mime = data.logo_mime;
+      // delete 용 path 추출 — public URL 의 bucket prefix 이후 부분
+      var m = String(data.logo_url || '').match(/\/storage\/v1\/object\/public\/[^/]+\/(.+)$/);
+      ps.logo_path = m ? m[1] : null;
+      saveFormState();
+
+      // 미리보기 영역 재렌더
+      var wrapEl = document.getElementById('sticker-input-wrap-' + idx);
+      if (wrapEl) {
+        var t = document.createElement('div');
+        t.innerHTML = buildStickerInputSection(idx);
+        wrapEl.replaceWith(t.firstElementChild || t);
+      } else {
+        renderCurrentStep();
+      }
+    } catch (e) {
+      console.error('[uploadStickerLogo]', e);
+      alert('로고 업로드 실패: ' + e.message);
+      if ($progress) $progress.classList.add('hidden');
+    }
+  }
+
+  /** Storage 의 업로드된 파일 정리 (교체/삭제 시). fire-and-forget. */
+  async function deleteStickerLogo(ps) {
+    if (!ps || !ps.logo_path) return;
+    try {
+      await fetch(API + '/api/bg/sticker-logo/upload?path=' + encodeURIComponent(ps.logo_path), {
+        method: 'DELETE',
+      });
+    } catch (_) { /* 실패해도 무시 — Storage 잔여 파일은 운영자가 별도 정리 */ }
+  }
+
   /**
    * 상품별 기본 state 생성 — 첫번째 매칭 스티커 + 첫번째 '선택 가능한' 박스 옵션.
    * 품절(sold_out) 옵션은 기본 선택에서 제외.
@@ -1481,6 +1566,12 @@
       if (v) return v;
     }
     return '스티커';
+  }
+
+  /** migration 026: 해당 상품이 회사 로고 첨부 가능 상품인지 여부. admin 이 명시 설정한 상품만 true. */
+  function isLogoUploadAllowedForProduct(productCode) {
+    const map = orderData?.allow_logo_upload_by_product;
+    return !!(productCode && map && map[productCode]);
   }
 
   /**
@@ -2166,6 +2257,14 @@
           return '<div class="flex justify-between items-center"><span class="text-slate-500">' + esc(gName) + '</span><span class="text-slate-900 font-medium flex items-center">' + valHtml + '</span></div>';
         }).join('');
       }
+      // 로고 첨부 row (migration 026) — 업로드된 경우만 노출
+      var logoRowHtml = '';
+      if (ps.logo_url) {
+        var logoFn = esc(ps.logo_filename || '로고');
+        var logoThumb = '<img src="' + esc(ps.logo_url) + '" alt="logo" class="inline-block w-10 h-10 object-contain rounded-lg border border-amber-200 mr-2 align-middle bg-white" />';
+        logoRowHtml = '<div class="flex justify-between items-center"><span class="text-amber-700">🏢 회사 로고</span><span class="text-amber-900 font-medium flex items-center">' + logoThumb + logoFn + '</span></div>';
+      }
+
       return (
         '<div class="surface p-4 mb-2">' +
           '<div class="flex items-center justify-between mb-2">' +
@@ -2176,6 +2275,7 @@
             customRowHtml +
             '<div class="flex justify-between items-center"><span class="text-slate-500">' + esc(confirmProductDecoLabel) + '</span><span class="text-slate-900 font-medium flex items-center">' + stickerThumb + stickerLabel + '</span></div>' +
             (sticker ? '<div class="flex justify-between"><span class="text-slate-500">' + esc(confirmProductDecoLabel) + '정보</span><span class="text-slate-900 font-medium">' + inputLabel + '</span></div>' : '') +
+            logoRowHtml +
           '</div>' +
           fieldHtml +
         '</div>'
@@ -2419,15 +2519,27 @@
 
     // 기본값: sticker_input이 명시적으로 'none'이 아닌 경우 입력 표시
     var isNone = stInput === 'none';
+    // 로고 첨부 게이트 (migration 026) — admin 이 켠 상품만 토글 노출
+    var canAttachLogo = isLogoUploadAllowedForProduct(productCode);
+    var isLogoEnabled = !!ps.logo_enabled;
+    var hasLogo = !!ps.logo_url;
 
     var headerHtml = '<div class="mt-4">'
       + (isNone ? '<p class="text-[12px] text-amber-800 rounded-xl px-3.5 py-2.5 mb-3 font-medium" style="background:linear-gradient(135deg,rgba(253,230,138,0.4),rgba(245,158,11,0.12));border:1px solid rgba(245,158,11,0.2)">⚠️ 문구는 샘플이미지로 출력되며 이름은 출력되지 않습니다.</p>' : '')
-      + '<div class="flex items-center justify-between mb-2">'
+      + '<div class="flex items-center justify-between mb-2 flex-wrap gap-y-1">'
       + '<label class="text-[12px] font-semibold text-slate-700">' + esc(stProductDecoLabel) + ' 문구 입력</label>'
+      + '<div class="flex items-center gap-3">'
+      + (canAttachLogo
+          ? '<label class="flex items-center gap-1.5 cursor-pointer">'
+            + '<input type="checkbox" class="w-4 h-4 accent-amber-500" ' + (isLogoEnabled ? 'checked' : '') + ' data-action="productStickerLogoToggle" data-idx="' + idx + '" />'
+            + '<span class="text-[12px] text-amber-700 font-medium">🏢 로고 첨부</span>'
+            + '</label>'
+          : '')
       + '<label class="flex items-center gap-1.5 cursor-pointer">'
       + '<input type="checkbox" class="w-4 h-4 accent-indigo-500" ' + (isNone ? 'checked' : '') + ' data-action="productStickerInputNone" data-idx="' + idx + '" />'
       + '<span class="text-[12px] text-slate-600 font-medium">입력안함</span>'
       + '</label>'
+      + '</div>'
       + '</div>'
       + '</div>';
 
@@ -2456,7 +2568,38 @@
       fieldsHtml = '<div class="p-4 rounded-xl gradient-brand-soft space-y-3">' + fieldInputs + '</div>';
     }
 
-    return '<div id="sticker-input-wrap-' + idx + '">' + headerHtml + fieldsHtml + '</div>';
+    // 로고 첨부 영역 (migration 026) — canAttachLogo + 토글 ON 시 노출
+    //   업로드 전: 파일 선택 버튼
+    //   업로드 후: 썸네일 미리보기 + 파일명 + 삭제 버튼
+    var logoHtml = '';
+    if (canAttachLogo && isLogoEnabled) {
+      if (hasLogo) {
+        var fnSafe = esc(ps.logo_filename || '로고');
+        var sizeKb = ps.logo_size ? Math.round(ps.logo_size / 1024) + 'KB' : '';
+        logoHtml = '<div class="mt-3 p-3 rounded-xl border border-amber-200 bg-amber-50 flex items-center gap-3">'
+          + '<img src="' + esc(ps.logo_url) + '" alt="로고 미리보기" class="w-14 h-14 rounded-lg object-contain bg-white border border-amber-100" />'
+          + '<div class="flex-1 min-w-0">'
+          + '<div class="text-[12px] font-semibold text-amber-900 truncate">' + fnSafe + '</div>'
+          + '<div class="text-[11px] text-amber-700">' + sizeKb + ' · 업로드 완료</div>'
+          + '</div>'
+          + '<button type="button" data-action="productStickerLogoRemove" data-idx="' + idx + '" class="text-[11px] font-medium text-rose-600 hover:text-rose-700 px-2 py-1 rounded-lg">삭제</button>'
+          + '</div>';
+      } else {
+        logoHtml = '<div class="mt-3 p-3 rounded-xl border border-dashed border-amber-300 bg-amber-50/40">'
+          + '<label class="flex items-center justify-between gap-3 cursor-pointer">'
+          + '<div class="flex-1 min-w-0">'
+          + '<div class="text-[12px] font-semibold text-amber-900">🏢 회사 로고 업로드</div>'
+          + '<div class="text-[11px] text-amber-700 mt-0.5">PNG / JPG, 최대 5MB</div>'
+          + '</div>'
+          + '<span class="px-3 py-1.5 rounded-lg bg-amber-500 text-white text-[12px] font-semibold pressable">파일 선택</span>'
+          + '<input type="file" accept="image/png,image/jpeg" class="hidden" data-action="productStickerLogoUpload" data-idx="' + idx + '" />'
+          + '</label>'
+          + '<div id="logo-progress-' + idx + '" class="text-[11px] text-amber-700 mt-2 hidden"></div>'
+          + '</div>';
+      }
+    }
+
+    return '<div id="sticker-input-wrap-' + idx + '">' + headerHtml + fieldsHtml + logoHtml + '</div>';
   }
 
   const STEP_RENDERERS = [renderStep0, renderStep1, renderStep2, renderStep3];
@@ -2850,6 +2993,56 @@
         }
         break;
       }
+      // 로고 첨부 (migration 026)
+      case 'productStickerLogoToggle': {
+        const idx = target.dataset.idx;
+        const ps = ensureProductEntry(idx);
+        ps.logo_enabled = !!target.checked;
+        // OFF 로 끄면 업로드된 파일도 자동 제거 (Storage 정리는 비동기 fire-and-forget)
+        if (!ps.logo_enabled && ps.logo_url) {
+          deleteStickerLogo(ps).catch(function(e) { console.warn('[logo delete]', e.message); });
+          delete ps.logo_url;
+          delete ps.logo_filename;
+          delete ps.logo_size;
+          delete ps.logo_mime;
+          delete ps.logo_path;
+        }
+        saveFormState();
+        var wrapEl = document.getElementById('sticker-input-wrap-' + idx);
+        if (wrapEl) {
+          var t = document.createElement('div');
+          t.innerHTML = buildStickerInputSection(idx);
+          wrapEl.replaceWith(t.firstElementChild || t);
+        } else renderCurrentStep();
+        break;
+      }
+      case 'productStickerLogoUpload': {
+        const idx = target.dataset.idx;
+        const file = target.files && target.files[0];
+        if (!file) break;
+        uploadStickerLogo(idx, file);
+        break;
+      }
+      case 'productStickerLogoRemove': {
+        const idx = target.dataset.idx;
+        const ps = ensureProductEntry(idx);
+        if (ps.logo_url) {
+          deleteStickerLogo(ps).catch(function(e) { console.warn('[logo delete]', e.message); });
+        }
+        delete ps.logo_url;
+        delete ps.logo_filename;
+        delete ps.logo_size;
+        delete ps.logo_mime;
+        delete ps.logo_path;
+        saveFormState();
+        var wrapEl = document.getElementById('sticker-input-wrap-' + idx);
+        if (wrapEl) {
+          var t = document.createElement('div');
+          t.innerHTML = buildStickerInputSection(idx);
+          wrapEl.replaceWith(t.firstElementChild || t);
+        } else renderCurrentStep();
+        break;
+      }
       case 'customerRequest': {
         formState.customer_request = target.value;
         saveFormState();
@@ -3084,6 +3277,12 @@
         box_code: box ? box.code : null,
         box_name: box ? (box.name || box.code) : null,
         custom_options: customOptionsPayload,
+        // 로고 첨부 (migration 026) — logo_enabled && logo_url 있을 때만 의미 있음
+        logo_url: ps.logo_url || null,
+        logo_filename: ps.logo_filename || null,
+        logo_size: ps.logo_size || null,
+        logo_mime: ps.logo_mime || null,
+        logo_path: ps.logo_path || null,
       };
     });
 
@@ -3109,8 +3308,8 @@
       shipping_by_group: isMultiShipping ? (formState.shipping_by_group || {}) : null, // 멀티 그룹 메타데이터 (감사/표시용)
       products: productInputs,
       sticker_selections: productInputs
-        // 스티커 OR 박스 OR 자유옵션 어느 하나라도 있으면 선택 row 로 남김
-        .filter(function(pi){ return pi.sticker_id || pi.box_code || (pi.custom_options && Object.keys(pi.custom_options).length > 0); })
+        // 스티커 OR 박스 OR 자유옵션 OR 로고 어느 하나라도 있으면 선택 row 로 남김
+        .filter(function(pi){ return pi.sticker_id || pi.box_code || pi.logo_url || (pi.custom_options && Object.keys(pi.custom_options).length > 0); })
         .map(function(pi){ return {
           product_code: pi.product_code,
           product_name: pi.product_name,
@@ -3124,6 +3323,12 @@
           box_code: pi.box_code,
           box_name: pi.box_name,
           custom_options: pi.custom_options || {},
+          // 로고 첨부 (migration 026)
+          logo_url: pi.logo_url,
+          logo_filename: pi.logo_filename,
+          logo_size: pi.logo_size,
+          logo_mime: pi.logo_mime,
+          logo_path: pi.logo_path,
         }; }),
       cash_receipt_yn: formState.cash_receipt_yn,
       receipt_type: formState.receipt_type,
@@ -3531,9 +3736,17 @@
         customHtml = '';
       }
 
+      // 로고 첨부 row (migration 026) — 저장된 sticker_selections 에 logo_url 있으면 표시
+      var summaryLogoLine = '';
+      if (s.logo_url) {
+        var summaryLogoFn = esc(s.logo_filename || '로고');
+        var summaryLogoThumb = '<img src="' + esc(s.logo_url) + '" alt="logo" class="inline-block w-8 h-8 object-contain rounded-md border border-amber-200 mr-1.5 align-middle bg-white" />';
+        summaryLogoLine = '<div class="flex justify-between items-center text-sm"><span class="text-amber-700">🏢 회사 로고</span><span class="text-amber-900 font-medium flex items-center">' + summaryLogoThumb + summaryLogoFn + '</span></div>';
+      }
+
       return '<div class="surface p-4 mb-2">'
         + '<h4 class="text-[14px] font-bold text-slate-900 mb-2">' + esc(p.product_name || '상품') + ' <span class="text-[11px] font-medium text-slate-400">(수량 ' + (Number(p.quantity) || 1) + ')</span></h4>'
-        + '<div class="space-y-1.5">' + boxLine + customOptsLines + stickerLine + '</div>'
+        + '<div class="space-y-1.5">' + boxLine + customOptsLines + stickerLine + summaryLogoLine + '</div>'
         + customHtml
         + '</div>';
     }).join('');
