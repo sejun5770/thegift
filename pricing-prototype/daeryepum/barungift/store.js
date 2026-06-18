@@ -267,6 +267,7 @@ async function upsertProductSettings(productId, data) {
     express_fee: data.express_fee ?? 0,
     express_cutoff_time: data.express_cutoff_time ?? `${String(data.cutoff_hour ?? 14).padStart(2,'0')}:${String(data.cutoff_minute ?? 0).padStart(2,'0')}`,
     blackout_dates: data.blackout_dates ?? (data.closed_dates || []).map(d => d.date),
+    allow_logo_upload: data.allow_logo_upload ?? false,  // 고객 로고 첨부 허용 게이트 (migration 026)
   };
 
   if (USE_SUPABASE) return sbInsert('bg_product_settings', newSetting);

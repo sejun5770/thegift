@@ -1872,6 +1872,14 @@ nav.nav-loading a[href^="#"] {
         </div>
       </div>
 
+      <!-- 고객 로고 첨부 허용 — migration 026 -->
+      <div style="display:flex;align-items:center;gap:8px;background:#fef3c7;padding:9px 12px;border-radius:8px;border:1px dashed #fbbf24">
+        <input type="checkbox" id="bg-p-meta-allow-logo" style="margin:0;width:16px;height:16px;cursor:pointer">
+        <label for="bg-p-meta-allow-logo" style="font-size:12px;color:#92400e;cursor:pointer;line-height:1.4" title="고객이 스티커 입력 단계에서 회사 로고 (PNG/JPG, ≤5MB) 를 첨부할 수 있게 됩니다.">
+          🏢 <b>고객 로고 첨부 허용</b> — 스티커 입력 모드에 '로고 첨부' 옵션 노출 (PNG/JPG, 최대 5MB)
+        </label>
+      </div>
+
       <!-- 위탁 거래처 매핑 — Phase 1 -->
       <div style="display:grid;grid-template-columns:1fr 130px;gap:8px;background:#f9fafb;padding:10px;border-radius:8px;border:1px dashed var(--gray-300)">
         <div>
@@ -8959,6 +8967,9 @@ async function openBgProductForm(productId) {
     // 장식 명칭 (decoration_label) — 비어있으면 placeholder '스티커' 그대로 보임
     const decoInput = document.getElementById('bg-p-meta-deco-label');
     if (decoInput) decoInput.value = s?.decoration_label || '';
+    // 고객 로고 첨부 허용 게이트 (migration 026)
+    const allowLogoCb = document.getElementById('bg-p-meta-allow-logo');
+    if (allowLogoCb) allowLogoCb.checked = !!s?.allow_logo_upload;
     // 거래처 / 수수료율 dropdown 로드 + 현재 값 셋팅
     try {
       const vRes = await fetch(API + '/api/bg/vendors?active_only=1');
@@ -9487,6 +9498,9 @@ async function saveBgProduct() {
   const cmRaw = (document.getElementById('bg-p-meta-commission')?.value || '').trim();
   const commissionRate = cmRaw === '' ? null : Math.max(0, Math.min(100, Number(cmRaw) || 0));
 
+  // 고객 로고 첨부 허용 게이트 (migration 026)
+  const allowLogoUpload = !!document.getElementById('bg-p-meta-allow-logo')?.checked;
+
   const body = {
     brand: brand || null,
     product_name: productName || null,
@@ -9497,6 +9511,7 @@ async function saveBgProduct() {
     vendor_id: vendorId,
     commission_rate: commissionRate,
     shipping_group_id: shippingGroupId,
+    allow_logo_upload: allowLogoUpload,
   };
 
   try {
