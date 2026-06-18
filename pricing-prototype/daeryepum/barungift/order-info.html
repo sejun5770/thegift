@@ -3704,8 +3704,16 @@
             + '</span></div>';
         }).join('');
       }
-      // 고객 입력 문구. 기본 fallback 키 'text' 는 '{장식명}  문구' 로 치환해서 보여줌.
+      // 고객 입력 문구 — 스티커별 custom_fields 정의의 field_label 을 사용해 표시.
+      //   FIELD_LABEL 은 field_id (예: 'f-splcj9') → 사람 라벨 (예: '상단 문구') 매핑.
+      //   default 단일 'text' 필드는 '{장식명} 문구' fallback. 정의 없으면 field_id 그대로.
       const FIELD_LABEL = { text: summaryDecoLabel + ' 문구' };
+      if (sticker && Array.isArray(sticker.custom_fields)) {
+        sticker.custom_fields.forEach(function(f) {
+          const key = f.field_id || f.name || f.field_label;
+          if (key) FIELD_LABEL[key] = f.field_label || f.label || key;
+        });
+      }
       const customVals = Object.entries(s.custom_values || {}).filter(function(pair){ return pair[1]; });
       // 스티커 선택됐는데 입력값 없음(= 입력안함 모드 or 비어있음) → '입력안함' 명시
       let customHtml;
