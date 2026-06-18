@@ -1207,10 +1207,17 @@
       return;
     }
 
+    // 교체 케이스: 기존 logo 가 있으면 Storage 정리 (best-effort, await 안 함)
+    if (ps.logo_path) {
+      deleteStickerLogo({ logo_path: ps.logo_path }).catch(function(e) {
+        console.warn('[logo replace cleanup]', e && e.message);
+      });
+    }
+
     const $progress = document.getElementById('logo-progress-' + idx);
     if ($progress) {
       $progress.classList.remove('hidden');
-      $progress.textContent = '업로드 중... (' + Math.round(file.size / 1024) + 'KB)';
+      $progress.textContent = '🏢 로고 업로드 중... (' + Math.round(file.size / 1024) + 'KB)';
     }
 
     try {
@@ -1219,7 +1226,7 @@
         product_code: productCode,
         group_id: groupId,
       });
-      const r = await fetch(API + '/api/bg/sticker-logo/upload?' + params, {
+      const r = await fetch(API_BASE + '/api/bg/sticker-logo/upload?' + params, {
         method: 'POST',
         headers: {
           'Content-Type': file.type,
@@ -1259,7 +1266,7 @@
   async function deleteStickerLogo(ps) {
     if (!ps || !ps.logo_path) return;
     try {
-      await fetch(API + '/api/bg/sticker-logo/upload?path=' + encodeURIComponent(ps.logo_path), {
+      await fetch(API_BASE + '/api/bg/sticker-logo/upload?path=' + encodeURIComponent(ps.logo_path), {
         method: 'DELETE',
       });
     } catch (_) { /* 실패해도 무시 — Storage 잔여 파일은 운영자가 별도 정리 */ }
@@ -2519,22 +2526,26 @@
 
     // 기본값: sticker_input이 명시적으로 'none'이 아닌 경우 입력 표시
     var isNone = stInput === 'none';
-    // 로고 첨부 게이트 (migration 026) — admin 이 켠 상품만 토글 노출
+    // 로고 첨부 게이트 (migration 026) — admin 이 켠 상품만 버튼 노출
     var canAttachLogo = isLogoUploadAllowedForProduct(productCode);
-    var isLogoEnabled = !!ps.logo_enabled;
     var hasLogo = !!ps.logo_url;
+
+    // 헤더 영역의 '🏢 로고 첨부' 버튼 — 로고 미업로드 상태에서만 노출.
+    //   클릭 → label 이 wrap 한 hidden file input 자동 트리거 → OS 파일 선택 → 업로드
+    //   업로드 완료 후 → 미리보기 카드로 대체되므로 버튼은 자동 숨김.
+    var logoBtnHtml = (canAttachLogo && !hasLogo)
+      ? '<label class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-800 text-[11px] font-semibold cursor-pointer pressable transition-colors" title="회사 로고 (PNG/JPG, ≤5MB) 첨부">'
+        + '<span>🏢 로고 첨부</span>'
+        + '<input type="file" accept="image/png,image/jpeg" class="hidden" data-action="productStickerLogoUpload" data-idx="' + idx + '" />'
+        + '</label>'
+      : '';
 
     var headerHtml = '<div class="mt-4">'
       + (isNone ? '<p class="text-[12px] text-amber-800 rounded-xl px-3.5 py-2.5 mb-3 font-medium" style="background:linear-gradient(135deg,rgba(253,230,138,0.4),rgba(245,158,11,0.12));border:1px solid rgba(245,158,11,0.2)">⚠️ 문구는 샘플이미지로 출력되며 이름은 출력되지 않습니다.</p>' : '')
       + '<div class="flex items-center justify-between mb-2 flex-wrap gap-y-1">'
       + '<label class="text-[12px] font-semibold text-slate-700">' + esc(stProductDecoLabel) + ' 문구 입력</label>'
-      + '<div class="flex items-center gap-3">'
-      + (canAttachLogo
-          ? '<label class="flex items-center gap-1.5 cursor-pointer">'
-            + '<input type="checkbox" class="w-4 h-4 accent-amber-500" ' + (isLogoEnabled ? 'checked' : '') + ' data-action="productStickerLogoToggle" data-idx="' + idx + '" />'
-            + '<span class="text-[12px] text-amber-700 font-medium">🏢 로고 첨부</span>'
-            + '</label>'
-          : '')
+      + '<div class="flex items-center gap-2">'
+      + logoBtnHtml
       + '<label class="flex items-center gap-1.5 cursor-pointer">'
       + '<input type="checkbox" class="w-4 h-4 accent-indigo-500" ' + (isNone ? 'checked' : '') + ' data-action="productStickerInputNone" data-idx="' + idx + '" />'
       + '<span class="text-[12px] text-slate-600 font-medium">입력안함</span>'
@@ -2568,38 +2579,32 @@
       fieldsHtml = '<div class="p-4 rounded-xl gradient-brand-soft space-y-3">' + fieldInputs + '</div>';
     }
 
-    // 로고 첨부 영역 (migration 026) — canAttachLogo + 토글 ON 시 노출
-    //   업로드 전: 파일 선택 버튼
-    //   업로드 후: 썸네일 미리보기 + 파일명 + 삭제 버튼
+    // 로고 미리보기 카드 (migration 026) — 업로드 완료 후만 노출.
+    //   헤더의 '로고 첨부' 버튼이 첫 업로드 진입점이므로 dropzone 영역은 없음.
+    //   업로드 진행 중 상태는 logo-progress-{idx} 에 표시.
     var logoHtml = '';
-    if (canAttachLogo && isLogoEnabled) {
-      if (hasLogo) {
-        var fnSafe = esc(ps.logo_filename || '로고');
-        var sizeKb = ps.logo_size ? Math.round(ps.logo_size / 1024) + 'KB' : '';
-        logoHtml = '<div class="mt-3 p-3 rounded-xl border border-amber-200 bg-amber-50 flex items-center gap-3">'
-          + '<img src="' + esc(ps.logo_url) + '" alt="로고 미리보기" class="w-14 h-14 rounded-lg object-contain bg-white border border-amber-100" />'
-          + '<div class="flex-1 min-w-0">'
-          + '<div class="text-[12px] font-semibold text-amber-900 truncate">' + fnSafe + '</div>'
-          + '<div class="text-[11px] text-amber-700">' + sizeKb + ' · 업로드 완료</div>'
-          + '</div>'
-          + '<button type="button" data-action="productStickerLogoRemove" data-idx="' + idx + '" class="text-[11px] font-medium text-rose-600 hover:text-rose-700 px-2 py-1 rounded-lg">삭제</button>'
-          + '</div>';
-      } else {
-        logoHtml = '<div class="mt-3 p-3 rounded-xl border border-dashed border-amber-300 bg-amber-50/40">'
-          + '<label class="flex items-center justify-between gap-3 cursor-pointer">'
-          + '<div class="flex-1 min-w-0">'
-          + '<div class="text-[12px] font-semibold text-amber-900">🏢 회사 로고 업로드</div>'
-          + '<div class="text-[11px] text-amber-700 mt-0.5">PNG / JPG, 최대 5MB</div>'
-          + '</div>'
-          + '<span class="px-3 py-1.5 rounded-lg bg-amber-500 text-white text-[12px] font-semibold pressable">파일 선택</span>'
-          + '<input type="file" accept="image/png,image/jpeg" class="hidden" data-action="productStickerLogoUpload" data-idx="' + idx + '" />'
-          + '</label>'
-          + '<div id="logo-progress-' + idx + '" class="text-[11px] text-amber-700 mt-2 hidden"></div>'
-          + '</div>';
-      }
+    if (canAttachLogo && hasLogo) {
+      var fnSafe = esc(ps.logo_filename || '로고');
+      var sizeKb = ps.logo_size ? Math.round(ps.logo_size / 1024) + 'KB' : '';
+      logoHtml = '<div class="mt-3 p-3 rounded-xl border border-amber-200 bg-amber-50 flex items-center gap-3">'
+        + '<img src="' + esc(ps.logo_url) + '" alt="로고 미리보기" class="w-14 h-14 rounded-lg object-contain bg-white border border-amber-100" />'
+        + '<div class="flex-1 min-w-0">'
+        + '<div class="text-[12px] font-semibold text-amber-900 truncate">🏢 ' + fnSafe + '</div>'
+        + '<div class="text-[11px] text-amber-700">' + sizeKb + ' · 업로드 완료</div>'
+        + '</div>'
+        + '<label class="text-[11px] font-medium text-amber-700 hover:text-amber-900 px-2 py-1 rounded-lg cursor-pointer" title="다른 파일로 교체">'
+        + '변경'
+        + '<input type="file" accept="image/png,image/jpeg" class="hidden" data-action="productStickerLogoUpload" data-idx="' + idx + '" />'
+        + '</label>'
+        + '<button type="button" data-action="productStickerLogoRemove" data-idx="' + idx + '" class="text-[11px] font-medium text-rose-600 hover:text-rose-700 px-2 py-1 rounded-lg">삭제</button>'
+        + '</div>';
     }
+    // 업로드 진행 표시 영역 (uploadStickerLogo 가 채움)
+    var progressHtml = canAttachLogo
+      ? '<div id="logo-progress-' + idx + '" class="text-[11px] text-amber-700 mt-2 hidden"></div>'
+      : '';
 
-    return '<div id="sticker-input-wrap-' + idx + '">' + headerHtml + fieldsHtml + logoHtml + '</div>';
+    return '<div id="sticker-input-wrap-' + idx + '">' + headerHtml + fieldsHtml + logoHtml + progressHtml + '</div>';
   }
 
   const STEP_RENDERERS = [renderStep0, renderStep1, renderStep2, renderStep3];
@@ -2994,33 +2999,16 @@
         break;
       }
       // 로고 첨부 (migration 026)
-      case 'productStickerLogoToggle': {
-        const idx = target.dataset.idx;
-        const ps = ensureProductEntry(idx);
-        ps.logo_enabled = !!target.checked;
-        // OFF 로 끄면 업로드된 파일도 자동 제거 (Storage 정리는 비동기 fire-and-forget)
-        if (!ps.logo_enabled && ps.logo_url) {
-          deleteStickerLogo(ps).catch(function(e) { console.warn('[logo delete]', e.message); });
-          delete ps.logo_url;
-          delete ps.logo_filename;
-          delete ps.logo_size;
-          delete ps.logo_mime;
-          delete ps.logo_path;
-        }
-        saveFormState();
-        var wrapEl = document.getElementById('sticker-input-wrap-' + idx);
-        if (wrapEl) {
-          var t = document.createElement('div');
-          t.innerHTML = buildStickerInputSection(idx);
-          wrapEl.replaceWith(t.firstElementChild || t);
-        } else renderCurrentStep();
-        break;
-      }
+      //   업로드: 헤더 '🏢 로고 첨부' 버튼 또는 미리보기 카드의 '변경' 버튼 → file input change
+      //   교체 케이스 (logo_url 이 이미 있는 상태에서 새 파일 선택) 는 uploadStickerLogo 가
+      //   기존 파일을 자동으로 Storage 정리한 뒤 새 파일 업로드.
       case 'productStickerLogoUpload': {
         const idx = target.dataset.idx;
         const file = target.files && target.files[0];
         if (!file) break;
         uploadStickerLogo(idx, file);
+        // 다음 변경/재업로드 시 같은 파일 재선택도 change 이벤트 발생시키도록 reset
+        try { target.value = ''; } catch (_) {}
         break;
       }
       case 'productStickerLogoRemove': {
