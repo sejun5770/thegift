@@ -11736,13 +11736,19 @@ function renderBgUnified() {
     const expressPrefix = isExpressOrder
       ? '<span title="빠른출고" style="color:#dc2626;font-weight:700;margin-right:2px">⚡</span>'
       : '';
+    // 로고 첨부 🏢 prefix (migration 026) — 행 단위 sel.logo_url 있을 때만.
+    //   주문 안의 여러 상품 중 로고 첨부된 상품 행에만 표시 (멀티 상품 주문 대응).
+    //   ⚡ 와 함께 노출 가능 (둘 다 있으면 ⚡🏢 순).
+    const logoPrefix = sel?.logo_url
+      ? '<span title="회사 로고 첨부됨 — 문구 셀에서 다운로드" style="color:#d97706;font-weight:700;margin-right:2px">🏢</span>'
+      : '';
     const orderSeqStyle = hasRequest
       ? 'font-weight:700;white-space:nowrap;background:#fef3c7;color:#92400e;border-radius:4px;padding:2px 6px'
       : 'font-weight:600;white-space:nowrap';
     const orderSeqInner = hasRequest
       ? `<span title="${esc(String(ci.customer_request).slice(0, 200))}">📝 ${esc(order.order_seq)}</span>`
       : esc(order.order_seq);
-    const orderSeqContent = expressPrefix + orderSeqInner;
+    const orderSeqContent = expressPrefix + logoPrefix + orderSeqInner;
     html += `<tr class="${rowClass}" style="${borderStyle};cursor:pointer" onclick="_onUniRowClick(${rowIdx}, event)">
       <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()" onclick="event.stopPropagation()"></td>
       <td style="${orderSeqStyle}">${orderSeqContent}</td>
