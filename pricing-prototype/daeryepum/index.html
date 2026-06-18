@@ -11653,13 +11653,25 @@ function renderBgUnified() {
     // 스티커 custom_fields 정의 순서대로 (시그니처 허니 기프트 등 다중 필드 스티커 대응).
     //   default 'text' 단일 필드는 라벨 생략, 그 외엔 'label: value' 로 표시.
     const fieldEntries = _getStickerFieldEntries(sel);
-    const customText = fieldEntries.length
+    const customTextBody = fieldEntries.length
       ? fieldEntries.map(e => {
           // XSS: label/value 모두 escape 필수
           if (e.key === 'text' && fieldEntries.length === 1) return esc(String(e.value));
           return `<span style="color:var(--gray-500)">${esc(e.label)}:</span> ${esc(String(e.value))}`;
         }).join('<br>')
       : '<span style="color:var(--gray-300)">-</span>';
+    // 로고 첨부 (migration 026) — sel.logo_url 있으면 문구 셀 끝에 미니 미리보기 + 다운로드 링크
+    //   인쇄팀이 운영 표에서 직접 다운로드 (target=_blank). 이미지는 16x16 thumbnail.
+    let logoIndicator = '';
+    if (sel?.logo_url) {
+      const fn = esc(sel.logo_filename || '로고');
+      const sizeKb = sel.logo_size ? Math.round(sel.logo_size / 1024) + 'KB' : '';
+      logoIndicator = `<div style="margin-top:6px;display:flex;align-items:center;gap:6px;padding:3px 6px;background:#fef3c7;border:1px solid #fbbf24;border-radius:4px;font-size:11px">
+        <img src="${esc(sel.logo_url)}" alt="logo" style="width:16px;height:16px;object-fit:contain;border-radius:2px;background:#fff" />
+        <a href="${esc(sel.logo_url)}" target="_blank" rel="noopener" download="${fn}" style="color:#92400e;font-weight:600;text-decoration:none" onclick="event.stopPropagation()" title="새 탭에서 열기 / 다운로드">🏢 ${fn}${sizeKb ? ' (' + sizeKb + ')' : ''}</a>
+      </div>`;
+    }
+    const customText = customTextBody + logoIndicator;
     // product 단위 출고일/빠른출고 표시 (멀티 출고일 그룹 주문 호환):
     //   sel.desired_ship_date / sel.is_express 우선 (멀티 그룹은 product 별로 다름)
     //   없으면 ci.desired_ship_date / ci.is_express fallback (단일 그룹 / 구버전 호환)
@@ -13371,6 +13383,8 @@ function copyBgUnified() {
     //   - 스티커 custom_fields 정의 순서대로, '필드라벨: 값' 형태로 연결 (' / ' 구분).
     //   - default 단일 'text' 필드는 라벨 없이 값만 (기존 동작 유지, 가독성).
     //   - TSV/HTML 브레이크 방지: 탭/개행은 공백으로 치환.
+    //   - 로고 첨부 (migration 026): logo_url 있으면 문구 끝에 '🏢 로고: {url}' append.
+    //     인쇄팀이 TSV 붙여넣은 시트에서 URL 클릭으로 다운로드 가능.
     if (sel?.custom_values) {
       const entries = _getStickerFieldEntries(sel);
       if (entries.length) {
@@ -13382,6 +13396,10 @@ function copyBgUnified() {
         }).filter(Boolean);
         if (parts.length) cells[15] = parts.join(' / ');
       }
+    }
+    if (sel?.logo_url) {
+      const logoTag = `🏢 로고: ${String(sel.logo_url).replace(/[\t\r\n]+/g, ' ').trim()}`;
+      cells[15] = cells[15] ? `${cells[15]} / ${logoTag}` : logoTag;
     }
     // Q열(index 16) = 배송메세지 (MSSQL recv_msg — ETC: o.recv_msg / CARD: di.DELIVERY_MEMO)
     //   TSV 안전: 탭/개행 → 공백으로 치환.
