@@ -408,6 +408,34 @@ const DB_CONFIG = {
 let pool = null;
 let _poolInitPromise = null; // 동시 초기화 요청 중복 방지 (race-condition 가드)
 
+// ============================================
+// MySQL 풀 — 디얼디어 wedding DB (별도 서버, port 3306)
+//   환경변수: MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE
+//   미설정 시 getMysqlPool() 는 명확한 에러로 fallback (디얼디어 통합 영역에서만 호출).
+// ============================================
+let _mysqlPool = null;
+async function getMysqlPool() {
+  if (_mysqlPool) return _mysqlPool;
+  const host = process.env.MYSQL_HOST;
+  const port = parseInt(process.env.MYSQL_PORT, 10) || 3306;
+  const user = process.env.MYSQL_USER;
+  const password = process.env.MYSQL_PASSWORD;
+  const database = process.env.MYSQL_DATABASE;
+  if (!host || !user || !password || !database) {
+    throw new Error('MYSQL_HOST/PORT/USER/PASSWORD/DATABASE 환경변수 미설정 — Docker Manager에 등록 필요');
+  }
+  const mysql = require('mysql2/promise');
+  _mysqlPool = mysql.createPool({
+    host, port, user, password, database,
+    connectionLimit: 5,
+    waitForConnections: true,
+    queueLimit: 0,
+    connectTimeout: 10000,
+  });
+  console.log(`Connected to MySQL (${host}:${port}/${database})`);
+  return _mysqlPool;
+}
+
 /**
  * MSSQL 풀 획득 — 끊긴 풀 자동 감지 + 헬스체크 + 단일 재시도.
  * - pool.connected 가 stale 인 경우 (Azure SQL 이 idle 연결을 닫았지만 클라이언트가 모름)
@@ -5671,6 +5699,61 @@ const server = http.createServer(async (req, res) => {
                   'apiOrders 의 INNER JOIN S2_Card 가 이 row 들을 누락시킴 — LEFT JOIN 또는 UNION 으로 수정 필요.',
             ...results,
           };
+        }
+      } else if (pathname === '/api/admin/probe-wedding-mysql' && req.method === 'GET') {
+        // 디얼디어 MySQL DB (wedding) 스키마 진단 — 회원/예식 관련 테이블/컬럼 자동 탐색.
+        //   URL: /api/admin/probe-wedding-mysql
+        //         /api/admin/probe-wedding-mysql?describe=<table>  ← 특정 테이블 컬럼 전체
+        //         /api/admin/probe-wedding-mysql?sample=<table>    ← 상위 5행 샘플 (PII 노출 주의)
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          const mp = await getMysqlPool();
+          const out = { db: process.env.MYSQL_DATABASE };
+          // 단일 테이블 모드
+          const describeTable = (parsed.query.describe || '').trim();
+          const sampleTable = (parsed.query.sample || '').trim();
+          if (describeTable && /^[A-Za-z0-9_]+$/.test(describeTable)) {
+            const [cols] = await mp.query(`DESCRIBE \`${describeTable}\``);
+            const [cnt] = await mp.query(`SELECT COUNT(*) AS n FROM \`${describeTable}\``);
+            out.describe = { table: describeTable, columns: cols, row_count: cnt[0].n };
+            data = out;
+          } else if (sampleTable && /^[A-Za-z0-9_]+$/.test(sampleTable)) {
+            const [rows] = await mp.query(`SELECT * FROM \`${sampleTable}\` LIMIT 5`);
+            out.sample = { table: sampleTable, rows };
+            data = out;
+          } else {
+            // 전체 탐색 모드
+            const [tables] = await mp.query('SHOW TABLES');
+            const all = tables.map(r => Object.values(r)[0]);
+            // 회원/예식 관련 테이블 후보 추출
+            const candRe = /user|member|account|customer|wedding|wedd|guest|profile|info/i;
+            const candidates = all.filter(t => candRe.test(t));
+            out.total_tables = all.length;
+            out.all_tables = all;
+            out.candidate_tables = candidates;
+            // 후보 테이블 (상위 10개) 의 컬럼 + row count 같이 조회 — 회원 / 예식일 컬럼 식별
+            const detail = {};
+            for (const t of candidates.slice(0, 10)) {
+              try {
+                const [cols] = await mp.query(`DESCRIBE \`${t}\``);
+                const [cnt] = await mp.query(`SELECT COUNT(*) AS n FROM \`${t}\``);
+                // 예식/wedding/날짜 키워드 컬럼 우선 노출
+                const wedColRe = /wed|marri|date|year|month|day/i;
+                const weddingCols = cols.filter(c => wedColRe.test(c.Field));
+                detail[t] = { row_count: cnt[0].n, total_columns: cols.length, wedding_like_columns: weddingCols, all_columns: cols };
+              } catch (e) {
+                detail[t] = { error: e.message };
+              }
+            }
+            out.candidate_table_detail = detail;
+            out.hint = '회원 + 예식일 컬럼이 있는 테이블을 식별하면 알려주세요. probe-wedding-mysql?describe=<table> 로 특정 테이블 컬럼 전체 조회 가능. PII 노출 주의로 sample 모드는 운영자만 신중 사용.';
+            data = out;
+          }
+        } catch (err) {
+          console.error('[probe-wedding-mysql] error:', err.message);
+          data = { error: 'MySQL 진단 실패: ' + err.message };
         }
       } else if (pathname === '/api/admin/probe-com-products' && req.method === 'GET') {
         // 위탁답례품(COM_ 시작 Card_Code) 상품 분포 진단.
