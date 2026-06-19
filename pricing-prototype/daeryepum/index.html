@@ -1794,7 +1794,7 @@ nav.nav-loading a[href^="#"] {
       <button class="btn" onclick="moveWcToday()" title="이번 달로">📅 오늘</button>
       <span style="margin:0 6px;color:var(--gray-300)">|</span>
       <button class="btn btn-primary" onclick="copyWeddingCalendar('month')" title="월 전체 TSV 클립보드 복사">📋 월 전체 복사</button>
-      <button class="btn" onclick="copyWeddingCalendar('week')" title="주차별 선택 복사 (선택 안 하면 모든 주차)">📋 주차 복사</button>
+      <button class="btn" onclick="copyWeddingCalendar('week')" title="좌측 표에서 체크한 주차만 복사 (체크 없으면 전체)">📋 선택 주차 복사</button>
     </div>
   </div>
   <p style="font-size:12px;color:var(--gray-500);margin:0 0 16px">
@@ -1837,6 +1837,32 @@ nav.nav-loading a[href^="#"] {
         </table>
       </div>
     </div>
+  </div>
+
+  <!-- 운영 메모 (Phase 2B) — 디바이스 localStorage 에 월별로 저장. TSV 복사 시 마지막에 포함. -->
+  <div class="card" style="padding:14px 16px;margin-top:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:13px;font-weight:600">📝 운영 메모 (<span id="wc-memo-label">-</span>)</div>
+      <span id="wc-memo-status" style="font-size:11px;color:var(--gray-400)">자동 저장</span>
+    </div>
+    <textarea id="wc-memo" rows="3" placeholder="예: 회원가입일 2025/03/11 ~ Today / 샘플신청·청첩장·감사장·문자수신·이메일수신: 전체 / 특이사항..." oninput="onWcMemoInput()" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;resize:vertical;font-family:inherit"></textarea>
+    <div style="font-size:11px;color:var(--gray-400);margin-top:4px">현재 디바이스의 localStorage 에 월별 저장됩니다 · TSV 복사 시 하단에 포함됩니다.</div>
+  </div>
+
+  <!-- 사이트별 12개월 트렌드 (Phase 2C) -->
+  <div class="card" style="padding:14px 16px;margin-top:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:6px">
+      <div style="font-size:13px;font-weight:600">📈 사이트별 월별 트렌드</div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <select id="wc-trend-months" onchange="loadWcTrend()" style="padding:5px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
+          <option value="6">최근 6개월</option>
+          <option value="12" selected>최근 12개월</option>
+          <option value="24">최근 24개월</option>
+        </select>
+        <span id="wc-trend-loading" style="font-size:11px;color:var(--gray-400)"></span>
+      </div>
+    </div>
+    <canvas id="wc-trend-chart" style="max-height:300px"></canvas>
   </div>
 </div>
 
@@ -10819,6 +10845,9 @@ async function loadWeddingCalendar() {
     renderWeddingCalendar(data);
     $loading.style.display = 'none';
     $table.style.display = '';
+    // Phase 2: 메모 + 트렌드 차트 (fire-and-forget — 트렌드 실패해도 캘린더는 유지)
+    loadWcMemo();
+    loadWcTrend().catch(e => console.warn('[wc trend]', e.message));
   } catch (e) {
     console.error('[loadWeddingCalendar]', e);
     $loading.textContent = '조회 실패: ' + e.message;
@@ -10846,7 +10875,12 @@ function renderWeddingCalendar(data) {
       const rowBg = isSum ? 'background:#f3f4f6;font-weight:600' : (i === 0 ? 'background:#fafafa' : '');
       const borderTop = (i === 0) ? 'border-top:2px solid var(--gray-300)' : '';
       tbody += `<tr style="${rowBg};${borderTop}">`;
-      if (i === 0) tbody += `<td rowspan="6" style="padding:6px 8px;border:1px solid var(--gray-200);text-align:center;font-weight:600;background:#f9fafb">${wk.week_index}주차</td>`;
+      if (i === 0) tbody += `<td rowspan="6" style="padding:6px 8px;border:1px solid var(--gray-200);text-align:center;font-weight:600;background:#f9fafb">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+          <input type="checkbox" class="wc-week-check" data-week="${wk.week_index}" style="cursor:pointer">
+          <span>${wk.week_index}주차</span>
+        </div>
+      </td>`;
       tbody += `<td style="padding:4px 6px;border:1px solid var(--gray-200);text-align:center;font-weight:600;color:${isSum?'#1e3a8a':'var(--gray-700)'}">${isSum?'합':WC_SITE_SHORT[site]}</td>`;
       // 일~토 셀
       wk.days.forEach((day, di) => {
@@ -10916,15 +10950,19 @@ function renderWeddingCalendar(data) {
 /** TSV 클립보드 복사 — 캡쳐 포맷 그대로 (헤더 + 주차별 사이트 5행 + 합계). scope: 'month' | 'week'. */
 function copyWeddingCalendar(scope) {
   if (!_wcData) { showToast('데이터가 없습니다.'); return; }
+  let targetWeeks = _wcData.weeks;
+  if (scope === 'week') {
+    // 체크된 주차만 추출. 하나도 안 됐으면 모든 주차 (안전한 기본 동작).
+    const checked = Array.from(document.querySelectorAll('.wc-week-check:checked'))
+      .map(cb => parseInt(cb.dataset.week, 10));
+    if (checked.length > 0) {
+      targetWeeks = _wcData.weeks.filter(wk => checked.includes(wk.week_index));
+      if (!targetWeeks.length) { showToast('선택한 주차에 데이터가 없습니다.'); return; }
+    }
+  }
   const lines = [];
   // 헤더
   lines.push(['', '', ...WC_DAY_NAMES, '주 합계'].join('\t'));
-  let targetWeeks = _wcData.weeks;
-  if (scope === 'week') {
-    // 가장 단순 — 현재 달의 weeks 모두 (사용자가 명시 선택 UI 없는 첫 버전).
-    // 캡쳐와 일관성 위해 모든 주차 출력하되, 주차별 빈 행으로 시각적 구분.
-    targetWeeks = _wcData.weeks;
-  }
   targetWeeks.forEach(wk => {
     [...WC_SITES, '합'].forEach((siteOrSum, i) => {
       const isSum = siteOrSum === '합';
@@ -10963,11 +11001,140 @@ function copyWeddingCalendar(scope) {
     const pct = delta.pct === null ? '신규' : `${delta.pct >= 0 ? '+' : ''}${delta.pct}%`;
     lines.push(['', isSum ? '합' : s, String(prev), `${delta.count >= 0 ? '+' : ''}${delta.count}`, pct].join('\t'));
   });
+  // 메모 (Phase 2B) — 비어있지 않으면 TSV 마지막에 부착
+  const memo = (document.getElementById('wc-memo')?.value || '').trim();
+  if (memo) {
+    lines.push('');
+    lines.push(['', '메모 (업데이트 일자)', new Date().toLocaleString('ko-KR')].join('\t'));
+    memo.split(/\r?\n/).forEach(ln => lines.push(['', ln].join('\t')));
+  }
   const tsv = lines.join('\n');
   navigator.clipboard.writeText(tsv).then(() => {
-    showToast(`✅ ${scope === 'month' ? '월 전체' : '주차'} 캘린더 복사됨 (${lines.length}행)`);
+    const scopeLabel = scope === 'month' ? '월 전체' : (scope === 'week' ? '선택 주차' : '주차');
+    showToast(`✅ ${scopeLabel} 캘린더 복사됨 (${lines.length}행)`);
   }).catch(e => {
     alert('클립보드 복사 실패: ' + e.message);
+  });
+}
+
+// ============================================
+// 운영 메모 (Phase 2B) — localStorage 월별 저장
+// ============================================
+function _wcMemoKey() {
+  const y = document.getElementById('wc-year')?.value;
+  const m = document.getElementById('wc-month')?.value;
+  return `wc-memo-${y}-${m}`;
+}
+function loadWcMemo() {
+  const $ta = document.getElementById('wc-memo');
+  const $label = document.getElementById('wc-memo-label');
+  if (!$ta) return;
+  const y = document.getElementById('wc-year')?.value;
+  const m = document.getElementById('wc-month')?.value;
+  if ($label) $label.textContent = `${y}년 ${m}월`;
+  try {
+    $ta.value = localStorage.getItem(_wcMemoKey()) || '';
+  } catch (_) { $ta.value = ''; }
+  const $status = document.getElementById('wc-memo-status');
+  if ($status) $status.textContent = $ta.value ? '저장됨' : '자동 저장';
+}
+let _wcMemoSaveTimer = null;
+function onWcMemoInput() {
+  const $ta = document.getElementById('wc-memo');
+  const $status = document.getElementById('wc-memo-status');
+  if (!$ta) return;
+  if ($status) $status.textContent = '저장 중...';
+  clearTimeout(_wcMemoSaveTimer);
+  _wcMemoSaveTimer = setTimeout(() => {
+    try {
+      const k = _wcMemoKey();
+      if ($ta.value) localStorage.setItem(k, $ta.value);
+      else localStorage.removeItem(k);
+      if ($status) $status.textContent = '저장됨 · ' + new Date().toLocaleTimeString('ko-KR');
+    } catch (e) {
+      if ($status) $status.textContent = '저장 실패: ' + e.message;
+    }
+  }, 400);
+}
+
+// ============================================
+// 사이트별 12개월 트렌드 (Phase 2C) — Chart.js 라인
+// ============================================
+const WC_TREND_COLORS = {
+  '바른손카드': '#3b82f6',
+  '바른손몰':   '#10b981',
+  '디얼디어':   '#f59e0b',
+  '바른손M카드': '#8b5cf6',
+  '기타':       '#94a3b8',
+};
+let _wcTrendChart = null;
+async function loadWcTrend() {
+  const y = document.getElementById('wc-year')?.value;
+  const m = document.getElementById('wc-month')?.value;
+  const months = document.getElementById('wc-trend-months')?.value || 12;
+  const $loading = document.getElementById('wc-trend-loading');
+  if ($loading) $loading.textContent = '로딩 중...';
+  try {
+    const r = await fetch(`${API}/api/dashboard/wedding-calendar/trend?end_year=${y}&end_month=${m}&months=${months}`);
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    renderWcTrend(data);
+    if ($loading) $loading.textContent = '';
+  } catch (e) {
+    console.error('[loadWcTrend]', e);
+    if ($loading) $loading.textContent = '실패: ' + e.message;
+  }
+}
+function renderWcTrend(data) {
+  const $cv = document.getElementById('wc-trend-chart');
+  if (!$cv) return;
+  const labels = data.months.map(mo => mo.label);
+  // 사이트별 데이터셋 — 0 만 있는 사이트는 노이즈 제거차 숨김 처리 (legend toggle 가능)
+  const datasets = WC_SITES.map(s => ({
+    label: s,
+    data: data.months.map(mo => mo.by_site[s] || 0),
+    borderColor: WC_TREND_COLORS[s] || '#999',
+    backgroundColor: WC_TREND_COLORS[s] || '#999',
+    tension: 0.25,
+    pointRadius: 3,
+    pointHoverRadius: 5,
+    borderWidth: 2,
+    hidden: data.months.every(mo => (mo.by_site[s] || 0) === 0),
+  }));
+  // 합계 라인 (대시 패턴)
+  datasets.push({
+    label: '합계',
+    data: data.months.map(mo => mo.total),
+    borderColor: '#1f2937',
+    backgroundColor: '#1f2937',
+    borderDash: [4, 4],
+    tension: 0.25,
+    pointRadius: 2,
+    borderWidth: 1.5,
+    hidden: true, // 기본 숨김 (legend 클릭으로 ON)
+  });
+  if (_wcTrendChart) _wcTrendChart.destroy();
+  _wcTrendChart = new Chart($cv.getContext('2d'), {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+        tooltip: { callbacks: {
+          footer: (items) => {
+            const total = items.reduce((s, it) => s + it.parsed.y, 0);
+            return items[0]?.dataset?.label === '합계' ? '' : `소계: ${total}건`;
+          },
+        } },
+      },
+      scales: {
+        y: { beginAtZero: true, ticks: { font: { size: 11 } } },
+        x: { ticks: { font: { size: 11 } } },
+      },
+    },
   });
 }
 

@@ -4063,6 +4063,77 @@ async function apiWeddingCalendar(query = {}) {
   };
 }
 
+// ============================================
+// 예식일 캘린더 트렌드 — GET /api/dashboard/wedding-calendar/trend?end_year=Y&end_month=M&months=12
+//
+// 사이트별 월별 합계 시계열 — Chart.js 라인 차트 데이터.
+//   end_year/end_month 까지의 최근 N개월 (기본 12개월).
+//   응답: { months: [{year, month, label, by_site:{사이트: total}, total}, ...] }
+// ============================================
+async function apiWeddingCalendarTrend(query = {}) {
+  const now = today();
+  const endYear = parseInt(query.end_year, 10) || now.getFullYear();
+  const endMonth = parseInt(query.end_month, 10) || (now.getMonth() + 1);
+  const months = Math.min(36, Math.max(3, parseInt(query.months, 10) || 12));
+
+  // 범위: 마지막 월 말일 + 1일 ~ 시작 월 1일
+  const endDateExclusive = new Date(endYear, endMonth, 1); // 다음달 1일
+  const startDate = new Date(endYear, endMonth - months, 1);
+  if (startDate < new Date(2000, 0, 1)) return { error: '기간 범위 오류' };
+
+  const p = await getPool();
+  const r = await p.request()
+    .input('ws', sql.VarChar, fmtDate(startDate))
+    .input('we', sql.VarChar, fmtDate(endDateExclusive))
+    .query(`
+      SELECT
+        YEAR(t.wd_date) AS y,
+        MONTH(t.wd_date) AS m,
+        t.site_name,
+        COUNT(*) AS wedding_count
+      FROM (
+        SELECT DISTINCT u.uid,
+          TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) AS wd_date,
+          ISNULL(si.SiteName, '기타') AS site_name
+        FROM S2_UserInfo u WITH (NOLOCK)
+        LEFT JOIN SiteInfo si ON u.REFERER_SALES_GUBUN = si.SiteCode
+        WHERE u.site_div = 'SB'
+          AND u.USE_YORN = 'Y'
+          AND u.wedd_year IS NOT NULL AND LEN(u.wedd_year) = 4
+          AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) >= @ws
+          AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) < @we
+      ) t
+      GROUP BY YEAR(t.wd_date), MONTH(t.wd_date), t.site_name
+      ORDER BY YEAR(t.wd_date), MONTH(t.wd_date)
+    `);
+
+  const normSite = (s) => WEDDING_CALENDAR_SITES.includes(s) ? s : '기타';
+  const ALL_SITES = [...WEDDING_CALENDAR_SITES, '기타'];
+  // key = `${y}-${m}` → { 바른손카드: n, ... }
+  const map = {};
+  r.recordset.forEach(row => {
+    const key = `${row.y}-${row.m}`;
+    if (!map[key]) map[key] = {};
+    const s = normSite(row.site_name);
+    map[key][s] = (map[key][s] || 0) + row.wedding_count;
+  });
+  // months 배열 빌드 (시작월부터 endMonth 까지 순서)
+  const out = [];
+  let cur = new Date(startDate);
+  while (cur < endDateExclusive) {
+    const y = cur.getFullYear();
+    const m = cur.getMonth() + 1;
+    const cell = map[`${y}-${m}`] || {};
+    const bySite = {};
+    let total = 0;
+    ALL_SITES.forEach(s => { const v = cell[s] || 0; bySite[s] = v; total += v; });
+    out.push({ year: y, month: m, label: `${y}.${String(m).padStart(2, '0')}`, by_site: bySite, total });
+    cur = new Date(y, m, 1); // 다음 달
+  }
+
+  return { end_year: endYear, end_month: endMonth, months: out, sites: ALL_SITES };
+}
+
 //   bg_order_customer_info.sticker_selections JSONB 를 집계 — 다음 두 가지 분석:
 //   1) 상품별 스티커 인기도 (Top 10 상품 × 스티커별 선택률)
 //   2) 메시지 분석 — 입력률, 길이 통계, 자주 등장 단어 / 키워드 카테고리
@@ -4880,6 +4951,8 @@ const server = http.createServer(async (req, res) => {
         data = await apiLeadtime3way(parsed.query);
       } else if (pathname === '/api/dashboard/wedding-calendar') {
         data = await apiWeddingCalendar(parsed.query);
+      } else if (pathname === '/api/dashboard/wedding-calendar/trend') {
+        data = await apiWeddingCalendarTrend(parsed.query);
       } else if (pathname === '/api/bg/vendor-settlements') {
         data = await apiVendorSettlements(parsed.query);
       } else if (pathname === '/api/bg/vendor-dashboard') {
