@@ -5847,6 +5847,105 @@ const server = http.createServer(async (req, res) => {
             ...results,
           };
         }
+      } else if (pathname === '/api/admin/probe-dmd-phone-match' && req.method === 'GET') {
+        // 디얼디어 회원 ↔ 답례품 구매자 phone 매칭 진단.
+        //   URL: /api/admin/probe-dmd-phone-match?days=90
+        // 응답: MySQL phone set 크기, MSSQL 답례품 주문자 phone 분포, 매칭 통계, 샘플 (마스킹).
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const days = parseInt(parsed.query.days, 10) || 90;
+        const out = { days };
+        try {
+          // 1) MySQL 디얼디어 phone set
+          if (!process.env.MYSQL_HOST) {
+            out.dmd = { error: 'MYSQL_* 환경변수 미설정' };
+          } else {
+            const mp = await getMysqlPool();
+            const [rawDmd] = await mp.query(`
+              SELECT phone FROM users WHERE is_test = 'F' AND phone IS NOT NULL AND phone <> '' LIMIT 50000
+            `);
+            const dmdRawSamples = rawDmd.slice(0, 5).map(r => r.phone);
+            const dmdNorm = rawDmd.map(r => String(r.phone || '').replace(/\D/g, '')).filter(p => p.length >= 8);
+            const dmdLenDist = {};
+            dmdNorm.forEach(p => { dmdLenDist[p.length] = (dmdLenDist[p.length] || 0) + 1; });
+            out.dmd = {
+              total_users_with_phone: rawDmd.length,
+              normalized_phones: dmdNorm.length,
+              length_distribution: dmdLenDist,
+              raw_samples: dmdRawSamples,
+              normalized_samples: dmdNorm.slice(0, 5).map(p => p.slice(0,3) + '****' + p.slice(-2)),
+            };
+          }
+
+          // 2) MSSQL 답례품 주문자 phone (최근 N일)
+          const pp = await getPool();
+          const r = await pp.request().input('days', sql.Int, days).query(`
+            SELECT
+              ui.hand_phone1 AS p1, ui.hand_phone2 AS p2, ui.hand_phone3 AS p3,
+              first_order.member_id
+            FROM (
+              SELECT DISTINCT member_id
+              FROM (
+                SELECT o.member_id, o.order_date
+                FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                WHERE c.Card_Div = 'D01' AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+                  AND o.order_date >= DATEADD(day, -@days, GETDATE())
+                UNION ALL
+                SELECT cord.member_id, cord.order_date
+                FROM custom_order cord WITH (NOLOCK)
+                INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
+                INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                WHERE c.Card_Div = 'D01' AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
+                  AND cord.order_date >= DATEADD(day, -@days, GETDATE())
+              ) u
+            ) first_order
+            LEFT JOIN S2_UserInfo ui WITH (NOLOCK) ON first_order.member_id = ui.uid
+          `);
+          const mssqlBuyers = r.recordset;
+          const mssqlWithPhone = mssqlBuyers.filter(row => row.p1 || row.p2 || row.p3);
+          const mssqlNorm = mssqlWithPhone.map(row => {
+            const concat = String((row.p1||'') + (row.p2||'') + (row.p3||''));
+            return concat.replace(/\D/g, '');
+          });
+          const mssqlLenDist = {};
+          mssqlNorm.forEach(p => { mssqlLenDist[p.length] = (mssqlLenDist[p.length] || 0) + 1; });
+          const mssqlSamples = mssqlNorm.slice(0, 5).map(p => p ? p.slice(0,3) + '****' + p.slice(-2) : '');
+          out.mssql_buyers = {
+            total_buyers: mssqlBuyers.length,
+            with_phone: mssqlWithPhone.length,
+            normalized_phones: mssqlNorm.filter(p => p.length >= 8).length,
+            length_distribution: mssqlLenDist,
+            normalized_samples: mssqlSamples,
+            raw_samples: mssqlWithPhone.slice(0, 3).map(r => ({ p1: r.p1, p2: r.p2, p3: r.p3, len: ((r.p1||'')+(r.p2||'')+(r.p3||'')).replace(/\D/g, '').length })),
+          };
+
+          // 3) 매칭 통계
+          if (out.dmd && !out.dmd.error) {
+            const dmdSet = await fetchDearMyDearPhones();
+            let matched = 0;
+            const matchedSamples = [];
+            mssqlNorm.forEach(p => {
+              if (p.length >= 8 && dmdSet.has(p)) {
+                matched++;
+                if (matchedSamples.length < 3) matchedSamples.push(p.slice(0,3)+'****'+p.slice(-2));
+              }
+            });
+            out.match = {
+              dmd_set_size: dmdSet.size,
+              mssql_buyers_normalized: mssqlNorm.filter(p => p.length >= 8).length,
+              matched_count: matched,
+              matched_samples: matchedSamples,
+              hint: matched === 0 ? '매칭 0건 — 가능 원인: (1) 정말 0건 (2) phone 형식 차이 (3) hand_phone1/2/3 가 빈값 / S2_UserInfo 컬럼명 다름. length_distribution 비교 + raw_samples 형태 확인.' : '매칭 OK',
+            };
+          }
+          data = out;
+        } catch (err) {
+          console.error('[probe-dmd-phone-match] error:', err.message);
+          data = { ...out, error: err.message };
+        }
       } else if (pathname === '/api/admin/probe-wedding-mysql' && req.method === 'GET') {
         // 디얼디어 MySQL DB (wedding) 스키마 진단 — 회원/예식 관련 테이블/컬럼 자동 탐색.
         //   URL: /api/admin/probe-wedding-mysql
