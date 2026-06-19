@@ -6261,6 +6261,68 @@ const server = http.createServer(async (req, res) => {
             ...results,
           };
         }
+      } else if (pathname === '/api/admin/probe-guest-order-sites' && req.method === 'GET') {
+        // 비회원 (member_id NULL/빈값) 답례품 주문의 주문 사이트 분포.
+        //   URL: /api/admin/probe-guest-order-sites?days=90
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const days = parseInt(parsed.query.days, 10) || 90;
+        try {
+          const pp = await getPool();
+          const r = await pp.request().input('days', sql.Int, days).query(`
+            SELECT order_site, src, COUNT(DISTINCT order_key) AS guest_orders FROM (
+              SELECT
+                'ETC' AS src,
+                ISNULL(os_si.SiteName, ISNULL(co.COMPANY_NAME, '기타')) AS order_site,
+                CONCAT('E', o.order_seq) AS order_key
+              FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+              INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+              INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+              LEFT JOIN COMPANY co WITH (NOLOCK) ON o.company_Seq = co.COMPANY_SEQ
+              LEFT JOIN SiteInfo os_si ON co.SALES_GUBUN = os_si.SiteCode
+              WHERE c.Card_Div = 'D01' AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+                AND o.order_date >= DATEADD(day, -@days, GETDATE())
+                AND (o.member_id IS NULL OR LTRIM(RTRIM(CAST(o.member_id AS NVARCHAR(50)))) = '')
+              UNION ALL
+              SELECT
+                'CARD' AS src,
+                ISNULL(os_si.SiteName, ISNULL(comp.COMPANY_NAME, '기타')) AS order_site,
+                CONCAT('C', cord.order_seq) AS order_key
+              FROM custom_order cord WITH (NOLOCK)
+              INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
+              INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+              LEFT JOIN COMPANY comp WITH (NOLOCK) ON cord.company_Seq = comp.COMPANY_SEQ
+              LEFT JOIN SiteInfo os_si ON comp.SALES_GUBUN = os_si.SiteCode
+              WHERE c.Card_Div = 'D01' AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
+                AND cord.order_date >= DATEADD(day, -@days, GETDATE())
+                AND (cord.member_id IS NULL OR LTRIM(RTRIM(CAST(cord.member_id AS NVARCHAR(50)))) = '')
+            ) t
+            GROUP BY order_site, src
+            ORDER BY guest_orders DESC
+          `);
+          // 사이트별 합계 + src 분포
+          const bySiteTotal = {};
+          r.recordset.forEach(row => {
+            bySiteTotal[row.order_site] = (bySiteTotal[row.order_site] || 0) + row.guest_orders;
+          });
+          const total = Object.values(bySiteTotal).reduce((s, v) => s + v, 0);
+          const distribution = Object.entries(bySiteTotal)
+            .map(([order_site, guest_orders]) => ({
+              order_site, guest_orders,
+              pct: total > 0 ? Math.round(guest_orders / total * 1000) / 10 : 0,
+            }))
+            .sort((a, b) => b.guest_orders - a.guest_orders);
+          data = {
+            days,
+            total_guest_orders: total,
+            distribution,
+            raw_by_src: r.recordset,
+          };
+        } catch (err) {
+          console.error('[probe-guest-order-sites] error:', err.message);
+          data = { error: err.message };
+        }
       } else if (pathname === '/api/admin/probe-buyer-membership' && req.method === 'GET') {
         // 답례품 구매자의 회원 상태 분포 — 비회원/Orphan/정상 회원 비율.
         //   URL: /api/admin/probe-buyer-membership?days=90
