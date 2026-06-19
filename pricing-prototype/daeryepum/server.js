@@ -4787,38 +4787,38 @@ async function apiMarketing(query = {}) {
     ) t GROUP BY order_site ORDER BY order_count DESC
   `);
 
-  // 가입사이트 = 회원의 최초 답례품 주문 사이트 기준 (ETC + CARD 통합)
-  //   디얼디어 매칭: S2_UserInfo.hand_phone1+2+3 → MySQL wedding.users.phone 정규화 매칭
-  //   매칭된 회원은 signup_site 를 '디얼디어' 로 강제 분류 (사용자 정책: 동일 정보가 있는 경우에만).
-  //   raw 데이터 반환 후 JS 에서 phone 매칭 + GROUP BY 집계.
+  // 가입사이트 = 회원이 실제로 가입한 사이트 (S2_UserInfo.REFERER_SALES_GUBUN)
+  //   이전 로직 (최초 답례품 주문 사이트) 은 바른손M카드 회원이 답례품 주문 시
+  //   바른손카드/몰로 이동하므로 M카드가 영원히 0건으로 잡히는 한계 있었음.
+  //   진짜 가입 사이트로 변경 → M카드 가입회원 중 답례품 구매자도 별도 행으로 표시.
+  //   site_div='SB' + USE_YORN='Y' 로 통합회원 중복 제거 + 활성 회원.
+  //   디얼디어 매칭: hand_phone1+2+3 → MySQL wedding.users.phone (CI 진단 진행중, 후속 통합).
   const signupSiteRaw = await p.request().query(`
-    SELECT
-      ISNULL(first_si.SiteName, '기타') AS signup_site,
-      ui.hand_phone1 AS p1, ui.hand_phone2 AS p2, ui.hand_phone3 AS p3
-    FROM (
-      SELECT member_id, SALES_GUBUN,
-             ROW_NUMBER() OVER (PARTITION BY member_id ORDER BY order_date ASC) AS rn
-      FROM (
-        SELECT o.member_id, co.SALES_GUBUN, o.order_date
+    WITH gift_buyer_members AS (
+      SELECT DISTINCT member_id FROM (
+        SELECT o.member_id
         FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
         INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-        LEFT JOIN COMPANY co WITH (NOLOCK) ON o.company_Seq = co.COMPANY_SEQ
         WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
           AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
         UNION ALL
-        SELECT cord.member_id, comp.SALES_GUBUN, cord.order_date
+        SELECT cord.member_id
         FROM custom_order cord WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-        LEFT JOIN COMPANY comp WITH (NOLOCK) ON cord.company_Seq = comp.COMPANY_SEQ
         WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
           AND cord.order_date >= ${MK_FROM} AND cord.order_date < ${MK_TO}
-      ) all_orders
-    ) first_order
-    LEFT JOIN SiteInfo first_si ON first_order.SALES_GUBUN = first_si.SiteCode
-    LEFT JOIN S2_UserInfo ui WITH (NOLOCK) ON first_order.member_id = ui.uid
-    WHERE first_order.rn = 1
+      ) u
+      WHERE member_id IS NOT NULL
+    )
+    SELECT
+      ISNULL(ref_si.SiteName, '기타') AS signup_site,
+      ui.hand_phone1 AS p1, ui.hand_phone2 AS p2, ui.hand_phone3 AS p3
+    FROM gift_buyer_members gbm
+    INNER JOIN S2_UserInfo ui WITH (NOLOCK) ON gbm.member_id = ui.uid
+    LEFT JOIN SiteInfo ref_si ON ui.REFERER_SALES_GUBUN = ref_si.SiteCode
+    WHERE ui.site_div = 'SB' AND ui.USE_YORN = 'Y'
   `);
   // 디얼디어 phone 매칭 + 집계 (JS) — 기존 signupSiteResult 인터페이스 호환 위해 recordset 모방
   const _dmdPhones = await fetchDearMyDearPhones();
@@ -4857,20 +4857,23 @@ async function apiMarketing(query = {}) {
       WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
         AND cord.order_date >= ${MK_FROM} AND cord.order_date < ${MK_TO}
     ),
-    first_site AS (
-      SELECT member_id, SALES_GUBUN AS first_sg,
-             ROW_NUMBER() OVER (PARTITION BY member_id ORDER BY order_date ASC) AS rn
-      FROM all_gift_orders
+    -- 가입 사이트 = S2_UserInfo.REFERER_SALES_GUBUN (signupSiteRaw 와 동일 정책)
+    --   이전 (최초 주문 사이트) 은 M카드 회원이 영원히 0건이라 부정확.
+    --   통합회원 site_div='SB' + USE_YORN='Y' 활성 회원만.
+    referer_site AS (
+      SELECT u.uid AS member_id, u.REFERER_SALES_GUBUN AS referer_sg
+      FROM S2_UserInfo u WITH (NOLOCK)
+      WHERE u.site_div = 'SB' AND u.USE_YORN = 'Y'
     )
     SELECT
-      ISNULL(fs_si.SiteName, '기타') AS signup_site,
+      ISNULL(rs_si.SiteName, '기타') AS signup_site,
       ISNULL(os_si.SiteName, '기타') AS order_site,
       COUNT(DISTINCT ago.order_key) AS order_count
     FROM all_gift_orders ago
     LEFT JOIN SiteInfo os_si ON ago.SALES_GUBUN = os_si.SiteCode
-    INNER JOIN first_site fs ON ago.member_id = fs.member_id AND fs.rn = 1
-    LEFT JOIN SiteInfo fs_si ON fs.first_sg = fs_si.SiteCode
-    GROUP BY ISNULL(fs_si.SiteName, '기타'), ISNULL(os_si.SiteName, '기타')
+    INNER JOIN referer_site rs ON ago.member_id = rs.member_id
+    LEFT JOIN SiteInfo rs_si ON rs.referer_sg = rs_si.SiteCode
+    GROUP BY ISNULL(rs_si.SiteName, '기타'), ISNULL(os_si.SiteName, '기타')
     ORDER BY order_count DESC
   `);
 
