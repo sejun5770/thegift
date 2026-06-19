@@ -4861,12 +4861,36 @@ async function apiMarketing(query = {}) {
     const dup = String(row.dupinfo || '').trim();
     if (dup.length >= 32 && _dmdDupInfos.has(dup)) _dmdMatchedCount++;
   });
+  // 비회원 주문 — member_id NULL/빈값 (회원 가입 안 한 게스트 결제). 주문 단위 카운트.
+  //   회원 행은 회원 단위 (1회원 = 1행), 비회원은 주문 단위라 단위 차이 있음 → 라벨에 명시.
+  const guestOrdersRes = await p.request().query(`
+    SELECT COUNT(DISTINCT order_key) AS guest_orders
+    FROM (
+      SELECT o.member_id, CONCAT('E', o.order_seq) AS order_key
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+        AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
+      UNION ALL
+      SELECT cord.member_id, CONCAT('C', cord.order_seq) AS order_key
+      FROM custom_order cord WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
+        AND cord.order_date >= ${MK_FROM} AND cord.order_date < ${MK_TO}
+    ) u
+    WHERE member_id IS NULL OR LTRIM(RTRIM(CAST(member_id AS NVARCHAR(50)))) = ''
+  `);
+  const guestCount = guestOrdersRes.recordset[0]?.guest_orders || 0;
+  if (guestCount > 0) _signupCounts['비회원'] = guestCount;
   const signupSiteResult = {
     recordset: Object.entries(_signupCounts)
       .map(([signup_site, member_count]) => ({ signup_site, member_count }))
       .sort((a, b) => b.member_count - a.member_count),
     dearMyDearMatchedCount: _dmdMatchedCount,
-    dearMyDearTotalSetSize: _dmdDupInfos.size, // 디얼디어 전체 회원수 (DI 기준)
+    dearMyDearTotalSetSize: _dmdDupInfos.size,
+    guestOrderCount: guestCount,
   };
 
   // 사이트 상관관계 (가입사이트 → 주문사이트 크로스탭) - ETC + CARD 통합
