@@ -3941,9 +3941,40 @@ async function fetchDearMyDearWeddingDates(startDateStr, endDateExclStr) {
 }
 
 // ============================================
-// 디얼디어 (wedding MySQL DB) 회원 전화번호 set — 가입 사이트 분포 매칭용
-//   users.phone 의 숫자만 추출 (길이 >= 8 — 너무 짧은 잘못된 phone 노이즈 제거).
-//   결과 Set 으로 답례품 주문자 phone 과 정확 매칭. 미설정/실패 시 빈 Set.
+// 디얼디어 (wedding MySQL DB) 회원 DupInfo (DI) Set — 본인인증 ID 매칭용
+//   users.dupinfo 평문 (NICE/KCB DI, ~64자) → MSSQL S2_UserInfo.DupInfo 와 정확 매칭.
+//   phone 은 Laravel encrypted 라 매칭 불가, 대신 본인인증 DI 사용 (가장 정확한 회원 식별자).
+//   10분 캐시. 미설정/실패 시 빈 Set.
+// ============================================
+let _dmdDupInfosCache = null;
+let _dmdDupInfosCacheTs = 0;
+async function fetchDearMyDearDupInfos() {
+  if (!process.env.MYSQL_HOST) return new Set();
+  const TTL_MS = 10 * 60 * 1000;
+  if (_dmdDupInfosCache && Date.now() - _dmdDupInfosCacheTs < TTL_MS) return _dmdDupInfosCache;
+  try {
+    const mp = await getMysqlPool();
+    const [rows] = await mp.query(`
+      SELECT DISTINCT dupinfo FROM users
+      WHERE is_test = 'F' AND dupinfo IS NOT NULL AND dupinfo <> ''
+    `);
+    const set = new Set();
+    rows.forEach(r => {
+      const v = String(r.dupinfo || '').trim();
+      if (v.length >= 32) set.add(v); // 너무 짧은 잘못된 값 노이즈 제거 (정상은 64자)
+    });
+    _dmdDupInfosCache = set;
+    _dmdDupInfosCacheTs = Date.now();
+    return set;
+  } catch (e) {
+    console.warn('[fetchDearMyDearDupInfos] MySQL 조회 실패:', e.message);
+    return new Set();
+  }
+}
+
+// ============================================
+// 디얼디어 (wedding MySQL DB) 회원 전화번호 set — (phone 은 Laravel encrypted 라 deprecated)
+//   probe endpoint 검증 용도로만 유지. 매칭 0건 확인됨.
 // ============================================
 let _dmdPhonesCache = null;
 let _dmdPhonesCacheTs = 0;
@@ -4788,11 +4819,9 @@ async function apiMarketing(query = {}) {
   `);
 
   // 가입사이트 = 회원이 실제로 가입한 사이트 (S2_UserInfo.REFERER_SALES_GUBUN)
-  //   이전 로직 (최초 답례품 주문 사이트) 은 바른손M카드 회원이 답례품 주문 시
-  //   바른손카드/몰로 이동하므로 M카드가 영원히 0건으로 잡히는 한계 있었음.
-  //   진짜 가입 사이트로 변경 → M카드 가입회원 중 답례품 구매자도 별도 행으로 표시.
+  //   바른손M카드 가입회원 중 답례품 구매자도 별도 행으로 표시.
   //   site_div='SB' + USE_YORN='Y' 로 통합회원 중복 제거 + 활성 회원.
-  //   디얼디어 매칭: hand_phone1+2+3 → MySQL wedding.users.phone (CI 진단 진행중, 후속 통합).
+  //   디얼디어 매칭: DupInfo (NICE/KCB 본인인증 DI) — MySQL users.dupinfo ↔ MSSQL DupInfo 정확 매칭.
   const signupSiteRaw = await p.request().query(`
     WITH gift_buyer_members AS (
       SELECT DISTINCT member_id FROM (
@@ -4814,19 +4843,19 @@ async function apiMarketing(query = {}) {
     )
     SELECT
       ISNULL(ref_si.SiteName, '기타') AS signup_site,
-      ui.hand_phone1 AS p1, ui.hand_phone2 AS p2, ui.hand_phone3 AS p3
+      ui.DupInfo AS dupinfo
     FROM gift_buyer_members gbm
     INNER JOIN S2_UserInfo ui WITH (NOLOCK) ON gbm.member_id = ui.uid
     LEFT JOIN SiteInfo ref_si ON ui.REFERER_SALES_GUBUN = ref_si.SiteCode
     WHERE ui.site_div = 'SB' AND ui.USE_YORN = 'Y'
   `);
-  // 디얼디어 phone 매칭 + 집계 (JS) — 기존 signupSiteResult 인터페이스 호환 위해 recordset 모방
-  const _dmdPhones = await fetchDearMyDearPhones();
+  // 디얼디어 DupInfo 매칭 + 집계 (JS) — 기존 signupSiteResult 인터페이스 호환.
+  const _dmdDupInfos = await fetchDearMyDearDupInfos();
   const _signupCounts = {};
   let _dmdMatchedCount = 0;
   signupSiteRaw.recordset.forEach(row => {
-    const phoneNorm = String((row.p1 || '') + (row.p2 || '') + (row.p3 || '')).replace(/\D/g, '');
-    const isDmd = phoneNorm.length >= 8 && _dmdPhones.has(phoneNorm);
+    const dup = String(row.dupinfo || '').trim();
+    const isDmd = dup.length >= 32 && _dmdDupInfos.has(dup);
     const site = isDmd ? '디얼디어' : row.signup_site;
     _signupCounts[site] = (_signupCounts[site] || 0) + 1;
     if (isDmd) _dmdMatchedCount++;
