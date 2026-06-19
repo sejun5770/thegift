@@ -5847,6 +5847,124 @@ const server = http.createServer(async (req, res) => {
             ...results,
           };
         }
+      } else if (pathname === '/api/admin/probe-dmd-ci-match' && req.method === 'GET') {
+        // 디얼디어 dupinfo/conninfo ↔ MSSQL S2_UserInfo CI/DI 매칭 가능성 진단.
+        //   URL: /api/admin/probe-dmd-ci-match
+        // 응답:
+        //   · mysql.dupinfo_samples: 평문/암호화 여부 식별 (Laravel encrypted 인지)
+        //   · mysql.conninfo_samples: 동일
+        //   · mssql.user_columns: S2_UserInfo 의 CI/DI 관련 컬럼 후보
+        //   · mssql.ci_samples: 후보 컬럼별 샘플 (마스킹)
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const out = {};
+        try {
+          // 1) MySQL: dupinfo, conninfo 샘플 + 길이/형식 확인
+          if (!process.env.MYSQL_HOST) {
+            out.mysql = { error: 'MYSQL_* 환경변수 미설정' };
+          } else {
+            const mp = await getMysqlPool();
+            const [rows] = await mp.query(`
+              SELECT dupinfo, conninfo FROM users
+              WHERE is_test = 'F' AND (dupinfo IS NOT NULL OR conninfo IS NOT NULL)
+              LIMIT 10
+            `);
+            const dupSamples = rows.map(r => r.dupinfo).filter(Boolean).slice(0, 5);
+            const conSamples = rows.map(r => r.conninfo).filter(Boolean).slice(0, 5);
+            // 길이 분포 (전체)
+            const [stat] = await mp.query(`
+              SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN dupinfo IS NOT NULL AND dupinfo <> '' THEN 1 ELSE 0 END) AS with_dupinfo,
+                SUM(CASE WHEN conninfo IS NOT NULL AND conninfo <> '' THEN 1 ELSE 0 END) AS with_conninfo,
+                AVG(LENGTH(dupinfo)) AS avg_dupinfo_len,
+                AVG(LENGTH(conninfo)) AS avg_conninfo_len
+              FROM users WHERE is_test = 'F'
+            `);
+            // 마스킹 (앞 8자 + ... + 뒤 4자)
+            const mask = (s) => {
+              if (!s) return null;
+              const str = String(s);
+              if (str.length <= 12) return str.slice(0, 2) + '****' + str.slice(-2);
+              return str.slice(0, 8) + '...' + str.slice(-4);
+            };
+            // Laravel encrypted 여부 추정 (eyJpdiI6 prefix = base64 인코딩된 {"iv":..)
+            const isLaravelEncrypted = (s) => String(s || '').startsWith('eyJpdiI6');
+            out.mysql = {
+              stats: stat[0],
+              dupinfo: {
+                samples_masked: dupSamples.map(mask),
+                looks_laravel_encrypted: dupSamples.length > 0 && dupSamples.every(isLaravelEncrypted),
+                avg_length: stat[0].avg_dupinfo_len,
+              },
+              conninfo: {
+                samples_masked: conSamples.map(mask),
+                looks_laravel_encrypted: conSamples.length > 0 && conSamples.every(isLaravelEncrypted),
+                avg_length: stat[0].avg_conninfo_len,
+              },
+            };
+          }
+
+          // 2) MSSQL: S2_UserInfo 의 모든 컬럼 + CI/DI 후보 추출
+          const pp = await getPool();
+          const colsRes = await pp.request().query(`
+            SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_NAME = 'S2_UserInfo'
+            ORDER BY ORDINAL_POSITION
+          `);
+          const allCols = colsRes.recordset;
+          const ciRe = /^(ci|di|dupinfo|conninfo|cidi|user_ci|user_di)$/i;
+          const ciLikeRe = /ci|di|dupinfo|conninfo|impid|nice|cretop/i;
+          const exactMatches = allCols.filter(c => ciRe.test(c.COLUMN_NAME));
+          const fuzzyMatches = allCols.filter(c => ciLikeRe.test(c.COLUMN_NAME) && !ciRe.test(c.COLUMN_NAME));
+          out.mssql = {
+            total_columns: allCols.length,
+            exact_ci_di_columns: exactMatches,
+            fuzzy_ci_di_columns: fuzzyMatches,
+            all_column_names: allCols.map(c => c.COLUMN_NAME),
+          };
+
+          // 3) MSSQL: 후보 컬럼별 샘플 + non-null 비율 (최대 5개 컬럼)
+          const tryCols = [...exactMatches, ...fuzzyMatches].slice(0, 5);
+          const samples = {};
+          for (const col of tryCols) {
+            try {
+              const sampleRes = await pp.request().query(`
+                SELECT TOP 5 [${col.COLUMN_NAME}] AS val FROM S2_UserInfo WITH (NOLOCK)
+                WHERE [${col.COLUMN_NAME}] IS NOT NULL AND CAST([${col.COLUMN_NAME}] AS NVARCHAR(MAX)) <> ''
+              `);
+              const cntRes = await pp.request().query(`
+                SELECT
+                  COUNT(*) AS total,
+                  SUM(CASE WHEN [${col.COLUMN_NAME}] IS NOT NULL AND CAST([${col.COLUMN_NAME}] AS NVARCHAR(MAX)) <> '' THEN 1 ELSE 0 END) AS with_val
+                FROM S2_UserInfo WITH (NOLOCK)
+              `);
+              const mask = (s) => {
+                if (!s) return null;
+                const str = String(s);
+                if (str.length <= 12) return str.slice(0, 2) + '****' + str.slice(-2);
+                return str.slice(0, 8) + '...' + str.slice(-4);
+              };
+              samples[col.COLUMN_NAME] = {
+                type: col.DATA_TYPE,
+                max_length: col.CHARACTER_MAXIMUM_LENGTH,
+                samples_masked: sampleRes.recordset.map(r => mask(r.val)),
+                fill_rate: cntRes.recordset[0],
+              };
+            } catch (e) {
+              samples[col.COLUMN_NAME] = { error: e.message };
+            }
+          }
+          out.mssql_samples = samples;
+
+          out.hint = '· mysql.dupinfo/conninfo 가 looks_laravel_encrypted=true 면 평문 매칭 불가, Laravel APP_KEY 필요\n· mssql.exact_ci_di_columns 가 비어있으면 MSSQL 에 CI/DI 컬럼 없음 (가입 시 본인인증 안 받음 = 매칭 불가)\n· 양쪽 다 평문 + 컬럼 존재하면 정확 매칭 가능';
+          data = out;
+        } catch (err) {
+          console.error('[probe-dmd-ci-match] error:', err.message);
+          data = { ...out, error: err.message };
+        }
       } else if (pathname === '/api/admin/probe-dmd-phone-match' && req.method === 'GET') {
         // 디얼디어 회원 ↔ 답례품 구매자 phone 매칭 진단.
         //   URL: /api/admin/probe-dmd-phone-match?days=90
