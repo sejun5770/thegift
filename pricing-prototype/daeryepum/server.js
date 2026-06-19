@@ -5703,21 +5703,31 @@ const server = http.createServer(async (req, res) => {
       } else if (pathname === '/api/admin/probe-wedding-mysql' && req.method === 'GET') {
         // 디얼디어 MySQL DB (wedding) 스키마 진단 — 회원/예식 관련 테이블/컬럼 자동 탐색.
         //   URL: /api/admin/probe-wedding-mysql
-        //         /api/admin/probe-wedding-mysql?describe=<table>  ← 특정 테이블 컬럼 전체
-        //         /api/admin/probe-wedding-mysql?sample=<table>    ← 상위 5행 샘플 (PII 노출 주의)
+        //         /api/admin/probe-wedding-mysql?describe=<table>           ← 단일 테이블
+        //         /api/admin/probe-wedding-mysql?describe=t1,t2,t3          ← 콤마 구분 멀티
+        //         /api/admin/probe-wedding-mysql?sample=<table>             ← 상위 5행 샘플 (PII)
         if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
           return denyForbidden(res, 'admin/operator 필요');
         }
         try {
           const mp = await getMysqlPool();
           const out = { db: process.env.MYSQL_DATABASE };
-          // 단일 테이블 모드
-          const describeTable = (parsed.query.describe || '').trim();
+          // 단일/멀티 테이블 모드 — 콤마 구분 지원
+          const describeRaw = (parsed.query.describe || '').trim();
           const sampleTable = (parsed.query.sample || '').trim();
-          if (describeTable && /^[A-Za-z0-9_]+$/.test(describeTable)) {
-            const [cols] = await mp.query(`DESCRIBE \`${describeTable}\``);
-            const [cnt] = await mp.query(`SELECT COUNT(*) AS n FROM \`${describeTable}\``);
-            out.describe = { table: describeTable, columns: cols, row_count: cnt[0].n };
+          const describeList = describeRaw
+            ? describeRaw.split(',').map(s => s.trim()).filter(s => /^[A-Za-z0-9_]+$/.test(s)).slice(0, 10)
+            : [];
+          if (describeList.length > 0) {
+            const result = {};
+            for (const t of describeList) {
+              try {
+                const [cols] = await mp.query(`DESCRIBE \`${t}\``);
+                const [cnt] = await mp.query(`SELECT COUNT(*) AS n FROM \`${t}\``);
+                result[t] = { columns: cols, row_count: cnt[0].n };
+              } catch (e) { result[t] = { error: e.message }; }
+            }
+            out.describe = result;
             data = out;
           } else if (sampleTable && /^[A-Za-z0-9_]+$/.test(sampleTable)) {
             const [rows] = await mp.query(`SELECT * FROM \`${sampleTable}\` LIMIT 5`);
