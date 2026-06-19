@@ -6287,6 +6287,185 @@ const server = http.createServer(async (req, res) => {
             ...results,
           };
         }
+      } else if (pathname === '/api/admin/campaign-impact-analysis' && req.method === 'GET') {
+        // 캠페인 적용 상품 매출 영향 분석 (캠페인 기간 vs 직전 동기간 비교).
+        //   URL: /api/admin/campaign-impact-analysis?codes=TGJBK01D1,TGJBK04D1,...&start=2026-06-11&end=2026-06-18
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const codesRaw = (parsed.query.codes || '').trim();
+        const codes = codesRaw.split(',').map(s => s.trim()).filter(Boolean);
+        const start = (parsed.query.start || '').trim();
+        const end = (parsed.query.end || '').trim();
+        if (!codes.length) return json(res, { error: 'codes 인자 필수 (콤마 구분)' }, 400);
+        if (codes.length > 20) return json(res, { error: '최대 20개 코드' }, 400);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+          return json(res, { error: 'start/end YYYY-MM-DD' }, 400);
+        }
+        try {
+          const pp = await getPool();
+          // 기간 길이 + 직전 동기간 계산
+          const daysInRange = Math.round((new Date(end) - new Date(start)) / 86400000) + 1;
+          const prevEnd = new Date(new Date(start).getTime() - 86400000);
+          const prevStart = new Date(prevEnd.getTime() - (daysInRange - 1) * 86400000);
+          const fmtKstDate = (d) => d.toISOString().slice(0, 10);
+          const prevStartStr = fmtKstDate(prevStart);
+          const prevEndStr = fmtKstDate(prevEnd);
+
+          // 매출 조회 — BASE 매칭 (= OR LIKE base[_]%)
+          async function fetchRange(s, e) {
+            const req = pp.request().input('s', sql.VarChar, s).input('e', sql.VarChar, e);
+            const matchClause = codes.map((c, i) => {
+              req.input('pc' + i, sql.VarChar, c);
+              return `(c.Card_Code = @pc${i} OR c.Card_Code LIKE @pc${i} + '[_]%')`;
+            }).join(' OR ');
+            const r = await req.query(`
+              SELECT order_day, card_code, card_name, SUM(qty) AS qty, SUM(revenue) AS revenue
+              FROM (
+                SELECT
+                  CONVERT(varchar(10), o.order_date, 120) AS order_day,
+                  c.Card_Code AS card_code, c.Card_Name AS card_name,
+                  oi.order_count AS qty,
+                  CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1) AS revenue
+                FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                WHERE (${matchClause})
+                  AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+                  AND o.order_date >= @s AND o.order_date < DATEADD(day, 1, @e)
+                UNION ALL
+                SELECT
+                  CONVERT(varchar(10), co.order_date, 120),
+                  c.Card_Code, c.Card_Name,
+                  coi.item_count,
+                  CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                FROM custom_order co WITH (NOLOCK)
+                INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+                INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                WHERE (${matchClause})
+                  AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+                  AND co.order_date >= @s AND co.order_date < DATEADD(day, 1, @e)
+              ) t
+              GROUP BY order_day, card_code, card_name
+              ORDER BY order_day, card_code
+            `);
+            return r.recordset.map(row => ({
+              order_day: row.order_day,
+              card_code: row.card_code,
+              card_name: row.card_name,
+              qty: row.qty || 0,
+              revenue: Math.round(row.revenue || 0),
+            }));
+          }
+
+          // BASE 추출 helper
+          const toBase = (code) => {
+            if (!code) return code;
+            const m = String(code).match(/^(.+)_[A-Za-z0-9]+$/);
+            return m ? m[1] : code;
+          };
+          const cleanName = (n) => String(n || '').replace(/^\[.*?\]\s*/g, '').trim();
+
+          // 집계 helper
+          const aggregate = (rows) => {
+            const byDay = {};
+            const byProduct = {};
+            let totalRev = 0, totalQty = 0;
+            rows.forEach(r => {
+              totalRev += r.revenue;
+              totalQty += r.qty;
+              if (!byDay[r.order_day]) byDay[r.order_day] = { revenue: 0, qty: 0, orders: 0 };
+              byDay[r.order_day].revenue += r.revenue;
+              byDay[r.order_day].qty += r.qty;
+              // BASE 단위로 상품 그룹
+              const base = toBase(r.card_code);
+              if (!byProduct[base]) byProduct[base] = { product_code: base, names: new Set(), revenue: 0, qty: 0, variants: new Set() };
+              byProduct[base].names.add(cleanName(r.card_name));
+              byProduct[base].revenue += r.revenue;
+              byProduct[base].qty += r.qty;
+              byProduct[base].variants.add(r.card_code);
+            });
+            return {
+              by_day: Object.entries(byDay)
+                .map(([order_day, v]) => ({ order_day, ...v, avg_unit_price: v.qty > 0 ? Math.round(v.revenue / v.qty) : 0 }))
+                .sort((a, b) => a.order_day.localeCompare(b.order_day)),
+              by_product: Object.values(byProduct)
+                .map(p => ({
+                  product_code: p.product_code,
+                  names: [...p.names].filter(Boolean),
+                  variants: [...p.variants].sort(),
+                  revenue: p.revenue, qty: p.qty,
+                  avg_unit_price: p.qty > 0 ? Math.round(p.revenue / p.qty) : 0,
+                }))
+                .sort((a, b) => b.revenue - a.revenue),
+              total_revenue: totalRev,
+              total_qty: totalQty,
+              total_orders_estimate: rows.length, // 1 row = 1 order_day × card_code 조합
+              avg_unit_price: totalQty > 0 ? Math.round(totalRev / totalQty) : 0,
+            };
+          };
+
+          const [campaignRows, prevRows] = await Promise.all([
+            fetchRange(start, end),
+            fetchRange(prevStartStr, prevEndStr),
+          ]);
+          const campaign = aggregate(campaignRows);
+          const prev = aggregate(prevRows);
+
+          // delta 계산
+          const pctChange = (cur, prv) => prv > 0 ? Math.round((cur - prv) / prv * 1000) / 10 : (cur > 0 ? null : 0);
+          // 상품별 비교 (BASE 매칭)
+          const prevByProduct = new Map(prev.by_product.map(p => [p.product_code, p]));
+          const productDelta = campaign.by_product.map(c => {
+            const p = prevByProduct.get(c.product_code);
+            const prevRev = p ? p.revenue : 0;
+            const prevQty = p ? p.qty : 0;
+            const prevUnit = p ? p.avg_unit_price : 0;
+            return {
+              product_code: c.product_code,
+              names: c.names,
+              campaign_revenue: c.revenue, prev_revenue: prevRev,
+              campaign_qty: c.qty, prev_qty: prevQty,
+              campaign_unit_price: c.avg_unit_price, prev_unit_price: prevUnit,
+              revenue_delta_pct: pctChange(c.revenue, prevRev),
+              qty_delta_pct: pctChange(c.qty, prevQty),
+              unit_price_delta_pct: pctChange(c.avg_unit_price, prevUnit),
+            };
+          });
+
+          // 인사이트
+          const topRevDay = campaign.by_day.reduce((a, b) => (b.revenue > (a?.revenue || 0) ? b : a), null);
+          const lowRevDay = campaign.by_day.filter(d => d.revenue > 0).reduce((a, b) => (b.revenue < (a?.revenue || Infinity) ? b : a), null);
+
+          data = {
+            period: {
+              campaign: `${start} ~ ${end}`,
+              prev: `${prevStartStr} ~ ${prevEndStr}`,
+              days_in_range: daysInRange,
+            },
+            requested_codes: codes,
+            campaign,
+            prev,
+            delta: {
+              revenue_delta_pct: pctChange(campaign.total_revenue, prev.total_revenue),
+              qty_delta_pct: pctChange(campaign.total_qty, prev.total_qty),
+              unit_price_delta_pct: pctChange(campaign.avg_unit_price, prev.avg_unit_price),
+              by_product: productDelta,
+            },
+            insights: {
+              top_revenue_day: topRevDay,
+              lowest_revenue_day: lowRevDay,
+              campaign_avg_unit_price: campaign.avg_unit_price,
+              prev_avg_unit_price: prev.avg_unit_price,
+              // 할인 추정 — 평균 단가 감소율 (단순 추정)
+              estimated_discount_pct: prev.avg_unit_price > 0 ? Math.round((prev.avg_unit_price - campaign.avg_unit_price) / prev.avg_unit_price * 1000) / 10 : null,
+            },
+            hint: '캠페인 평균 단가가 전기 대비 낮으면 할인 효과. 수량 ↑ 매출 ↑ 면 캠페인 성공 (price elasticity 작동). 수량 ↑ 매출 ↓ 면 할인 폭이 너무 큼.',
+          };
+        } catch (err) {
+          console.error('[campaign-impact-analysis] error:', err.message);
+          data = { error: err.message };
+        }
       } else if (pathname === '/api/admin/probe-ci-product-name' && req.method === 'GET') {
         // 정보입력현황 (bg_order_customer_info.sticker_selections JSONB) 의 product_name 패턴 검색.
         //   배경: 매출 SQL 의 S2_Card.Card_Name 은 운영자가 시점별로 prefix 변경 가능 (할인율 등).
