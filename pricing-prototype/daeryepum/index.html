@@ -10890,15 +10890,22 @@ function renderWeddingCalendar(data) {
         const dayNum = day.date.slice(8, 10).replace(/^0/, '');
         const isToday = day.date === fmt(new Date());
         const outOfMonth = !day.in_month;
-        const cellColor = outOfMonth ? 'color:#cbd5e1' : (di === 0 ? 'color:#dc2626' : (di === 6 ? 'color:#2563eb' : ''));
-        const bg = isToday ? 'background:#fef9c3' : '';
-        // 사이트 첫 행에만 날짜 수치 (small) 노출 — 캡쳐 패턴: 셀에 카운트, 일자는 상단 헤더 없음
-        // 캡쳐와 동일하게 각 셀에 수치만 노출 (1주차 첫 행의 일자=31,1,2,3,4,5,6 같은 작은 표시는 헤더로는 X)
-        // 다만 첫 행에서 일자 보조 표기로 readability ↑
+        // 월 외 + 데이터 있음 → 회색 톤 + dashed border 로 시각적 구분 (전월/익월 데이터)
+        //   월 외 + 0 → 빈 칸 (기존 동작 유지)
+        //   월 내 → 정상 표시
+        const hasData = v > 0;
+        const cellColor = outOfMonth
+          ? (hasData ? 'color:#94a3b8' : 'color:#cbd5e1')
+          : (di === 0 ? 'color:#dc2626' : (di === 6 ? 'color:#2563eb' : ''));
+        const bg = isToday ? 'background:#fef9c3' : (outOfMonth && hasData ? 'background:#f8fafc' : '');
+        const border = outOfMonth && hasData ? 'border:1px dashed #cbd5e1' : 'border:1px solid var(--gray-200)';
         const dateHint = (i === 0)
           ? `<div style="font-size:9px;color:${outOfMonth ? '#cbd5e1' : 'var(--gray-400)'};margin-bottom:1px">${dayNum}</div>`
           : '';
-        tbody += `<td style="padding:4px 6px;border:1px solid var(--gray-200);text-align:right;${cellColor};${bg}">${dateHint}<span style="font-weight:${isSum?600:400}">${v || (outOfMonth ? '' : 0)}</span></td>`;
+        const displayVal = outOfMonth
+          ? (hasData ? v : '')   // 월 외: 데이터 있을 때만 표시 (0은 공란)
+          : (v || 0);            // 월 내: 0도 표시
+        tbody += `<td style="padding:4px 6px;${border};text-align:right;${cellColor};${bg}" title="${day.date}${outOfMonth?' (전월/익월)':''}">${dateHint}<span style="font-weight:${isSum?600:400}">${displayVal}</span></td>`;
       });
       // 주 합계 (행별)
       const rowSum = isSum
@@ -10973,7 +10980,9 @@ function copyWeddingCalendar(scope) {
         const v = isSum
           ? WC_SITES.reduce((s, sName) => s + (wk.by_site[sName]?.[di] || 0), 0)
           : (wk.by_site[site]?.[di] || 0);
-        return day.in_month ? String(v) : '';
+        // 월 외 셀: 데이터 있을 때만 포함 (0은 빈 칸 — 캡쳐 정합성). 월 내 셀: 0도 표시.
+        if (!day.in_month) return v > 0 ? String(v) : '';
+        return String(v);
       });
       const rowSum = isSum
         ? wk.week_total

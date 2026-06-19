@@ -4061,7 +4061,10 @@ async function apiWeddingCalendar(query = {}) {
       days.push({ date: key, day_of_week: dt.getDay(), in_month: inMonth });
       const cell = dailyMap[key] || {};
       ALL_SITES.forEach(s => {
-        const v = inMonth ? (cell[s] || 0) : 0; // 월 외 셀은 0 (캡쳐와 동일 — 회색 처리)
+        // 월 외 셀도 실제 값 노출 — 첫째 주(이전 월 말일), 마지막 주(다음 월 초)
+        //   week_total 도 7일 전체 합으로 더 정확해짐.
+        //   month_summary 만 in_month 분기 유지 (정확한 월 통합).
+        const v = cell[s] || 0;
         bySite[s].push(v);
         weekTotalBySite[s] += v;
         weekTotal += v;
