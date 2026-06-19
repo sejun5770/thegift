@@ -757,6 +757,14 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       // 데코는 Unit_Value 가 1 인 경우가 있어 분모 적용시 매출 왜곡 발생 → skip
       const skipUnitValue = query.category === 'deco';
       const cardUnitDivisor = skipUnitValue ? '1' : 'ISNULL(NULLIF(c.Unit_Value, 0), 1)';
+      // BASE 코드 추출 (TGJSD01O4_A → TGJSD01O4) — 마지막 _XXX (영숫자만) 제거.
+      //   사용자 정책: 동일 BASE 의 변형 (_A/_B/_C 캠페인별 분리) 을 단일 상품으로 통합.
+      const baseCodeExpr = (col) => `CASE
+        WHEN CHARINDEX('_', REVERSE(${col})) > 0
+          AND RIGHT(${col}, CHARINDEX('_', REVERSE(${col})) - 1) NOT LIKE '%[^A-Za-z0-9]%'
+        THEN LEFT(${col}, LEN(${col}) - CHARINDEX('_', REVERSE(${col})))
+        ELSE ${col}
+      END`;
       const pool = await getPool();
       const r = await pool.request().input('s', sql.VarChar, startStr).query(`
         WITH card_agg AS (
@@ -798,20 +806,23 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
             AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
           GROUP BY c.Card_Code
         )
-        SELECT code, MAX(name) AS name,
-               SUM(qty) AS total_qty,
-               SUM(revenue) AS total_revenue,
-               MAX(last_sold) AS last_sold_at
+        SELECT ${baseCodeExpr('u.code')} AS code,
+               MAX(u.name) AS name,
+               SUM(u.qty) AS total_qty,
+               SUM(u.revenue) AS total_revenue,
+               MAX(u.last_sold) AS last_sold_at,
+               COUNT(DISTINCT u.code) AS variant_count
         FROM (SELECT * FROM card_agg UNION ALL SELECT * FROM etc_agg) AS u
-        GROUP BY code
-        ORDER BY SUM(revenue) DESC
+        GROUP BY ${baseCodeExpr('u.code')}
+        ORDER BY SUM(u.revenue) DESC
       `);
       return json(res, r.recordset.map(row => ({
-        card_code: row.code,
+        card_code: row.code, // BASE 코드 (변형 통합)
         card_name: (row.name || '').replace(/^\[.*?\]\s*/g, ''),
         total_qty: row.total_qty || 0,
         total_revenue: Math.round(row.total_revenue || 0),
         last_sold_at: row.last_sold_at,
+        variant_count: row.variant_count || 1, // 통합된 변형(_A/_B/_C) 개수
       })));
     } catch (err) {
       console.error('[products/sales-list] error:', err.message);

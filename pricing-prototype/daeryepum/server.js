@@ -1122,14 +1122,15 @@ async function apiProductStats(query) {
     prevEndPlus = fmtDate(addDays(new Date(prevEnd + 'T00:00:00'), 1));
   }
 
-  /** 공통 쿼리 (기간, 상품코드 리스트 → 일별 집계 rows) */
+  /** 공통 쿼리 (기간, 상품코드 리스트 → 일별 집계 rows)
+   *   매칭 정책: 입력 코드(BASE) 와 정확 일치 OR 입력 코드 + '_' 변형 (_A/_B/_C 등) LIKE 매칭. */
   async function queryRange(codes, s, e) {
-    // IN 절 (code1, code2 ...) 파라미터화
     const req = p.request().input('s', sql.VarChar, s).input('e', sql.VarChar, e);
-    const placeholders = codes.map((c, i) => {
+    // 각 코드마다 (= OR LIKE) 절 생성 → OR 로 결합
+    const matchClause = codes.map((c, i) => {
       req.input('pc' + i, sql.VarChar, c);
-      return '@pc' + i;
-    }).join(',');
+      return `(c.Card_Code = @pc${i} OR c.Card_Code LIKE @pc${i} + '[_]%')`;
+    }).join(' OR ');
 
     const card = await req.query(`
       SELECT c.Card_Code AS card_code, MAX(c.Card_Name) AS card_name,
@@ -1146,14 +1147,17 @@ async function apiProductStats(query) {
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
-      WHERE c.Card_Code IN (${placeholders})
+      WHERE (${matchClause})
         AND co.order_date >= @s AND co.order_date < @e
         AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
       GROUP BY c.Card_Code, CAST(co.order_date AS DATE), co.order_seq
     `);
 
     const req2 = p.request().input('s', sql.VarChar, s).input('e', sql.VarChar, e);
-    codes.forEach((c, i) => req2.input('pc' + i, sql.VarChar, c));
+    const matchClause2 = codes.map((c, i) => {
+      req2.input('pc' + i, sql.VarChar, c);
+      return `(c.Card_Code = @pc${i} OR c.Card_Code LIKE @pc${i} + '[_]%')`;
+    }).join(' OR ');
     const etc = await req2.query(`
       SELECT c.Card_Code AS card_code, MAX(c.Card_Name) AS card_name,
              CAST(o.order_date AS DATE) AS d, o.order_seq,
@@ -1170,7 +1174,7 @@ async function apiProductStats(query) {
       INNER JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON o.order_seq = ei.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
-      WHERE c.Card_Code IN (${placeholders})
+      WHERE (${matchClause2})
         AND o.order_date >= @s AND o.order_date < @e
         AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
       GROUP BY c.Card_Code, CAST(o.order_date AS DATE), o.order_seq
@@ -1179,18 +1183,39 @@ async function apiProductStats(query) {
     return [...card.recordset, ...etc.recordset];
   }
 
-  /** rows → 상품별 {name, daily[], total{}} */
+  /** rows → 상품별 {name, daily[], total{}}
+   *   BASE 매칭: row.card_code (예: TGJSD01O4_A) 에서 _XXX suffix 제거 → BASE 코드.
+   *   입력 codes 가 BASE 단위면 모든 변형 row 가 자동 그룹핑. */
   function aggregate(rows, codes) {
+    // BASE 코드 추출 — _XXX (영숫자만) suffix 1단 제거
+    const toBase = (code) => {
+      if (!code) return code;
+      const m = String(code).match(/^(.+)_[A-Za-z0-9]+$/);
+      return m ? m[1] : code;
+    };
+    // product_name 의 [prefix] 제거 (가장 깔끔한 이름 선호용)
+    const cleanName = (n) => String(n || '').replace(/^\[.*?\]\s*/g, '').trim();
     const byProduct = new Map();
     codes.forEach(c => byProduct.set(c, {
       product_code: c, product_name: null,
       dayMap: new Map(), allOrders: new Set(),
+      variantCodes: new Set(),
     }));
     for (const r of rows) {
-      const key = r.card_code;
-      if (!byProduct.has(key)) continue;
+      // raw card_code → BASE
+      const base = toBase(r.card_code);
+      // BASE 가 직접 매칭되면 그 bucket, 아니면 raw 도 시도 (입력이 raw 인 경우)
+      const key = byProduct.has(base) ? base : (byProduct.has(r.card_code) ? r.card_code : null);
+      if (!key) continue;
       const bucket = byProduct.get(key);
-      if (!bucket.product_name && r.card_name) bucket.product_name = r.card_name;
+      bucket.variantCodes.add(r.card_code);
+      // 가장 깔끔한 이름 (prefix 없는 형태) 우선
+      if (r.card_name) {
+        const cleaned = cleanName(r.card_name);
+        if (!bucket.product_name || cleaned.length < cleanName(bucket.product_name).length || !bucket.product_name.startsWith('[')) {
+          bucket.product_name = cleaned || r.card_name;
+        }
+      }
       const dKey = r.d instanceof Date ? fmtDate(r.d) : String(r.d).slice(0, 10);
       if (!bucket.dayMap.has(dKey)) bucket.dayMap.set(dKey, { qty: 0, orders: new Set(), revenue: 0 });
       const d = bucket.dayMap.get(dKey);
@@ -1214,6 +1239,7 @@ async function apiProductStats(query) {
       return {
         product_code: c,
         product_name: b.product_name,
+        variant_codes: [...b.variantCodes].sort(), // 통합된 raw 코드들 (_A/_B/_C)
         total: {
           qty: totalQty,
           orders: totalOrders,
