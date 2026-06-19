@@ -5850,6 +5850,78 @@ const server = http.createServer(async (req, res) => {
             ...results,
           };
         }
+      } else if (pathname === '/api/admin/probe-buyer-membership' && req.method === 'GET') {
+        // 답례품 구매자의 회원 상태 분포 — 비회원/Orphan/정상 회원 비율.
+        //   URL: /api/admin/probe-buyer-membership?days=90
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const days = parseInt(parsed.query.days, 10) || 90;
+        try {
+          const pp = await getPool();
+          const r = await pp.request().input('days', sql.Int, days).query(`
+            WITH gift_orders AS (
+              SELECT o.member_id, o.order_seq
+              FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+              INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+              INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+              WHERE c.Card_Div = 'D01' AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+                AND o.order_date >= DATEADD(day, -@days, GETDATE())
+              UNION ALL
+              SELECT cord.member_id, cord.order_seq
+              FROM custom_order cord WITH (NOLOCK)
+              INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
+              INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+              WHERE c.Card_Div = 'D01' AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
+                AND cord.order_date >= DATEADD(day, -@days, GETDATE())
+            ),
+            distinct_orders AS (SELECT DISTINCT order_seq, member_id FROM gift_orders)
+            SELECT
+              COUNT(*) AS total_orders,
+              COUNT(DISTINCT member_id) AS unique_member_ids,
+              SUM(CASE WHEN member_id IS NULL OR LTRIM(RTRIM(CAST(member_id AS NVARCHAR(50)))) = '' THEN 1 ELSE 0 END) AS guest_orders,
+              SUM(CASE WHEN member_id IS NOT NULL AND LTRIM(RTRIM(CAST(member_id AS NVARCHAR(50)))) <> '' THEN 1 ELSE 0 END) AS member_orders
+            FROM distinct_orders
+          `);
+          const orphanCheck = await pp.request().input('days', sql.Int, days).query(`
+            WITH gift_buyer_members AS (
+              SELECT DISTINCT member_id FROM (
+                SELECT o.member_id
+                FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                WHERE c.Card_Div = 'D01' AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+                  AND o.order_date >= DATEADD(day, -@days, GETDATE())
+                UNION ALL
+                SELECT cord.member_id
+                FROM custom_order cord WITH (NOLOCK)
+                INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
+                INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                WHERE c.Card_Div = 'D01' AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
+                  AND cord.order_date >= DATEADD(day, -@days, GETDATE())
+              ) u
+              WHERE member_id IS NOT NULL AND LTRIM(RTRIM(CAST(member_id AS NVARCHAR(50)))) <> ''
+            )
+            SELECT
+              COUNT(*) AS total_member_ids,
+              SUM(CASE WHEN ui.uid IS NOT NULL THEN 1 ELSE 0 END) AS matched_in_userinfo,
+              SUM(CASE WHEN ui.uid IS NOT NULL AND ui.site_div = 'SB' AND ui.USE_YORN = 'Y' THEN 1 ELSE 0 END) AS active_unified,
+              SUM(CASE WHEN ui.uid IS NULL THEN 1 ELSE 0 END) AS orphan_no_match,
+              SUM(CASE WHEN ui.uid IS NOT NULL AND ui.USE_YORN <> 'Y' THEN 1 ELSE 0 END) AS withdrawn,
+              SUM(CASE WHEN ui.uid IS NOT NULL AND ui.site_div <> 'SB' THEN 1 ELSE 0 END) AS non_sb_site_div
+            FROM gift_buyer_members gbm
+            LEFT JOIN S2_UserInfo ui WITH (NOLOCK) ON gbm.member_id = ui.uid
+          `);
+          data = {
+            days,
+            order_level: r.recordset[0],
+            member_match: orphanCheck.recordset[0],
+            hint: 'guest_orders > 0 면 비회원 주문 존재. orphan_no_match > 0 면 member_id 있지만 S2_UserInfo 미매칭 (탈퇴 등). 둘 다 현재 가입사이트 그래프에서 제외됨.',
+          };
+        } catch (err) {
+          console.error('[probe-buyer-membership] error:', err.message);
+          data = { error: err.message };
+        }
       } else if (pathname === '/api/admin/probe-dmd-ci-match' && req.method === 'GET') {
         // 디얼디어 dupinfo/conninfo ↔ MSSQL S2_UserInfo CI/DI 매칭 가능성 진단.
         //   URL: /api/admin/probe-dmd-ci-match
