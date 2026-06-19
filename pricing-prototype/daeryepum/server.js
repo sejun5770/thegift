@@ -4849,22 +4849,24 @@ async function apiMarketing(query = {}) {
     LEFT JOIN SiteInfo ref_si ON ui.REFERER_SALES_GUBUN = ref_si.SiteCode
     WHERE ui.site_div = 'SB' AND ui.USE_YORN = 'Y'
   `);
-  // 디얼디어 DupInfo 매칭 + 집계 (JS) — 기존 signupSiteResult 인터페이스 호환.
+  // 디얼디어 DupInfo 매칭 — 보조지표 (텍스트) 전용. 막대그래프 분류는 변경하지 않음.
+  //   디얼디어 회원이 바른손카드/몰/M카드 등에 별도 가입했다면 그쪽 막대에 이미 포함됨.
+  //   강제로 '디얼디어' 로 옮기면 다른 사이트 카운트가 부정확해지므로 그대로 두고
+  //   '디얼디어 회원 중복 N명' 만 별도 메타로 노출 → 클라이언트에서 보조 텍스트로 표시.
   const _dmdDupInfos = await fetchDearMyDearDupInfos();
   const _signupCounts = {};
   let _dmdMatchedCount = 0;
   signupSiteRaw.recordset.forEach(row => {
+    _signupCounts[row.signup_site] = (_signupCounts[row.signup_site] || 0) + 1;
     const dup = String(row.dupinfo || '').trim();
-    const isDmd = dup.length >= 32 && _dmdDupInfos.has(dup);
-    const site = isDmd ? '디얼디어' : row.signup_site;
-    _signupCounts[site] = (_signupCounts[site] || 0) + 1;
-    if (isDmd) _dmdMatchedCount++;
+    if (dup.length >= 32 && _dmdDupInfos.has(dup)) _dmdMatchedCount++;
   });
   const signupSiteResult = {
     recordset: Object.entries(_signupCounts)
       .map(([signup_site, member_count]) => ({ signup_site, member_count }))
       .sort((a, b) => b.member_count - a.member_count),
     dearMyDearMatchedCount: _dmdMatchedCount,
+    dearMyDearTotalSetSize: _dmdDupInfos.size, // 디얼디어 전체 회원수 (DI 기준)
   };
 
   // 사이트 상관관계 (가입사이트 → 주문사이트 크로스탭) - ETC + CARD 통합
@@ -5086,6 +5088,11 @@ async function apiMarketing(query = {}) {
     conversion,
     memberSite: siteResult.recordset,
     signupSite: signupSiteResult.recordset,
+    signupSiteMeta: {
+      // 디얼디어 회원 중 답례품 구매자 (DupInfo 매칭). 위 막대그래프 내 다른 사이트에 이미 포함된 중복 카운트.
+      dearMyDearMatchedCount: signupSiteResult.dearMyDearMatchedCount || 0,
+      dearMyDearTotalSetSize: signupSiteResult.dearMyDearTotalSetSize || 0,
+    },
     siteCross: siteCrossResult.recordset,
     reorder: reorderResult.recordset[0] || {},
     reorderInterval: reorderIntervalResult.recordset,

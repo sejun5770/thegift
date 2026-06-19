@@ -6541,6 +6541,26 @@ function renderMarketing(mk) {
   renderSiteBar('mk-order-site', orderSiteMap);
   renderSiteBar('mk-signup-site', signupSiteMap, ['#f59e0b','#fbbf24','#fcd34d','#fde68a','#fef3c7']);
 
+  // 💍 디얼디어 보조지표 — 답례품 구매자 중 디얼디어 회원 (DupInfo 매칭) 중복 카운트.
+  //   다른 사이트 막대그래프에 이미 포함된 회원이라 별도 막대 X, 텍스트로만 표시.
+  const sMeta = mk.signupSiteMeta || {};
+  const dmdCount = sMeta.dearMyDearMatchedCount || 0;
+  const totalSignup = Object.values(signupSiteMap).reduce((s, v) => s + v, 0);
+  const dmdPct = totalSignup > 0 ? Math.round(dmdCount / totalSignup * 1000) / 10 : 0;
+  const $signupSiteContainer = document.getElementById('mk-signup-site');
+  if ($signupSiteContainer && $signupSiteContainer.parentElement) {
+    // 기존 보조 라인 제거 후 재추가 (재로딩 시 중복 방지)
+    const existingHint = $signupSiteContainer.parentElement.querySelector('.mk-signup-dmd-hint');
+    if (existingHint) existingHint.remove();
+    if (dmdCount > 0) {
+      const hint = document.createElement('div');
+      hint.className = 'mk-signup-dmd-hint';
+      hint.style.cssText = 'margin-top:6px;padding:6px 8px;background:#f5f3ff;border:1px dashed #8b5cf6;border-radius:6px;font-size:11px;color:#5b21b6;text-align:center;line-height:1.4';
+      hint.innerHTML = `💍 <b>디얼디어 회원</b> 중 답례품 구매자: <b>${dmdCount}명</b> (전체 ${dmdPct}%) <span style="color:#6b7280;font-weight:400">· 위 막대에 중복 포함</span>`;
+      $signupSiteContainer.parentElement.appendChild(hint);
+    }
+  }
+
   // 사이트 상관관계 테이블
   const crossData = mk.siteCross || [];
   if (crossData.length > 0) {
