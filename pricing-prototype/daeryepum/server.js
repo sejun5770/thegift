@@ -6261,6 +6261,80 @@ const server = http.createServer(async (req, res) => {
             ...results,
           };
         }
+      } else if (pathname === '/api/admin/probe-ci-product-name' && req.method === 'GET') {
+        // 정보입력현황 (bg_order_customer_info.sticker_selections JSONB) 의 product_name 패턴 검색.
+        //   배경: 매출 SQL 의 S2_Card.Card_Name 은 운영자가 시점별로 prefix 변경 가능 (할인율 등).
+        //   고객 입력 시점의 Card_Name 은 sticker_selections 에 그대로 보존됨.
+        //   → 캠페인 prefix 가 매출 SQL 에 없어도 sticker_selections 에서는 확인 가능.
+        //   URL: /api/admin/probe-ci-product-name?pattern=페스타&start=2026-06-01&end=2026-06-30
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const pattern = (parsed.query.pattern || '').trim();
+        if (!pattern) return json(res, { error: 'pattern 인자 필수' }, 400);
+        const start = (parsed.query.start || '').trim();
+        const end = (parsed.query.end || '').trim();
+        if (start && !/^\d{4}-\d{2}-\d{2}$/.test(start)) return json(res, { error: 'start YYYY-MM-DD' }, 400);
+        if (end && !/^\d{4}-\d{2}-\d{2}$/.test(end)) return json(res, { error: 'end YYYY-MM-DD' }, 400);
+        try {
+          const _bgStore = require('./barungift/store');
+          // 전체 CI fetch — store.getAllCustomerInfos 는 페이지네이션 자동 처리
+          const cis = await _bgStore.getAllCustomerInfos();
+          const lowerPattern = pattern.toLowerCase();
+          // 기간 필터 — submitted_at 기준 (JS 측 처리)
+          const startTs = start ? new Date(start + 'T00:00:00').getTime() : -Infinity;
+          const endTs = end ? new Date(end + 'T23:59:59').getTime() : Infinity;
+          const matches = [];
+          let scannedInPeriod = 0;
+          (cis || []).forEach(ci => {
+            const sa = ci.submitted_at ? new Date(ci.submitted_at).getTime() : 0;
+            if (sa < startTs || sa > endTs) return;
+            scannedInPeriod++;
+            const sels = ci.sticker_selections || [];
+            sels.forEach(sel => {
+              const pn = sel?.product_name || '';
+              if (pn && pn.toLowerCase().includes(lowerPattern)) {
+                matches.push({
+                  order_id: ci.order_id,
+                  submitted_at: ci.submitted_at,
+                  product_code: sel.product_code,
+                  product_name: pn,
+                  desired_ship_date: sel.desired_ship_date,
+                  quantity: sel.quantity,
+                });
+              }
+            });
+          });
+          // 매칭된 product_code 집계
+          const byCode = {};
+          matches.forEach(m => {
+            if (!byCode[m.product_code]) byCode[m.product_code] = { product_code: m.product_code, names: new Set(), order_ids: new Set(), total_qty: 0 };
+            byCode[m.product_code].names.add(m.product_name);
+            byCode[m.product_code].order_ids.add(m.order_id);
+            byCode[m.product_code].total_qty += (m.quantity || 0);
+          });
+          const summary = Object.values(byCode)
+            .map(v => ({
+              product_code: v.product_code,
+              product_names: [...v.names],
+              order_count: v.order_ids.size,
+              total_qty: v.total_qty,
+            }))
+            .sort((a, b) => b.order_count - a.order_count);
+          data = {
+            pattern,
+            period: (start && end) ? `${start} ~ ${end}` : '(전체)',
+            total_cis_in_db: (cis || []).length,
+            total_cis_in_period: scannedInPeriod,
+            total_matched_selections: matches.length,
+            by_product_code: summary,
+            samples: matches.slice(0, 30),
+            hint: 'sticker_selections 에 캠페인 prefix 가 저장된 시점 = 고객 정보입력 완료 시점. by_product_code 로 어느 상품에 캠페인이 적용됐는지 확인 → 그 product_code 로 매출 SQL 재호출 가능.',
+          };
+        } catch (err) {
+          console.error('[probe-ci-product-name] error:', err.message);
+          data = { error: err.message };
+        }
       } else if (pathname === '/api/admin/summer-festa-comparison' && req.method === 'GET') {
         // 썸머 99 페스타 prefix 상품 vs 동일 Card_Code 의 다른 (prefix 없는/다른) 상품 매출 비교.
         //   URL: /api/admin/summer-festa-comparison?start=2026-06-11&end=2026-06-18&pattern=썸머
