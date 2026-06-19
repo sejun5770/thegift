@@ -398,52 +398,6 @@ nav.nav-loading a[href^="#"] {
     </div>
   </div>
 
-  <!-- 결제대기 / 빠른출고 보조 KPI (매출 집계 정책엔 포함되지 않음) -->
-  <div class="section" data-dash-only="daeryepum">
-    <div class="section-title">⏳ 결제대기 · ⚡ 빠른출고</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div class="card" style="padding:14px 16px;border-left:3px solid #3b82f6">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
-          <span style="font-size:13px;font-weight:600;color:#1e3a8a">⏳ 결제대기 (오늘 주문)</span>
-          <span style="font-size:11px;color:var(--gray-500)">매출 집계 미포함</span>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
-          <div><span style="color:var(--gray-500)">건수</span> <strong id="cmp-t-pending-orders" style="margin-left:4px">-</strong></div>
-          <div><span style="color:var(--gray-500)">금액</span> <strong id="cmp-t-pending-amount" style="margin-left:4px">-</strong></div>
-        </div>
-        <div style="margin-top:6px;font-size:11px;color:var(--gray-500)">어제: <span id="cmp-y-pending">-</span></div>
-      </div>
-      <div class="card" style="padding:14px 16px;border-left:3px solid #f59e0b">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
-          <span style="font-size:13px;font-weight:600;color:#92400e">⚡ 빠른출고 채택 매출 (정보입력 완료 기준)</span>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
-          <div><span style="color:var(--gray-500)">건수</span> <strong id="cmp-t-express-orders" style="margin-left:4px">-</strong></div>
-          <div><span style="color:var(--gray-500)">매출</span> <strong id="cmp-t-express-amount" style="margin-left:4px">-</strong></div>
-        </div>
-        <!-- 오늘 빠른출고 동시/단독 분리 -->
-        <div id="cmp-t-express-copurchase-split" style="margin-top:6px;font-size:11px;color:var(--gray-500);display:none">
-          <div style="display:flex;align-items:center;gap:6px;padding:1px 0">
-            <span style="min-width:62px">├ 동시주문</span>
-            <span style="margin-left:auto" id="cmp-t-express-co-amount">-</span>
-            <span style="color:var(--gray-400)" id="cmp-t-express-co-orders">-</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:6px;padding:1px 0">
-            <span style="min-width:62px">└ 단독주문</span>
-            <span style="margin-left:auto" id="cmp-t-express-st-amount">-</span>
-            <span style="color:var(--gray-400)" id="cmp-t-express-st-orders">-</span>
-          </div>
-        </div>
-        <!-- 사이트별 동시/단독 세분화 — getPeriodTotal 의 by_site 와 동일 구조 -->
-        <div id="cmp-t-express-site-breakdown" style="margin-top:6px"></div>
-        <div style="margin-top:6px;font-size:11px;color:var(--gray-500)">
-          어제: <span id="cmp-y-express">-</span>
-          <span id="cmp-y-express-split" style="color:var(--gray-400);margin-left:4px"></span>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <!-- 빠른출고 추가 분석 — 채택율(전환율) / 시간대 / 요일 / 누적비용 -->
   <div class="section" data-dash-only="daeryepum">
     <div class="section-title">⚡ 빠른출고 분석 <span style="font-size:11px;color:var(--gray-500);font-weight:400;margin-left:6px">조회 기간 정보입력 완료 기준</span></div>
@@ -593,20 +547,12 @@ nav.nav-loading a[href^="#"] {
     </div>
   </div>
 
-  <!-- 🎨 스티커 / 💬 메시지 분석 — CI 입력완료~출고완료 모든 stage 의 sticker_selections JSONB 분석 -->
+  <!-- 💬 메시지 분석 — CI 입력완료~출고완료 모든 stage 의 sticker_selections JSONB 분석 -->
   <div class="section" data-dash-only="daeryepum">
-    <div class="section-title">🎨 스티커 · 💬 메시지 분석 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(정보입력 이후 모든 stage 포함 · 스티커작업/인쇄/제본/포장/출고)</span></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-      <!-- 좌: 상품별 스티커 타입 인기도 -->
-      <div class="card">
-        <h3 style="margin:0 0 8px;font-size:14px">상품별 스티커 인기도 <span style="font-size:11px;color:var(--gray-500);font-weight:400">(Top 10 상품 × 스티커별 선택률)</span></h3>
-        <div id="sa-products"><div style="color:var(--gray-400);text-align:center;padding:20px;font-size:12px">로딩 중...</div></div>
-      </div>
-      <!-- 우: 메시지 분석 -->
-      <div class="card">
-        <h3 style="margin:0 0 8px;font-size:14px">메시지 분석 <span style="font-size:11px;color:var(--gray-500);font-weight:400">(custom_fields 입력값 통계)</span></h3>
-        <div id="sa-messages"><div style="color:var(--gray-400);text-align:center;padding:20px;font-size:12px">로딩 중...</div></div>
-      </div>
+    <div class="section-title">💬 메시지 분석 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(정보입력 이후 모든 stage 포함 · 스티커작업/인쇄/제본/포장/출고)</span></div>
+    <div class="card">
+      <h3 style="margin:0 0 8px;font-size:14px">메시지 분석 <span style="font-size:11px;color:var(--gray-500);font-weight:400">(custom_fields 입력값 통계)</span></h3>
+      <div id="sa-messages"><div style="color:var(--gray-400);text-align:center;padding:20px;font-size:12px">로딩 중...</div></div>
     </div>
   </div>
 
