@@ -3881,6 +3881,54 @@ async function apiLeadtime3way(query) {
 
 // === 스티커 · 메시지 분석 (정보입력 완료 주문 기준) ===
 // ============================================
+// 디얼디어 (wedding MySQL DB) 예식자 fetch — users.event_date 기반
+//   varchar(50) 이라 STR_TO_DATE 다중 포맷 시도 + REGEXP 으로 안전 필터.
+//   is_test='F' (실회원만) + event_date 비어있지 않음 조건.
+//   반환: Map<'YYYY-MM-DD', count>
+// ============================================
+async function fetchDearMyDearWeddingDates(startDateStr, endDateExclStr) {
+  if (!process.env.MYSQL_HOST) return new Map(); // 환경변수 미설정 — 통합 영역에서 자연 0 처리
+  try {
+    const mp = await getMysqlPool();
+    // 가장 흔한 포맷 'YYYY-MM-DD' 우선. 다른 포맷 추가 발견 시 COALESCE 로 확장.
+    //   - 'YYYY-MM-DD' (표준)
+    //   - 'YYYY-MM-DD HH:mm:ss' (LEFT 10 자리만)
+    //   - 'YYYY/MM/DD'
+    //   - 'YYYYMMDD'
+    const [rows] = await mp.query(`
+      SELECT wd, COUNT(*) AS cnt
+      FROM (
+        SELECT DISTINCT id,
+          COALESCE(
+            STR_TO_DATE(LEFT(event_date, 10), '%Y-%m-%d'),
+            STR_TO_DATE(LEFT(event_date, 10), '%Y/%m/%d'),
+            CASE WHEN event_date REGEXP '^[0-9]{8}$' THEN STR_TO_DATE(event_date, '%Y%m%d') END
+          ) AS wd
+        FROM users
+        WHERE is_test = 'F'
+          AND event_date IS NOT NULL AND event_date <> ''
+      ) t
+      WHERE t.wd IS NOT NULL
+        AND t.wd >= ? AND t.wd < ?
+      GROUP BY wd
+      ORDER BY wd
+    `, [startDateStr, endDateExclStr]);
+    const out = new Map();
+    rows.forEach(r => {
+      // Date 객체 → 'YYYY-MM-DD'
+      const d = r.wd instanceof Date
+        ? r.wd.toISOString().slice(0, 10)
+        : String(r.wd).slice(0, 10);
+      out.set(d, r.cnt);
+    });
+    return out;
+  } catch (e) {
+    console.warn('[fetchDearMyDearWeddingDates] MySQL 조회 실패 — 0건 fallback:', e.message);
+    return new Map();
+  }
+}
+
+// ============================================
 // 예식일 캘린더 — GET /api/dashboard/wedding-calendar?year=2026&month=6
 //
 // 운영팀이 수동 관리하던 '월별 예식자 캘린더' 스프레드시트 자동화.
@@ -3989,6 +4037,12 @@ async function apiWeddingCalendar(query = {}) {
     const s = normSite(row.site_name);
     dailyMap[row.wd][s] = (dailyMap[row.wd][s] || 0) + row.wedding_count;
   });
+  // 디얼디어 (별도 MySQL wedding DB) 통합 — users.event_date 기반
+  const dmd = await fetchDearMyDearWeddingDates(fmtDate(gridStart), fmtDate(addDays(gridEnd, 1)));
+  dmd.forEach((cnt, dateKey) => {
+    if (!dailyMap[dateKey]) dailyMap[dateKey] = {};
+    dailyMap[dateKey]['디얼디어'] = (dailyMap[dateKey]['디얼디어'] || 0) + cnt;
+  });
 
   // 그리드 weeks 빌드
   const weeks = [];
@@ -4055,6 +4109,9 @@ async function apiWeddingCalendar(query = {}) {
   const prevBySite = {};
   ALL_SITES.forEach(s => prevBySite[s] = 0);
   r2.recordset.forEach(row => { prevBySite[normSite(row.site_name)] += row.wedding_count; });
+  // 디얼디어 전년 동월 통합
+  const dmdPrev = await fetchDearMyDearWeddingDates(fmtDate(prevMonthStart), fmtDate(addDays(prevMonthEnd, 1)));
+  dmdPrev.forEach(cnt => { prevBySite['디얼디어'] += cnt; });
   const prevTotalAll = ALL_SITES.reduce((sum, s) => sum + prevBySite[s], 0);
   const deltaBySite = {};
   ALL_SITES.forEach(s => {
@@ -4144,6 +4201,14 @@ async function apiWeddingCalendarTrend(query = {}) {
     if (!map[key]) map[key] = {};
     const s = normSite(row.site_name);
     map[key][s] = (map[key][s] || 0) + row.wedding_count;
+  });
+  // 디얼디어 (MySQL) 통합 — 일별 데이터를 월로 집계
+  const dmdTrend = await fetchDearMyDearWeddingDates(fmtDate(startDate), fmtDate(endDateExclusive));
+  dmdTrend.forEach((cnt, dateKey) => {
+    const dt = new Date(dateKey);
+    const key = `${dt.getFullYear()}-${dt.getMonth() + 1}`;
+    if (!map[key]) map[key] = {};
+    map[key]['디얼디어'] = (map[key]['디얼디어'] || 0) + cnt;
   });
   // months 배열 빌드 (시작월부터 endMonth 까지 순서)
   const out = [];
@@ -4237,22 +4302,38 @@ async function apiWeddingCalendarSiteBreakdown(query = {}) {
     .filter(row => row.site_name === null || !MAIN.includes(row.site_name))
     .map(row => ({ site_name: row.site_name || '(SiteInfo 미매칭)', member_count: row.member_count }));
 
+  // 디얼디어 (MySQL) 별도 표시 — by_site_name 에 추가
+  const dmd = await fetchDearMyDearWeddingDates(fmtDate(monthStart), fmtDate(monthEndExclusive));
+  let dmdTotal = 0;
+  dmd.forEach(cnt => { dmdTotal += cnt; });
+  const bySiteOut = r1.recordset.map(r => ({
+    site_name: r.site_name || '(SiteInfo 미매칭)',
+    member_count: r.member_count,
+    is_main: r.site_name ? MAIN.includes(r.site_name) : false,
+    source: 'MSSQL (S2_UserInfo)',
+  }));
+  if (dmdTotal > 0) {
+    bySiteOut.push({
+      site_name: '디얼디어',
+      member_count: dmdTotal,
+      is_main: true,
+      source: 'MySQL (wedding.users.event_date)',
+    });
+  }
+
   return {
     year,
     month,
     main_sites: MAIN,
-    by_site_name: r1.recordset.map(r => ({
-      site_name: r.site_name || '(SiteInfo 미매칭)',
-      member_count: r.member_count,
-      is_main: r.site_name ? MAIN.includes(r.site_name) : false,
-    })),
+    by_site_name: bySiteOut,
     by_referer_code: r2.recordset.map(r => ({
       referer_code: r.referer_code,
       site_name: r.site_name || '(SiteInfo 미매칭)',
       member_count: r.member_count,
     })),
     other_buckets: otherBuckets,
-    hint: '"기타" 로 묶인 항목 확인용. other_buckets 의 site_name 중 운영자가 메인으로 승격하고 싶은 사이트가 있으면 WEDDING_CALENDAR_SITES 상수에 추가.',
+    dearMyDear: { total: dmdTotal, source: 'MySQL wedding.users.event_date (is_test=F)' },
+    hint: '"기타" 로 묶인 항목 확인용. 디얼디어는 별도 MySQL DB 에서 통합. 운영자가 메인 승격하고 싶은 사이트가 있으면 WEDDING_CALENDAR_SITES 상수에 추가.',
   };
 }
 
@@ -5712,6 +5793,42 @@ const server = http.createServer(async (req, res) => {
         try {
           const mp = await getMysqlPool();
           const out = { db: process.env.MYSQL_DATABASE };
+          // event_date 포맷 진단 모드 (디얼디어 통합 검증)
+          //   ?check_event_date=1 → users.event_date 의 포맷별 분포 + 통합 함수 결과 샘플
+          if (parsed.query.check_event_date === '1') {
+            const out2 = { mode: 'check_event_date' };
+            // 비어있지 않은 event_date 의 길이별 분포 (포맷 추정)
+            const [byLen] = await mp.query(`
+              SELECT LENGTH(event_date) AS len, COUNT(*) AS n,
+                MIN(event_date) AS first_sample, MAX(event_date) AS last_sample
+              FROM users WHERE is_test = 'F' AND event_date IS NOT NULL AND event_date <> ''
+              GROUP BY LENGTH(event_date) ORDER BY n DESC LIMIT 10
+            `);
+            // STR_TO_DATE 변환 가능한 비율
+            const [conv] = await mp.query(`
+              SELECT
+                COUNT(*) AS total_nonempty,
+                SUM(CASE WHEN STR_TO_DATE(LEFT(event_date,10), '%Y-%m-%d') IS NOT NULL THEN 1 ELSE 0 END) AS std_dash,
+                SUM(CASE WHEN STR_TO_DATE(LEFT(event_date,10), '%Y/%m/%d') IS NOT NULL THEN 1 ELSE 0 END) AS std_slash,
+                SUM(CASE WHEN event_date REGEXP '^[0-9]{8}$' THEN 1 ELSE 0 END) AS compact_8digit
+              FROM users WHERE is_test = 'F' AND event_date IS NOT NULL AND event_date <> ''
+            `);
+            // 현재 통합 함수가 캐치하는 최근 12개월 합계
+            const todayKst = today();
+            const start12 = new Date(todayKst.getFullYear(), todayKst.getMonth() - 12, 1);
+            const integrated = await fetchDearMyDearWeddingDates(fmtDate(start12), fmtDate(addDays(todayKst, 30)));
+            let integratedTotal = 0;
+            integrated.forEach(c => { integratedTotal += c; });
+            out2.length_distribution = byLen;
+            out2.conversion_summary = conv[0];
+            out2.integrated_recent_12mo_sample = {
+              range: `${fmtDate(start12)} ~ ${fmtDate(addDays(todayKst, 30))}`,
+              total_days_with_data: integrated.size,
+              total_weddings: integratedTotal,
+            };
+            out2.hint = 'std_dash 가 total_nonempty 와 비슷하면 포맷 OK. 차이 크면 fetchDearMyDearWeddingDates 의 COALESCE 추가 포맷 필요.';
+            data = { ...out, ...out2 };
+          } else {
           // 단일/멀티 테이블 모드 — 콤마 구분 지원
           const describeRaw = (parsed.query.describe || '').trim();
           const sampleTable = (parsed.query.sample || '').trim();
@@ -5761,6 +5878,7 @@ const server = http.createServer(async (req, res) => {
             out.hint = '회원 + 예식일 컬럼이 있는 테이블을 식별하면 알려주세요. probe-wedding-mysql?describe=<table> 로 특정 테이블 컬럼 전체 조회 가능. PII 노출 주의로 sample 모드는 운영자만 신중 사용.';
             data = out;
           }
+          } // end of else (check_event_date 가 아닌 일반 모드 블록)
         } catch (err) {
           console.error('[probe-wedding-mysql] error:', err.message);
           data = { error: 'MySQL 진단 실패: ' + err.message };
