@@ -1794,7 +1794,7 @@ nav.nav-loading a[href^="#"] {
       <button class="btn" onclick="moveWcToday()" title="이번 달로">📅 오늘</button>
       <span style="margin:0 6px;color:var(--gray-300)">|</span>
       <button class="btn btn-primary" onclick="copyWeddingCalendar('month')" title="월 전체 TSV 클립보드 복사">📋 월 전체 복사</button>
-      <button class="btn" onclick="copyWeddingCalendar('week')" title="좌측 표에서 체크한 주차만 복사 (체크 없으면 전체)">📋 선택 주차 복사</button>
+      <span style="font-size:11px;color:var(--gray-400);margin-left:6px">주차별 복사는 표의 📋 버튼</span>
     </div>
   </div>
   <p style="font-size:12px;color:var(--gray-500);margin:0 0 16px">
@@ -10877,8 +10877,8 @@ function renderWeddingCalendar(data) {
       tbody += `<tr style="${rowBg};${borderTop}">`;
       if (i === 0) tbody += `<td rowspan="6" style="padding:6px 8px;border:1px solid var(--gray-200);text-align:center;font-weight:600;background:#f9fafb">
         <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
-          <input type="checkbox" class="wc-week-check" data-week="${wk.week_index}" style="cursor:pointer">
           <span>${wk.week_index}주차</span>
+          <button type="button" onclick="copyWeddingCalendarWeek(${wk.week_index})" title="이 주차 raw 복사 (4사이트 × 7일 숫자만)" style="padding:2px 6px;font-size:10px;font-weight:500;color:var(--primary);background:#fff;border:1px solid var(--primary);border-radius:4px;cursor:pointer">📋 복사</button>
         </div>
       </td>`;
       tbody += `<td style="padding:4px 6px;border:1px solid var(--gray-200);text-align:center;font-weight:600;color:${isSum?'#1e3a8a':'var(--gray-700)'}">${isSum?'합':WC_SITE_SHORT[site]}</td>`;
@@ -10954,49 +10954,32 @@ function renderWeddingCalendar(data) {
   $cmp.innerHTML = cmpRows;
 }
 
-/** TSV 클립보드 복사. scope:
- *   'month' — 캡쳐 포맷 (헤더 + 사이트 5행 + 합계 + KPI + 전년 + 메모)
- *   'week'  — raw 만 (바/몰/디/M 4행 × 7숫자, 합계/헤더/KPI/메모 모두 제외, 주차 사이 빈 행)
- *             → 운영자가 캘린더 워크시트의 사이트 행에 직접 paste 가능. */
+/** 단일 주차 raw 복사 — 4사이트 (바/몰/디/M) × 일~토 7숫자.
+ *   캘린더 표의 📋 버튼에서 즉시 호출. 라벨/합계/헤더 모두 없음. */
+function copyWeddingCalendarWeek(weekIndex) {
+  if (!_wcData) { showToast('데이터가 없습니다.'); return; }
+  const wk = _wcData.weeks.find(w => w.week_index === weekIndex);
+  if (!wk) { showToast(`${weekIndex}주차 데이터가 없습니다.`); return; }
+  const RAW_SITES = ['바른손카드', '바른손몰', '디얼디어', '바른손M카드'];
+  // wk.days 인덱스 0..6 = 일~토 (gridStart 일요일 보장)
+  const lines = RAW_SITES.map(site =>
+    wk.days.map((day, di) => {
+      const v = wk.by_site[site]?.[di] || 0;
+      if (!day.in_month) return v > 0 ? String(v) : '';
+      return String(v);
+    }).join('\t')
+  );
+  const tsv = lines.join('\n');
+  navigator.clipboard.writeText(tsv).then(() => {
+    showToast(`✅ ${weekIndex}주차 raw 복사됨 (4행 × 7열)`);
+  }).catch(e => alert('클립보드 복사 실패: ' + e.message));
+}
+
+/** TSV 클립보드 복사 (월 전체) — 캡쳐 포맷 (헤더 + 사이트 5행 + 합계 + KPI + 전년 + 메모). */
 function copyWeddingCalendar(scope) {
   if (!_wcData) { showToast('데이터가 없습니다.'); return; }
-  let targetWeeks = _wcData.weeks;
-  if (scope === 'week') {
-    // 체크된 주차만 추출. 하나도 안 됐으면 모든 주차 (안전한 기본 동작).
-    const checked = Array.from(document.querySelectorAll('.wc-week-check:checked'))
-      .map(cb => parseInt(cb.dataset.week, 10));
-    if (checked.length > 0) {
-      targetWeeks = _wcData.weeks.filter(wk => checked.includes(wk.week_index));
-      if (!targetWeeks.length) { showToast('선택한 주차에 데이터가 없습니다.'); return; }
-    }
-  }
+  const targetWeeks = _wcData.weeks;
   const lines = [];
-
-  if (scope === 'week') {
-    // === 주차별 raw 복사: 4사이트 (바/몰/디/M) × 일~토 7열 숫자만 ===
-    //   라벨/합계/헤더/기타/KPI/전년/메모 모두 제외 — 순수 숫자 4행 × 7열.
-    //   주차 사이 빈 행 1줄 (시각적 구분 + 캘린더 워크시트 구조 정합).
-    const RAW_SITES = ['바른손카드', '바른손몰', '디얼디어', '바른손M카드'];
-    // wk.days 인덱스 0..6 = 일~토 (캘린더 그리드는 항상 일요일 시작 — gridStart 보장)
-    targetWeeks.forEach((wk, wi) => {
-      RAW_SITES.forEach(site => {
-        const cells = wk.days.map((day, di) => {
-          const v = wk.by_site[site]?.[di] || 0;
-          if (!day.in_month) return v > 0 ? String(v) : '';
-          return String(v);
-        });
-        lines.push(cells.join('\t')); // 라벨 없이 7열 숫자만
-      });
-      if (wi < targetWeeks.length - 1) lines.push(''); // 주차 사이 빈 행
-    });
-    const tsv = lines.join('\n');
-    navigator.clipboard.writeText(tsv).then(() => {
-      showToast(`✅ 주차 raw 복사됨 (${targetWeeks.length}주차 × 4행 × 7열)`);
-    }).catch(e => alert('클립보드 복사 실패: ' + e.message));
-    return;
-  }
-
-  // === 월 전체 복사 (캡쳐 포맷) ===
   // 헤더
   lines.push(['', '', ...WC_DAY_NAMES, '주 합계'].join('\t'));
   targetWeeks.forEach(wk => {
