@@ -3941,6 +3941,38 @@ async function fetchDearMyDearWeddingDates(startDateStr, endDateExclStr) {
 }
 
 // ============================================
+// 디얼디어 (wedding MySQL DB) 회원 전화번호 set — 가입 사이트 분포 매칭용
+//   users.phone 의 숫자만 추출 (길이 >= 8 — 너무 짧은 잘못된 phone 노이즈 제거).
+//   결과 Set 으로 답례품 주문자 phone 과 정확 매칭. 미설정/실패 시 빈 Set.
+// ============================================
+let _dmdPhonesCache = null;
+let _dmdPhonesCacheTs = 0;
+async function fetchDearMyDearPhones() {
+  if (!process.env.MYSQL_HOST) return new Set();
+  // 10분 캐시 (회원 phone 은 자주 변하지 않음 — DB 부하 절감)
+  const TTL_MS = 10 * 60 * 1000;
+  if (_dmdPhonesCache && Date.now() - _dmdPhonesCacheTs < TTL_MS) return _dmdPhonesCache;
+  try {
+    const mp = await getMysqlPool();
+    const [rows] = await mp.query(`
+      SELECT DISTINCT phone FROM users
+      WHERE is_test = 'F' AND phone IS NOT NULL AND phone <> ''
+    `);
+    const set = new Set();
+    rows.forEach(r => {
+      const norm = String(r.phone || '').replace(/\D/g, '');
+      if (norm.length >= 8) set.add(norm);
+    });
+    _dmdPhonesCache = set;
+    _dmdPhonesCacheTs = Date.now();
+    return set;
+  } catch (e) {
+    console.warn('[fetchDearMyDearPhones] MySQL 조회 실패:', e.message);
+    return new Set();
+  }
+}
+
+// ============================================
 // 예식일 캘린더 — GET /api/dashboard/wedding-calendar?year=2026&month=6
 //
 // 운영팀이 수동 관리하던 '월별 예식자 캘린더' 스프레드시트 자동화.
@@ -4756,10 +4788,13 @@ async function apiMarketing(query = {}) {
   `);
 
   // 가입사이트 = 회원의 최초 답례품 주문 사이트 기준 (ETC + CARD 통합)
-  const signupSiteResult = await p.request().query(`
+  //   디얼디어 매칭: S2_UserInfo.hand_phone1+2+3 → MySQL wedding.users.phone 정규화 매칭
+  //   매칭된 회원은 signup_site 를 '디얼디어' 로 강제 분류 (사용자 정책: 동일 정보가 있는 경우에만).
+  //   raw 데이터 반환 후 JS 에서 phone 매칭 + GROUP BY 집계.
+  const signupSiteRaw = await p.request().query(`
     SELECT
       ISNULL(first_si.SiteName, '기타') AS signup_site,
-      COUNT(*) AS member_count
+      ui.hand_phone1 AS p1, ui.hand_phone2 AS p2, ui.hand_phone3 AS p3
     FROM (
       SELECT member_id, SALES_GUBUN,
              ROW_NUMBER() OVER (PARTITION BY member_id ORDER BY order_date ASC) AS rn
@@ -4782,10 +4817,26 @@ async function apiMarketing(query = {}) {
       ) all_orders
     ) first_order
     LEFT JOIN SiteInfo first_si ON first_order.SALES_GUBUN = first_si.SiteCode
+    LEFT JOIN S2_UserInfo ui WITH (NOLOCK) ON first_order.member_id = ui.uid
     WHERE first_order.rn = 1
-    GROUP BY ISNULL(first_si.SiteName, '기타')
-    ORDER BY member_count DESC
   `);
+  // 디얼디어 phone 매칭 + 집계 (JS) — 기존 signupSiteResult 인터페이스 호환 위해 recordset 모방
+  const _dmdPhones = await fetchDearMyDearPhones();
+  const _signupCounts = {};
+  let _dmdMatchedCount = 0;
+  signupSiteRaw.recordset.forEach(row => {
+    const phoneNorm = String((row.p1 || '') + (row.p2 || '') + (row.p3 || '')).replace(/\D/g, '');
+    const isDmd = phoneNorm.length >= 8 && _dmdPhones.has(phoneNorm);
+    const site = isDmd ? '디얼디어' : row.signup_site;
+    _signupCounts[site] = (_signupCounts[site] || 0) + 1;
+    if (isDmd) _dmdMatchedCount++;
+  });
+  const signupSiteResult = {
+    recordset: Object.entries(_signupCounts)
+      .map(([signup_site, member_count]) => ({ signup_site, member_count }))
+      .sort((a, b) => b.member_count - a.member_count),
+    dearMyDearMatchedCount: _dmdMatchedCount,
+  };
 
   // 사이트 상관관계 (가입사이트 → 주문사이트 크로스탭) - ETC + CARD 통합
   const siteCrossResult = await p.request().query(`

@@ -6527,11 +6527,13 @@ function renderMarketing(mk) {
     const entries = Object.entries(map).sort((a,b) => b[1] - a[1]);
     const maxV = Math.max(...entries.map(e => e[1]), 1);
     const sColors = colors || ['#3b82f6','#60a5fa','#93c5fd','#bfdbfe','#dbeafe'];
+    // 사이트명 SITE_COLORS 매핑 우선 (디얼디어 등 일관성), fallback 으로 인덱스 색상
     document.getElementById(containerId).innerHTML = entries.map(([name, cnt], i) => {
       const h = Math.max(8, Math.round((cnt / maxV) * 100));
+      const color = SITE_COLORS[name] || sColors[i] || '#e2e8f0';
       return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px">
         <span style="font-size:11px;font-weight:600">${cnt}</span>
-        <div style="width:100%;height:${h}px;background:${sColors[i]||'#e2e8f0'};border-radius:4px 4px 0 0"></div>
+        <div style="width:100%;height:${h}px;background:${color};border-radius:4px 4px 0 0"></div>
         <span style="font-size:10px;color:#666;white-space:nowrap">${name}</span>
       </div>`;
     }).join('');
