@@ -2972,6 +2972,11 @@ async function apiForecast(query = {}) {
 
   const weddingDailyMap = {};
   for (const r of weddingsByDate.recordset) { weddingDailyMap[r.wedd_date] = r.wedding_count; }
+  // 디얼디어 (MySQL wedding DB) 통합 — 매출 예측 분모에 포함 (사이트 무관 합산)
+  const dmdForecast = await fetchDearMyDearWeddingDates(weddStart, weddEnd);
+  dmdForecast.forEach((cnt, dateKey) => {
+    weddingDailyMap[dateKey] = (weddingDailyMap[dateKey] || 0) + cnt;
+  });
 
   // 2) 주차별 예식 윈도우 건수 (예식일 ±14일 범위)
   const weeks = [];
@@ -3426,14 +3431,21 @@ async function apiConversion(query = {}) {
     `);
 
   // 일별 → 주차별 집계 (사이트별)
-  // weddingMap: { 'YYYY-MM-DD': { total: N, '바른손카드': N, '바른손몰': N, ... } }
-  const MAIN_SITES = ['바른손카드', '바른손몰', '바른손M카드'];
+  // weddingMap: { 'YYYY-MM-DD': { total: N, '바른손카드': N, '바른손몰': N, '디얼디어': N, ... } }
+  const MAIN_SITES = ['바른손카드', '바른손몰', '디얼디어', '바른손M카드'];
   const weddingMap = {};
   weddings.recordset.forEach(r => {
     if (!weddingMap[r.wd]) weddingMap[r.wd] = { total: 0 };
     weddingMap[r.wd].total += r.wedding_count;
     const site = MAIN_SITES.includes(r.site_name) ? r.site_name : '기타';
     weddingMap[r.wd][site] = (weddingMap[r.wd][site] || 0) + r.wedding_count;
+  });
+  // 디얼디어 (MySQL wedding DB) 통합 — '디얼디어' 사이트로 라벨링
+  const dmdConv = await fetchDearMyDearWeddingDates(startDate, endDate);
+  dmdConv.forEach((cnt, dateKey) => {
+    if (!weddingMap[dateKey]) weddingMap[dateKey] = { total: 0 };
+    weddingMap[dateKey].total += cnt;
+    weddingMap[dateKey]['디얼디어'] = (weddingMap[dateKey]['디얼디어'] || 0) + cnt;
   });
   const orderMap = {};
   orders.recordset.forEach(r => { orderMap[r.od] = (orderMap[r.od]||0) + r.order_count; });
