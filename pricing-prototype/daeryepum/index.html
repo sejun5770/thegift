@@ -6541,31 +6541,30 @@ function renderMarketing(mk) {
   renderSiteBar('mk-order-site', orderSiteMap);
   renderSiteBar('mk-signup-site', signupSiteMap, ['#f59e0b','#fbbf24','#fcd34d','#fde68a','#fef3c7']);
 
-  // 💍 디얼디어 보조지표 — 답례품 구매자 중 디얼디어 회원 (DupInfo 매칭) 중복 카운트.
-  //   다른 사이트 막대그래프에 이미 포함된 회원이라 별도 막대 X, 텍스트로만 표시.
-  // ℹ️ 비회원 보조지표 — 비회원 주문은 모두 자사몰(바른손카드) 에서 발생 (probe 확인 결과).
+  // 💍 디얼디어 보조지표 + ℹ️ 비회원 보조지표 — 상관관계 표 (mk-site-cross) 아래에 표시.
+  //   mk-site-chart 의 끝에 append → 막대그래프 → 상관관계 표 → 보조 hint 순.
   const sMeta = mk.signupSiteMeta || {};
   const dmdCount = sMeta.dearMyDearMatchedCount || 0;
   const guestCount = sMeta.guestOrderCount || 0;
   const totalSignup = Object.values(signupSiteMap).reduce((s, v) => s + v, 0);
   const dmdPct = totalSignup > 0 ? Math.round(dmdCount / totalSignup * 1000) / 10 : 0;
-  const $signupSiteContainer = document.getElementById('mk-signup-site');
-  if ($signupSiteContainer && $signupSiteContainer.parentElement) {
-    // 기존 보조 라인 제거 후 재추가 (재로딩 시 중복 방지)
-    $signupSiteContainer.parentElement.querySelectorAll('.mk-signup-dmd-hint, .mk-signup-guest-hint').forEach(el => el.remove());
+  const $siteChart = document.getElementById('mk-site-chart');
+  if ($siteChart) {
+    // 기존 hint 제거 후 재추가 (재로딩 시 중복 방지)
+    $siteChart.querySelectorAll('.mk-signup-dmd-hint, .mk-signup-guest-hint').forEach(el => el.remove());
     if (dmdCount > 0) {
       const hint = document.createElement('div');
       hint.className = 'mk-signup-dmd-hint';
-      hint.style.cssText = 'margin-top:6px;padding:6px 8px;background:#f5f3ff;border:1px dashed #8b5cf6;border-radius:6px;font-size:11px;color:#5b21b6;text-align:center;line-height:1.4';
+      hint.style.cssText = 'margin-top:10px;padding:6px 8px;background:#f5f3ff;border:1px dashed #8b5cf6;border-radius:6px;font-size:11px;color:#5b21b6;text-align:center;line-height:1.4';
       hint.innerHTML = `💍 <b>디얼디어 회원</b> 중 답례품 구매자: <b>${dmdCount}명</b> (전체 ${dmdPct}%) <span style="color:#6b7280;font-weight:400">· 위 막대에 중복 포함</span>`;
-      $signupSiteContainer.parentElement.appendChild(hint);
+      $siteChart.appendChild(hint);
     }
     if (guestCount > 0) {
       const hint = document.createElement('div');
       hint.className = 'mk-signup-guest-hint';
       hint.style.cssText = 'margin-top:6px;padding:6px 8px;background:#f8fafc;border:1px dashed #94a3b8;border-radius:6px;font-size:11px;color:#475569;text-align:center;line-height:1.4';
       hint.innerHTML = `ℹ️ <b>비회원 ${guestCount}건</b>은 모두 <b>자사몰(바른손카드)</b>에서 발생 <span style="color:#94a3b8;font-weight:400">· 다른 사이트는 회원가입 필수 · 카운트는 주문 단위</span>`;
-      $signupSiteContainer.parentElement.appendChild(hint);
+      $siteChart.appendChild(hint);
     }
   }
 
