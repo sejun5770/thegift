@@ -3852,6 +3852,217 @@ async function apiLeadtime3way(query) {
 }
 
 // === 스티커 · 메시지 분석 (정보입력 완료 주문 기준) ===
+// ============================================
+// 예식일 캘린더 — GET /api/dashboard/wedding-calendar?year=2026&month=6
+//
+// 운영팀이 수동 관리하던 '월별 예식자 캘린더' 스프레드시트 자동화.
+//   캘린더 그리드 (일~토) × 사이트별 (바른손카드/바른손몰/디얼디어/바른손M카드/기타)
+//   회원 가입사이트 = S2_UserInfo.REFERER_SALES_GUBUN → SiteInfo.SiteName 매핑
+//   site_div='SB' 로 통합회원 중복 제거, USE_YORN='Y' 활성 회원만
+//
+// 응답:
+//   {
+//     year, month,
+//     month_start, month_end,                        // 1일 ~ 말일
+//     grid_start, grid_end,                          // 1주차 시작 일요일 ~ 마지막주차 토요일
+//     weeks: [                                       // 캘린더 그리드 (보통 5~6 주차)
+//       {
+//         week_index: 1,
+//         days: [{date, day_of_week, in_month}, ...],  // 7일
+//         by_site: { 바른손카드: [d1..d7], 바른손몰: [...], ... },
+//         week_total_by_site: { 바른손카드: N, ... },
+//         week_total: N,
+//       }, ...
+//     ],
+//     month_summary: {
+//       by_site: {
+//         바른손카드: { total, weekend, weekday, weekend_pct },
+//         ...
+//         합: { total, weekend, weekday, weekend_pct },
+//       },
+//     },
+//     prev_year_summary: {                           // 전년 동월 비교
+//       by_site: { 바른손카드: total, ... },
+//       delta_by_site: { 바른손카드: { count: +N, pct: +X.X }, ... },
+//     },
+//   }
+// ============================================
+const WEDDING_CALENDAR_SITES = ['바른손카드', '바른손몰', '디얼디어', '바른손M카드'];
+
+async function apiWeddingCalendar(query = {}) {
+  const now = today();
+  const year = parseInt(query.year, 10) || now.getFullYear();
+  const month = parseInt(query.month, 10) || (now.getMonth() + 1);
+  if (year < 2000 || year > 2100 || month < 1 || month > 12) {
+    return { error: 'year/month 범위 오류' };
+  }
+
+  const monthStart = new Date(year, month - 1, 1);
+  const monthEnd = new Date(year, month, 0); // 말일
+  // 그리드 시작 = 월 1일이 속한 주의 일요일, 끝 = 말일이 속한 주의 토요일
+  const gridStart = addDays(monthStart, -monthStart.getDay());
+  const gridEnd = addDays(monthEnd, 6 - monthEnd.getDay());
+  // 전년 동월
+  const prevMonthStart = new Date(year - 1, month - 1, 1);
+  const prevMonthEnd = new Date(year - 1, month, 0);
+
+  const p = await getPool();
+
+  // 1) 현재 월 그리드 범위의 사이트별 일별 예식자 수
+  const r1 = await p.request()
+    .input('ws', sql.VarChar, fmtDate(gridStart))
+    .input('we', sql.VarChar, fmtDate(addDays(gridEnd, 1)))
+    .query(`
+      SELECT wd, site_name, COUNT(*) AS wedding_count
+      FROM (
+        SELECT DISTINCT u.uid,
+          CONVERT(varchar(10), TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date), 120) AS wd,
+          ISNULL(si.SiteName, '기타') AS site_name
+        FROM S2_UserInfo u WITH (NOLOCK)
+        LEFT JOIN SiteInfo si ON u.REFERER_SALES_GUBUN = si.SiteCode
+        WHERE u.site_div = 'SB'
+          AND u.USE_YORN = 'Y'
+          AND u.wedd_year IS NOT NULL AND LEN(u.wedd_year) = 4
+          AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) >= @ws
+          AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) < @we
+      ) t
+      GROUP BY wd, site_name
+      ORDER BY wd
+    `);
+
+  // 2) 전년 동월 사이트별 총합 (비교 카드용)
+  const r2 = await p.request()
+    .input('ws', sql.VarChar, fmtDate(prevMonthStart))
+    .input('we', sql.VarChar, fmtDate(addDays(prevMonthEnd, 1)))
+    .query(`
+      SELECT site_name, COUNT(*) AS wedding_count
+      FROM (
+        SELECT DISTINCT u.uid,
+          ISNULL(si.SiteName, '기타') AS site_name
+        FROM S2_UserInfo u WITH (NOLOCK)
+        LEFT JOIN SiteInfo si ON u.REFERER_SALES_GUBUN = si.SiteCode
+        WHERE u.site_div = 'SB'
+          AND u.USE_YORN = 'Y'
+          AND u.wedd_year IS NOT NULL AND LEN(u.wedd_year) = 4
+          AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) >= @ws
+          AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) < @we
+      ) t
+      GROUP BY site_name
+    `);
+
+  // 사이트 정규화: 4개 메인 외 모두 '기타'
+  const normSite = (s) => WEDDING_CALENDAR_SITES.includes(s) ? s : '기타';
+  const ALL_SITES = [...WEDDING_CALENDAR_SITES, '기타'];
+
+  // dailyMap: { 'YYYY-MM-DD': { 바른손카드: N, ... } }
+  const dailyMap = {};
+  r1.recordset.forEach(row => {
+    if (!dailyMap[row.wd]) dailyMap[row.wd] = {};
+    const s = normSite(row.site_name);
+    dailyMap[row.wd][s] = (dailyMap[row.wd][s] || 0) + row.wedding_count;
+  });
+
+  // 그리드 weeks 빌드
+  const weeks = [];
+  let weekIdx = 0;
+  for (let d = new Date(gridStart); d <= gridEnd; d = addDays(d, 7)) {
+    weekIdx++;
+    const days = [];
+    const bySite = {};
+    const weekTotalBySite = {};
+    ALL_SITES.forEach(s => { bySite[s] = []; weekTotalBySite[s] = 0; });
+    let weekTotal = 0;
+    for (let i = 0; i < 7; i++) {
+      const dt = addDays(d, i);
+      const key = fmtDate(dt);
+      const inMonth = dt.getMonth() === (month - 1) && dt.getFullYear() === year;
+      days.push({ date: key, day_of_week: dt.getDay(), in_month: inMonth });
+      const cell = dailyMap[key] || {};
+      ALL_SITES.forEach(s => {
+        const v = inMonth ? (cell[s] || 0) : 0; // 월 외 셀은 0 (캡쳐와 동일 — 회색 처리)
+        bySite[s].push(v);
+        weekTotalBySite[s] += v;
+        weekTotal += v;
+      });
+    }
+    weeks.push({
+      week_index: weekIdx,
+      days,
+      by_site: bySite,
+      week_total_by_site: weekTotalBySite,
+      week_total: weekTotal,
+    });
+  }
+
+  // 월 통합 KPI: 사이트별 total / weekend (토일) / weekday / 주말비중
+  const monthSummary = { by_site: {} };
+  ALL_SITES.forEach(s => { monthSummary.by_site[s] = { total: 0, weekend: 0, weekday: 0, weekend_pct: 0 }; });
+  let totalAll = 0, weekendAll = 0;
+  weeks.forEach(w => {
+    w.days.forEach((day, i) => {
+      if (!day.in_month) return;
+      const cell = dailyMap[day.date] || {};
+      const isWeekend = day.day_of_week === 0 || day.day_of_week === 6;
+      ALL_SITES.forEach(s => {
+        const v = cell[s] || 0;
+        monthSummary.by_site[s].total += v;
+        if (isWeekend) monthSummary.by_site[s].weekend += v;
+        else monthSummary.by_site[s].weekday += v;
+      });
+      const dayTotal = ALL_SITES.reduce((sum, s) => sum + (cell[s] || 0), 0);
+      totalAll += dayTotal;
+      if (isWeekend) weekendAll += dayTotal;
+    });
+  });
+  ALL_SITES.forEach(s => {
+    const row = monthSummary.by_site[s];
+    row.weekend_pct = row.total > 0 ? Math.round(row.weekend / row.total * 1000) / 10 : 0;
+  });
+  monthSummary.total = totalAll;
+  monthSummary.weekend = weekendAll;
+  monthSummary.weekday = totalAll - weekendAll;
+  monthSummary.weekend_pct = totalAll > 0 ? Math.round(weekendAll / totalAll * 1000) / 10 : 0;
+
+  // 전년 비교
+  const prevBySite = {};
+  ALL_SITES.forEach(s => prevBySite[s] = 0);
+  r2.recordset.forEach(row => { prevBySite[normSite(row.site_name)] += row.wedding_count; });
+  const prevTotalAll = ALL_SITES.reduce((sum, s) => sum + prevBySite[s], 0);
+  const deltaBySite = {};
+  ALL_SITES.forEach(s => {
+    const cur = monthSummary.by_site[s].total;
+    const prev = prevBySite[s];
+    deltaBySite[s] = {
+      count: cur - prev,
+      pct: prev > 0 ? Math.round((cur - prev) / prev * 1000) / 10 : (cur > 0 ? null : 0),
+    };
+  });
+  const deltaTotal = {
+    count: totalAll - prevTotalAll,
+    pct: prevTotalAll > 0 ? Math.round((totalAll - prevTotalAll) / prevTotalAll * 1000) / 10 : (totalAll > 0 ? null : 0),
+  };
+
+  return {
+    year,
+    month,
+    month_start: fmtDate(monthStart),
+    month_end: fmtDate(monthEnd),
+    grid_start: fmtDate(gridStart),
+    grid_end: fmtDate(gridEnd),
+    sites: ALL_SITES,
+    weeks,
+    month_summary: monthSummary,
+    prev_year_summary: {
+      year: year - 1,
+      month,
+      by_site: prevBySite,
+      total: prevTotalAll,
+      delta_by_site: deltaBySite,
+      delta_total: deltaTotal,
+    },
+  };
+}
+
 //   bg_order_customer_info.sticker_selections JSONB 를 집계 — 다음 두 가지 분석:
 //   1) 상품별 스티커 인기도 (Top 10 상품 × 스티커별 선택률)
 //   2) 메시지 분석 — 입력률, 길이 통계, 자주 등장 단어 / 키워드 카테고리
@@ -4667,6 +4878,8 @@ const server = http.createServer(async (req, res) => {
         data = await apiStickerAnalytics(parsed.query);
       } else if (pathname === '/api/dashboard/leadtime-3way') {
         data = await apiLeadtime3way(parsed.query);
+      } else if (pathname === '/api/dashboard/wedding-calendar') {
+        data = await apiWeddingCalendar(parsed.query);
       } else if (pathname === '/api/bg/vendor-settlements') {
         data = await apiVendorSettlements(parsed.query);
       } else if (pathname === '/api/bg/vendor-dashboard') {

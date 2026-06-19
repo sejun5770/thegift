@@ -284,6 +284,7 @@ nav.nav-loading a[href^="#"] {
   <a href="#bg-vendors" onclick="showPage('bg-vendors')">🤝 위탁업체</a>
   <a href="#bg-settlements" onclick="showPage('bg-settlements')">💰 위탁정산</a>
   <a href="#bg-vendor-dashboard" onclick="showPage('bg-vendor-dashboard')">📈 위탁 대시보드</a>
+  <a href="#wedding-calendar" onclick="showPage('wedding-calendar')">💍 예식일 캘린더</a>
   <a href="#admin-nav-settings" onclick="showPage('admin-nav-settings')" id="nav-link-admin-nav-settings" style="display:none">⚙️ GNB 설정</a>
   <div class="user-area" id="user-area"></div>
 </nav>
@@ -1781,6 +1782,64 @@ nav.nav-loading a[href^="#"] {
   </div>
 </div>
 
+<!-- ========== 예식일 캘린더 ========== -->
+<div id="page-wedding-calendar" class="page">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <h2 style="margin:0">💍 월별 예식일 캘린더</h2>
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <button class="btn" onclick="moveWcMonth(-1)" title="이전 달">◀</button>
+      <select id="wc-year" onchange="loadWeddingCalendar()" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px"></select>
+      <select id="wc-month" onchange="loadWeddingCalendar()" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px"></select>
+      <button class="btn" onclick="moveWcMonth(1)" title="다음 달">▶</button>
+      <button class="btn" onclick="moveWcToday()" title="이번 달로">📅 오늘</button>
+      <span style="margin:0 6px;color:var(--gray-300)">|</span>
+      <button class="btn btn-primary" onclick="copyWeddingCalendar('month')" title="월 전체 TSV 클립보드 복사">📋 월 전체 복사</button>
+      <button class="btn" onclick="copyWeddingCalendar('week')" title="주차별 선택 복사 (선택 안 하면 모든 주차)">📋 주차 복사</button>
+    </div>
+  </div>
+  <p style="font-size:12px;color:var(--gray-500);margin:0 0 16px">
+    회원가입 시 입력한 예식일 기준 · S2_UserInfo (탈퇴 회원 제외) · 통합회원 중복 제거 · 사이트별 분리
+  </p>
+
+  <div style="display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start">
+    <!-- 캘린더 표 -->
+    <div class="card" style="overflow-x:auto">
+      <div id="wc-loading" style="padding:20px;color:var(--gray-500)">로딩 중...</div>
+      <table id="wc-table" style="display:none;width:100%;border-collapse:collapse;font-size:12px;min-width:780px">
+        <thead id="wc-thead"></thead>
+        <tbody id="wc-tbody"></tbody>
+      </table>
+    </div>
+    <!-- 우측 KPI -->
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="card" style="padding:14px 16px">
+        <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px">월 통합 (<span id="wc-month-label">-</span>)</div>
+        <table id="wc-summary-table" style="width:100%;font-size:12px;border-collapse:collapse">
+          <thead><tr style="border-bottom:1px solid var(--gray-200)">
+            <th style="text-align:left;padding:4px 6px;font-weight:600">사이트</th>
+            <th style="text-align:right;padding:4px 6px;font-weight:600">합계</th>
+            <th style="text-align:right;padding:4px 6px;font-weight:600">토일</th>
+            <th style="text-align:right;padding:4px 6px;font-weight:600">주말%</th>
+          </tr></thead>
+          <tbody id="wc-summary-tbody"></tbody>
+        </table>
+      </div>
+      <div class="card" style="padding:14px 16px">
+        <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px">전년 동월 비교 (<span id="wc-prev-label">-</span>)</div>
+        <table id="wc-compare-table" style="width:100%;font-size:12px;border-collapse:collapse">
+          <thead><tr style="border-bottom:1px solid var(--gray-200)">
+            <th style="text-align:left;padding:4px 6px;font-weight:600">사이트</th>
+            <th style="text-align:right;padding:4px 6px;font-weight:600">전년</th>
+            <th style="text-align:right;padding:4px 6px;font-weight:600">증감</th>
+            <th style="text-align:right;padding:4px 6px;font-weight:600">증감%</th>
+          </tr></thead>
+          <tbody id="wc-compare-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ========== 바른기프트: 상품 설정 ========== -->
 <div id="page-bg-products" class="page">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
@@ -2843,6 +2902,7 @@ function showPage(name) {
   if (name === 'bg-vendors') loadBgVendors();
   if (name === 'bg-settlements') initBgSettlements();
   if (name === 'bg-vendor-dashboard') initBgVendorDashboard();
+  if (name === 'wedding-calendar') initWeddingCalendar();
 }
 
 // --- Category Tabs ---
@@ -10681,6 +10741,236 @@ function bgShPreviewNextMonth() { bgShPreviewMonth.setMonth(bgShPreviewMonth.get
 // ============================================
 // 바른기프트: 답례품 알림톡 발송
 // ============================================
+// ============================================
+// ============================================
+// 예식일 캘린더 (월별 사이트별 그리드 + TSV 복사)
+//   데이터 소스: /api/dashboard/wedding-calendar?year=Y&month=M
+//   사이트: 바른손카드 / 바른손몰 / 디얼디어 / 바른손M카드 / 기타 + 합
+//   주차: 일~토 기준, 월 그리드 (보통 5~6주차)
+// ============================================
+const WC_SITES = ['바른손카드', '바른손몰', '디얼디어', '바른손M카드', '기타'];
+const WC_SITE_SHORT = { '바른손카드': '바', '바른손몰': '몰', '디얼디어': '디', '바른손M카드': 'M', '기타': '기' };
+const WC_DAY_NAMES = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
+let _wcData = null;
+
+function initWeddingCalendar() {
+  const $y = document.getElementById('wc-year');
+  const $m = document.getElementById('wc-month');
+  if ($y && !$y.options.length) {
+    const now = new Date();
+    const yNow = now.getFullYear();
+    // 최근 3년 ~ 다음 1년
+    for (let y = yNow - 3; y <= yNow + 1; y++) {
+      const opt = document.createElement('option');
+      opt.value = y; opt.textContent = y + '년';
+      $y.appendChild(opt);
+    }
+    $y.value = yNow;
+  }
+  if ($m && !$m.options.length) {
+    for (let m = 1; m <= 12; m++) {
+      const opt = document.createElement('option');
+      opt.value = m; opt.textContent = m + '월';
+      $m.appendChild(opt);
+    }
+    $m.value = (new Date()).getMonth() + 1;
+  }
+  loadWeddingCalendar();
+}
+
+function moveWcMonth(delta) {
+  const $y = document.getElementById('wc-year');
+  const $m = document.getElementById('wc-month');
+  let y = parseInt($y.value, 10);
+  let m = parseInt($m.value, 10) + delta;
+  if (m < 1) { m = 12; y--; }
+  if (m > 12) { m = 1; y++; }
+  // year select 의 범위 보정 — option 없으면 추가
+  if (!Array.from($y.options).some(o => parseInt(o.value, 10) === y)) {
+    const opt = document.createElement('option');
+    opt.value = y; opt.textContent = y + '년';
+    $y.appendChild(opt);
+  }
+  $y.value = y;
+  $m.value = m;
+  loadWeddingCalendar();
+}
+
+function moveWcToday() {
+  const now = new Date();
+  document.getElementById('wc-year').value = now.getFullYear();
+  document.getElementById('wc-month').value = now.getMonth() + 1;
+  loadWeddingCalendar();
+}
+
+async function loadWeddingCalendar() {
+  const y = document.getElementById('wc-year').value;
+  const m = document.getElementById('wc-month').value;
+  const $loading = document.getElementById('wc-loading');
+  const $table = document.getElementById('wc-table');
+  $loading.style.display = '';
+  $loading.textContent = '로딩 중...';
+  $table.style.display = 'none';
+  try {
+    const r = await fetch(`${API}/api/dashboard/wedding-calendar?year=${y}&month=${m}`);
+    const data = await r.json();
+    if (data.error) throw new Error(data.error);
+    _wcData = data;
+    renderWeddingCalendar(data);
+    $loading.style.display = 'none';
+    $table.style.display = '';
+  } catch (e) {
+    console.error('[loadWeddingCalendar]', e);
+    $loading.textContent = '조회 실패: ' + e.message;
+  }
+}
+
+function renderWeddingCalendar(data) {
+  const $thead = document.getElementById('wc-thead');
+  const $tbody = document.getElementById('wc-tbody');
+  // 헤더
+  $thead.innerHTML = `<tr style="background:#f9fafb">
+    <th style="padding:6px 8px;border:1px solid var(--gray-200);text-align:center;width:54px">주</th>
+    <th style="padding:6px 8px;border:1px solid var(--gray-200);text-align:center;width:36px">사이트</th>
+    ${WC_DAY_NAMES.map((d, i) => `<th style="padding:6px 8px;border:1px solid var(--gray-200);text-align:center;color:${i===0?'#dc2626':i===6?'#2563eb':'inherit'}">${d}</th>`).join('')}
+    <th style="padding:6px 8px;border:1px solid var(--gray-200);text-align:center;background:#fef3c7;width:60px">주 합계</th>
+  </tr>`;
+
+  // 본체: 각 주차마다 (사이트 5개 + 합계 1개) = 6행
+  let tbody = '';
+  data.weeks.forEach((wk, wi) => {
+    // 1번째 행에 rowspan 으로 주차번호
+    [...WC_SITES, '합'].forEach((siteOrSum, i) => {
+      const isSum = siteOrSum === '합';
+      const site = isSum ? null : siteOrSum;
+      const rowBg = isSum ? 'background:#f3f4f6;font-weight:600' : (i === 0 ? 'background:#fafafa' : '');
+      const borderTop = (i === 0) ? 'border-top:2px solid var(--gray-300)' : '';
+      tbody += `<tr style="${rowBg};${borderTop}">`;
+      if (i === 0) tbody += `<td rowspan="6" style="padding:6px 8px;border:1px solid var(--gray-200);text-align:center;font-weight:600;background:#f9fafb">${wk.week_index}주차</td>`;
+      tbody += `<td style="padding:4px 6px;border:1px solid var(--gray-200);text-align:center;font-weight:600;color:${isSum?'#1e3a8a':'var(--gray-700)'}">${isSum?'합':WC_SITE_SHORT[site]}</td>`;
+      // 일~토 셀
+      wk.days.forEach((day, di) => {
+        const v = isSum
+          ? WC_SITES.reduce((s, sName) => s + (wk.by_site[sName]?.[di] || 0), 0)
+          : (wk.by_site[site]?.[di] || 0);
+        const dayNum = day.date.slice(8, 10).replace(/^0/, '');
+        const isToday = day.date === fmt(new Date());
+        const outOfMonth = !day.in_month;
+        const cellColor = outOfMonth ? 'color:#cbd5e1' : (di === 0 ? 'color:#dc2626' : (di === 6 ? 'color:#2563eb' : ''));
+        const bg = isToday ? 'background:#fef9c3' : '';
+        // 사이트 첫 행에만 날짜 수치 (small) 노출 — 캡쳐 패턴: 셀에 카운트, 일자는 상단 헤더 없음
+        // 캡쳐와 동일하게 각 셀에 수치만 노출 (1주차 첫 행의 일자=31,1,2,3,4,5,6 같은 작은 표시는 헤더로는 X)
+        // 다만 첫 행에서 일자 보조 표기로 readability ↑
+        const dateHint = (i === 0)
+          ? `<div style="font-size:9px;color:${outOfMonth ? '#cbd5e1' : 'var(--gray-400)'};margin-bottom:1px">${dayNum}</div>`
+          : '';
+        tbody += `<td style="padding:4px 6px;border:1px solid var(--gray-200);text-align:right;${cellColor};${bg}">${dateHint}<span style="font-weight:${isSum?600:400}">${v || (outOfMonth ? '' : 0)}</span></td>`;
+      });
+      // 주 합계 (행별)
+      const rowSum = isSum
+        ? wk.week_total
+        : (wk.week_total_by_site[site] || 0);
+      tbody += `<td style="padding:4px 6px;border:1px solid var(--gray-200);text-align:right;background:#fef9c3;font-weight:600">${rowSum}</td>`;
+      tbody += '</tr>';
+    });
+  });
+  $tbody.innerHTML = tbody;
+
+  // 우측 KPI — 월 통합
+  document.getElementById('wc-month-label').textContent = `${data.year}년 ${data.month}월`;
+  const $sum = document.getElementById('wc-summary-tbody');
+  const sumRows = [...WC_SITES, '합'].map(s => {
+    const isSum = s === '합';
+    const row = isSum
+      ? { total: data.month_summary.total, weekend: data.month_summary.weekend, weekend_pct: data.month_summary.weekend_pct }
+      : data.month_summary.by_site[s];
+    return `<tr style="${isSum?'background:#f3f4f6;font-weight:600':''}">
+      <td style="padding:4px 6px">${isSum?'합':s}</td>
+      <td style="padding:4px 6px;text-align:right">${row.total}</td>
+      <td style="padding:4px 6px;text-align:right">${row.weekend}</td>
+      <td style="padding:4px 6px;text-align:right">${row.weekend_pct}%</td>
+    </tr>`;
+  }).join('');
+  $sum.innerHTML = sumRows;
+
+  // 우측 KPI — 전년 비교
+  document.getElementById('wc-prev-label').textContent = `${data.prev_year_summary.year}년 ${data.prev_year_summary.month}월`;
+  const $cmp = document.getElementById('wc-compare-tbody');
+  const cmpRows = [...WC_SITES, '합'].map(s => {
+    const isSum = s === '합';
+    const prev = isSum ? data.prev_year_summary.total : (data.prev_year_summary.by_site[s] || 0);
+    const delta = isSum ? data.prev_year_summary.delta_total : data.prev_year_summary.delta_by_site[s];
+    const pct = delta.pct === null ? '신규' : `${delta.pct >= 0 ? '+' : ''}${delta.pct}%`;
+    const dCnt = `${delta.count >= 0 ? '+' : ''}${delta.count}`;
+    const dColor = delta.count > 0 ? '#dc2626' : (delta.count < 0 ? '#2563eb' : 'var(--gray-500)');
+    return `<tr style="${isSum?'background:#f3f4f6;font-weight:600':''}">
+      <td style="padding:4px 6px">${isSum?'합':s}</td>
+      <td style="padding:4px 6px;text-align:right">${prev}</td>
+      <td style="padding:4px 6px;text-align:right;color:${dColor}">${dCnt}</td>
+      <td style="padding:4px 6px;text-align:right;color:${dColor}">${pct}</td>
+    </tr>`;
+  }).join('');
+  $cmp.innerHTML = cmpRows;
+}
+
+/** TSV 클립보드 복사 — 캡쳐 포맷 그대로 (헤더 + 주차별 사이트 5행 + 합계). scope: 'month' | 'week'. */
+function copyWeddingCalendar(scope) {
+  if (!_wcData) { showToast('데이터가 없습니다.'); return; }
+  const lines = [];
+  // 헤더
+  lines.push(['', '', ...WC_DAY_NAMES, '주 합계'].join('\t'));
+  let targetWeeks = _wcData.weeks;
+  if (scope === 'week') {
+    // 가장 단순 — 현재 달의 weeks 모두 (사용자가 명시 선택 UI 없는 첫 버전).
+    // 캡쳐와 일관성 위해 모든 주차 출력하되, 주차별 빈 행으로 시각적 구분.
+    targetWeeks = _wcData.weeks;
+  }
+  targetWeeks.forEach(wk => {
+    [...WC_SITES, '합'].forEach((siteOrSum, i) => {
+      const isSum = siteOrSum === '합';
+      const site = isSum ? null : siteOrSum;
+      const rowLabel = (i === 0) ? `${wk.week_index}주차` : '';
+      const siteShort = isSum ? '합' : WC_SITE_SHORT[site];
+      const cells = wk.days.map((day, di) => {
+        const v = isSum
+          ? WC_SITES.reduce((s, sName) => s + (wk.by_site[sName]?.[di] || 0), 0)
+          : (wk.by_site[site]?.[di] || 0);
+        return day.in_month ? String(v) : '';
+      });
+      const rowSum = isSum
+        ? wk.week_total
+        : (wk.week_total_by_site[site] || 0);
+      lines.push([rowLabel, siteShort, ...cells, String(rowSum)].join('\t'));
+    });
+    // 주차 사이 빈 행 (시각적 구분)
+    lines.push(['', '', '', '', '', '', '', '', ''].join('\t'));
+  });
+  // 월 통합 / 전년 비교 별도 블록
+  lines.push(['', '월 통합', '합계', '토일', '주말%'].join('\t'));
+  [...WC_SITES, '합'].forEach(s => {
+    const isSum = s === '합';
+    const row = isSum
+      ? { total: _wcData.month_summary.total, weekend: _wcData.month_summary.weekend, weekend_pct: _wcData.month_summary.weekend_pct }
+      : _wcData.month_summary.by_site[s];
+    lines.push(['', isSum ? '합' : s, String(row.total), String(row.weekend), `${row.weekend_pct}%`].join('\t'));
+  });
+  lines.push('');
+  lines.push(['', `전년 동월 (${_wcData.prev_year_summary.year}년 ${_wcData.prev_year_summary.month}월)`, '전년', '증감', '증감%'].join('\t'));
+  [...WC_SITES, '합'].forEach(s => {
+    const isSum = s === '합';
+    const prev = isSum ? _wcData.prev_year_summary.total : (_wcData.prev_year_summary.by_site[s] || 0);
+    const delta = isSum ? _wcData.prev_year_summary.delta_total : _wcData.prev_year_summary.delta_by_site[s];
+    const pct = delta.pct === null ? '신규' : `${delta.pct >= 0 ? '+' : ''}${delta.pct}%`;
+    lines.push(['', isSum ? '합' : s, String(prev), `${delta.count >= 0 ? '+' : ''}${delta.count}`, pct].join('\t'));
+  });
+  const tsv = lines.join('\n');
+  navigator.clipboard.writeText(tsv).then(() => {
+    showToast(`✅ ${scope === 'month' ? '월 전체' : '주차'} 캘린더 복사됨 (${lines.length}행)`);
+  }).catch(e => {
+    alert('클립보드 복사 실패: ' + e.message);
+  });
+}
+
 // ============================================
 // 쿠팡 로켓그로스 (RFM) 매출 수동 입력
 // ============================================
