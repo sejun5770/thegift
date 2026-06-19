@@ -10973,25 +10973,25 @@ function copyWeddingCalendar(scope) {
   const lines = [];
 
   if (scope === 'week') {
-    // === 주차별 raw 복사: 4사이트 (바/몰/디/M) × 7숫자 ===
-    //   합계/헤더/기타/KPI/전년/메모 모두 제외. 주차 사이 빈 행 1줄.
+    // === 주차별 raw 복사: 4사이트 (바/몰/디/M) × 일~토 7열 숫자만 ===
+    //   라벨/합계/헤더/기타/KPI/전년/메모 모두 제외 — 순수 숫자 4행 × 7열.
+    //   주차 사이 빈 행 1줄 (시각적 구분 + 캘린더 워크시트 구조 정합).
     const RAW_SITES = ['바른손카드', '바른손몰', '디얼디어', '바른손M카드'];
+    // wk.days 인덱스 0..6 = 일~토 (캘린더 그리드는 항상 일요일 시작 — gridStart 보장)
     targetWeeks.forEach((wk, wi) => {
       RAW_SITES.forEach(site => {
         const cells = wk.days.map((day, di) => {
           const v = wk.by_site[site]?.[di] || 0;
-          // 월 외 셀: 데이터 있을 때만 포함 (0은 빈 칸)
           if (!day.in_month) return v > 0 ? String(v) : '';
           return String(v);
         });
-        // 라벨 (바/몰/디/M) + 7 숫자
-        lines.push([WC_SITE_SHORT[site], ...cells].join('\t'));
+        lines.push(cells.join('\t')); // 라벨 없이 7열 숫자만
       });
       if (wi < targetWeeks.length - 1) lines.push(''); // 주차 사이 빈 행
     });
     const tsv = lines.join('\n');
     navigator.clipboard.writeText(tsv).then(() => {
-      showToast(`✅ 주차 raw 복사됨 (${targetWeeks.length}주차 × 4행)`);
+      showToast(`✅ 주차 raw 복사됨 (${targetWeeks.length}주차 × 4행 × 7열)`);
     }).catch(e => alert('클립보드 복사 실패: ' + e.message));
     return;
   }
