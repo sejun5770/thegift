@@ -6261,6 +6261,121 @@ const server = http.createServer(async (req, res) => {
             ...results,
           };
         }
+      } else if (pathname === '/api/admin/summer-festa-comparison' && req.method === 'GET') {
+        // 썸머 99 페스타 prefix 상품 vs 동일 Card_Code 의 다른 (prefix 없는/다른) 상품 매출 비교.
+        //   URL: /api/admin/summer-festa-comparison?start=2026-06-11&end=2026-06-18&pattern=썸머
+        //   매칭 패턴: pattern 인자 (기본: 썸머) 가 포함된 Card_Name 을 'campaign' 그룹, 나머지 동일 Card_Code = 'baseline'.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const start = (parsed.query.start || '').trim();
+        const end = (parsed.query.end || '').trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+          return json(res, { error: 'start/end YYYY-MM-DD 형식 필수' }, 400);
+        }
+        const pattern = (parsed.query.pattern || '썸머').trim();
+        const patternSafe = pattern.replace(/[\[\]%_]/g, ''); // SQL LIKE 특수문자 제거
+        try {
+          const pp = await getPool();
+          const r = await pp.request()
+            .input('s', sql.VarChar, start)
+            .input('e', sql.VarChar, end)
+            .query(`
+              WITH all_orders AS (
+                SELECT
+                  CONVERT(varchar(10), o.order_date, 120) AS order_day,
+                  c.Card_Code, c.Card_Name,
+                  oi.order_count AS qty,
+                  CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1) AS revenue
+                FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                WHERE c.Card_Div = 'D01' AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+                  AND o.order_date >= @s AND o.order_date < DATEADD(day, 1, @e)
+                UNION ALL
+                SELECT
+                  CONVERT(varchar(10), co.order_date, 120),
+                  c.Card_Code, c.Card_Name,
+                  coi.item_count,
+                  CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                FROM custom_order co WITH (NOLOCK)
+                INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+                INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                WHERE c.Card_Div = 'D01' AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+                  AND co.order_date >= @s AND co.order_date < DATEADD(day, 1, @e)
+              )
+              SELECT
+                Card_Code, Card_Name,
+                CASE WHEN Card_Name LIKE '%${patternSafe}%' THEN 'campaign' ELSE 'baseline' END AS group_label,
+                order_day,
+                SUM(qty) AS qty,
+                SUM(revenue) AS revenue
+              FROM all_orders
+              GROUP BY Card_Code, Card_Name,
+                CASE WHEN Card_Name LIKE '%${patternSafe}%' THEN 'campaign' ELSE 'baseline' END,
+                order_day
+              ORDER BY Card_Code, order_day
+            `);
+          const rows = r.recordset.map(row => ({
+            card_code: row.Card_Code,
+            card_name: row.Card_Name,
+            group: row.group_label,
+            order_day: row.order_day,
+            qty: row.qty || 0,
+            revenue: Math.round(row.revenue || 0),
+          }));
+
+          // campaign 매칭된 Card_Code 집합 추출 → 같은 Card_Code 의 baseline 만 비교 대상으로 한정
+          const campaignCodes = new Set(rows.filter(r => r.group === 'campaign').map(r => r.card_code));
+          const campaignRows = rows.filter(r => r.group === 'campaign');
+          const baselineRows = rows.filter(r => r.group === 'baseline' && campaignCodes.has(r.card_code));
+
+          // 일자별 합산 (campaign vs baseline)
+          const dayAgg = (filtered) => {
+            const m = {};
+            filtered.forEach(r => {
+              if (!m[r.order_day]) m[r.order_day] = { revenue: 0, qty: 0 };
+              m[r.order_day].revenue += r.revenue;
+              m[r.order_day].qty += r.qty;
+            });
+            return Object.entries(m).map(([order_day, v]) => ({ order_day, ...v })).sort((a, b) => a.order_day.localeCompare(b.order_day));
+          };
+          // Card_Code 별 합산
+          const codeAgg = (filtered) => {
+            const m = {};
+            filtered.forEach(r => {
+              const key = r.card_code;
+              if (!m[key]) m[key] = { card_code: r.card_code, names: new Set(), revenue: 0, qty: 0 };
+              m[key].names.add(r.card_name);
+              m[key].revenue += r.revenue;
+              m[key].qty += r.qty;
+            });
+            return Object.values(m).map(v => ({ ...v, card_names: [...v.names] })).map(({ names, ...rest }) => rest).sort((a, b) => b.revenue - a.revenue);
+          };
+
+          data = {
+            period: `${start} ~ ${end}`,
+            pattern: patternSafe,
+            campaign: {
+              card_codes: [...campaignCodes],
+              by_day: dayAgg(campaignRows),
+              by_card: codeAgg(campaignRows),
+              total_revenue: campaignRows.reduce((s, r) => s + r.revenue, 0),
+              total_qty: campaignRows.reduce((s, r) => s + r.qty, 0),
+            },
+            baseline: {
+              by_day: dayAgg(baselineRows),
+              by_card: codeAgg(baselineRows),
+              total_revenue: baselineRows.reduce((s, r) => s + r.revenue, 0),
+              total_qty: baselineRows.reduce((s, r) => s + r.qty, 0),
+            },
+            raw: rows,
+            hint: 'campaign = Card_Name LIKE %' + patternSafe + '%, baseline = 같은 Card_Code 의 다른 상품. campaign 매칭 Card_Code 없으면 패턴 조정 필요 (pattern=... 인자).',
+          };
+        } catch (err) {
+          console.error('[summer-festa-comparison] error:', err.message);
+          data = { error: err.message };
+        }
       } else if (pathname === '/api/admin/probe-guest-order-sites' && req.method === 'GET') {
         // 비회원 (member_id NULL/빈값) 답례품 주문의 주문 사이트 분포.
         //   URL: /api/admin/probe-guest-order-sites?days=90
