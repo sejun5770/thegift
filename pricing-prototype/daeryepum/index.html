@@ -10954,7 +10954,10 @@ function renderWeddingCalendar(data) {
   $cmp.innerHTML = cmpRows;
 }
 
-/** TSV 클립보드 복사 — 캡쳐 포맷 그대로 (헤더 + 주차별 사이트 5행 + 합계). scope: 'month' | 'week'. */
+/** TSV 클립보드 복사. scope:
+ *   'month' — 캡쳐 포맷 (헤더 + 사이트 5행 + 합계 + KPI + 전년 + 메모)
+ *   'week'  — raw 만 (바/몰/디/M 4행 × 7숫자, 합계/헤더/KPI/메모 모두 제외, 주차 사이 빈 행)
+ *             → 운영자가 캘린더 워크시트의 사이트 행에 직접 paste 가능. */
 function copyWeddingCalendar(scope) {
   if (!_wcData) { showToast('데이터가 없습니다.'); return; }
   let targetWeeks = _wcData.weeks;
@@ -10968,6 +10971,32 @@ function copyWeddingCalendar(scope) {
     }
   }
   const lines = [];
+
+  if (scope === 'week') {
+    // === 주차별 raw 복사: 4사이트 (바/몰/디/M) × 7숫자 ===
+    //   합계/헤더/기타/KPI/전년/메모 모두 제외. 주차 사이 빈 행 1줄.
+    const RAW_SITES = ['바른손카드', '바른손몰', '디얼디어', '바른손M카드'];
+    targetWeeks.forEach((wk, wi) => {
+      RAW_SITES.forEach(site => {
+        const cells = wk.days.map((day, di) => {
+          const v = wk.by_site[site]?.[di] || 0;
+          // 월 외 셀: 데이터 있을 때만 포함 (0은 빈 칸)
+          if (!day.in_month) return v > 0 ? String(v) : '';
+          return String(v);
+        });
+        // 라벨 (바/몰/디/M) + 7 숫자
+        lines.push([WC_SITE_SHORT[site], ...cells].join('\t'));
+      });
+      if (wi < targetWeeks.length - 1) lines.push(''); // 주차 사이 빈 행
+    });
+    const tsv = lines.join('\n');
+    navigator.clipboard.writeText(tsv).then(() => {
+      showToast(`✅ 주차 raw 복사됨 (${targetWeeks.length}주차 × 4행)`);
+    }).catch(e => alert('클립보드 복사 실패: ' + e.message));
+    return;
+  }
+
+  // === 월 전체 복사 (캡쳐 포맷) ===
   // 헤더
   lines.push(['', '', ...WC_DAY_NAMES, '주 합계'].join('\t'));
   targetWeeks.forEach(wk => {
@@ -11019,8 +11048,7 @@ function copyWeddingCalendar(scope) {
   }
   const tsv = lines.join('\n');
   navigator.clipboard.writeText(tsv).then(() => {
-    const scopeLabel = scope === 'month' ? '월 전체' : (scope === 'week' ? '선택 주차' : '주차');
-    showToast(`✅ ${scopeLabel} 캘린더 복사됨 (${lines.length}행)`);
+    showToast(`✅ 월 전체 캘린더 복사됨 (${lines.length}행)`);
   }).catch(e => {
     alert('클립보드 복사 실패: ' + e.message);
   });
