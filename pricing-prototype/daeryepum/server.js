@@ -4134,6 +4134,100 @@ async function apiWeddingCalendarTrend(query = {}) {
   return { end_year: endYear, end_month: endMonth, months: out, sites: ALL_SITES };
 }
 
+// ============================================
+// 예식일 캘린더 — 사이트 분포 진단
+// GET /api/dashboard/wedding-calendar/site-breakdown?year=Y&month=M
+//   해당 월에 잡힌 회원들의 실제 SiteName 분포 + REFERER_SALES_GUBUN 분포.
+//   '기타' 로 묶인 사이트가 무엇인지 확인용 — 운영자가 메인 4사이트 확장 결정에 사용.
+//
+// 응답:
+//   {
+//     year, month,
+//     by_site_name: [{ site_name, member_count }, ...],   // SiteInfo 매칭된 사이트별 (NULL 포함)
+//     by_referer_code: [{ referer_code, site_name, member_count }, ...],  // 코드 단위 raw 분포
+//     unmatched_referer_codes: [...],                      // SiteInfo 에 등록 안 된 REFERER_SALES_GUBUN
+//   }
+// ============================================
+async function apiWeddingCalendarSiteBreakdown(query = {}) {
+  const now = today();
+  const year = parseInt(query.year, 10) || now.getFullYear();
+  const month = parseInt(query.month, 10) || (now.getMonth() + 1);
+  if (year < 2000 || year > 2100 || month < 1 || month > 12) {
+    return { error: 'year/month 범위 오류' };
+  }
+
+  const monthStart = new Date(year, month - 1, 1);
+  const monthEndExclusive = new Date(year, month, 1);
+  const p = await getPool();
+
+  // SiteName 분포 (NULL 도 별도 행으로 표시)
+  const r1 = await p.request()
+    .input('ws', sql.VarChar, fmtDate(monthStart))
+    .input('we', sql.VarChar, fmtDate(monthEndExclusive))
+    .query(`
+      SELECT site_name, COUNT(*) AS member_count
+      FROM (
+        SELECT DISTINCT u.uid,
+          si.SiteName AS site_name
+        FROM S2_UserInfo u WITH (NOLOCK)
+        LEFT JOIN SiteInfo si ON u.REFERER_SALES_GUBUN = si.SiteCode
+        WHERE u.site_div = 'SB'
+          AND u.USE_YORN = 'Y'
+          AND u.wedd_year IS NOT NULL AND LEN(u.wedd_year) = 4
+          AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) >= @ws
+          AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) < @we
+      ) t
+      GROUP BY site_name
+      ORDER BY member_count DESC
+    `);
+
+  // REFERER_SALES_GUBUN 코드 단위 raw 분포 (어떤 코드가 매칭 안 되는지 확인)
+  const r2 = await p.request()
+    .input('ws', sql.VarChar, fmtDate(monthStart))
+    .input('we', sql.VarChar, fmtDate(monthEndExclusive))
+    .query(`
+      SELECT referer_code, site_name, COUNT(*) AS member_count
+      FROM (
+        SELECT DISTINCT u.uid,
+          ISNULL(u.REFERER_SALES_GUBUN, '(NULL)') AS referer_code,
+          si.SiteName AS site_name
+        FROM S2_UserInfo u WITH (NOLOCK)
+        LEFT JOIN SiteInfo si ON u.REFERER_SALES_GUBUN = si.SiteCode
+        WHERE u.site_div = 'SB'
+          AND u.USE_YORN = 'Y'
+          AND u.wedd_year IS NOT NULL AND LEN(u.wedd_year) = 4
+          AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) >= @ws
+          AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) < @we
+      ) t
+      GROUP BY referer_code, site_name
+      ORDER BY member_count DESC
+    `);
+
+  // '기타' 로 묶이는 사이트 (메인 4 외 + NULL)
+  const MAIN = WEDDING_CALENDAR_SITES;
+  const otherBuckets = r1.recordset
+    .filter(row => row.site_name === null || !MAIN.includes(row.site_name))
+    .map(row => ({ site_name: row.site_name || '(SiteInfo 미매칭)', member_count: row.member_count }));
+
+  return {
+    year,
+    month,
+    main_sites: MAIN,
+    by_site_name: r1.recordset.map(r => ({
+      site_name: r.site_name || '(SiteInfo 미매칭)',
+      member_count: r.member_count,
+      is_main: r.site_name ? MAIN.includes(r.site_name) : false,
+    })),
+    by_referer_code: r2.recordset.map(r => ({
+      referer_code: r.referer_code,
+      site_name: r.site_name || '(SiteInfo 미매칭)',
+      member_count: r.member_count,
+    })),
+    other_buckets: otherBuckets,
+    hint: '"기타" 로 묶인 항목 확인용. other_buckets 의 site_name 중 운영자가 메인으로 승격하고 싶은 사이트가 있으면 WEDDING_CALENDAR_SITES 상수에 추가.',
+  };
+}
+
 //   bg_order_customer_info.sticker_selections JSONB 를 집계 — 다음 두 가지 분석:
 //   1) 상품별 스티커 인기도 (Top 10 상품 × 스티커별 선택률)
 //   2) 메시지 분석 — 입력률, 길이 통계, 자주 등장 단어 / 키워드 카테고리
@@ -4953,6 +5047,8 @@ const server = http.createServer(async (req, res) => {
         data = await apiWeddingCalendar(parsed.query);
       } else if (pathname === '/api/dashboard/wedding-calendar/trend') {
         data = await apiWeddingCalendarTrend(parsed.query);
+      } else if (pathname === '/api/dashboard/wedding-calendar/site-breakdown') {
+        data = await apiWeddingCalendarSiteBreakdown(parsed.query);
       } else if (pathname === '/api/bg/vendor-settlements') {
         data = await apiVendorSettlements(parsed.query);
       } else if (pathname === '/api/bg/vendor-dashboard') {
