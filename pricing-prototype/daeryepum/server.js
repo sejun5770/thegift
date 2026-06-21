@@ -6304,9 +6304,13 @@ const server = http.createServer(async (req, res) => {
         }
         try {
           const pp = await getPool();
-          // 기간 길이 + 직전 동기간 계산
+          // 기간 길이 + baseline 계산
+          //   prev_offset (기본 0): 0 = 직전 동기간, 1 = 그 전, 2 = 그 전의 그 전
+          //   각 offset 만큼 (daysInRange × offset) 일 더 이전으로 baseline 이동.
           const daysInRange = Math.round((new Date(end) - new Date(start)) / 86400000) + 1;
-          const prevEnd = new Date(new Date(start).getTime() - 86400000);
+          const prevOffset = Math.max(0, Math.min(10, parseInt(parsed.query.prev_offset, 10) || 0));
+          const offsetDays = (prevOffset + 1) * daysInRange;
+          const prevEnd = new Date(new Date(start).getTime() - 86400000 - prevOffset * daysInRange * 86400000);
           const prevStart = new Date(prevEnd.getTime() - (daysInRange - 1) * 86400000);
           const fmtKstDate = (d) => d.toISOString().slice(0, 10);
           const prevStartStr = fmtKstDate(prevStart);
@@ -6442,6 +6446,7 @@ const server = http.createServer(async (req, res) => {
               campaign: `${start} ~ ${end}`,
               prev: `${prevStartStr} ~ ${prevEndStr}`,
               days_in_range: daysInRange,
+              prev_offset: prevOffset, // 0=직전, 1=그 전, 2=그 전의 그 전
             },
             requested_codes: codes,
             campaign,
