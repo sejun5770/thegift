@@ -1389,7 +1389,8 @@ async function apiDashboardComparison(query = {}) {
           GROUP BY ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
             CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
         `),
-      // 3) 결제대기 = status_seq=1 AND settle_date IS NULL — CARD/ETC 합산 (사이트별 분리는 생략)
+      // 3) 결제대기 = status_seq IN (1, 9) AND settle_date IS NULL — CARD/ETC 합산
+      //   1: 결제대기, 9: 초안컨펌완료/결제대기 (둘 다 미결제 상태)
       p.request()
         .input('s', sql.VarChar, startStr)
         .input('e', sql.VarChar, endStr)
@@ -1403,7 +1404,7 @@ async function apiDashboardComparison(query = {}) {
             INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
             INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
             WHERE ${D01_FILTER} AND co.order_date >= @s AND co.order_date < @e
-              AND co.status_seq = 1 AND co.settle_date IS NULL
+              AND co.status_seq IN (1, 9) AND co.settle_date IS NULL
           ) AS card
           UNION ALL
           SELECT amount, orders, qty FROM (
@@ -1417,7 +1418,7 @@ async function apiDashboardComparison(query = {}) {
             LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
             ${ETC_COUPON_DIVISOR_JOIN_D01}
             WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e
-              AND o.status_seq = 1 AND o.settle_date IS NULL
+              AND o.status_seq IN (1, 9) AND o.settle_date IS NULL
           ) AS etc
         `),
     ]);

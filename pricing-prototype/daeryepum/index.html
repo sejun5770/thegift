@@ -2200,7 +2200,7 @@ nav.nav-loading a[href^="#"] {
       <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
         <input type="checkbox" id="uni-hide-cancel" onchange="renderBgUnified()"> 취소 제외
       </label>
-      <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px" title="결제 미완료 상태인 주문 제외 (status_seq=1, settle_date 비어있음)">
+      <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px" title="결제 미완료 상태인 주문 제외 (status_seq=1 결제대기 또는 9 초안컨펌완료/결제대기, settle_date 비어있음)">
         <input type="checkbox" id="uni-hide-pending" onchange="renderBgUnified()"> 결제대기 제외
       </label>
       <label id="uni-hide-processed-wrap" style="font-size:13px;cursor:pointer;display:none;align-items:center;gap:4px">
@@ -2699,11 +2699,11 @@ const SETTLE_METHOD_MAP = {
   'A': '해외카드',
   'B': '적립금',
 };
-// 수집 제외 상태: 3=결제취소, 5=주문취소, 또는 status_seq=1 이면서 settle_date 없는 미결제 주문
-// status_seq=1 이어도 settle_date 가 있으면 실제로는 결제 완료된 것이므로 수집 대상에 포함
+// 수집 제외 상태: 3=결제취소, 5=주문취소, 또는 (1=결제대기 또는 9=초안컨펌완료/결제대기) + settle_date 없음
+// settle_date 가 있으면 결제 완료된 것으로 판정 (status_seq 무관)
 function isCancelled(r) {
   if (r.status_seq === 3 || r.status_seq === 5) return true;
-  if (r.status_seq === 1 && !r.settle_date) return true; // 미결제 주문만
+  if ((r.status_seq === 1 || r.status_seq === 9) && !r.settle_date) return true;
   return false;
 }
 
@@ -2998,8 +2998,8 @@ function getFilteredOrders() {
     // 취소주문 제외 (3=결제취소, 5=주문취소)
     if (excludeCancel && (r.status_seq === 3 || r.status_seq === 5)) return false;
     // 결제대기 제외 — settle_date 가 없는 '실제 미결제' 주문 기준
-    // (status_seq=1 이어도 settle_date 있으면 결제 완료된 것)
-    if (excludePending && r.status_seq === 1 && !r.settle_date) return false;
+    //   status_seq=1 (결제대기) 또는 9 (초안컨펌완료/결제대기) + settle_date 없음.
+    if (excludePending && (r.status_seq === 1 || r.status_seq === 9) && !r.settle_date) return false;
     // 상품코드/명 검색
     if (q) {
       const code = (r.card_code || '').toLowerCase();
@@ -3024,9 +3024,9 @@ function renderOrderTable() {
     const key = String(r.order_seq);
     const isCollected = collected.has(key);
     const isCancelStatus = r.status_seq === 3 || r.status_seq === 5;
-    // 결제대기 하이라이트 — status_seq=1 이면서 settle_date 가 실제로 비어있는 주문만
+    // 결제대기 하이라이트 — status_seq=1 (결제대기) 또는 9 (초안컨펌완료/결제대기) + settle_date 없음
     //   CARD/ETC 모두 settle_date 채워지면 결제 완료된 것으로 판정
-    const isPendingStatus = r.status_seq === 1 && !r.settle_date;
+    const isPendingStatus = (r.status_seq === 1 || r.status_seq === 9) && !r.settle_date;
     let cls = '';
     if (isCollected && isCancelStatus) cls = 'row-cancel-alert';
     else if (isCollected && isPendingStatus) cls = 'row-pending-alert'; // 결제대기인데 수집완료 — 운영 검토 필요
@@ -11797,8 +11797,9 @@ function renderBgUnified() {
 
   const receiptLabel = { personal: '소득공제', business: '지출증빙' };
 
-  // 결제대기 판별 — status_seq=1 + settle_date 비어있음 (CARD/ETC 공통)
-  const isPaymentPending = o => o.status_seq === 1 && !o.settle_date;
+  // 결제대기 판별 — status_seq=1 (결제대기) 또는 9 (초안컨펌완료/결제대기) + settle_date 없음
+  //   CARD/ETC 공통. settle_date 채워지면 결제 완료 (status_seq 무관).
+  const isPaymentPending = o => (o.status_seq === 1 || o.status_seq === 9) && !o.settle_date;
 
   // 탭별 카운트 미리 계산 (취소 / 결제대기 제외 적용 후)
   const isCancelled = o => o.status_seq === 3 || o.status_seq === 5;
