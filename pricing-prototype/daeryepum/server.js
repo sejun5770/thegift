@@ -1149,7 +1149,7 @@ async function apiProductStats(query) {
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
       WHERE (${matchClause})
         AND co.order_date >= @s AND co.order_date < @e
-        AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+        AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
       GROUP BY c.Card_Code, CAST(co.order_date AS DATE), co.order_seq
     `);
 
@@ -1385,7 +1385,7 @@ async function apiDashboardComparison(query = {}) {
           INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
           LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
           LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
-          WHERE ${D01_FILTER} AND co.order_date >= @s AND co.order_date < @e AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+          WHERE ${D01_FILTER} AND co.order_date >= @s AND co.order_date < @e AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
           GROUP BY ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
             CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
         `),
@@ -1641,7 +1641,7 @@ async function apiDashboardComparison(query = {}) {
             LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
             WHERE ${D01_FILTER} AND co.order_seq IN (${inList})
               AND co.order_date >= @s AND co.order_date < @e
-              AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+              AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
             GROUP BY ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
               CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
           `);
@@ -1854,7 +1854,7 @@ async function apiDashboardSummary(query) {
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
         LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
-        WHERE ${categoryFilter} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+        WHERE ${categoryFilter} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
         GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
           CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
 
@@ -1902,7 +1902,7 @@ async function apiDashboardSummary(query) {
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
         LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
-        WHERE ${categoryFilter} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+        WHERE ${categoryFilter} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
         GROUP BY CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
           CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
       `),
@@ -1962,7 +1962,7 @@ async function apiDashboardSummary(query) {
             LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
             WHERE ${D01_FILTER} AND co.order_seq IN (${inList})
               AND co.order_date >= @startDate AND co.order_date < @endDate
-              AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+              AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
             GROUP BY CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
               CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
           `));
@@ -2341,7 +2341,7 @@ async function apiVendorSettlements(query) {
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
       WHERE ${D01_FILTER} AND co.order_seq IN (${inList})
-        AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
+        AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5, 9)
       GROUP BY co.order_seq, c.Card_Code, c.Card_Name, CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
     `).then(r => r.recordset.map(row => ({ ...row, _src: 'CARD' }))));
   }
@@ -2767,7 +2767,7 @@ async function apiDashboardByShipDate(query) {
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
       WHERE ${D01_FILTER} AND co.order_seq IN (${inList})
-        AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
+        AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5, 9)
       GROUP BY co.order_seq, CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
     `).then(r => r.recordset.map(row => ({ ...row, _src: 'CARD' }))));
   }
@@ -3079,7 +3079,7 @@ async function apiForecast(query = {}) {
         FROM custom_order co WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-        WHERE ${D01_FILTER} AND co.order_date >= @awStart AND co.order_date < @awEnd AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+        WHERE ${D01_FILTER} AND co.order_date >= @awStart AND co.order_date < @awEnd AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
       ) t GROUP BY order_day
     `);
 
@@ -3169,7 +3169,7 @@ async function apiForecast(query = {}) {
         FROM custom_order co WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-        WHERE ${D01_FILTER} AND co.order_date >= @start30 AND co.order_date < DATEADD(day,1,@today) AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+        WHERE ${D01_FILTER} AND co.order_date >= @start30 AND co.order_date < DATEADD(day,1,@today) AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
       ) t
     `);
 
@@ -3348,7 +3348,7 @@ async function apiLeadtime(query = {}) {
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       INNER JOIN custom_order_WeddInfo w WITH (NOLOCK) ON co.order_seq = w.order_seq
-      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
         AND w.event_year IS NOT NULL AND LEN(w.event_year) = 4
         AND TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) IS NOT NULL
         AND co.order_date >= DATEADD(day, -${WINDOW_DAYS}, GETDATE())
@@ -3452,7 +3452,7 @@ async function apiConversion(query = {}) {
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       WHERE ${D01_FILTER} AND co.order_date >= @os AND co.order_date < @oe
-        AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+        AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
       GROUP BY CONVERT(varchar(10), co.order_date, 120)
     `);
 
@@ -4636,7 +4636,7 @@ async function apiSamples(query = {}) {
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
         WHERE ${D01_FILTER} AND co.order_date >= @ss AND co.order_date < @se
-          AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+          AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
           AND coi.item_count = 1
       ) t
       GROUP BY order_day, card_name, card_code
@@ -4676,7 +4676,7 @@ async function apiSamples(query = {}) {
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
         WHERE ${D01_FILTER} AND co.order_date >= @sos AND co.order_date < @soe
-          AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+          AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
           AND coi.item_count = 1
       ) t
       GROUP BY order_day
@@ -4713,7 +4713,7 @@ async function apiMarketing(query = {}) {
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5) AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9) AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
       GROUP BY DATEPART(hour, co.order_date)
     ) t GROUP BY hr ORDER BY hr
   `);
@@ -4732,7 +4732,7 @@ async function apiMarketing(query = {}) {
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5) AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9) AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
       GROUP BY DATEPART(weekday, co.order_date)
     ) t GROUP BY dow ORDER BY dow
   `);
@@ -4755,7 +4755,7 @@ async function apiMarketing(query = {}) {
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN DELIVERY_INFO di WITH (NOLOCK) ON co.order_seq = di.ORDER_SEQ AND di.DELIVERY_SEQ = 1
-      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5) AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9) AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
         AND di.ADDR IS NOT NULL AND LEN(di.ADDR) > 2
       GROUP BY LEFT(di.ADDR, CHARINDEX(' ', di.ADDR + ' ') - 1)
     ) t GROUP BY region ORDER BY cnt DESC
@@ -4776,7 +4776,7 @@ async function apiMarketing(query = {}) {
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5) AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9) AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
         AND co.member_id IS NOT NULL AND co.member_id != ''
     ) t
   `);
@@ -4787,7 +4787,7 @@ async function apiMarketing(query = {}) {
     FROM custom_order co WITH (NOLOCK)
     INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
     INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-    WHERE c.Card_Div = 'A01' AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5) AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
+    WHERE c.Card_Div = 'A01' AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9) AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
       AND co.member_id IS NOT NULL AND co.member_id != ''
   `);
   const cardSet = new Set(cardMembers.recordset.map(r => r.member_id));
@@ -4839,7 +4839,7 @@ async function apiMarketing(query = {}) {
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN COMPANY comp WITH (NOLOCK) ON cord.company_Seq = comp.COMPANY_SEQ
       LEFT JOIN SiteInfo os_si ON comp.SALES_GUBUN = os_si.SiteCode
-      WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5, 9)
         AND cord.order_date >= ${MK_FROM} AND cord.order_date < ${MK_TO}
     ) t GROUP BY order_site ORDER BY order_count DESC
   `);
@@ -4862,7 +4862,7 @@ async function apiMarketing(query = {}) {
         FROM custom_order cord WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-        WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
+        WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5, 9)
           AND cord.order_date >= ${MK_FROM} AND cord.order_date < ${MK_TO}
       ) u
       WHERE member_id IS NOT NULL
@@ -4903,7 +4903,7 @@ async function apiMarketing(query = {}) {
       FROM custom_order cord WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5, 9)
         AND cord.order_date >= ${MK_FROM} AND cord.order_date < ${MK_TO}
     ) u
     WHERE member_id IS NULL OR LTRIM(RTRIM(CAST(member_id AS NVARCHAR(50)))) = ''
@@ -4935,7 +4935,7 @@ async function apiMarketing(query = {}) {
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN COMPANY comp WITH (NOLOCK) ON cord.company_Seq = comp.COMPANY_SEQ
-      WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5, 9)
         AND cord.order_date >= ${MK_FROM} AND cord.order_date < ${MK_TO}
     ),
     -- 가입 사이트 = S2_UserInfo.REFERER_SALES_GUBUN (signupSiteRaw 와 동일 정책)
@@ -4974,7 +4974,7 @@ async function apiMarketing(query = {}) {
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
         AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
     ),
     member_gaps AS (
@@ -5022,7 +5022,7 @@ async function apiMarketing(query = {}) {
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
         AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
     ),
     ordered AS (
@@ -5091,7 +5091,7 @@ async function apiMarketing(query = {}) {
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
         AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
     ) t GROUP BY channel ORDER BY revenue DESC
   `);
@@ -5124,7 +5124,7 @@ async function apiMarketing(query = {}) {
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
         AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
     ) t
     GROUP BY CONVERT(varchar(10), DATEADD(week, DATEDIFF(week, 0, order_date), 0), 120), channel
@@ -5196,7 +5196,7 @@ async function apiMarketingSites(query = {}) {
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN COMPANY comp WITH (NOLOCK) ON cord.company_Seq = comp.COMPANY_SEQ
       LEFT JOIN SiteInfo os_si ON comp.SALES_GUBUN = os_si.SiteCode
-      WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5, 9)
         AND cord.order_date >= ${MK_FROM} AND cord.order_date < ${MK_TO}
     ) t GROUP BY order_site ORDER BY order_count DESC
   `);
@@ -5214,7 +5214,7 @@ async function apiMarketingSites(query = {}) {
         SELECT cord.member_id FROM custom_order cord WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-        WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
+        WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5, 9)
           AND cord.order_date >= ${MK_FROM} AND cord.order_date < ${MK_TO}
       ) u WHERE member_id IS NOT NULL
     )
@@ -5249,7 +5249,7 @@ async function apiMarketingSites(query = {}) {
       FROM custom_order cord WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5, 9)
         AND cord.order_date >= ${MK_FROM} AND cord.order_date < ${MK_TO}
     ) u
     WHERE member_id IS NULL OR LTRIM(RTRIM(CAST(member_id AS NVARCHAR(50)))) = ''
@@ -5273,7 +5273,7 @@ async function apiMarketingSites(query = {}) {
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN COMPANY comp WITH (NOLOCK) ON cord.company_Seq = comp.COMPANY_SEQ
-      WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5, 9)
         AND cord.order_date >= ${MK_FROM} AND cord.order_date < ${MK_TO}
     ),
     referer_site AS (
@@ -5327,7 +5327,7 @@ async function apiMarketingReorder(query = {}) {
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
         AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
     ),
     member_gaps AS (
@@ -5371,7 +5371,7 @@ async function apiMarketingReorder(query = {}) {
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON coi.order_seq = co.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
         AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
     ),
     ordered AS (
@@ -5451,7 +5451,7 @@ async function apiMarketingChannel(query = {}) {
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
         AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
     ) t GROUP BY channel ORDER BY revenue DESC
   `);
@@ -5483,7 +5483,7 @@ async function apiMarketingChannel(query = {}) {
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
         AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
     ) t
     GROUP BY CONVERT(varchar(10), DATEADD(week, DATEDIFF(week, 0, order_date), 0), 120), channel
@@ -6348,7 +6348,7 @@ const server = http.createServer(async (req, res) => {
                 INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
                 INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
                 WHERE (${matchClause})
-                  AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+                  AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
                   AND co.order_date >= @s AND co.order_date < DATEADD(day, 1, @e)
               ) t
               GROUP BY order_day, card_code, card_name
@@ -6586,7 +6586,7 @@ const server = http.createServer(async (req, res) => {
                 FROM custom_order co WITH (NOLOCK)
                 INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
                 INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-                WHERE c.Card_Div = 'D01' AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+                WHERE c.Card_Div = 'D01' AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
                   AND co.order_date >= @s AND co.order_date < DATEADD(day, 1, @e)
               )
               SELECT
@@ -6694,7 +6694,7 @@ const server = http.createServer(async (req, res) => {
               INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
               LEFT JOIN COMPANY comp WITH (NOLOCK) ON cord.company_Seq = comp.COMPANY_SEQ
               LEFT JOIN SiteInfo os_si ON comp.SALES_GUBUN = os_si.SiteCode
-              WHERE c.Card_Div = 'D01' AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
+              WHERE c.Card_Div = 'D01' AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5, 9)
                 AND cord.order_date >= DATEADD(day, -@days, GETDATE())
                 AND (cord.member_id IS NULL OR LTRIM(RTRIM(CAST(cord.member_id AS NVARCHAR(50)))) = '')
             ) t
@@ -6745,7 +6745,7 @@ const server = http.createServer(async (req, res) => {
               FROM custom_order cord WITH (NOLOCK)
               INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
               INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-              WHERE c.Card_Div = 'D01' AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
+              WHERE c.Card_Div = 'D01' AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5, 9)
                 AND cord.order_date >= DATEADD(day, -@days, GETDATE())
             ),
             distinct_orders AS (SELECT DISTINCT order_seq, member_id FROM gift_orders)
@@ -6770,7 +6770,7 @@ const server = http.createServer(async (req, res) => {
                 FROM custom_order cord WITH (NOLOCK)
                 INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
                 INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-                WHERE c.Card_Div = 'D01' AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
+                WHERE c.Card_Div = 'D01' AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5, 9)
                   AND cord.order_date >= DATEADD(day, -@days, GETDATE())
               ) u
               WHERE member_id IS NOT NULL AND LTRIM(RTRIM(CAST(member_id AS NVARCHAR(50)))) <> ''
@@ -6964,7 +6964,7 @@ const server = http.createServer(async (req, res) => {
                 FROM custom_order cord WITH (NOLOCK)
                 INNER JOIN custom_order_item coi WITH (NOLOCK) ON cord.order_seq = coi.order_seq
                 INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-                WHERE c.Card_Div = 'D01' AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5)
+                WHERE c.Card_Div = 'D01' AND cord.status_seq >= 2 AND cord.status_seq NOT IN (3, 5, 9)
                   AND cord.order_date >= DATEADD(day, -@days, GETDATE())
               ) u
             ) first_order
@@ -7163,7 +7163,7 @@ const server = http.createServer(async (req, res) => {
             INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
             WHERE c.Card_Code LIKE 'COM[_]%'
               AND o.order_date >= DATEADD(day, -@days, GETDATE())
-              AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+              AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5, 9)
             UNION ALL
             SELECT 'CARD' AS src, COUNT(DISTINCT co.order_seq) AS order_cnt,
               ISNULL(SUM(coi.item_count), 0) AS total_qty,
@@ -7174,7 +7174,7 @@ const server = http.createServer(async (req, res) => {
             INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
             WHERE c.Card_Code LIKE 'COM[_]%'
               AND co.order_date >= DATEADD(day, -@days, GETDATE())
-              AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5)
+              AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5, 9)
           `);
           results.recent_com_orders = r.recordset;
         } catch (e) { results.recent_com_orders = { error: e.message }; }
@@ -7385,7 +7385,7 @@ const server = http.createServer(async (req, res) => {
             FROM ${table} o WITH (NOLOCK)
             LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
             WHERE o.${dateCol} >= DATEADD(day, -@days, GETDATE())
-              AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+              AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5, 9)
               AND si.SiteName IS NULL  -- SiteInfo 미매핑
               AND o.company_Seq IS NOT NULL
             GROUP BY o.company_Seq
@@ -7406,7 +7406,7 @@ const server = http.createServer(async (req, res) => {
             FROM ${table} o WITH (NOLOCK)
             WHERE o.${dateCol} >= DATEADD(day, -@days, GETDATE())
               AND o.company_Seq IN (${inList})
-              AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5)
+              AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5, 9)
             ORDER BY o.order_date DESC
           `);
           return r.recordset;
@@ -8076,7 +8076,7 @@ const server = http.createServer(async (req, res) => {
           FROM custom_order co WITH (NOLOCK)
           LEFT JOIN card_vbank cv ON cv.order_seq = co.order_seq
           WHERE co.order_date >= DATEADD(day, -@days, GETDATE())
-            AND co.status_seq NOT IN (3, 5)
+            AND co.status_seq NOT IN (3, 5, 9)
           GROUP BY co.settle_method
           ORDER BY cnt DESC
         `);
@@ -8111,7 +8111,7 @@ const server = http.createServer(async (req, res) => {
             FROM custom_order co WITH (NOLOCK)
             LEFT JOIN card_vbank cv ON cv.order_seq = co.order_seq
             WHERE co.order_date >= DATEADD(day, -@days, GETDATE())
-              AND co.status_seq NOT IN (3, 5)
+              AND co.status_seq NOT IN (3, 5, 9)
           ) t WHERE t.rn <= 3
           ORDER BY t.settle_method, t.order_date DESC
         `);
@@ -8291,7 +8291,7 @@ const server = http.createServer(async (req, res) => {
               LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
               WHERE c.Card_Div = 'D01'
                 AND co.order_date >= @s AND co.order_date < @e
-                AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+                AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
             )
             SELECT
               CONVERT(varchar(10), d.order_date, 120) AS order_day,
@@ -8356,7 +8356,7 @@ const server = http.createServer(async (req, res) => {
               AND o.order_date >= @s AND o.order_date < @e
               AND ABS(DATEDIFF(day, o.order_date, co.order_date)) <= 30
               AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
-              AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5)
+              AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
           `);
         // 집계: order_seq 당 distinct Card_Div 수, 사이트별 분포
         const byOrder = {};
