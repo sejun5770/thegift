@@ -5702,13 +5702,14 @@ const server = http.createServer(async (req, res) => {
             LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
             WHERE o.order_seq = @seq
           `);
+          // custom_order 는 coupon_price/point_price/delivery_price 컬럼 없음 (CUSTOM_ETC_ORDER 와 다른 스키마).
+          //   필요한 핵심 필드만 안전하게 조회.
           const card = await pp.request().input('seq', sql.Int, seq).query(`
             SELECT co.order_seq, co.order_date,
               CONVERT(varchar(19), co.settle_date, 120) AS settle_date,
               co.settle_price, co.settle_method, co.settle_status,
               co.company_Seq, co.status_seq, co.order_name, co.member_id,
               co.last_total_price, co.order_total_price,
-              co.coupon_price, co.point_price, co.delivery_price,
               coi.item_sale_price, coi.item_count, coi.card_seq,
               c.Card_Name, c.Card_Code, c.Card_Div, c.Unit_Value,
               ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name
