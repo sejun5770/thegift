@@ -9430,8 +9430,47 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// ─── 매일 KST 03:00 주문RAW 자동 sync ───
+//   별도 cron 서버 없이 컨테이너 내부에서 자체 호출.
+//   GOOGLE_SHEETS_* 환경변수 미설정 시 endpoint 가 자체 에러로 응답 → 무해.
+function scheduleDailyOrderRawSync() {
+  function msUntilNextRun() {
+    // 매일 KST 03:00 = UTC 18:00
+    const now = new Date();
+    const target = new Date();
+    target.setUTCHours(18, 0, 0, 0);
+    if (target <= now) target.setUTCDate(target.getUTCDate() + 1);
+    return target.getTime() - now.getTime();
+  }
+
+  async function runOnce() {
+    const stamp = new Date().toISOString();
+    try {
+      console.log('[sync-cron]', stamp, '주문RAW sync 시작');
+      const res = await fetch(`http://localhost:${PORT}/api/admin/sync-order-raw`, {
+        method: 'POST',
+        headers: { 'x-internal-cron': '1' }
+      });
+      const text = await res.text();
+      let body;
+      try { body = JSON.parse(text); } catch { body = text.slice(0, 500); }
+      console.log('[sync-cron] 완료 status=' + res.status, body);
+    } catch (err) {
+      console.error('[sync-cron] 실패:', err.message);
+    }
+    setTimeout(runOnce, msUntilNextRun());
+  }
+
+  const waitMs = msUntilNextRun();
+  setTimeout(runOnce, waitMs);
+  const h = Math.floor(waitMs / 3600000);
+  const m = Math.floor((waitMs % 3600000) / 60000);
+  console.log(`[sync-cron] 매일 03:00 KST 등록 — 첫 실행까지 ${h}시간 ${m}분`);
+}
+
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`답례품 관리 서버: http://localhost:${PORT}${BASE_PATH || ''}`);
+  scheduleDailyOrderRawSync();
 });
 
 // 서버 크래시 방지
