@@ -6724,6 +6724,92 @@ const server = http.createServer(async (req, res) => {
           console.error('[probe-guest-order-sites] error:', err.message);
           data = { error: err.message };
         }
+      } else if (pathname === '/api/admin/probe-stock-tables' && req.method === 'GET') {
+        // MSSQL bar_shop1 의 재고 관련 테이블 자동 탐색.
+        //   URL: /api/admin/probe-stock-tables
+        //         /api/admin/probe-stock-tables?describe=<table>  ← 특정 테이블 컬럼 + sample 5행
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          const pp = await getPool();
+          const describeTable = (parsed.query.describe || '').trim();
+          if (describeTable && /^[A-Za-z0-9_]+$/.test(describeTable)) {
+            // 단일 테이블 describe + sample
+            const cols = await pp.request().query(`
+              SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+              FROM INFORMATION_SCHEMA.COLUMNS
+              WHERE TABLE_NAME = '${describeTable}'
+              ORDER BY ORDINAL_POSITION
+            `);
+            let sample = { recordset: [] };
+            try {
+              sample = await pp.request().query(`SELECT TOP 5 * FROM [${describeTable}] WITH (NOLOCK)`);
+            } catch (e) { sample = { recordset: [], error: e.message }; }
+            const cnt = await pp.request().query(`SELECT COUNT(*) AS n FROM [${describeTable}] WITH (NOLOCK)`).catch(() => ({ recordset: [{ n: null }] }));
+            data = {
+              table: describeTable,
+              columns: cols.recordset,
+              row_count: cnt.recordset[0].n,
+              samples: sample.recordset,
+              sample_error: sample.error,
+            };
+          } else {
+            // 전체 탐색 — 재고 관련 테이블 + 컬럼 후보
+            const tbls = await pp.request().query(`
+              SELECT TABLE_NAME, TABLE_TYPE
+              FROM INFORMATION_SCHEMA.TABLES
+              WHERE TABLE_TYPE = 'BASE TABLE'
+              ORDER BY TABLE_NAME
+            `);
+            const allTables = tbls.recordset.map(r => r.TABLE_NAME);
+            // 테이블명 키워드 — stock/inventory/jaego/재고/qty
+            const tableRe = /stock|inventory|jaego|qty|jego|item_stock|product_stock/i;
+            const candTables = allTables.filter(t => tableRe.test(t));
+            // 컬럼명 패턴 — stock_qty / qty / inventory 컬럼이 있는 테이블 탐색
+            const colsRes = await pp.request().query(`
+              SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE
+              FROM INFORMATION_SCHEMA.COLUMNS
+              WHERE COLUMN_NAME LIKE '%stock%' OR COLUMN_NAME LIKE '%inventory%'
+                 OR COLUMN_NAME = 'qty' OR COLUMN_NAME = 'remain_qty'
+                 OR COLUMN_NAME LIKE '%jaego%' OR COLUMN_NAME LIKE '%jego%'
+              ORDER BY TABLE_NAME, COLUMN_NAME
+            `);
+            // 테이블별 컬럼 그룹핑
+            const tablesByCols = {};
+            colsRes.recordset.forEach(r => {
+              if (!tablesByCols[r.TABLE_NAME]) tablesByCols[r.TABLE_NAME] = [];
+              tablesByCols[r.TABLE_NAME].push({ col: r.COLUMN_NAME, type: r.DATA_TYPE });
+            });
+            // 후보 테이블 row_count 조회
+            const candDetail = {};
+            for (const t of candTables.slice(0, 15)) {
+              try {
+                const r = await pp.request().query(`SELECT COUNT(*) AS n FROM [${t}] WITH (NOLOCK)`);
+                const c = await pp.request().query(`
+                  SELECT TOP 30 COLUMN_NAME, DATA_TYPE
+                  FROM INFORMATION_SCHEMA.COLUMNS
+                  WHERE TABLE_NAME = '${t}'
+                  ORDER BY ORDINAL_POSITION
+                `);
+                candDetail[t] = { row_count: r.recordset[0].n, columns: c.recordset };
+              } catch (e) {
+                candDetail[t] = { error: e.message };
+              }
+            }
+            data = {
+              total_tables: allTables.length,
+              candidate_tables_by_name: candTables,
+              candidate_tables_by_column: Object.keys(tablesByCols),
+              column_matches_summary: tablesByCols,
+              candidate_table_detail: candDetail,
+              hint: 'candidate_tables_by_name/column 의 row_count 가 의미 있는 (수백~수만) 테이블이 재고 마스터일 가능성 큼. 정확한 테이블 식별 후 probe-stock-tables?describe=<table> 로 컬럼/샘플 확인.',
+            };
+          }
+        } catch (err) {
+          console.error('[probe-stock-tables] error:', err.message);
+          data = { error: err.message };
+        }
       } else if (pathname === '/api/admin/probe-buyer-membership' && req.method === 'GET') {
         // 답례품 구매자의 회원 상태 분포 — 비회원/Orphan/정상 회원 비율.
         //   URL: /api/admin/probe-buyer-membership?days=90
