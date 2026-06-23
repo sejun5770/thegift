@@ -6724,6 +6724,179 @@ const server = http.createServer(async (req, res) => {
           console.error('[probe-guest-order-sites] error:', err.message);
           data = { error: err.message };
         }
+      } else if (pathname === '/api/admin/sales-report-by-site-time' && req.method === 'GET') {
+        // 답례품 BASE 품목코드별 사이트/시간단위 매출 리포트 — TSV(스프레드시트 paste) 지원.
+        //   URL: /api/admin/sales-report-by-site-time?view=daily|weekly|monthly|ship&format=tsv|json&days=N
+        //   재고 제외 (사용자 요청 2026-06-23). 4개 사이트 (바른손카드/몰/쿠팡/네이버) + 기타.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const format = String(parsed.query.format || 'json').toLowerCase();
+        const view = String(parsed.query.view || 'daily').toLowerCase();
+        const defaultDays = { daily: 90, weekly: 84, monthly: 365, ship: 60 }[view] || 90;
+        const days = Math.max(1, Math.min(730, parseInt(parsed.query.days, 10) || defaultDays));
+        try {
+          const pp = await getPool();
+          const todayDate = today();
+          const todayStr = fmtDate(todayDate);
+          const startStr = fmtDate(addDays(todayDate, -days));
+          const endExclStr = fmtDate(addDays(todayDate, 1));
+
+          const toBase = (code) => {
+            if (!code) return code;
+            const m = String(code).match(/^(.+)_[A-Za-z0-9]+$/);
+            return m ? m[1] : code;
+          };
+          const cleanCardName = (n) => String(n || '').replace(/^\[.*?\]\s*/g, '').trim();
+
+          // 4개 메인 사이트 + 기타
+          const MAIN_SITES = ['바른손카드', '바른손몰', '쿠팡', '네이버'];
+          const mapSite = (s) => MAIN_SITES.includes(s) ? s : '기타';
+
+          let rows = [];
+
+          if (view === 'ship') {
+            // 출고일별 — sticker_selections.desired_ship_date 기준
+            //   매출은 sticker_selections 에 없으므로 수량만. 매출 필요하면 매출 SQL 별도 매칭.
+            //   기간: 직전 days 일 ~ 미래 days/2 일 (예약 출고 포함)
+            const nextEndStr = fmtDate(addDays(todayDate, Math.floor(days / 2)));
+            const _bgStore = require('./barungift/store');
+            let cis = [];
+            try { cis = await _bgStore.getAllCustomerInfos(); }
+            catch (e) { console.warn('[sales-report] CIs fetch failed:', e.message); }
+            const aggMap = new Map(); // key: ship_date|base → {qty, name}
+            (cis || []).forEach(ci => {
+              (ci.sticker_selections || []).forEach(sel => {
+                const dshp = sel.desired_ship_date;
+                if (!dshp || dshp < startStr || dshp > nextEndStr) return;
+                const code = sel.product_code;
+                if (!code) return;
+                const base = toBase(code);
+                const key = `${dshp}|${base}`;
+                if (!aggMap.has(key)) aggMap.set(key, {
+                  ship_date: dshp, base_code: base, name: sel.product_name, qty: 0,
+                });
+                aggMap.get(key).qty += (sel.quantity || 0);
+              });
+            });
+            rows = [...aggMap.values()]
+              .map(r => ({
+                ship_date: r.ship_date,
+                base_code: r.base_code,
+                name: cleanCardName(r.name),
+                qty: r.qty,
+              }))
+              .filter(r => r.qty > 0)
+              .sort((a, b) => a.ship_date.localeCompare(b.ship_date) || a.base_code.localeCompare(b.base_code));
+          } else {
+            // settle_date 기준 — daily/weekly/monthly
+            //   weekly: 주 시작일 (월요일 기준) ISO 주차
+            //   monthly: YYYY-MM
+            const periodSql = view === 'daily'
+              ? `CONVERT(varchar(10), {DATE}, 120)`
+              : view === 'weekly'
+                ? `CONVERT(varchar(10), DATEADD(week, DATEDIFF(week, 0, {DATE}), 0), 120)`
+                : `CONVERT(varchar(7), {DATE}, 120)`;
+            const result = await pp.request()
+              .input('s', sql.VarChar, startStr)
+              .input('e', sql.VarChar, endExclStr)
+              .query(`
+                SELECT period, card_code, card_name, site_name,
+                       SUM(qty) AS qty, SUM(revenue) AS revenue
+                FROM (
+                  SELECT ${periodSql.replace(/\{DATE\}/g, 'co.settle_date')} AS period,
+                         c.Card_Code AS card_code, c.Card_Name AS card_name,
+                         ISNULL(si.SiteName, ISNULL(comp.COMPANY_NAME, '기타')) AS site_name,
+                         CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1) AS revenue,
+                         coi.item_count AS qty
+                  FROM custom_order co WITH (NOLOCK)
+                  INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                  LEFT JOIN COMPANY comp WITH (NOLOCK) ON co.company_Seq = comp.COMPANY_SEQ
+                  LEFT JOIN SiteInfo si ON comp.SALES_GUBUN = si.SiteCode
+                  WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')
+                    AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+                    AND co.settle_date IS NOT NULL
+                    AND co.settle_date >= @s AND co.settle_date < @e
+                  UNION ALL
+                  SELECT ${periodSql.replace(/\{DATE\}/g, 'o.settle_date')},
+                         c.Card_Code, c.Card_Name,
+                         ISNULL(si.SiteName, '기타'),
+                         ${ETC_AMOUNT_EXPR},
+                         oi.order_count
+                  FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                  INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                  LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+                  ${ETC_COUPON_DIVISOR_JOIN_D01}
+                  WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')
+                    AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+                    AND o.settle_date IS NOT NULL
+                    AND o.settle_date >= @s AND o.settle_date < @e
+                ) t
+                GROUP BY period, card_code, card_name, site_name
+                ORDER BY period, card_code
+              `);
+            // BASE + 사이트 정규화
+            const aggMap = new Map(); // period|base|site
+            result.recordset.forEach(r => {
+              const base = toBase(r.card_code);
+              const site = mapSite(r.site_name);
+              const key = `${r.period}|${base}|${site}`;
+              if (!aggMap.has(key)) aggMap.set(key, {
+                period: r.period, site, base_code: base, name: r.card_name, qty: 0, revenue: 0,
+              });
+              const agg = aggMap.get(key);
+              agg.qty += (r.qty || 0);
+              agg.revenue += Math.round(r.revenue || 0);
+            });
+            const siteOrder = [...MAIN_SITES, '기타'];
+            rows = [...aggMap.values()]
+              .map(r => ({
+                period: r.period, site: r.site, base_code: r.base_code,
+                name: cleanCardName(r.name), qty: r.qty, revenue: r.revenue,
+              }))
+              .filter(r => r.qty > 0 || r.revenue > 0)
+              .sort((a, b) =>
+                a.period.localeCompare(b.period) ||
+                siteOrder.indexOf(a.site) - siteOrder.indexOf(b.site) ||
+                a.base_code.localeCompare(b.base_code)
+              );
+          }
+
+          // TSV 응답 (구글 시트 paste 용)
+          if (format === 'tsv') {
+            let tsv;
+            if (view === 'ship') {
+              tsv = ['출고일자\tBASE품목코드\t상품명\t수량'].concat(
+                rows.map(r => `${r.ship_date}\t${r.base_code}\t${r.name}\t${r.qty}`)
+              ).join('\n');
+            } else {
+              const periodLabel = view === 'daily' ? '일자' : view === 'weekly' ? '주차시작' : '월';
+              tsv = [`${periodLabel}\t사이트\tBASE품목코드\t상품명\t수량\t매출`].concat(
+                rows.map(r => `${r.period}\t${r.site}\t${r.base_code}\t${r.name}\t${r.qty}\t${r.revenue}`)
+              ).join('\n');
+            }
+            res.writeHead(200, {
+              'Content-Type': 'text/tab-separated-values; charset=utf-8',
+              'Content-Disposition': `inline; filename="sales-${view}-${todayStr}.tsv"`,
+            });
+            res.end(tsv);
+            return;
+          }
+
+          data = {
+            view, days,
+            period: `${startStr} ~ ${todayStr}`,
+            total_rows: rows.length,
+            sites: [...MAIN_SITES, '기타'],
+            rows,
+            hint: 'format=tsv 추가하면 구글 시트에 paste 가능한 TSV 응답. view=daily|weekly|monthly|ship 각각 호출 후 시트에 paste.',
+          };
+        } catch (err) {
+          console.error('[sales-report-by-site-time] error:', err.message);
+          data = { error: err.message };
+        }
       } else if (pathname === '/api/admin/product-summary-report' && req.method === 'GET') {
         // 답례품 BASE 품목코드별 종합 리포트 (재고 + 출고수량 + 매출).
         //   URL: /api/admin/product-summary-report?format=json|excel
