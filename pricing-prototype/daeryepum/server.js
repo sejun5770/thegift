@@ -6749,9 +6749,15 @@ const server = http.createServer(async (req, res) => {
           };
           const cleanCardName = (n) => String(n || '').replace(/^\[.*?\]\s*/g, '').trim();
 
-          // 4개 메인 사이트 + 기타
-          const MAIN_SITES = ['바른손카드', '바른손몰', '쿠팡', '네이버'];
-          const mapSite = (s) => MAIN_SITES.includes(s) ? s : '기타';
+          // 사이트 그룹화 (사용자 정책 2026-06-23):
+          //   바른손카드 = 자사몰 (별도)
+          //   제휴몰 = 바른손몰 + 기타 모든 외부 제휴사 (운영팀이 바른손몰을 제휴몰로 분류)
+          //   쿠팡 / 네이버 = 별도
+          const MAIN_SITES = ['바른손카드', '제휴몰', '쿠팡', '네이버'];
+          const mapSite = (s) => {
+            if (s === '바른손카드' || s === '쿠팡' || s === '네이버') return s;
+            return '제휴몰'; // 바른손몰 포함 모든 제휴 채널 통합
+          };
 
           let rows = [];
 
@@ -6850,7 +6856,7 @@ const server = http.createServer(async (req, res) => {
               agg.qty += (r.qty || 0);
               agg.revenue += Math.round(r.revenue || 0);
             });
-            const siteOrder = [...MAIN_SITES, '기타'];
+            const siteOrder = MAIN_SITES; // 기타는 모두 제휴몰로 흡수됨
             rows = [...aggMap.values()]
               .map(r => ({
                 period: r.period, site: r.site, base_code: r.base_code,
@@ -6889,7 +6895,7 @@ const server = http.createServer(async (req, res) => {
             view, days,
             period: `${startStr} ~ ${todayStr}`,
             total_rows: rows.length,
-            sites: [...MAIN_SITES, '기타'],
+            sites: MAIN_SITES, // 바른손카드 / 제휴몰 / 쿠팡 / 네이버 (기타는 모두 제휴몰로 흡수)
             rows,
             hint: 'format=tsv 추가하면 구글 시트에 paste 가능한 TSV 응답. view=daily|weekly|monthly|ship 각각 호출 후 시트에 paste.',
           };
