@@ -2,8 +2,10 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# 의존성: mssql (bar_shop1), mysql2 (디얼디어 wedding), bcryptjs (네이버 OAuth), xlsx (Excel 다운로드)
-RUN npm init -y && npm install mssql mysql2 bcryptjs xlsx
+# 의존성: mssql/mysql2/bcryptjs/xlsx 외 추가
+#   · googleapis (Google Sheets API — 주문RAW 자동 sync)
+#   · date-fns (날짜 처리)
+RUN npm init -y && npm install mssql mysql2 bcryptjs xlsx googleapis date-fns
 
 # 답례품 앱 복사
 COPY pricing-prototype/daeryepum/server.js ./
