@@ -6724,6 +6724,218 @@ const server = http.createServer(async (req, res) => {
           console.error('[probe-guest-order-sites] error:', err.message);
           data = { error: err.message };
         }
+      } else if (pathname === '/api/admin/strategy-product-report' && req.method === 'GET') {
+        // 운영 전략 메모 언급 상품의 재고/매출/출고 자동 조회 리포트.
+        //   URL: /api/admin/strategy-product-report?format=tsv|json&patterns=노슈가,데일리너츠,...
+        //   patterns 미지정 시 기본 전략 메모 (2026-06-23) 상품 패턴.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const format = String(parsed.query.format || 'json').toLowerCase();
+        const patternsRaw = (parsed.query.patterns || '').trim();
+        const defaultPatterns = [
+          '노슈가', '데일리너츠', '하루간식', '생활공작소', '주방세제',
+          '레몬', '올리브', '소금', '핸드워시', '호두정과', '비타민', '꿀'
+        ];
+        const patterns = patternsRaw
+          ? patternsRaw.split(',').map(s => s.trim()).filter(Boolean)
+          : defaultPatterns;
+        try {
+          const pp = await getPool();
+          const todayDate = today();
+          const todayStr = fmtDate(todayDate);
+          const prev30 = fmtDate(addDays(todayDate, -30));
+          const prev90 = fmtDate(addDays(todayDate, -90));
+          const todayPlus1 = fmtDate(addDays(todayDate, 1));
+          const nextEnd = fmtDate(addDays(todayDate, 30));
+          const toBase = (code) => {
+            if (!code) return code;
+            const m = String(code).match(/^(.+)_[A-Za-z0-9]+$/);
+            return m ? m[1] : code;
+          };
+          const cleanCardName = (n) => String(n || '').replace(/^\[.*?\]\s*/g, '').trim();
+
+          // 1) 패턴별 상품 매칭 (S2_Card.Card_Name LIKE)
+          const productMap = new Map();
+          for (const pattern of patterns) {
+            const safePat = pattern.replace(/[\[\]%_]/g, '');
+            const r = await pp.request()
+              .input('pat', sql.NVarChar, `%${safePat}%`)
+              .query(`
+                SELECT Card_Code, Card_Name
+                FROM S2_Card WITH (NOLOCK)
+                WHERE (Card_Div = 'D01' OR Card_Code LIKE 'COM[_]%')
+                  AND Card_Name LIKE @pat
+                  AND Card_Code IS NOT NULL AND Card_Code <> ''
+              `);
+            r.recordset.forEach(row => {
+              const base = toBase(row.Card_Code);
+              if (!productMap.has(base)) productMap.set(base, {
+                base_code: base, names: new Set(), raw_codes: new Set(), patterns: new Set(),
+              });
+              const p = productMap.get(base);
+              p.names.add(cleanCardName(row.Card_Name));
+              p.raw_codes.add(row.Card_Code);
+              p.patterns.add(pattern);
+            });
+          }
+
+          if (productMap.size === 0) {
+            data = { patterns, total_matched: 0, products: [], hint: '매칭된 상품 없음. patterns 인자 조정 필요.' };
+          } else {
+            // 2) 재고 (S2_CARD_ERP_STOCK)
+            const stockRows = await pp.request().query(`
+              SELECT CARD_CODE, ISNULL(INVENTORY_CURRENT_QTY, 0) AS cur, ISNULL(INVENTORY_AVAILABLE_QTY, 0) AS avail
+              FROM S2_CARD_ERP_STOCK WITH (NOLOCK)
+            `);
+            const stockMap = new Map();
+            stockRows.recordset.forEach(r => {
+              const base = toBase(r.CARD_CODE);
+              if (!productMap.has(base)) return;
+              if (!stockMap.has(base)) stockMap.set(base, { current: 0, available: 0 });
+              const s = stockMap.get(base);
+              s.current += r.cur;
+              s.available += r.avail;
+            });
+
+            // 3) 매출 SQL helper (settle_date 기준)
+            const fetchSales = async (startStr) => {
+              const r = await pp.request()
+                .input('s', sql.VarChar, startStr)
+                .input('e', sql.VarChar, todayPlus1)
+                .query(`
+                  SELECT card_code, SUM(qty) AS qty, SUM(revenue) AS revenue
+                  FROM (
+                    SELECT c.Card_Code AS card_code,
+                      CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1) AS revenue,
+                      coi.item_count AS qty
+                    FROM custom_order co WITH (NOLOCK)
+                    INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+                    INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                    WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')
+                      AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+                      AND co.settle_date IS NOT NULL
+                      AND co.settle_date >= @s AND co.settle_date < @e
+                    UNION ALL
+                    SELECT c.Card_Code,
+                      ${ETC_AMOUNT_EXPR},
+                      oi.order_count
+                    FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                    INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                    INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                    LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+                    ${ETC_COUPON_DIVISOR_JOIN_D01}
+                    WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')
+                      AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+                      AND o.settle_date IS NOT NULL
+                      AND o.settle_date >= @s AND o.settle_date < @e
+                  ) t
+                  GROUP BY card_code
+                `);
+              const map = new Map();
+              r.recordset.forEach(row => {
+                const base = toBase(row.card_code);
+                if (!productMap.has(base)) return;
+                if (!map.has(base)) map.set(base, { qty: 0, revenue: 0 });
+                const s = map.get(base);
+                s.qty += row.qty || 0;
+                s.revenue += Math.round(row.revenue || 0);
+              });
+              return map;
+            };
+            const sales30Map = await fetchSales(prev30);
+            const sales90Map = await fetchSales(prev90);
+
+            // 4) 출고 (sticker_selections)
+            const _bgStore = require('./barungift/store');
+            let cis = [];
+            try { cis = await _bgStore.getAllCustomerInfos(); }
+            catch (e) { console.warn('[strategy-report] CIs failed:', e.message); }
+            const shipMap = new Map();
+            (cis || []).forEach(ci => {
+              (ci.sticker_selections || []).forEach(sel => {
+                const code = sel.product_code;
+                if (!code) return;
+                const base = toBase(code);
+                if (!productMap.has(base)) return;
+                const dshp = sel.desired_ship_date;
+                const qty = sel.quantity || 0;
+                if (!dshp || !qty) return;
+                if (!shipMap.has(base)) shipMap.set(base, { prev: 0, today: 0, next: 0 });
+                const s = shipMap.get(base);
+                if (dshp >= prev30 && dshp < todayStr) s.prev += qty;
+                else if (dshp === todayStr) s.today += qty;
+                else if (dshp > todayStr && dshp <= nextEnd) s.next += qty;
+              });
+            });
+
+            // 결과 정리
+            const products = [...productMap.values()].map(p => {
+              const stock = stockMap.get(p.base_code) || { current: 0, available: 0 };
+              const s30 = sales30Map.get(p.base_code) || { qty: 0, revenue: 0 };
+              const s90 = sales90Map.get(p.base_code) || { qty: 0, revenue: 0 };
+              const ship = shipMap.get(p.base_code) || { prev: 0, today: 0, next: 0 };
+              const namesList = [...p.names].filter(Boolean);
+              const bestName = namesList.sort((a, b) => a.length - b.length)[0] || '';
+              return {
+                base_code: p.base_code,
+                name: bestName,
+                matched_patterns: [...p.patterns].join('/'),
+                variant_count: p.raw_codes.size,
+                current_qty: stock.current,
+                available_qty: stock.available,
+                sales_30d_qty: s30.qty,
+                sales_30d_revenue: s30.revenue,
+                sales_90d_qty: s90.qty,
+                sales_90d_revenue: s90.revenue,
+                ship_prev_month: ship.prev,
+                ship_today: ship.today,
+                ship_next_month: ship.next,
+                // 회전율 추정 — 가용재고가 30일 매출 수량의 몇 배인지 (큰 값 = 재고 과잉)
+                stock_to_sales_ratio: s30.qty > 0 ? Math.round(stock.available / s30.qty * 100) / 100 : null,
+              };
+            }).sort((a, b) => {
+              // 정렬: 매칭 패턴 순서 → 재고 큰 순
+              return b.current_qty - a.current_qty;
+            });
+
+            if (format === 'tsv') {
+              const lines = [];
+              lines.push([
+                '매칭 패턴', 'BASE 품목코드', '상품명', '변형 개수',
+                '현 재고', '가용 재고',
+                '30일 수량', '30일 매출', '90일 수량', '90일 매출',
+                '직전 30일 출고', '오늘 출고', '이후 30일 출고',
+                '재고/매출 회전 (배)',
+              ].join('\t'));
+              products.forEach(p => {
+                lines.push([
+                  p.matched_patterns, p.base_code, p.name, p.variant_count,
+                  p.current_qty, p.available_qty,
+                  p.sales_30d_qty, p.sales_30d_revenue, p.sales_90d_qty, p.sales_90d_revenue,
+                  p.ship_prev_month, p.ship_today, p.ship_next_month,
+                  p.stock_to_sales_ratio === null ? '-' : p.stock_to_sales_ratio,
+                ].join('\t'));
+              });
+              res.writeHead(200, {
+                'Content-Type': 'text/tab-separated-values; charset=utf-8',
+                'Content-Disposition': `inline; filename="strategy-report-${todayStr}.tsv"`,
+              });
+              res.end(lines.join('\n'));
+              return;
+            }
+            data = {
+              generated_at: new Date().toISOString(),
+              patterns,
+              total_matched: products.length,
+              products,
+              hint: 'stock_to_sales_ratio > 3 (3개월치 이상 재고): 재고 과잉 의심. ship_today + next: 예약 출고로 자연 소진 예상.',
+            };
+          }
+        } catch (err) {
+          console.error('[strategy-product-report] error:', err.message);
+          data = { error: err.message };
+        }
       } else if (pathname === '/api/admin/sales-report-by-site-time' && req.method === 'GET') {
         // 답례품 BASE 품목코드별 사이트/시간단위 매출 리포트 — TSV(스프레드시트 paste) 지원.
         //   URL: /api/admin/sales-report-by-site-time?view=daily|weekly|monthly|ship&format=tsv|json&days=N
