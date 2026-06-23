@@ -6724,6 +6724,243 @@ const server = http.createServer(async (req, res) => {
           console.error('[probe-guest-order-sites] error:', err.message);
           data = { error: err.message };
         }
+      } else if (pathname === '/api/admin/product-summary-report' && req.method === 'GET') {
+        // 답례품 BASE 품목코드별 종합 리포트 (재고 + 출고수량 + 매출).
+        //   URL: /api/admin/product-summary-report?format=json|excel
+        //   재고 출처: S2_CARD_ERP_STOCK (운영자 확인 2026-06-23)
+        //   출고일 기준: sticker_selections.desired_ship_date (정보입력 완료)
+        //   매출: settle_date 기준 직전 30일, 결제 완료 status만 (NOT IN 3,5,9 / 15)
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const format = String(parsed.query.format || 'json').toLowerCase();
+        try {
+          const pp = await getPool();
+          const todayDate = today();
+          const todayStr = fmtDate(todayDate);
+          const prevStart = fmtDate(addDays(todayDate, -30));
+          const todayPlus1 = fmtDate(addDays(todayDate, 1));
+          const nextEnd = fmtDate(addDays(todayDate, 30));
+
+          // BASE 코드 추출 (_XXX suffix 1단 제거)
+          const toBase = (code) => {
+            if (!code) return code;
+            const m = String(code).match(/^(.+)_[A-Za-z0-9]+$/);
+            return m ? m[1] : code;
+          };
+          const cleanCardName = (n) => String(n || '').replace(/^\[.*?\]\s*/g, '').trim();
+
+          // 1) 답례품 상품 마스터
+          const productsRaw = await pp.request().query(`
+            SELECT Card_Code, Card_Name
+            FROM S2_Card WITH (NOLOCK)
+            WHERE (Card_Div = 'D01' OR Card_Code LIKE 'COM[_]%')
+              AND Card_Code IS NOT NULL AND Card_Code <> ''
+          `);
+
+          // 2) 재고 (S2_CARD_ERP_STOCK)
+          const stockRaw = await pp.request().query(`
+            SELECT CARD_CODE AS card_code,
+                   ISNULL(INVENTORY_CURRENT_QTY, 0) AS current_qty,
+                   ISNULL(INVENTORY_AVAILABLE_QTY, 0) AS available_qty,
+                   ISNULL(TOTAL_SALE_PRICE_30_DAY, 0) AS sales_30d
+            FROM S2_CARD_ERP_STOCK WITH (NOLOCK)
+          `);
+
+          // 3) 매출 (직전 30일, settle_date 기준, 결제완료 상태만)
+          const salesRaw = await pp.request()
+            .input('s', sql.VarChar, prevStart)
+            .input('e', sql.VarChar, todayPlus1)
+            .query(`
+              SELECT card_code, settle_day, site_name,
+                     SUM(revenue) AS revenue, SUM(qty) AS qty
+              FROM (
+                SELECT c.Card_Code AS card_code,
+                       CONVERT(varchar(10), co.settle_date, 120) AS settle_day,
+                       ISNULL(si.SiteName, ISNULL(comp.COMPANY_NAME, '기타')) AS site_name,
+                       CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1) AS revenue,
+                       coi.item_count AS qty
+                FROM custom_order co WITH (NOLOCK)
+                INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+                INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                LEFT JOIN COMPANY comp WITH (NOLOCK) ON co.company_Seq = comp.COMPANY_SEQ
+                LEFT JOIN SiteInfo si ON comp.SALES_GUBUN = si.SiteCode
+                WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')
+                  AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+                  AND co.settle_date IS NOT NULL
+                  AND co.settle_date >= @s AND co.settle_date < @e
+                UNION ALL
+                SELECT c.Card_Code,
+                       CONVERT(varchar(10), o.settle_date, 120),
+                       ISNULL(si.SiteName, '기타'),
+                       ${ETC_AMOUNT_EXPR},
+                       oi.order_count
+                FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+                ${ETC_COUPON_DIVISOR_JOIN_D01}
+                WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')
+                  AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+                  AND o.settle_date IS NOT NULL
+                  AND o.settle_date >= @s AND o.settle_date < @e
+              ) t
+              GROUP BY card_code, settle_day, site_name
+            `);
+
+          // 4) Supabase — sticker_selections 의 desired_ship_date
+          const _bgStore = require('./barungift/store');
+          let cis = [];
+          try { cis = await _bgStore.getAllCustomerInfos(); }
+          catch (e) { console.warn('[product-summary] CIs fetch failed:', e.message); }
+
+          // === BASE 단위 집계 ===
+          const byBase = new Map();
+          // 상품 마스터
+          productsRaw.recordset.forEach(r => {
+            const base = toBase(r.Card_Code);
+            if (!byBase.has(base)) {
+              byBase.set(base, {
+                base_code: base, card_name: cleanCardName(r.Card_Name),
+                variants: new Set(),
+                current_qty: 0, available_qty: 0, sales_30d_erp: 0,
+                ship_prev: 0, ship_today: 0, ship_next: 0,
+                rev_by_day: new Map(), rev_by_site: new Map(),
+                total_rev_30d: 0, total_qty_30d: 0,
+              });
+            }
+            const p = byBase.get(base);
+            p.variants.add(r.Card_Code);
+            const cleaned = cleanCardName(r.Card_Name);
+            if (cleaned && (!p.card_name || (cleaned.length < p.card_name.length && !cleaned.startsWith('[')))) {
+              p.card_name = cleaned;
+            }
+          });
+          // 재고
+          stockRaw.recordset.forEach(r => {
+            const base = toBase(r.card_code);
+            const p = byBase.get(base);
+            if (!p) return;
+            p.current_qty += (r.current_qty || 0);
+            p.available_qty += (r.available_qty || 0);
+            p.sales_30d_erp += (r.sales_30d || 0);
+          });
+          // 매출
+          salesRaw.recordset.forEach(r => {
+            const base = toBase(r.card_code);
+            const p = byBase.get(base);
+            if (!p) return;
+            const rev = Math.round(r.revenue || 0);
+            const qty = r.qty || 0;
+            p.rev_by_day.set(r.settle_day, (p.rev_by_day.get(r.settle_day) || 0) + rev);
+            p.rev_by_site.set(r.site_name, (p.rev_by_site.get(r.site_name) || 0) + rev);
+            p.total_rev_30d += rev;
+            p.total_qty_30d += qty;
+          });
+          // 출고수량 (희망 출고일 윈도우)
+          (cis || []).forEach(ci => {
+            (ci.sticker_selections || []).forEach(sel => {
+              const code = sel.product_code;
+              if (!code) return;
+              const base = toBase(code);
+              const p = byBase.get(base);
+              if (!p) return;
+              const dshp = sel.desired_ship_date;
+              const qty = sel.quantity || 0;
+              if (!dshp || !qty) return;
+              if (dshp >= prevStart && dshp < todayStr) p.ship_prev += qty;
+              else if (dshp === todayStr) p.ship_today += qty;
+              else if (dshp > todayStr && dshp <= nextEnd) p.ship_next += qty;
+            });
+          });
+
+          // 결과 정리 — 활동 없는 상품 제외 (재고도 0, 매출도 0, 출고도 0)
+          const products = [...byBase.values()]
+            .filter(p => p.current_qty > 0 || p.total_rev_30d > 0 || p.ship_prev > 0 || p.ship_today > 0 || p.ship_next > 0 || p.sales_30d_erp > 0)
+            .map(p => ({
+              base_code: p.base_code,
+              card_name: p.card_name,
+              variant_count: p.variants.size,
+              variants: [...p.variants].sort(),
+              current_qty: p.current_qty,
+              available_qty: p.available_qty,
+              sales_30d_erp: p.sales_30d_erp,
+              ship_qty_prev_month: p.ship_prev,
+              ship_qty_today: p.ship_today,
+              ship_qty_next_month: p.ship_next,
+              total_revenue_30d: p.total_rev_30d,
+              total_qty_30d: p.total_qty_30d,
+              revenue_by_day: [...p.rev_by_day.entries()]
+                .map(([d, v]) => ({ settle_date: d, revenue: v }))
+                .sort((a, b) => a.settle_date.localeCompare(b.settle_date)),
+              revenue_by_site: [...p.rev_by_site.entries()]
+                .map(([s, v]) => ({ site_name: s, revenue: v }))
+                .sort((a, b) => b.revenue - a.revenue),
+            }))
+            .sort((a, b) => b.total_revenue_30d - a.total_revenue_30d);
+
+          // === Excel 응답 ===
+          if (format === 'excel' || format === 'xlsx') {
+            const XLSX = require('xlsx');
+            // 모든 site_name 수집 (컬럼화)
+            const allSites = new Set();
+            products.forEach(p => p.revenue_by_site.forEach(s => allSites.add(s.site_name)));
+            const siteList = [...allSites].sort();
+            const rows = products.map(p => {
+              const row = {
+                'BASE 품목코드': p.base_code,
+                '상품명': p.card_name,
+                '변형 개수': p.variant_count,
+                '변형 코드': p.variants.join(', '),
+                '현재 재고': p.current_qty,
+                '가용 재고': p.available_qty,
+                '직전 30일 출고 (희망일)': p.ship_qty_prev_month,
+                '오늘 출고 (희망일)': p.ship_qty_today,
+                '이후 30일 출고 (희망일)': p.ship_qty_next_month,
+                '30일 매출': p.total_revenue_30d,
+                '30일 수량': p.total_qty_30d,
+                '30일 매출 (ERP 캐시)': p.sales_30d_erp,
+              };
+              siteList.forEach(s => {
+                const found = p.revenue_by_site.find(x => x.site_name === s);
+                row[`매출[${s}]`] = found ? found.revenue : 0;
+              });
+              return row;
+            });
+            const ws = XLSX.utils.json_to_sheet(rows);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, '상품별 종합');
+            const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+            const filename = `daeryepum_product_summary_${todayStr}.xlsx`;
+            res.writeHead(200, {
+              'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+              'Content-Length': buf.length,
+            });
+            res.end(buf);
+            return;
+          }
+
+          // === JSON 응답 ===
+          data = {
+            generated_at: new Date().toISOString(),
+            period: {
+              prev_month: `${prevStart} ~ ${fmtDate(addDays(todayDate, -1))}`,
+              today: todayStr,
+              next_month: `${todayPlus1} ~ ${nextEnd}`,
+            },
+            total_products: products.length,
+            data_sources: {
+              stock: 'S2_CARD_ERP_STOCK',
+              ship_qty: 'bg_order_customer_info.sticker_selections.desired_ship_date',
+              revenue: 'custom_order + CUSTOM_ETC_ORDER (settle_date 기준, status_seq 결제완료)',
+            },
+            products,
+          };
+        } catch (err) {
+          console.error('[product-summary-report] error:', err.message);
+          data = { error: err.message, stack: err.stack };
+        }
       } else if (pathname === '/api/admin/probe-stock-tables' && req.method === 'GET') {
         // MSSQL bar_shop1 의 재고 관련 테이블 자동 탐색.
         //   URL: /api/admin/probe-stock-tables
