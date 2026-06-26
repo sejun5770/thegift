@@ -62,13 +62,36 @@ function parseStores() {
     const ids = idsRaw.split(',').map(s => s.trim()).filter(Boolean);
     const stores = ids.map(id => ({
       id: String(id),
-      name: process.env[`NAVER_STORE_NAME_${id}`] || String(id),
+      name: process.env[`NAVER_STORE_NAME_${id}`] || process.env[`NAVER_NAME_${id}`] || String(id),
       client_id: process.env[`NAVER_CLIENT_ID_${id}`] || '',
       client_secret: process.env[`NAVER_CLIENT_SECRET_${id}`] || '',
       product_codes: process.env[`NAVER_PRODUCT_CODES_${id}`] || '',
       category_ids: process.env[`NAVER_CATEGORY_IDS_${id}`] || '',
     })).filter(s => s.client_id && s.client_secret);
     if (stores.length) return stores;
+  }
+
+  // 인덱스 기반 자동 탐지 — NAVER_ID_1, NAVER_NAME_1, NAVER_CLIENT_ID_1, ... 패턴.
+  //   NAVER_STORE_IDS 없이도 작동. NAVER_ID_<n> 의 값이 store_id 가 됨.
+  //   NAVER_ID_<n> 비워두면 인덱스 n 그대로 store_id 사용 (1, 2, ...).
+  //   최대 20개까지 자동 탐색.
+  {
+    const indexedStores = [];
+    for (let i = 1; i <= 20; i++) {
+      const clientId = process.env[`NAVER_CLIENT_ID_${i}`] || '';
+      const clientSecret = process.env[`NAVER_CLIENT_SECRET_${i}`] || '';
+      if (!clientId || !clientSecret) continue;
+      const storeId = process.env[`NAVER_ID_${i}`] || String(i);
+      indexedStores.push({
+        id: String(storeId),
+        name: process.env[`NAVER_NAME_${i}`] || process.env[`NAVER_STORE_NAME_${i}`] || String(storeId),
+        client_id: clientId,
+        client_secret: clientSecret,
+        product_codes: process.env[`NAVER_PRODUCT_CODES_${i}`] || '',
+        category_ids: process.env[`NAVER_CATEGORY_IDS_${i}`] || '',
+      });
+    }
+    if (indexedStores.length) return indexedStores;
   }
 
   // 단일 env 폴백 (NAVER_CLIENT_ID / NAVER_CLIENT_SECRET)
