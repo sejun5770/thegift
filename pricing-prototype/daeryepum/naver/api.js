@@ -20,14 +20,22 @@ const crypto = require('crypto');
 
 const HOST = process.env.NAVER_API_HOST || 'https://api.commerce.naver.com';
 
-// 멀티 스토어 지원 — 단일 NAVER_CLIENT_ID/SECRET 또는 NAVER_STORES JSON.
+// 멀티 스토어 지원 — 3가지 방식 (우선순위 순):
 //
-// NAVER_STORES (우선):
-//   JSON 배열. 예:
-//     [{"id":"main","name":"바른손몰 답례품","client_id":"...","client_secret":"...","product_codes":"TGJSD01,TGJSD02","category_ids":""},
-//      {"id":"sub","name":"신규 스토어","client_id":"...","client_secret":"...","product_codes":"NEW01"}]
+// 1) NAVER_STORES (JSON 배열, 최우선)
+//    예: [{"id":"1","name":"바른손몰","client_id":"...","client_secret":"...","product_codes":"TGJSD01"}]
 //
-// 단일 호환 (구버전 운영 환경): NAVER_STORES 미설정 시 NAVER_CLIENT_ID/SECRET 을 store_id='main' 으로 자동 등록.
+// 2) NAVER_STORE_IDS suffix 방식 (운영 권장 — Docker Manager env 등록 용이)
+//    NAVER_STORE_IDS=1,2          ← 콤마 구분 ID 목록
+//    NAVER_CLIENT_ID_1=...
+//    NAVER_CLIENT_SECRET_1=...
+//    NAVER_PRODUCT_CODES_1=...    ← 선택
+//    NAVER_CATEGORY_IDS_1=...     ← 선택
+//    NAVER_STORE_NAME_1=...       ← 선택 (라벨)
+//    NAVER_CLIENT_ID_2=... (이하 동일)
+//
+// 3) NAVER_CLIENT_ID/SECRET 단일 env (구버전 호환)
+//    NAVER_STORES / NAVER_STORE_IDS 둘 다 미설정 시 store_id='main' 자동 등록.
 function parseStores() {
   const raw = process.env.NAVER_STORES || '';
   if (raw.trim()) {
@@ -44,10 +52,26 @@ function parseStores() {
         })).filter(s => s.client_id && s.client_secret);
       }
     } catch (e) {
-      console.error('[naver] NAVER_STORES JSON 파싱 실패 — 단일 env 폴백:', e.message);
+      console.error('[naver] NAVER_STORES JSON 파싱 실패 — suffix/단일 폴백:', e.message);
     }
   }
-  // 단일 env 폴백
+
+  // Suffix 방식 — NAVER_STORE_IDS=1,2 + NAVER_CLIENT_ID_1, NAVER_CLIENT_SECRET_1, ...
+  const idsRaw = process.env.NAVER_STORE_IDS || '';
+  if (idsRaw.trim()) {
+    const ids = idsRaw.split(',').map(s => s.trim()).filter(Boolean);
+    const stores = ids.map(id => ({
+      id: String(id),
+      name: process.env[`NAVER_STORE_NAME_${id}`] || String(id),
+      client_id: process.env[`NAVER_CLIENT_ID_${id}`] || '',
+      client_secret: process.env[`NAVER_CLIENT_SECRET_${id}`] || '',
+      product_codes: process.env[`NAVER_PRODUCT_CODES_${id}`] || '',
+      category_ids: process.env[`NAVER_CATEGORY_IDS_${id}`] || '',
+    })).filter(s => s.client_id && s.client_secret);
+    if (stores.length) return stores;
+  }
+
+  // 단일 env 폴백 (NAVER_CLIENT_ID / NAVER_CLIENT_SECRET)
   const cid = process.env.NAVER_CLIENT_ID || '';
   const csec = process.env.NAVER_CLIENT_SECRET || '';
   if (cid && csec) {
