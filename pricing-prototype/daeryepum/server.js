@@ -5976,91 +5976,123 @@ const server = http.createServer(async (req, res) => {
           daysBack: parseInt(body.days_back) || 7,
         });
       } else if (pathname === '/api/naver/sync-state') {
+        // ?store=<id> 로 특정 스토어 조회. 미지정 시 모든 스토어 sync state 반환.
         const naverStore = require('./naver/store');
-        data = await naverStore.getSyncState();
+        const naverApi = require('./naver/api');
+        if (parsed.query.store) {
+          data = await naverStore.getSyncState(parsed.query.store);
+        } else {
+          const stores = naverApi.getStores();
+          const states = await naverStore.getSyncState('*');
+          data = {
+            stores: stores.map(s => ({ id: s.id, name: s.name })),
+            states: Array.isArray(states) ? states : (states ? [states] : []),
+          };
+        }
       } else if (pathname === '/api/naver/debug-auth') {
         // 인증 서명 페이로드 진단 — 토큰 요청 전후 모두 노출.
-        logAdminAccess(session, req, 'naver-debug-auth', {});
+        //   ?store=<store_id> 로 특정 스토어 선택 (멀티 스토어). 미지정 시 첫 번째.
+        logAdminAccess(session, req, 'naver-debug-auth', parsed.query);
         const naverApi = require('./naver/api');
-        if (!naverApi.isConfigured()) {
-          data = { error: 'Naver API 키 미설정' };
+        const stores = naverApi.getStores();
+        if (!stores.length) {
+          data = { error: 'Naver API 키 미설정 (NAVER_STORES 또는 NAVER_CLIENT_ID/CLIENT_SECRET)' };
         } else {
-          // 직접 서명 만들어보고 페이로드 노출 + 실제 호출 시도
-          const timestamp = Date.now();
-          const message = `${naverApi.CLIENT_ID}_${timestamp}`;
-          let signature, signError;
-          try {
-            signature = naverApi.signClientSecret(naverApi.CLIENT_ID, timestamp, process.env.NAVER_CLIENT_SECRET);
-          } catch (e) { signError = e.message; }
-          let tokenResult = null;
-          try {
-            const token = await naverApi.getAccessToken();
-            tokenResult = { ok: true, token_first_8: String(token).slice(0, 8) + '...', token_length: token.length };
-          } catch (e) {
-            tokenResult = { ok: false, error: e.message };
+          const storeId = parsed.query.store || stores[0].id;
+          const store = naverApi.getStore(storeId);
+          if (!store) {
+            data = { error: `store_id=${storeId} 미등록`, available_stores: stores.map(s => s.id) };
+          } else {
+            const timestamp = Date.now();
+            const message = `${store.client_id}_${timestamp}`;
+            let signature, signError;
+            try {
+              signature = naverApi.signClientSecret(store.client_id, timestamp, store.client_secret);
+            } catch (e) { signError = e.message; }
+            let tokenResult = null;
+            try {
+              const token = await naverApi.getAccessToken(store);
+              tokenResult = { ok: true, token_first_8: String(token).slice(0, 8) + '...', token_length: token.length };
+            } catch (e) {
+              tokenResult = { ok: false, error: e.message };
+            }
+            data = {
+              store_id: store.id,
+              store_name: store.name,
+              available_stores: stores.map(s => ({ id: s.id, name: s.name })),
+              client_id: store.client_id,
+              secret_format: /^\$2[abxy]\$/.test(store.client_secret) ? 'bcrypt ($2x$)' : 'raw',
+              secret_length: store.client_secret.length,
+              secret_first_8: store.client_secret.slice(0, 8),
+              sign_method: /^\$2[abxy]\$/.test(store.client_secret) ? 'bcrypt + base64url(padded)' : 'HMAC-SHA256 + base64url(padded)',
+              timestamp,
+              timestamp_iso: new Date(timestamp).toISOString(),
+              message_to_sign: message,
+              signature_length: signature ? signature.length : 0,
+              signature_first_16: signature ? signature.slice(0, 16) + '...' : null,
+              signature_last_8: signature ? '...' + signature.slice(-8) : null,
+              sign_error: signError,
+              token_result: tokenResult,
+            };
           }
-          data = {
-            client_id: naverApi.CLIENT_ID,
-            secret_format: /^\$2[abxy]\$/.test(process.env.NAVER_CLIENT_SECRET || '') ? 'bcrypt ($2x$)' : 'raw',
-            secret_length: (process.env.NAVER_CLIENT_SECRET || '').length,
-            secret_first_8: (process.env.NAVER_CLIENT_SECRET || '').slice(0, 8),
-            sign_method: /^\$2[abxy]\$/.test(process.env.NAVER_CLIENT_SECRET || '') ? 'bcrypt + base64url(padded)' : 'HMAC-SHA256 + base64url(padded)',
-            timestamp,
-            timestamp_iso: new Date(timestamp).toISOString(),
-            message_to_sign: message,
-            signature_length: signature ? signature.length : 0,
-            signature_first_16: signature ? signature.slice(0, 16) + '...' : null,
-            signature_last_8: signature ? '...' + signature.slice(-8) : null,
-            sign_error: signError,
-            token_result: tokenResult,
-          };
         }
       } else if (pathname === '/api/naver/debug-raw') {
         // 네이버 API raw 응답 진단 — 0건 또는 에러 원인 식별용
         // 기본 hours_back=24 (오늘 주문 잡히는지), days_back 도 옵션
+        //   ?store=<store_id> 로 특정 스토어 선택. 미지정 시 첫 번째.
         logAdminAccess(session, req, 'naver-debug-raw', parsed.query);
         const naverApi = require('./naver/api');
-        if (!naverApi.isConfigured()) {
-          data = { error: 'Naver API 키 미설정 (NAVER_CLIENT_ID/CLIENT_SECRET)' };
+        const stores = naverApi.getStores();
+        if (!stores.length) {
+          data = { error: 'Naver API 키 미설정 (NAVER_STORES 또는 NAVER_CLIENT_ID/CLIENT_SECRET)' };
         } else {
-          const hoursBack = parsed.query.hours_back
-            ? parseInt(parsed.query.hours_back)
-            : (parsed.query.days_back ? parseInt(parsed.query.days_back) * 24 : 24);
-          const endMs = Date.now();
-          const startMs = endMs - hoursBack * 3600000;
-          try {
-            // 1) 방식 A — 직접 리스트
-            let directResult, directError;
+          const storeId = parsed.query.store || stores[0].id;
+          const store = naverApi.getStore(storeId);
+          if (!store) {
+            data = { error: `store_id=${storeId} 미등록`, available_stores: stores.map(s => s.id) };
+          } else {
+            const hoursBack = parsed.query.hours_back
+              ? parseInt(parsed.query.hours_back)
+              : (parsed.query.days_back ? parseInt(parsed.query.days_back) * 24 : 24);
+            const endMs = Date.now();
+            const startMs = endMs - hoursBack * 3600000;
             try {
-              directResult = await naverApi.listProductOrdersDirect({ startMs, endMs });
+              // 1) 방식 A — 직접 리스트
+              let directResult, directError;
+              try {
+                directResult = await naverApi.listProductOrdersDirect(store, { startMs, endMs });
+              } catch (e) {
+                directError = { message: e.message, status: e.status };
+              }
+              // 2) 방식 B — last-changed-statuses (참고용 비교)
+              const changed = await naverApi.listChangedStatuses(store, { fromMs: startMs, toMs: endMs });
+              const lcStatuses = changed.data?.lastChangeStatuses || changed.data || [];
+              const ids = Array.isArray(lcStatuses) ? lcStatuses.map(r => r?.productOrderId).filter(Boolean).slice(0, 10) : [];
+              data = {
+                query: {
+                  store_id: store.id,
+                  store_name: store.name,
+                  hours_back: hoursBack,
+                  start_kst: naverApi.fmtKstIso(startMs),
+                  end_kst: naverApi.fmtKstIso(endMs),
+                  client_id: store.client_id,
+                },
+                available_stores: stores.map(s => ({ id: s.id, name: s.name })),
+                direct_list: {
+                  error: directError,
+                  raw_response: directResult,
+                  response_keys: directResult && typeof directResult === 'object' ? Object.keys(directResult) : [],
+                },
+                last_changed_statuses: {
+                  raw_response: changed,
+                  response_keys: changed && typeof changed === 'object' ? Object.keys(changed) : [],
+                  count: Array.isArray(lcStatuses) ? lcStatuses.length : null,
+                  sample_ids: ids,
+                },
+              };
             } catch (e) {
-              directError = { message: e.message, status: e.status };
+              data = { error: e.message, store_id: store.id, client_id: store.client_id };
             }
-            // 2) 방식 B — last-changed-statuses (참고용 비교)
-            const changed = await naverApi.listChangedStatuses({ fromMs: startMs, toMs: endMs });
-            const lcStatuses = changed.data?.lastChangeStatuses || changed.data || [];
-            const ids = Array.isArray(lcStatuses) ? lcStatuses.map(r => r?.productOrderId).filter(Boolean).slice(0, 10) : [];
-            data = {
-              query: {
-                hours_back: hoursBack,
-                start_kst: naverApi.fmtKstIso(startMs),
-                end_kst: naverApi.fmtKstIso(endMs),
-                client_id: naverApi.CLIENT_ID,
-              },
-              direct_list: {
-                error: directError,
-                raw_response: directResult,
-                response_keys: directResult && typeof directResult === 'object' ? Object.keys(directResult) : [],
-              },
-              last_changed_statuses: {
-                raw_response: changed,
-                response_keys: changed && typeof changed === 'object' ? Object.keys(changed) : [],
-                count: Array.isArray(lcStatuses) ? lcStatuses.length : null,
-                sample_ids: ids,
-              },
-            };
-          } catch (e) {
-            data = { error: e.message, client_id: naverApi.CLIENT_ID };
           }
         }
       } else if (pathname === '/api/admin/nav-menu' && req.method === 'GET') {

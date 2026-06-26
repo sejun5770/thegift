@@ -1,10 +1,14 @@
 /**
  * 네이버 스마트스토어 주문 동기화 — 커머스 API → 정규화 → Supabase upsert.
  *
+ * 멀티 스토어 지원 (NAVER_STORES JSON):
+ *   각 스토어마다 product_codes / category_ids 필터 개별 설정 가능.
+ *   단일 env 폴백: NAVER_CATEGORY_IDS / NAVER_PRODUCT_CODES 전역.
+ *
  * 답례품 카테고리 필터:
- *   NAVER_CATEGORY_IDS    — 콤마 구분 카테고리 ID 리스트
- *   NAVER_PRODUCT_CODES   — 콤마 구분 셀러 상품코드
- *   둘 다 비어 있으면 전체 통과 (초기 운영 진단용).
+ *   store.product_codes / store.category_ids (스토어별) 우선
+ *   둘 다 비어 있으면 NAVER_CATEGORY_IDS / NAVER_PRODUCT_CODES 전역 사용
+ *   그것도 비어 있으면 전체 통과 (초기 운영 진단용).
  *
  * 상태 매핑 (productOrderStatus → 한글):
  *   PAYMENT_WAITING → 결제대기
@@ -24,11 +28,25 @@ const bgStore = require('../barungift/store');
 const { enrichFromOption } = require('./option-parser');
 const { autoAdvanceNoStickerSelections } = require('../barungift/workflow-store');
 
-const CATEGORY_IDS = (process.env.NAVER_CATEGORY_IDS || '')
+// 전역 폴백 — 스토어별 필터 미설정 시 사용
+const GLOBAL_CATEGORY_IDS = (process.env.NAVER_CATEGORY_IDS || '')
   .split(',').map(s => s.trim()).filter(Boolean);
-const PRODUCT_CODES = (process.env.NAVER_PRODUCT_CODES || '')
+const GLOBAL_PRODUCT_CODES = (process.env.NAVER_PRODUCT_CODES || '')
   .split(',').map(s => s.trim()).filter(Boolean);
-const FILTER_DISABLED = !CATEGORY_IDS.length && !PRODUCT_CODES.length;
+
+function resolveFilters(storeConfig) {
+  const cats = (storeConfig && storeConfig.category_ids ? storeConfig.category_ids : '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+  const codes = (storeConfig && storeConfig.product_codes ? storeConfig.product_codes : '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+  const effectiveCats = cats.length ? cats : GLOBAL_CATEGORY_IDS;
+  const effectiveCodes = codes.length ? codes : GLOBAL_PRODUCT_CODES;
+  return {
+    categoryIds: effectiveCats,
+    productCodes: effectiveCodes,
+    filterDisabled: !effectiveCats.length && !effectiveCodes.length,
+  };
+}
 
 const STATUS_LABEL = {
   PAYMENT_WAITING: '결제대기',
@@ -47,7 +65,7 @@ const STATUS_LABEL = {
  *     { productOrder: {...}, order: {...}, delivery: {...}, ... }
  *   필드명이 실제 응답과 다를 수 있어 raw_payload 도 함께 저장 (디버깅용).
  */
-function normalizeOrder(item) {
+function normalizeOrder(item, storeConfig = null, filters = null) {
   // 네이버 detail 응답 구조: { order: {...}, productOrder: {...}, (delivery?) }
   const po = item.productOrder || item;
   const order = item.order || {};
@@ -62,11 +80,13 @@ function normalizeOrder(item) {
   const productCode = po.sellerProductCode ? String(po.sellerProductCode) : null;
   const productId = po.productId ? String(po.productId) : null;
   const categoryId = String(po.categoryId || po.category?.categoryId || '');
-  if (!FILTER_DISABLED) {
-    const catOk = CATEGORY_IDS.length && CATEGORY_IDS.includes(categoryId);
-    const codeOk = PRODUCT_CODES.length && (
-      (productCode && PRODUCT_CODES.includes(productCode)) ||
-      (productId && PRODUCT_CODES.includes(productId))
+  // 스토어별 필터 또는 전역 폴백
+  const fl = filters || resolveFilters(storeConfig);
+  if (!fl.filterDisabled) {
+    const catOk = fl.categoryIds.length && fl.categoryIds.includes(categoryId);
+    const codeOk = fl.productCodes.length && (
+      (productCode && fl.productCodes.includes(productCode)) ||
+      (productId && fl.productCodes.includes(productId))
     );
     if (!catOk && !codeOk) return null;
   }
@@ -85,6 +105,7 @@ function normalizeOrder(item) {
   const sa = po.shippingAddress || order.shippingAddress || {};
 
   return {
+    store_id: storeConfig ? storeConfig.id : 'main',
     product_order_id: productOrderId,
     order_id: orderId,
     ordered_at: orderedAt,
@@ -125,29 +146,28 @@ function normalizeOrder(item) {
 /**
  * 메인 동기화 — 기간 내 변경 주문 fetch → 정규화 → upsert + stub ci.
  */
-async function syncRecent({ daysBack = 7 } = {}) {
-  if (!api.isConfigured()) {
-    const err = 'Naver API 키 미설정 (NAVER_CLIENT_ID/CLIENT_SECRET)';
-    await store.updateSyncState({ last_error: err });
-    return { fetched: 0, upserted: 0, filtered_out: 0, error: err };
-  }
+/**
+ * 단일 스토어 sync — 내부 헬퍼.
+ */
+async function syncOneStore(storeConfig, { daysBack = 7 } = {}) {
   if (!store.USE_SUPABASE) {
-    return { fetched: 0, upserted: 0, error: 'Supabase 미설정' };
+    return { store_id: storeConfig.id, fetched: 0, upserted: 0, error: 'Supabase 미설정' };
   }
   const endMs = Date.now();
   const startMs = endMs - daysBack * 86400000;
   let res;
   try {
-    res = await api.listAllOrders({ startMs, endMs });
+    res = await api.listAllOrders(storeConfig, { startMs, endMs });
   } catch (e) {
-    await store.updateSyncState({ last_error: e.message, last_synced_at: new Date().toISOString() });
-    return { fetched: 0, upserted: 0, error: e.message };
+    await store.updateSyncState(storeConfig.id, { last_error: e.message, last_synced_at: new Date().toISOString() });
+    return { store_id: storeConfig.id, fetched: 0, upserted: 0, error: e.message };
   }
   const items = res.items || [];
+  const filters = resolveFilters(storeConfig);
   const rows = [];
   let filteredOut = 0;
   for (const item of items) {
-    const r = normalizeOrder(item);
+    const r = normalizeOrder(item, storeConfig, filters);
     if (r) rows.push(r);
     else filteredOut++;
   }
@@ -158,8 +178,8 @@ async function syncRecent({ daysBack = 7 } = {}) {
       const r = await store.upsertNaverOrders(rows);
       upserted = r.upserted || rows.length;
     } catch (e) {
-      await store.updateSyncState({ last_error: e.message, last_synced_at: new Date().toISOString() });
-      return { fetched: items.length, upserted: 0, filtered_out: filteredOut, error: e.message };
+      await store.updateSyncState(storeConfig.id, { last_error: e.message, last_synced_at: new Date().toISOString() });
+      return { store_id: storeConfig.id, fetched: items.length, upserted: 0, filtered_out: filteredOut, error: e.message };
     }
   }
 
@@ -258,20 +278,22 @@ async function syncRecent({ daysBack = 7 } = {}) {
     }
   }
 
-  await store.updateSyncState({
+  await store.updateSyncState(storeConfig.id, {
     last_synced_at: new Date().toISOString(),
     last_synced_order_count: upserted,
     last_error: null,
   });
 
   return {
+    store_id: storeConfig.id,
+    store_name: storeConfig.name,
     fetched: items.length,
     upserted,
     stub_ci_upserted: stubUpserted,
     enriched: enrichedCount,
     filtered_out: filteredOut,
     items: rows.length,
-    filter_disabled: FILTER_DISABLED,
+    filter_disabled: filters.filterDisabled,
     window: {
       start_ms: startMs, end_ms: endMs, days: daysBack,
       start_kst: api.fmtKstIso(startMs),
@@ -285,4 +307,34 @@ async function syncRecent({ daysBack = 7 } = {}) {
   };
 }
 
-module.exports = { syncRecent, normalizeOrder, STATUS_LABEL };
+/**
+ * 메인 sync entrypoint — 모든 등록 store 를 순서대로 sync.
+ *   토큰/세션/API 호출은 store 별 격리 — 한 스토어 실패가 다른 스토어 차단 안 함.
+ *   응답: { stores: [...], total: { fetched, upserted, ... } }
+ */
+async function syncRecent({ daysBack = 7 } = {}) {
+  if (!api.isConfigured()) {
+    const err = 'Naver API 키 미설정 (NAVER_STORES 또는 NAVER_CLIENT_ID/CLIENT_SECRET)';
+    return { stores: [], total: { fetched: 0, upserted: 0 }, error: err };
+  }
+  const stores = api.getStores();
+  const results = [];
+  for (const sc of stores) {
+    try {
+      const r = await syncOneStore(sc, { daysBack });
+      results.push(r);
+    } catch (e) {
+      results.push({ store_id: sc.id, store_name: sc.name, fetched: 0, upserted: 0, error: e.message });
+    }
+  }
+  const total = results.reduce((acc, r) => ({
+    fetched: acc.fetched + (r.fetched || 0),
+    upserted: acc.upserted + (r.upserted || 0),
+    stub_ci_upserted: acc.stub_ci_upserted + (r.stub_ci_upserted || 0),
+    enriched: acc.enriched + (r.enriched || 0),
+    filtered_out: acc.filtered_out + (r.filtered_out || 0),
+  }), { fetched: 0, upserted: 0, stub_ci_upserted: 0, enriched: 0, filtered_out: 0 });
+  return { stores: results, total };
+}
+
+module.exports = { syncRecent, syncOneStore, normalizeOrder, STATUS_LABEL };

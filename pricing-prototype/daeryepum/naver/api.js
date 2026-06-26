@@ -19,15 +19,62 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 
 const HOST = process.env.NAVER_API_HOST || 'https://api.commerce.naver.com';
-const CLIENT_ID = process.env.NAVER_CLIENT_ID || '';
-const CLIENT_SECRET = process.env.NAVER_CLIENT_SECRET || '';
 
-function isConfigured() {
-  return !!(CLIENT_ID && CLIENT_SECRET);
+// 멀티 스토어 지원 — 단일 NAVER_CLIENT_ID/SECRET 또는 NAVER_STORES JSON.
+//
+// NAVER_STORES (우선):
+//   JSON 배열. 예:
+//     [{"id":"main","name":"바른손몰 답례품","client_id":"...","client_secret":"...","product_codes":"TGJSD01,TGJSD02","category_ids":""},
+//      {"id":"sub","name":"신규 스토어","client_id":"...","client_secret":"...","product_codes":"NEW01"}]
+//
+// 단일 호환 (구버전 운영 환경): NAVER_STORES 미설정 시 NAVER_CLIENT_ID/SECRET 을 store_id='main' 으로 자동 등록.
+function parseStores() {
+  const raw = process.env.NAVER_STORES || '';
+  if (raw.trim()) {
+    try {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr) && arr.length) {
+        return arr.map((s, i) => ({
+          id: String(s.id || s.store_id || `store${i + 1}`),
+          name: String(s.name || s.id || `store${i + 1}`),
+          client_id: String(s.client_id || ''),
+          client_secret: String(s.client_secret || ''),
+          product_codes: String(s.product_codes || ''),
+          category_ids: String(s.category_ids || ''),
+        })).filter(s => s.client_id && s.client_secret);
+      }
+    } catch (e) {
+      console.error('[naver] NAVER_STORES JSON 파싱 실패 — 단일 env 폴백:', e.message);
+    }
+  }
+  // 단일 env 폴백
+  const cid = process.env.NAVER_CLIENT_ID || '';
+  const csec = process.env.NAVER_CLIENT_SECRET || '';
+  if (cid && csec) {
+    return [{
+      id: 'main',
+      name: process.env.NAVER_STORE_NAME || 'main',
+      client_id: cid,
+      client_secret: csec,
+      product_codes: process.env.NAVER_PRODUCT_CODES || '',
+      category_ids: process.env.NAVER_CATEGORY_IDS || '',
+    }];
+  }
+  return [];
 }
 
-// 토큰 캐시 — 모듈 메모리
-let _tokenCache = { token: null, expiresAt: 0 };
+const STORES = parseStores();
+const STORE_BY_ID = new Map(STORES.map(s => [s.id, s]));
+
+function getStores() { return STORES; }
+function getStore(id) { return STORE_BY_ID.get(id) || null; }
+
+function isConfigured() {
+  return STORES.length > 0;
+}
+
+// 토큰 캐시 — store_id 별 Map
+const _tokenCacheByStore = new Map(); // store_id → { token, expiresAt }
 
 /**
  * OAuth access_token 발급 (또는 캐시 재사용).
@@ -73,22 +120,28 @@ function signClientSecret(clientId, timestamp, secret) {
   return b64UrlWithPadding(hmac);
 }
 
-async function getAccessToken() {
-  if (_tokenCache.token && _tokenCache.expiresAt > Date.now()) {
-    return _tokenCache.token;
+async function getAccessToken(store) {
+  if (!store) throw new Error('getAccessToken: store 인자 필요');
+  const cached = _tokenCacheByStore.get(store.id);
+  if (cached && cached.token && cached.expiresAt > Date.now()) {
+    return cached.token;
   }
-  if (!isConfigured()) throw new Error('Naver API 키 미설정 (NAVER_CLIENT_ID/CLIENT_SECRET).');
+  const clientId = store.client_id;
+  const clientSecret = store.client_secret;
+  if (!clientId || !clientSecret) {
+    throw new Error(`Naver API 키 미설정 (store=${store.id}).`);
+  }
 
   const timestamp = Date.now();
   let signature;
   try {
-    signature = signClientSecret(CLIENT_ID, timestamp, CLIENT_SECRET);
+    signature = signClientSecret(clientId, timestamp, clientSecret);
   } catch (e) {
-    throw new Error(`Naver 서명 실패 (client_secret 형식 확인): ${e.message}. secret 첫 4자: ${CLIENT_SECRET.slice(0, 4)}... 길이: ${CLIENT_SECRET.length}`);
+    throw new Error(`Naver 서명 실패 store=${store.id} (client_secret 형식 확인): ${e.message}. secret 첫 4자: ${clientSecret.slice(0, 4)}... 길이: ${clientSecret.length}`);
   }
 
   const form = new URLSearchParams();
-  form.append('client_id', CLIENT_ID);
+  form.append('client_id', clientId);
   form.append('timestamp', String(timestamp));
   form.append('client_secret_sign', signature);
   form.append('grant_type', 'client_credentials');
@@ -103,18 +156,18 @@ async function getAccessToken() {
   let data;
   try { data = JSON.parse(text); } catch { data = { _raw: text }; }
   if (!res.ok) {
-    throw new Error(`Naver token [${res.status}]: ${text.slice(0, 500)}`);
+    throw new Error(`Naver token store=${store.id} [${res.status}]: ${text.slice(0, 500)}`);
   }
   if (!data.access_token) {
-    throw new Error(`Naver token: access_token 없음 - ${text.slice(0, 300)}`);
+    throw new Error(`Naver token store=${store.id}: access_token 없음 - ${text.slice(0, 300)}`);
   }
   // expires_in 보통 10800초 (3시간) — 5분 buffer
   const ttlSec = (data.expires_in || 10800) - 300;
-  _tokenCache = {
+  _tokenCacheByStore.set(store.id, {
     token: data.access_token,
     expiresAt: Date.now() + Math.max(ttlSec, 60) * 1000,
-  };
-  return _tokenCache.token;
+  });
+  return data.access_token;
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -127,12 +180,12 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
  *   429 (GW.RATE_LIMIT) 자동 재시도 — 기본 2회까지, 1.5s/3s backoff.
  *   Retry-After 헤더가 있으면 우선 사용.
  */
-async function callNaver(method, path, body = null, { maxRetries = 2, baseBackoffMs = 1500 } = {}) {
-  if (!isConfigured()) throw new Error('Naver API 키 미설정.');
+async function callNaver(store, method, path, body = null, { maxRetries = 2, baseBackoffMs = 1500 } = {}) {
+  if (!store) throw new Error('callNaver: store 인자 필요');
 
   let lastErr;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const token = await getAccessToken();
+    const token = await getAccessToken(store);
     const opts = {
       method: method.toUpperCase(),
       headers: {
@@ -188,21 +241,21 @@ function fmtKstIso(ms) {
  *   ⚠️ 네이버 spec: lastChangedFrom 만 주면 자동으로 +24h 윈도우. 더 넓게는 lastChangedTo 명시 필요.
  *   ⚠️ 최대 윈도우 24h. 더 긴 기간은 24h chunk 반복 (listAllOrders 참고).
  */
-async function listChangedStatuses({ fromMs, toMs, lastChangedType } = {}) {
+async function listChangedStatuses(store, { fromMs, toMs, lastChangedType } = {}) {
   const params = new URLSearchParams();
   params.set('lastChangedFrom', fmtKstIso(fromMs));
   if (toMs) params.set('lastChangedTo', fmtKstIso(toMs));
   if (lastChangedType) params.set('lastChangedType', lastChangedType);
-  return callNaver('GET', `/external/v1/pay-order/seller/product-orders/last-changed-statuses?${params.toString()}`);
+  return callNaver(store, 'GET', `/external/v1/pay-order/seller/product-orders/last-changed-statuses?${params.toString()}`);
 }
 
 /**
  * productOrderId 리스트로 상세 일괄 조회 — query endpoint.
  *   네이버 spec 상 한 번에 최대 N개 (보통 300).
  */
-async function queryProductOrders(productOrderIds) {
+async function queryProductOrders(store, productOrderIds) {
   if (!Array.isArray(productOrderIds) || !productOrderIds.length) return { data: [] };
-  return callNaver('POST', '/external/v1/pay-order/seller/product-orders/query', {
+  return callNaver(store, 'POST', '/external/v1/pay-order/seller/product-orders/query', {
     productOrderIds,
   });
 }
@@ -217,7 +270,7 @@ async function queryProductOrders(productOrderIds) {
  *     page / size
  *     productOrderStatuses
  */
-async function listProductOrdersDirect({ startMs, endMs, page = 1, size = 100 } = {}) {
+async function listProductOrdersDirect(store, { startMs, endMs, page = 1, size = 100 } = {}) {
   const params = new URLSearchParams();
   // 후보 1: fromDate / toDate (KST yyyy-MM-dd)
   // 후보 2: orderDateFrom / orderDateTo
@@ -226,7 +279,7 @@ async function listProductOrdersDirect({ startMs, endMs, page = 1, size = 100 } 
   params.set('to', fmtKstIso(endMs));
   params.set('page', String(page));
   params.set('size', String(size));
-  return callNaver('GET', `/external/v1/pay-order/seller/product-orders?${params.toString()}`);
+  return callNaver(store, 'GET', `/external/v1/pay-order/seller/product-orders?${params.toString()}`);
 }
 
 /**
@@ -267,7 +320,7 @@ function flattenItem(it) {
  *     (해당 24h 에 주문이 없는 것이 확정 → changed 호출도 어차피 0건)
  *   - direct 가 실패(throw — 보통 5xx/429 재시도 실패)했을 때만 changed 폴백
  */
-async function listAllOrders({ startMs, endMs } = {}) {
+async function listAllOrders(store, { startMs, endMs } = {}) {
   const CHUNK_MS = 24 * 3600 * 1000;
   const INTER_CHUNK_DELAY_MS = 250;
   const allItems = [];
@@ -289,7 +342,7 @@ async function listAllOrders({ startMs, endMs } = {}) {
     // 방식 A — direct list 시도. 성공시 (빈 결과 포함) fallback 안 함.
     let directSucceeded = false;
     try {
-      const res = await listProductOrdersDirect({ startMs: from, endMs: to });
+      const res = await listProductOrdersDirect(store, { startMs: from, endMs: to });
       const raw = res.data?.contents || res.data?.productOrders || res.data || [];
       const items = Array.isArray(raw) ? raw.map(flattenItem) : [];
       for (const it of items) {
@@ -309,7 +362,7 @@ async function listAllOrders({ startMs, endMs } = {}) {
     // 방식 B — direct 가 실패한 경우만 last-changed-statuses 폴백
     if (!directSucceeded) {
       try {
-        const res = await listChangedStatuses({ fromMs: from, toMs: to });
+        const res = await listChangedStatuses(store, { fromMs: from, toMs: to });
         const arr = res.data?.lastChangeStatuses || res.data || [];
         const chunkIds = [];
         for (const row of (Array.isArray(arr) ? arr : [])) {
@@ -322,7 +375,7 @@ async function listAllOrders({ startMs, endMs } = {}) {
         diag.changed = { count: chunkIds.length };
         if (chunkIds.length) {
           try {
-            const detailRes = await queryProductOrders(chunkIds);
+            const detailRes = await queryProductOrders(store, chunkIds);
             const detailArr = Array.isArray(detailRes.data) ? detailRes.data : [];
             const items = detailArr.map(flattenItem);
             for (const it of items) {
@@ -358,6 +411,8 @@ async function listAllOrders({ startMs, endMs } = {}) {
 
 module.exports = {
   isConfigured,
+  getStores,
+  getStore,
   getAccessToken,
   callNaver,
   signClientSecret,
@@ -366,5 +421,4 @@ module.exports = {
   queryProductOrders,
   listProductOrdersDirect,
   listAllOrders,
-  CLIENT_ID, // for log/debug only
 };

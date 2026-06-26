@@ -106,26 +106,59 @@ async function listNaverOrders({ startStr, endStr, byPaid = false, orderIds } = 
   return sbGet('naver_orders', params.join('&'));
 }
 
-async function getSyncState() {
+/**
+ * 동기화 상태 조회.
+ *   storeId 미지정 시 모든 store 의 row 배열 반환.
+ *   storeId 지정 시 해당 store row 1개 반환.
+ *   하위 호환: storeId 가 undefined 면 store_id='main' 단일 조회 (구버전 동작).
+ */
+async function getSyncState(storeId) {
   if (!USE_SUPABASE) return null;
-  const rows = await sbGet('naver_sync_state', 'id=eq.1');
+  if (storeId === undefined) {
+    // 구 호환: store_id='main' 단일 조회
+    const rows = await sbGet('naver_sync_state', `store_id=eq.main`);
+    return rows[0] || null;
+  }
+  if (storeId === '*') {
+    return sbGet('naver_sync_state', 'order=store_id.asc');
+  }
+  const rows = await sbGet('naver_sync_state', `store_id=eq.${encodeURIComponent(storeId)}`);
   return rows[0] || null;
 }
 
-async function updateSyncState(patch) {
+/**
+ * 동기화 상태 갱신 — store_id 별 row 에 upsert.
+ *   첫 인자 storeId 가 string 이면 신버전 (멀티 스토어).
+ *   첫 인자가 객체이면 구버전 호환 — store_id='main' 으로 처리.
+ */
+async function updateSyncState(storeIdOrPatch, maybePatch) {
   if (!USE_SUPABASE) return null;
-  const url = `${REST_BASE}/naver_sync_state?id=eq.1`;
+  let storeId, patch;
+  if (typeof storeIdOrPatch === 'string') {
+    storeId = storeIdOrPatch;
+    patch = maybePatch || {};
+  } else {
+    storeId = 'main';
+    patch = storeIdOrPatch || {};
+  }
+  // upsert via PostgREST on_conflict=store_id (unique index)
+  const url = `${REST_BASE}/naver_sync_state?on_conflict=store_id`;
+  const body = {
+    store_id: storeId,
+    ...patch,
+    updated_at: new Date().toISOString(),
+  };
   const res = await fetch(url, {
-    method: 'PATCH',
-    headers: { ...HEADERS, Prefer: 'return=representation' },
-    body: JSON.stringify({ ...patch, updated_at: new Date().toISOString() }),
+    method: 'POST',
+    headers: { ...HEADERS, Prefer: 'resolution=merge-duplicates,return=representation' },
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Supabase update naver_sync_state [${res.status}]: ${text.slice(0, 300)}`);
+    throw new Error(`Supabase upsert naver_sync_state [${res.status}]: ${text.slice(0, 300)}`);
   }
   const rows = await res.json();
-  return rows[0] || null;
+  return Array.isArray(rows) ? (rows[0] || null) : rows;
 }
 
 module.exports = {
