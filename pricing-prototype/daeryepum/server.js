@@ -500,6 +500,35 @@ function formatSiteName(siteName) {
   return siteName;
 }
 
+/**
+ * 네이버 스마트스토어 store_id → site_name 라벨.
+ *   - 등록된 스토어 1개 (또는 store_id='main') 이면 '네이버' 단일 표시 (호환)
+ *   - 멀티 스토어이면 '네이버(<NAVER_NAME_n>)' 분리 표시
+ *   - 알 수 없는 store_id 면 '네이버(store_id)' 폴백
+ */
+function naverSiteLabel(storeId) {
+  try {
+    const naverApi = require('./naver/api');
+    const stores = naverApi.getStores();
+    if (stores.length <= 1) return '네이버';
+    if (storeId) {
+      const s = naverApi.getStore(storeId);
+      if (s && s.name) return `네이버(${s.name})`;
+      return `네이버(${storeId})`;
+    }
+  } catch {}
+  return '네이버';
+}
+
+/**
+ * '네이버(...)' 형태 site_name 을 '네이버' 단일로 normalize.
+ *   매출 KPI / sales report 등 통합 집계에서 사용.
+ */
+function normalizeNaverSite(siteName) {
+  if (typeof siteName === 'string' && siteName.startsWith('네이버(')) return '네이버';
+  return siteName;
+}
+
 // 카테고리 필터 정의
 //   Card_Div 코드 (S2_Card 테이블):
 //     D01 = 답례품, D02 = 꽃다발, C29 = 데코소품(웨딩포스터/스티커/아크릴/photo_print 등)
@@ -954,10 +983,11 @@ async function apiOrders(query) {
           status_label: r.status_label || r.status || '',
           settle_method: r.settle_method || null,
           wedding_date: null,
-          site_name: '네이버',
+          site_name: naverSiteLabel(r.store_id),
           file_count: 0,
           delivery_seq: 1,
           source: 'naver',
+          naver_store_id: r.store_id || null,
           naver_status: r.status,
           naver_order_id: r.order_id,
           display_name: r.recv_name || '',
@@ -2077,13 +2107,14 @@ async function apiDashboardSummary(query) {
       for (const r of naverRows) {
         const day = String(r.ordered_at || '').slice(0, 10);
         if (!day) continue;
+        const siteLabel = naverSiteLabel(r.store_id);
         const name = r.product_name || '네이버 답례품';
         const code = r.product_code || '';
-        const key = `${day}|${code}|${name}`;
+        const key = `${day}|${siteLabel}|${code}|${name}`;
         if (!byDayProduct.has(key)) {
           byDayProduct.set(key, {
             card_name: name, card_code: code,
-            order_day: day, site_name: '네이버',
+            order_day: day, site_name: siteLabel,
             order_type: '단독주문',
             order_count: 0, total_qty: 0, total_amount: 0,
             _orderIds: new Set(),
@@ -2093,8 +2124,8 @@ async function apiDashboardSummary(query) {
         bucket.total_qty += r.item_count || 0;
         bucket.total_amount += r.item_total_price || 0;
         bucket._orderIds.add(`${r.order_id}::${r.product_order_id}`);
-        const ck = `${day}|네이버|단독주문`;
-        if (!byDayForCount.has(ck)) byDayForCount.set(ck, { order_day: day, site_name: '네이버', order_type: '단독주문', _orderIds: new Set() });
+        const ck = `${day}|${siteLabel}|단독주문`;
+        if (!byDayForCount.has(ck)) byDayForCount.set(ck, { order_day: day, site_name: siteLabel, order_type: '단독주문', _orderIds: new Set() });
         byDayForCount.get(ck)._orderIds.add(`${r.order_id}::${r.product_order_id}`);
       }
       for (const v of byDayProduct.values()) {
@@ -7182,7 +7213,9 @@ const server = http.createServer(async (req, res) => {
           //   쿠팡 / 네이버 = 별도
           const MAIN_SITES = ['바른손카드', '제휴몰', '쿠팡', '네이버'];
           const mapSite = (s) => {
-            if (s === '바른손카드' || s === '쿠팡' || s === '네이버') return s;
+            // 네이버 멀티 스토어 라벨 ('네이버(바른손카드)' 등) → '네이버' 통합
+            const norm = normalizeNaverSite(s);
+            if (norm === '바른손카드' || norm === '쿠팡' || norm === '네이버') return norm;
             return '제휴몰'; // 바른손몰 포함 모든 제휴 채널 통합
           };
 
