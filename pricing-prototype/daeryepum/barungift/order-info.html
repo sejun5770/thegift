@@ -1466,13 +1466,19 @@
           const groups = getShippingGroups();
           for (const g of groups) {
             const slot = formState.shipping_by_group?.[g.group_id];
-            if (!slot || !slot.ship_date || !slot.ship_type) return false;
+            if (!slot || !slot.ship_date || !slot.ship_type) {
+              console.warn('[isStepValid] step1 multi 미입력:', g.group_name, 'slot=', slot);
+              return false;
+            }
             // 해당 그룹 기준으로 date close 검증
             const prevCtx = _activeCalGroupId;
             _activeCalGroupId = g.group_id;
             const closed = isDateClosed(slot.ship_date);
             _activeCalGroupId = prevCtx;
-            if (closed) return false;
+            if (closed) {
+              console.warn('[isStepValid] step1 multi close:', g.group_name, 'date=', slot.ship_date);
+              return false;
+            }
           }
           return true;
         }
