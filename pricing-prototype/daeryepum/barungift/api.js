@@ -461,8 +461,10 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
           for (const gid of uniqueGroupIds) {
             const meta = gid ? groupMetaById.get(gid) : defaultMeta;
             const cfg = await store.getShippingConfig(gid);
+            // group_id=null 은 '_activeCalGroupId == null' 분기와 충돌하므로 안정 키 '__default__' 부여.
+            //   캘린더 클릭 / 검증 모두 같은 키로 매칭 보장.
             result.push({
-              group_id: gid || null,
+              group_id: gid || '__default__',
               group_name: meta?.name || '기본 그룹',
               is_default: !!meta?.is_default || gid == null,
               config: cfg,
@@ -471,7 +473,10 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
           }
           return result;
         })(),
-        shipping_group_by_product: shippingGroupByProduct, // { product_code: group_id|null }
+        // group_id=null 의 상품도 '__default__' 로 정규화 — 멀티 그룹 모드에서 일관 키.
+        shipping_group_by_product: Object.fromEntries(
+          Object.entries(shippingGroupByProduct).map(([pc, gid]) => [pc, gid || '__default__'])
+        ),
         available_stickers: availableStickers,
         stickers_by_product: stickersByProduct,
         box_options_by_product: boxOptionsByProduct, // { product_code: [{code,name,color,preview_image_url}] }

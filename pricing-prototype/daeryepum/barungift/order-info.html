@@ -1464,24 +1464,15 @@
         if (isMultiShippingGroups()) {
           // 멀티 그룹: 각 그룹마다 date + ship_type 모두 확정 필요
           const groups = getShippingGroups();
-          console.warn('[isStepValid] step1 multi groups:', groups.map(g => ({id: g.group_id, name: g.group_name, products: g.product_codes})));
-          console.warn('[isStepValid] step1 multi formState keys:', Object.keys(formState.shipping_by_group || {}));
-          console.warn('[isStepValid] step1 multi formState:', JSON.parse(JSON.stringify(formState.shipping_by_group || {})));
           for (const g of groups) {
             const slot = formState.shipping_by_group?.[g.group_id];
-            if (!slot || !slot.ship_date || !slot.ship_type) {
-              console.warn('[isStepValid] step1 multi 미입력:', g.group_name, 'group_id=', g.group_id, 'slot=', slot);
-              return false;
-            }
+            if (!slot || !slot.ship_date || !slot.ship_type) return false;
             // 해당 그룹 기준으로 date close 검증
             const prevCtx = _activeCalGroupId;
             _activeCalGroupId = g.group_id;
             const closed = isDateClosed(slot.ship_date);
             _activeCalGroupId = prevCtx;
-            if (closed) {
-              console.warn('[isStepValid] step1 multi close:', g.group_name, 'date=', slot.ship_date);
-              return false;
-            }
+            if (closed) return false;
           }
           return true;
         }
