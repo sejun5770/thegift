@@ -1132,26 +1132,35 @@
   }
 
   function getExpressFee() {
+    // 글로벌 폴백 — group 의 config.express_fee 가 누락/0 이면 사용.
+    //   운영자가 그룹별 fee 명시 안 한 경우 (마이그레이션 누락 등) 글로벌 fee 적용.
+    const fallbackFee = parseInt(
+      orderData?.shipping_config?.express_fee ?? orderData?.product_settings?.express_fee ?? 0
+    ) || 0;
+
     // 멀티 그룹 모드 & ctx 외부: 빠른출고로 선택된 모든 그룹의 fee 합산.
     //   각 그룹의 ship_type === 'express' 인 경우만 그 그룹 config.express_fee 누적.
+    //   group fee 가 0/누락이면 fallbackFee 사용.
     if (_activeCalGroupId == null && isMultiShippingGroups()) {
       const groups = getShippingGroups();
       let total = 0;
       for (const g of groups) {
         const gst = formState.shipping_by_group?.[g.group_id]?.ship_type;
-        if (gst === 'express') total += parseInt(g.config?.express_fee) || 0;
+        if (gst === 'express') {
+          const gfee = parseInt(g.config?.express_fee) || 0;
+          total += gfee > 0 ? gfee : fallbackFee;
+        }
       }
       return total;
     }
-    // 단일 그룹 또는 ctx 내부: 활성 그룹 / 공통 config 의 fee
+    // 단일 그룹 또는 ctx 내부: 활성 그룹의 fee, 누락 시 글로벌 폴백.
     if (_activeCalGroupId != null) {
       const groups = getShippingGroups();
       const g = groups.find(gg => gg.group_id === _activeCalGroupId);
-      return parseInt(g?.config?.express_fee) || 0;
+      const gfee = parseInt(g?.config?.express_fee) || 0;
+      return gfee > 0 ? gfee : fallbackFee;
     }
-    return orderData?.shipping_config?.express_fee
-      ?? orderData?.product_settings?.express_fee
-      ?? 0;
+    return fallbackFee;
   }
 
   function isExpressAvailable() {
@@ -1695,6 +1704,22 @@
         return p ? `<span class="inline-block text-[11.5px] text-slate-600 bg-white px-2 py-1 rounded-md border border-slate-200 mr-1 mb-1">${esc(p.product_name || pc)} <span class="text-slate-400 font-mono">(${esc(pc)})</span></span>` : '';
       }).join('');
 
+      // 그룹 헤더 라벨 — 그룹명 대신 선택된 상품명으로 표시.
+      //   1개 상품: 상품명
+      //   2개 이상: "<첫 상품명> 외 N종"
+      //   상품 0개 (이상 케이스): 기존 그룹명
+      const productNames = (g.product_codes || [])
+        .map(pc => productByCode.get(pc)?.product_name || pc)
+        .filter(Boolean);
+      let groupLabel;
+      if (productNames.length === 0) {
+        groupLabel = g.group_name || '출고 그룹';
+      } else if (productNames.length === 1) {
+        groupLabel = productNames[0];
+      } else {
+        groupLabel = `${productNames[0]} 외 ${productNames.length - 1}종`;
+      }
+
       const isPicked = !!slot.ship_date;
       const statusBadge = isPicked
         ? `<span class="inline-flex items-center gap-1 text-[11px] font-bold bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">✓ ${esc(slot.ship_date)} ${slot.ship_type === 'express' ? '· ⚡빠른출고' : '· 📦일반'}</span>`
@@ -1704,7 +1729,7 @@
         <div class="surface mb-4 overflow-hidden" style="border-left:3px solid var(--brand-500, #6366f1)">
           <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/50">
             <div class="flex items-center justify-between gap-2 flex-wrap mb-2">
-              <h3 class="text-[14px] font-bold text-slate-900">📅 ${esc(g.group_name || '출고 그룹')}</h3>
+              <h3 class="text-[14px] font-bold text-slate-900">📅 ${esc(groupLabel)}</h3>
               ${statusBadge}
             </div>
             <div class="flex flex-wrap">${productLines}</div>
