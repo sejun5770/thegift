@@ -1526,6 +1526,92 @@ async function apiArtistSettlements(query = {}) {
   };
 }
 
+/**
+ * Phase 4 — 최근 N개월 월별 정산 합계 추이.
+ *   각 월에 대해 apiArtistSettlements 호출 → 합계만 추출.
+ *   응답: { months: ['2025-07'...'2026-06'], totals: [...], by_artist: { artistId: [...] }, artist_names: {...} }
+ */
+async function apiArtistSettlementsHistory(query = {}) {
+  const months = Math.min(parseInt(query.months) || 12, 24);
+  const todayDate = today();
+  // 최근 N개월의 1일 ~ 다음달 1일
+  const monthList = [];
+  for (let i = months - 1; i >= 0; i--) {
+    const d = new Date(todayDate.getFullYear(), todayDate.getMonth() - i, 1);
+    monthList.push({
+      label: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+      start: fmtDate(d),
+      end: fmtDate(new Date(d.getFullYear(), d.getMonth() + 1, 1))
+    });
+  }
+  // 각 월 정산 합계 조회 — 순차 (병렬은 MSSQL pool 부담)
+  const totals = [];
+  const byArtist = {};  // artistId → [amount per month]
+  const artistNames = {};
+  for (const m of monthList) {
+    const r = await apiArtistSettlements({ start_date: m.start, end_date: m.end });
+    if (r.error) { totals.push(0); continue; }
+    totals.push(r.totals?.settlement_amount || 0);
+    for (const a of (r.by_artist || [])) {
+      if (!byArtist[a.artist_id]) {
+        byArtist[a.artist_id] = new Array(monthList.length).fill(0);
+        artistNames[a.artist_id] = a.name;
+      }
+      const idx = monthList.findIndex(x => x.label === m.label);
+      if (idx >= 0) byArtist[a.artist_id][idx] = a.settlement_amount;
+    }
+  }
+  return {
+    months: monthList.map(m => m.label),
+    totals,
+    by_artist: byArtist,
+    artist_names: artistNames
+  };
+}
+
+/**
+ * Phase 4 — 월 마감 (특정 월의 작가별 정산 스냅샷 저장).
+ *   해당 월의 apiArtistSettlements 호출 → 작가별 결과를 bg_artist_settlements 에 upsert (artist_id, month) PK.
+ */
+async function apiArtistSettlementsConfirm({ month, confirmedBy }) {
+  const [y, mn] = month.split('-').map(Number);
+  const start = fmtDate(new Date(y, mn - 1, 1));
+  const end = fmtDate(new Date(y, mn, 1));
+  const r = await apiArtistSettlements({ start_date: start, end_date: end });
+  if (r.error) return { error: r.error };
+  const rows = (r.by_artist || []).map(a => ({
+    artist_id: a.artist_id,
+    month: `${month}-01`,
+    total_amount: a.total_amount,
+    commission_rate: a.commission_rate,
+    settlement_amount: a.settlement_amount,
+    total_qty: a.total_qty,
+    status: 'confirmed',
+    confirmed_by: confirmedBy
+  }));
+  if (!rows.length) return { ok: true, upserted: 0, message: '확정할 작가 정산이 없습니다.' };
+  try {
+    const upRes = await fetch(`${SUPABASE_URL}/rest/v1/bg_artist_settlements?on_conflict=artist_id,month`, {
+      method: 'POST',
+      headers: {
+        apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`,
+        'Content-Type':'application/json',
+        Prefer: 'resolution=merge-duplicates,return=representation'
+      },
+      body: JSON.stringify(rows)
+    });
+    const j = await upRes.json();
+    if (!upRes.ok) return { error: j?.message || '마감 실패' };
+    return {
+      ok: true,
+      upserted: Array.isArray(j) ? j.length : rows.length,
+      total_settlement: r.totals?.settlement_amount || 0
+    };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
 async function apiDashboardComparison(query = {}) {
   const p = await getPool();
   // 카테고리별 필터 + amount 계산식 (apiOrders / apiDashboardSummary 와 동일 패턴).
@@ -6082,6 +6168,47 @@ const server = http.createServer(async (req, res) => {
         //   반환:
         //     { period: {start, end}, by_artist: [...], by_product: [...] }
         data = await apiArtistSettlements(parsed.query);
+      } else if (pathname === '/api/artists/settlements/history' && req.method === 'GET') {
+        // Phase 4 — 최근 N개월 (default 12) 월별 정산 합계 (전체 + 작가별).
+        //   chart 용. 각 월의 apiArtistSettlements 결과를 순차 호출.
+        data = await apiArtistSettlementsHistory(parsed.query);
+      } else if (pathname === '/api/artists/settlements/confirm' && req.method === 'POST') {
+        // Phase 4 — 월 마감 (확정 저장).
+        //   Body: { month: 'YYYY-MM' }
+        //   해당 월 모든 작가 정산 스냅샷을 bg_artist_settlements 에 upsert.
+        const body = await new Promise((resolve) => {
+          let raw=''; req.on('data', c=>raw+=c);
+          req.on('end', () => { try { resolve(raw?JSON.parse(raw):{}); } catch { resolve({}); } });
+        });
+        const month = String(body.month || '').match(/^\d{4}-\d{2}$/) ? body.month : null;
+        if (!month) data = { error: 'month 형식: YYYY-MM' };
+        else data = await apiArtistSettlementsConfirm({ month, confirmedBy: session?.email || 'admin' });
+      } else if (pathname === '/api/artists/settlements/confirm' && req.method === 'DELETE') {
+        // 월 마감 해제
+        const monthQ = parsed.query.month;
+        if (!monthQ || !/^\d{4}-\d{2}$/.test(monthQ)) data = { error: 'month 형식: YYYY-MM' };
+        else {
+          try {
+            const r = await fetch(`${SUPABASE_URL}/rest/v1/bg_artist_settlements?month=eq.${monthQ}-01`, {
+              method: 'DELETE',
+              headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, Prefer: 'return=representation' }
+            });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) data = { error: j?.message || '마감 해제 실패' };
+            else data = { ok: true, deleted: Array.isArray(j) ? j.length : 0 };
+          } catch (e) { data = { error: e.message }; }
+        }
+      } else if (pathname === '/api/artists/settlements/confirmed' && req.method === 'GET') {
+        // 마감 상태 조회 (특정 월 또는 전체)
+        try {
+          const q = parsed.query.month ? `?month=eq.${parsed.query.month}-01` : '';
+          const r = await fetch(`${SUPABASE_URL}/rest/v1/bg_artist_settlements${q}&select=*,bg_artists(name)&order=month.desc,artist_id`.replace('?&', '?'), {
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+          });
+          const arr = await r.json();
+          if (!r.ok) data = { error: arr?.message || '조회 실패', items: [] };
+          else data = { items: Array.isArray(arr) ? arr : [] };
+        } catch (e) { data = { error: e.message, items: [] }; }
       } else if (pathname === '/api/dashboard/comparison') {
         data = await apiDashboardComparison(parsed.query);
       } else if (pathname === '/api/dashboard/summary') {

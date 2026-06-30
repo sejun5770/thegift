@@ -1771,11 +1771,14 @@ nav.nav-loading a[href^="#"] {
           <div>
             <span style="color:var(--gray-500);font-size:11px">기간</span>
             <strong id="art-stl-period" style="margin-left:6px"></strong>
+            <span id="art-stl-confirmed-badge" style="display:none;margin-left:10px;padding:2px 8px;background:#16a34a;color:#fff;border-radius:10px;font-size:10px;font-weight:600">✓ 마감</span>
           </div>
-          <div style="display:flex;gap:24px">
+          <div style="display:flex;gap:24px;align-items:center">
             <div><span style="color:var(--gray-500);font-size:11px">총 수량</span> <strong id="art-stl-total-qty" style="margin-left:6px"></strong></div>
             <div><span style="color:var(--gray-500);font-size:11px">총 매출</span> <strong id="art-stl-total-amount" style="margin-left:6px"></strong></div>
             <div><span style="color:var(--gray-500);font-size:11px">총 정산금액</span> <strong id="art-stl-total-settlement" style="margin-left:6px;color:#7c3aed"></strong></div>
+            <button id="art-stl-confirm-btn" class="btn" style="padding:6px 12px;font-size:11px;display:none" onclick="confirmSettlementMonth()">🔒 월 마감</button>
+            <button id="art-stl-unconfirm-btn" class="btn" style="padding:6px 12px;font-size:11px;display:none" onclick="unconfirmSettlementMonth()" title="마감 해제">🔓 마감 해제</button>
           </div>
         </div>
       </div>
@@ -1798,6 +1801,23 @@ nav.nav-loading a[href^="#"] {
         </thead>
         <tbody id="art-stl-tbody"></tbody>
       </table>
+    </div>
+
+    <!-- 월별 추이 차트 카드 -->
+    <div class="card" style="padding:16px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0;font-size:14px">📊 최근 12개월 정산 추이</h3>
+        <div style="display:flex;gap:6px;align-items:center;font-size:11px;color:var(--gray-500)">
+          <button class="btn" id="art-hist-mode-total" onclick="setHistoryMode('total')" style="padding:4px 10px;font-size:11px;background:var(--primary);color:#fff;border-color:var(--primary)">총 정산금액</button>
+          <button class="btn" id="art-hist-mode-artist" onclick="setHistoryMode('artist')" style="padding:4px 10px;font-size:11px">작가별 TOP 5</button>
+          <button class="btn" style="padding:4px 10px;font-size:11px" onclick="loadHistory()">🔄 새로고침</button>
+        </div>
+      </div>
+      <div id="art-hist-loading" style="text-align:center;padding:40px;color:var(--gray-500);font-size:13px">불러오는 중…</div>
+      <div id="art-hist-chart-wrap" style="display:none">
+        <svg id="art-hist-chart" viewBox="0 0 800 280" style="width:100%;height:280px;background:#fafafa;border-radius:4px"></svg>
+        <div id="art-hist-legend" style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font-size:11px;color:var(--gray-600);padding-left:8px"></div>
+      </div>
     </div>
   </div>
 
@@ -11008,8 +11028,9 @@ function initSettlementsTab() {
   // 이번 달 → start/end 자동 설정
   onSettlementMonthChange();
   _settlementsInitialized = true;
-  // 자동 조회
+  // 자동 조회 + 월별 추이 차트
   loadSettlements();
+  loadHistory();
 }
 
 function onSettlementMonthChange() {
@@ -11043,6 +11064,18 @@ async function loadSettlements() {
     if (d.error) throw new Error(d.error);
     _settlementsData = d;
     renderSettlements();
+    // 마감 상태 — 월 단위 조회일 때만 (자유 기간이면 마감 X)
+    const ym = document.getElementById('art-stl-month')?.value;
+    if (ym) checkConfirmedStatus(ym);
+    else {
+      // 자유 기간이면 마감 버튼 숨김
+      const $cb = document.getElementById('art-stl-confirm-btn');
+      const $ub = document.getElementById('art-stl-unconfirm-btn');
+      const $bg = document.getElementById('art-stl-confirmed-badge');
+      if ($cb) $cb.style.display = 'none';
+      if ($ub) $ub.style.display = 'none';
+      if ($bg) $bg.style.display = 'none';
+    }
   } catch (e) {
     $loading.style.display = 'none';
     $empty.textContent = `조회 실패: ${e.message}`;
@@ -11148,6 +11181,156 @@ function toggleArtistDetail(artistId) {
   if (_settlementsExpanded.has(artistId)) _settlementsExpanded.delete(artistId);
   else _settlementsExpanded.add(artistId);
   renderSettlements();
+}
+
+// ── Phase 4 — 월별 추이 + 마감 ──
+let _historyData = null;
+let _historyMode = 'total';  // 'total' | 'artist'
+let _confirmedMonths = new Set();  // 마감된 월 (YYYY-MM)
+
+async function loadHistory() {
+  const $loading = document.getElementById('art-hist-loading');
+  const $wrap = document.getElementById('art-hist-chart-wrap');
+  $loading.style.display = '';
+  $wrap.style.display = 'none';
+  try {
+    const r = await fetch(`${API}/api/artists/settlements/history?months=12`);
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    _historyData = d;
+    renderHistoryChart();
+    $loading.style.display = 'none';
+    $wrap.style.display = '';
+  } catch (e) {
+    $loading.textContent = `차트 로드 실패: ${e.message}`;
+  }
+}
+
+function setHistoryMode(mode) {
+  _historyMode = mode;
+  ['total','artist'].forEach(m => {
+    const $b = document.getElementById(`art-hist-mode-${m}`);
+    if (!$b) return;
+    const active = m === mode;
+    $b.style.background = active ? 'var(--primary)' : '';
+    $b.style.color = active ? '#fff' : '';
+    $b.style.borderColor = active ? 'var(--primary)' : '';
+  });
+  if (_historyData) renderHistoryChart();
+}
+
+function renderHistoryChart() {
+  const d = _historyData;
+  if (!d || !d.months?.length) return;
+  const $svg = document.getElementById('art-hist-chart');
+  const $legend = document.getElementById('art-hist-legend');
+  const W = 800, H = 280, padL = 60, padR = 20, padT = 20, padB = 40;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+  const months = d.months;
+  const n = months.length;
+
+  let series = [];  // [{ name, values, color }]
+  if (_historyMode === 'total') {
+    series = [{ name: '총 정산금액', values: d.totals, color: '#7c3aed' }];
+  } else {
+    // TOP 5 작가 — 합계 큰 순
+    const sums = Object.entries(d.by_artist).map(([id, vals]) => ({
+      id, name: d.artist_names[id] || id, sum: vals.reduce((a,b)=>a+b,0), vals
+    })).sort((a,b) => b.sum - a.sum).slice(0, 5);
+    const colors = ['#7c3aed','#0ea5e9','#10b981','#f59e0b','#ef4444'];
+    series = sums.map((s, i) => ({ name: s.name, values: s.vals, color: colors[i % colors.length] }));
+  }
+  if (!series.length) { $svg.innerHTML = '<text x="400" y="140" text-anchor="middle" fill="#9ca3af">데이터 없음</text>'; return; }
+  const maxV = Math.max(1, ...series.flatMap(s => s.values));
+  const yScale = v => padT + innerH - (v / maxV) * innerH;
+  const xScale = i => padL + (n > 1 ? (i / (n - 1)) * innerW : innerW / 2);
+
+  // 축
+  const gridLines = [];
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + (innerH / 4) * i;
+    const val = maxV * (1 - i / 4);
+    gridLines.push(`<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#e5e7eb" stroke-width="0.5"/>`);
+    gridLines.push(`<text x="${padL - 6}" y="${y + 3}" font-size="10" fill="#6b7280" text-anchor="end">${fmtKRW(Math.round(val))}</text>`);
+  }
+  // x축 라벨
+  const xLabels = months.map((m, i) => `<text x="${xScale(i)}" y="${H - padB + 16}" font-size="10" fill="#6b7280" text-anchor="middle">${m.slice(5)}월</text>`).join('');
+
+  // 시리즈
+  const seriesSvg = series.map(s => {
+    if (_historyMode === 'total') {
+      // 막대 차트
+      const barW = innerW / n * 0.6;
+      return s.values.map((v, i) => {
+        const x = xScale(i) - barW / 2;
+        const y = yScale(v);
+        const h = padT + innerH - y;
+        return `<rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="${s.color}" opacity="0.85"/>
+                <text x="${xScale(i)}" y="${y - 4}" font-size="9" fill="#374151" text-anchor="middle">${v > 0 ? fmtKRW(v) : ''}</text>`;
+      }).join('');
+    }
+    // 라인 차트
+    const pts = s.values.map((v, i) => `${xScale(i)},${yScale(v)}`).join(' ');
+    const dots = s.values.map((v, i) => `<circle cx="${xScale(i)}" cy="${yScale(v)}" r="3" fill="${s.color}"/>`).join('');
+    return `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2"/>${dots}`;
+  }).join('');
+
+  $svg.innerHTML = gridLines.join('') + xLabels + seriesSvg;
+
+  // 범례
+  $legend.innerHTML = series.map(s =>
+    `<div style="display:flex;align-items:center;gap:4px"><span style="display:inline-block;width:10px;height:10px;background:${s.color};border-radius:2px"></span>${esc(s.name)}</div>`
+  ).join('');
+}
+
+async function checkConfirmedStatus(month) {
+  // month: YYYY-MM
+  try {
+    const r = await fetch(`${API}/api/artists/settlements/confirmed?month=${month}`);
+    const d = await r.json();
+    const isConfirmed = (d.items || []).length > 0;
+    if (isConfirmed) _confirmedMonths.add(month);
+    else _confirmedMonths.delete(month);
+    const $badge = document.getElementById('art-stl-confirmed-badge');
+    const $cBtn = document.getElementById('art-stl-confirm-btn');
+    const $uBtn = document.getElementById('art-stl-unconfirm-btn');
+    if ($badge) $badge.style.display = isConfirmed ? '' : 'none';
+    if ($cBtn) $cBtn.style.display = isConfirmed ? 'none' : '';
+    if ($uBtn) $uBtn.style.display = isConfirmed ? '' : 'none';
+    return isConfirmed;
+  } catch { return false; }
+}
+
+async function confirmSettlementMonth() {
+  const ym = document.getElementById('art-stl-month')?.value;
+  if (!ym) { alert('월을 선택해주세요.'); return; }
+  if (!confirm(`${ym} 월 정산을 마감하시겠습니까?\n\n마감 시 현재 정산금액 스냅샷이 저장됩니다.\n이후 매출 변동 시 운영자가 재확인 필요.`)) return;
+  try {
+    const r = await fetch(`${API}/api/artists/settlements/confirm`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ month: ym })
+    });
+    const j = await r.json();
+    if (!r.ok || j.error) throw new Error(j.error || '마감 실패');
+    showToast(`${ym} 마감 완료 (${j.upserted}명 / ${fmtKRW(j.total_settlement)})`);
+    checkConfirmedStatus(ym);
+    loadHistory();
+  } catch (e) { alert('실패: ' + e.message); }
+}
+
+async function unconfirmSettlementMonth() {
+  const ym = document.getElementById('art-stl-month')?.value;
+  if (!ym) { alert('월을 선택해주세요.'); return; }
+  if (!confirm(`${ym} 월 마감을 해제하시겠습니까?`)) return;
+  try {
+    const r = await fetch(`${API}/api/artists/settlements/confirm?month=${ym}`, { method: 'DELETE' });
+    const j = await r.json();
+    if (!r.ok || j.error) throw new Error(j.error || '해제 실패');
+    showToast('마감 해제 완료');
+    checkConfirmedStatus(ym);
+    loadHistory();
+  } catch (e) { alert('실패: ' + e.message); }
 }
 
 function downloadSettlementCsv() {
