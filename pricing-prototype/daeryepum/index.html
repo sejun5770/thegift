@@ -2701,9 +2701,16 @@ const SETTLE_METHOD_MAP = {
 };
 // 수집 제외 상태: 3=결제취소, 5=주문취소, 또는 (1=결제대기 또는 9=초안컨펌완료/결제대기) + settle_date 없음
 // settle_date 가 있으면 결제 완료된 것으로 판정 (status_seq 무관)
+// 마켓플레이스 (네이버/쿠팡): status 문자열 기반 매칭
 function isCancelled(r) {
+  // CARD/ETC — status_seq 기반
   if (r.status_seq === 3 || r.status_seq === 5) return true;
   if ((r.status_seq === 1 || r.status_seq === 9) && !r.settle_date) return true;
+  // 마켓플레이스 — status 문자열 기반
+  //   네이버: CANCELED / RETURNED / EXCHANGED
+  //   쿠팡:   CANCEL / RETURNS
+  if (r.status === 'CANCELED' || r.status === 'RETURNED' || r.status === 'EXCHANGED') return true;
+  if (r.status === 'CANCEL' || r.status === 'RETURNS') return true;
   return false;
 }
 
@@ -11808,7 +11815,12 @@ function renderBgUnified() {
   const isPaymentPending = o => (o.status_seq === 1 || o.status_seq === 9) && !o.settle_date;
 
   // 탭별 카운트 미리 계산 (취소 / 결제대기 제외 적용 후)
-  const isCancelled = o => o.status_seq === 3 || o.status_seq === 5;
+  //   CARD/ETC: status_seq 기반 / 마켓플레이스: status 문자열 기반 — 전역 isCancelled 와 동일 정책.
+  const isCancelled = o => (
+    o.status_seq === 3 || o.status_seq === 5
+    || o.status === 'CANCELED' || o.status === 'RETURNED' || o.status === 'EXCHANGED'
+    || o.status === 'CANCEL' || o.status === 'RETURNS'
+  );
   const visibleBase = bgUnifiedOrders.filter(o =>
     (!hideCancel  || !isCancelled(o)) &&
     (!hidePending || !isPaymentPending(o))
