@@ -1505,8 +1505,13 @@ async function apiDashboardComparison(query = {}) {
     //   실패해도 MSSQL 결과는 유지.
     async function mergeMarketplace(siteName, listFn, getOrderKey) {
       try {
-        const rows = await listFn();
-        if (!rows || !rows.length) return;
+        const rowsRaw = await listFn();
+        if (!rowsRaw || !rowsRaw.length) return;
+        // 매출 집계 — 취소/반품/교환 자동 제외 (CARD/ETC status_seq NOT IN (3,5,...) 와 동일 정책).
+        //   네이버: CANCELED / RETURNED / EXCHANGED, 쿠팡: CANCEL / RETURNS.
+        const CANCELED_STATUSES = ['CANCELED', 'RETURNED', 'EXCHANGED', 'CANCEL', 'RETURNS'];
+        const rows = rowsRaw.filter(r => !CANCELED_STATUSES.includes(r.status));
+        if (!rows.length) return;
         const seen = new Set();
         let amount = 0, orders = 0, qty = 0;
         for (const r of rows) {
