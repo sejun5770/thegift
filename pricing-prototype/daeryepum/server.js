@@ -932,6 +932,9 @@ async function apiOrders(query) {
           settle_price: r.settle_price || 0,
           coupon_price: 0,
           status_seq: null, // 쿠팡은 별도 status 체계 (status_label 사용)
+          // status — 클라이언트 isCancelled() / row-cancelled 시각 처리 매칭용 (raw 쿠팡 status)
+          //   CARD/ETC 는 undefined → CARD/ETC 로직 영향 없음. 쿠팡은 CANCEL/ACCEPT 등.
+          status: r.status,
           status_label: r.status_label || r.status || '',
           settle_method: r.settle_method || null,
           wedding_date: null,
@@ -980,6 +983,9 @@ async function apiOrders(query) {
           settle_price: r.settle_price || 0,
           coupon_price: 0,
           status_seq: null,
+          // status — 클라이언트 isCancelled() / row-cancelled 시각 처리 매칭용 (raw 네이버 status)
+          //   CARD/ETC 는 undefined → CARD/ETC 로직 영향 없음. 네이버는 CANCELED/PAYED 등.
+          status: r.status,
           status_label: r.status_label || r.status || '',
           settle_method: r.settle_method || null,
           wedding_date: null,
