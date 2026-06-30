@@ -905,10 +905,7 @@ async function apiOrders(query) {
   if (query.category === 'daeryepum' || !query.category) {
     try {
       const coupangStore = require('./coupang/store');
-      // apiOrders 는 주문조회 페이지 — 취소 row 도 표시 (운영자 추적용).
-      //   매출 KPI / 정보입력완료 페이지는 store 기본값 (취소 자동 제외) 그대로 사용.
       const coupangRows = await coupangStore.listCoupangOrders({
-        includeCanceled: true,
         startStr: startDate,
         endStr: endDate,
         byPaid: false, // order_date 기준 (MSSQL 과 일관)
@@ -958,10 +955,7 @@ async function apiOrders(query) {
     // 네이버 스마트스토어 — 쿠팡과 동일 패턴
     try {
       const naverStore = require('./naver/store');
-      // apiOrders 는 주문조회 페이지 — 취소 row 도 표시 (운영자 추적용).
-      //   매출 KPI / 정보입력완료 페이지는 store 기본값 (취소 자동 제외) 그대로 사용.
       const naverRows = await naverStore.listNaverOrders({
-        includeCanceled: true,
         startStr: startDate, endStr: endDate, byPaid: false,
         orderIds: naverIdsList.length ? naverIdsList : undefined,
       });
@@ -2054,9 +2048,12 @@ async function apiDashboardSummary(query) {
   const _isDaeryepumCategory = !query.category || query.category === 'daeryepum';
   if (_isDaeryepumCategory) try {
     const coupangStore = require('./coupang/store');
-    const coupangRows = await coupangStore.listCoupangOrders({
+    const coupangRowsRaw = await coupangStore.listCoupangOrders({
       startStr: startDate, endStr: endDate, byPaid: false,
     });
+    // 매출 집계 — 취소/반품 자동 제외 (CARD/ETC 의 status_seq NOT IN (3,5,...) 와 동일 정책).
+    //   주문조회 / 정보입력완료 등 다른 호출은 store 함수가 모든 row 반환 → 취소 표시 가능.
+    const coupangRows = (coupangRowsRaw || []).filter(r => !['CANCEL', 'RETURNS'].includes(r.status));
     if (coupangRows && coupangRows.length) {
       // (order_day, product) 키로 묶어 일×상품 단위 합산 → MSSQL summary 와 동일 단위
       const byDayProduct = new Map();
@@ -2104,9 +2101,11 @@ async function apiDashboardSummary(query) {
   // 네이버 스마트스토어 일별 합산 — 쿠팡과 동일 패턴, '네이버' 사이트 그룹. 답례품 전용.
   if (_isDaeryepumCategory) try {
     const naverStore = require('./naver/store');
-    const naverRows = await naverStore.listNaverOrders({
+    const naverRowsRaw = await naverStore.listNaverOrders({
       startStr: startDate, endStr: endDate, byPaid: false,
     });
+    // 매출 집계 — 취소/반품/교환 자동 제외 (CARD/ETC 의 status_seq NOT IN (3,5,...) 와 동일 정책).
+    const naverRows = (naverRowsRaw || []).filter(r => !['CANCELED', 'RETURNED', 'EXCHANGED'].includes(r.status));
     if (naverRows && naverRows.length) {
       const byDayProduct = new Map();
       const byDayForCount = new Map();

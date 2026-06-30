@@ -55,15 +55,14 @@ async function upsertCoupangOrders(rows) {
  */
 /**
  * 쿠팡 주문 목록 조회.
- *   기본 정책: CANCEL/RETURNS 자동 제외 (CARD/ETC status_seq NOT IN (3,5,...) 와 동일).
- *   매출/주문조회/정보입력 등 모든 호출에서 취소 row 자동 필터.
- *   includeCanceled=true 면 취소 포함 (운영자 진단 / 취소 전용 화면용).
- *   orderIds 명시 시: 그 ID 들은 status 무관 모두 반환.
+ *   기본: 모든 status row 반환 (CARD/ETC 의 MSSQL 조회 패턴과 동일).
+ *   주문조회 / 정보입력완료 등 모든 호출에서 취소 row 도 포함되어 표시 / 추적 가능.
+ *   매출 집계 측 (apiSummary 등) 에서 자체적으로 status='CANCEL'/'RETURNS' row 를 필터.
  */
-async function listCoupangOrders({ startStr, endStr, byPaid = false, orderIds, includeCanceled = false } = {}) {
+async function listCoupangOrders({ startStr, endStr, byPaid = false, orderIds } = {}) {
   if (!USE_SUPABASE) return [];
   const col = byPaid ? 'paid_at' : 'ordered_at';
-  // orderIds OR 모드 — PostgREST `or=(a.eq.x,b.eq.y)` syntax 활용. status 무관 모두 반환.
+  // orderIds OR 모드 — PostgREST `or=(a.eq.x,b.eq.y)` syntax 활용.
   if (Array.isArray(orderIds) && orderIds.length) {
     const inClause = `coupang_order_id=in.(${orderIds.join(',')})`;
     const params = [];
@@ -79,10 +78,6 @@ async function listCoupangOrders({ startStr, endStr, byPaid = false, orderIds, i
   const params = [];
   if (startStr) params.push(`${col}=gte.${encodeURIComponent(startStr)}`);
   if (endStr) params.push(`${col}=lt.${encodeURIComponent(endStr)}`);
-  // 취소/반품 자동 제외 (기본). includeCanceled=true 면 제외 안 함.
-  if (!includeCanceled) {
-    params.push('status=not.in.(CANCEL,RETURNS)');
-  }
   params.push(`order=${col}.desc`);
   return sbGet('coupang_orders', params.join('&'));
 }

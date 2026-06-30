@@ -87,15 +87,14 @@ async function patchNaverStubEnrichment(orderId, { sticker_selections, desired_s
 
 /**
  * 네이버 주문 목록 조회.
- *   기본 정책: CANCELED/RETURNED/EXCHANGED 자동 제외 (CARD/ETC status_seq NOT IN (3,5,...) 와 동일).
- *   매출/주문조회/정보입력 등 모든 호출에서 취소 row 자동 필터.
- *   includeCanceled=true 면 취소 포함 (운영자 진단 / 취소 전용 화면용).
- *   orderIds 명시 시: 그 ID 들은 status 무관 모두 반환 (특정 취소 주문 검색 가능).
+ *   기본: 모든 status row 반환 (CARD/ETC 의 MSSQL 조회 패턴과 동일).
+ *   주문조회 / 정보입력완료 등 모든 호출에서 취소 row 도 포함되어 표시 / 추적 가능.
+ *   매출 집계 측 (apiSummary 등) 에서 자체적으로 status_label='주문취소' row 를 필터.
  */
-async function listNaverOrders({ startStr, endStr, byPaid = false, orderIds, includeCanceled = false } = {}) {
+async function listNaverOrders({ startStr, endStr, byPaid = false, orderIds } = {}) {
   if (!USE_SUPABASE) return [];
   const col = byPaid ? 'paid_at' : 'ordered_at';
-  // orderIds OR 모드 — product_order_id 기준 (옛날 customer_info 매칭용). status 무관 모두 반환.
+  // orderIds OR 모드 — product_order_id 기준 (옛날 customer_info 매칭용).
   if (Array.isArray(orderIds) && orderIds.length) {
     const params = [];
     if (startStr && endStr) {
@@ -109,10 +108,6 @@ async function listNaverOrders({ startStr, endStr, byPaid = false, orderIds, inc
   const params = [];
   if (startStr) params.push(`${col}=gte.${encodeURIComponent(startStr)}`);
   if (endStr) params.push(`${col}=lt.${encodeURIComponent(endStr)}`);
-  // 취소/반품/교환 자동 제외 (기본). includeCanceled=true 면 제외 안 함.
-  if (!includeCanceled) {
-    params.push('status=not.in.(CANCELED,RETURNED,EXCHANGED)');
-  }
   params.push(`order=${col}.desc`);
   return sbGet('naver_orders', params.join('&'));
 }
