@@ -2959,7 +2959,13 @@ async function loadOrders() {
       r.order_type_label = r.has_copurchase
         ? '청첩장+답례품'
         : (r.order_type === 'ETC' ? '답례품 단독' : '답례품 단독(CARD)');
-      r.status_label = (r.order_type === 'CARD' ? STATUS_MAP_CARD : STATUS_MAP)[r.status_seq] || `상태${r.status_seq ?? '?'}`;
+      // status_label — 마켓플레이스 (네이버/쿠팡) 는 sync 단계에서 이미 한글 라벨 부여 → 보존.
+      //   CARD/ETC 는 status_seq 기반 STATUS_MAP 매핑.
+      if (r.order_type === 'NAVER' || r.order_type === 'COUPANG') {
+        r.status_label = r.status_label || r.status || '';
+      } else {
+        r.status_label = (r.order_type === 'CARD' ? STATUS_MAP_CARD : STATUS_MAP)[r.status_seq] || `상태${r.status_seq ?? '?'}`;
+      }
       // 결제수단 라벨 — 매핑 없으면 raw 코드 그대로 노출 (운영 중 신규 코드 추가 시 즉시 보임)
       r.settle_method_label = r.settle_method
         ? (SETTLE_METHOD_MAP[String(r.settle_method)] || `코드${r.settle_method}`)
