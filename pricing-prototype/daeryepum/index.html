@@ -284,6 +284,7 @@ nav.nav-loading a[href^="#"] {
   <a href="#bg-vendors" onclick="showPage('bg-vendors')">🤝 위탁업체</a>
   <a href="#bg-settlements" onclick="showPage('bg-settlements')">💰 위탁정산</a>
   <a href="#bg-vendor-dashboard" onclick="showPage('bg-vendor-dashboard')">📈 위탁 대시보드</a>
+  <a href="#bg-artists" onclick="showPage('bg-artists')">🎨 작가 정산</a>
   <a href="#wedding-calendar" onclick="showPage('wedding-calendar')">💍 예식일 캘린더</a>
   <a href="#admin-nav-settings" onclick="showPage('admin-nav-settings')" id="nav-link-admin-nav-settings" style="display:none">⚙️ GNB 설정</a>
   <div class="user-area" id="user-area"></div>
@@ -1728,6 +1729,47 @@ nav.nav-loading a[href^="#"] {
   </div>
 </div>
 
+<!-- ========== 작가 정산 (Phase 1: 셸) ========== -->
+<div id="page-bg-artists" class="page">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <h2 style="margin:0">🎨 작가 정산</h2>
+    <div style="font-size:12px;color:var(--gray-500)">
+      바른손몰 · 바른손카드 품목 매출 기준 작가 수수료 정산
+    </div>
+  </div>
+
+  <!-- 안내 박스 — Phase 1 placeholder -->
+  <div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:16px;margin-bottom:20px;font-size:13px;line-height:1.6">
+    <div style="font-weight:700;margin-bottom:8px;color:#854d0e">⚙️ 작가 정산 페이지 — Phase 1 (DB · 메뉴 구축 완료)</div>
+    <ul style="margin:0;padding-left:20px;color:#713f12">
+      <li>마이그레이션 030 — <code>bg_artists</code> · <code>bg_artist_products</code> 테이블 + 시드 (작가 11명 / 품목 30개+)</li>
+      <li>GNB 메뉴 추가 완료</li>
+      <li>다음 Phase 2 — 작가/품목 CRUD API + 관리 UI</li>
+      <li>Phase 3 — MSSQL 매출 조회 + 정산금액 계산</li>
+      <li>Phase 4 — 월별 정산 합계 + 차트</li>
+    </ul>
+  </div>
+
+  <!-- 시드 데이터 미리보기 (Phase 2 전까지 read-only) -->
+  <div class="card" style="padding:16px">
+    <h3 style="margin:0 0 12px;font-size:14px">📋 등록된 작가 · 품목 (시드 데이터)</h3>
+    <div id="artists-preview-loading" style="text-align:center;padding:24px;color:var(--gray-500);font-size:13px">불러오는 중…</div>
+    <div id="artists-preview-content" style="display:none">
+      <table class="data-table" style="width:100%;font-size:12px">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">분류</th>
+            <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">작가명</th>
+            <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">품목코드</th>
+            <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">수수료율</th>
+          </tr>
+        </thead>
+        <tbody id="artists-preview-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <!-- ========== 예식일 캘린더 ========== -->
 <div id="page-wedding-calendar" class="page">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
@@ -2883,6 +2925,7 @@ function showPage(name) {
   if (name === 'bg-vendors') loadBgVendors();
   if (name === 'bg-settlements') initBgSettlements();
   if (name === 'bg-vendor-dashboard') initBgVendorDashboard();
+  if (name === 'bg-artists') initArtistsPreview();
   if (name === 'wedding-calendar') initWeddingCalendar();
 }
 
@@ -10769,6 +10812,49 @@ function bgShPreviewNextMonth() { bgShPreviewMonth.setMonth(bgShPreviewMonth.get
 //   데이터 소스: /api/dashboard/wedding-calendar?year=Y&month=M
 //   사이트: 바른손카드 / 바른손몰 / 디얼디어 / 바른손M카드 / 기타 + 합
 //   주차: 일~토 기준, 월 그리드 (보통 5~6주차)
+// ============================================
+// 🎨 작가 정산 (Phase 1: read-only preview)
+// ============================================
+let _artistsPreviewLoaded = false;
+async function initArtistsPreview() {
+  if (_artistsPreviewLoaded) return;
+  const $loading = document.getElementById('artists-preview-loading');
+  const $content = document.getElementById('artists-preview-content');
+  const $tbody = document.getElementById('artists-preview-tbody');
+  if (!$tbody) return;
+  try {
+    const r = await fetch(`${API}/api/artists/preview`);
+    const d = await r.json();
+    const items = d.items || [];
+    if (!items.length) {
+      $loading.textContent = d.error ? `오류: ${d.error}` : '등록된 데이터가 없습니다.';
+      return;
+    }
+    // 분류 순서: 엽서세트 → 웨딩스탬프 → 청첩장 → 기타
+    const order = ['엽서세트', '웨딩스탬프', '청첩장'];
+    items.sort((a, b) => {
+      const ai = order.indexOf(a.category); const bi = order.indexOf(b.category);
+      const aRank = ai === -1 ? 999 : ai;
+      const bRank = bi === -1 ? 999 : bi;
+      if (aRank !== bRank) return aRank - bRank;
+      return (a.product_code || '').localeCompare(b.product_code || '');
+    });
+    $tbody.innerHTML = items.map(it => `
+      <tr>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100)">${esc(it.category || '-')}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100)">${esc(it.artist_name || '-')}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);font-family:monospace">${esc(it.product_code)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${Number(it.commission_rate).toFixed(0)}%</td>
+      </tr>
+    `).join('');
+    $loading.style.display = 'none';
+    $content.style.display = 'block';
+    _artistsPreviewLoaded = true;
+  } catch (e) {
+    $loading.textContent = `로드 실패: ${e.message}`;
+  }
+}
+
 // ============================================
 const WC_SITES = ['바른손카드', '바른손몰', '디얼디어', '바른손M카드', '기타'];
 const WC_SITE_SHORT = { '바른손카드': '바', '바른손몰': '몰', '디얼디어': '디', '바른손M카드': 'M', '기타': '기' };

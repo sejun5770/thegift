@@ -5678,6 +5678,31 @@ const server = http.createServer(async (req, res) => {
       let data;
       if (pathname === '/api/orders') {
         data = await apiOrders(parsed.query);
+      } else if (pathname === '/api/artists/preview' && req.method === 'GET') {
+        // Phase 1 — 작가/품목 시드 데이터 read-only 미리보기.
+        //   bg_artist_products + bg_artists join (artist_id FK).
+        try {
+          const supaUrl = `${SUPABASE_URL}/rest/v1/bg_artist_products?select=product_code,product_name,category,bg_artists(name,commission_rate)&order=category.asc,product_code.asc`;
+          const r = await fetch(supaUrl, {
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+          });
+          const items = await r.json();
+          if (!r.ok) {
+            data = { error: items?.message || 'Supabase 조회 실패', items: [] };
+          } else {
+            data = {
+              items: (Array.isArray(items) ? items : []).map(it => ({
+                category: it.category || '',
+                product_code: it.product_code || '',
+                product_name: it.product_name || '',
+                artist_name: it.bg_artists?.name || '',
+                commission_rate: it.bg_artists?.commission_rate || 0
+              }))
+            };
+          }
+        } catch (e) {
+          data = { error: e.message, items: [] };
+        }
       } else if (pathname === '/api/dashboard/comparison') {
         data = await apiDashboardComparison(parsed.query);
       } else if (pathname === '/api/dashboard/summary') {
