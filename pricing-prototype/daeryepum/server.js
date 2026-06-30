@@ -1320,6 +1320,212 @@ async function apiProductStats(query) {
   };
 }
 
+/**
+ * 작가별 정산 합계 + 품목별 drill-down (Phase 3).
+ *
+ * 매출 기준:
+ *   - 결제일 (settle_date) 기간 필터
+ *   - status_seq: CARD NOT IN (3, 5, 9) / ETC NOT IN (3, 5, 15) — 기존 매출 SQL 정책 동일
+ *
+ * 매칭:
+ *   - S2_Card.Card_Code == bg_artist_products.product_code (exact match)
+ *
+ * 응답:
+ *   {
+ *     period: { start, end },
+ *     totals: { total_qty, total_amount, settlement_amount },
+ *     by_artist: [{ artist_id, name, commission_rate, product_count, category_list, total_qty, total_amount, settlement_amount }],
+ *     by_product: [{ product_code, product_name, category, artist_id, artist_name, commission_rate, card_amount, etc_amount, total_amount, total_qty, settlement_amount }]
+ *   }
+ */
+async function apiArtistSettlements(query = {}) {
+  // 1) 기간 결정 — default: 이번 달 1일 ~ 다음 달 1일 (exclusive)
+  const todayDate = today();
+  const defaultStart = fmtDate(new Date(todayDate.getFullYear(), todayDate.getMonth(), 1));
+  const defaultEnd = fmtDate(new Date(todayDate.getFullYear(), todayDate.getMonth() + 1, 1));
+  const startDate = query.start_date || defaultStart;
+  const endDate = query.end_date || defaultEnd;
+
+  // 2) Supabase: 활성 작가 + 활성 품목 (artist join)
+  const artistsByCode = new Map(); // product_code → { artist_id, artist_name, commission_rate, category, product_name }
+  try {
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/bg_artist_products?select=product_code,product_name,category,is_active,artist_id,bg_artists(id,name,commission_rate,is_active)`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+    );
+    const arr = await r.json();
+    if (!r.ok) return { error: 'Supabase 조회 실패: ' + (arr?.message || r.status) };
+    for (const p of (Array.isArray(arr) ? arr : [])) {
+      if (!p.is_active) continue;
+      const a = p.bg_artists;
+      artistsByCode.set(p.product_code, {
+        product_code: p.product_code,
+        product_name: p.product_name || '',
+        category: p.category || '',
+        artist_id: p.artist_id || null,
+        artist_name: a?.name || '<미매핑>',
+        commission_rate: Number(a?.commission_rate || 0)
+      });
+    }
+  } catch (e) {
+    return { error: 'Supabase 조회 실패: ' + e.message };
+  }
+
+  if (artistsByCode.size === 0) {
+    return {
+      period: { start: startDate, end: endDate },
+      totals: { total_qty: 0, total_amount: 0, settlement_amount: 0 },
+      by_artist: [], by_product: [],
+      message: '등록된 활성 품목이 없습니다.'
+    };
+  }
+
+  // 3) MSSQL: CARD + ETC 매출 합산 (병렬)
+  const productCodes = [...artistsByCode.keys()];
+  const codesEscaped = productCodes.map(c => `'${String(c).replace(/'/g, "''")}'`).join(',');
+  const sales = new Map(); // product_code → { card_amount, etc_amount, card_qty, etc_qty, total_amount, total_qty }
+  try {
+    const p = await getPool();
+    const [cardRes, etcRes] = await Promise.all([
+      p.request()
+        .input('s', sql.VarChar, startDate)
+        .input('e', sql.VarChar, endDate)
+        .query(`
+          SELECT
+            c.Card_Code AS product_code,
+            c.Card_Name AS product_name,
+            ISNULL(SUM(coi.item_count), 0) AS total_qty,
+            ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)), 0) AS total_amount
+          FROM custom_order co WITH (NOLOCK)
+          INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+          INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+          WHERE c.Card_Code IN (${codesEscaped})
+            AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+            AND co.settle_date IS NOT NULL
+            AND co.settle_date >= @s AND co.settle_date < @e
+          GROUP BY c.Card_Code, c.Card_Name
+        `),
+      p.request()
+        .input('s', sql.VarChar, startDate)
+        .input('e', sql.VarChar, endDate)
+        .query(`
+          SELECT
+            c.Card_Code AS product_code,
+            c.Card_Name AS product_name,
+            ISNULL(SUM(oi.order_count), 0) AS total_qty,
+            ISNULL(SUM(CAST(oi.card_sale_price AS float) * oi.order_count), 0) AS total_amount
+          FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+          INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+          INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+          WHERE c.Card_Code IN (${codesEscaped})
+            AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+            AND o.settle_date IS NOT NULL
+            AND o.settle_date >= @s AND o.settle_date < @e
+          GROUP BY c.Card_Code, c.Card_Name
+        `),
+    ]);
+    const merge = (rows, channel) => {
+      for (const r of rows) {
+        const code = r.product_code;
+        if (!sales.has(code)) {
+          sales.set(code, {
+            mssql_product_name: r.product_name || '',
+            card_qty: 0, card_amount: 0,
+            etc_qty: 0, etc_amount: 0,
+            total_qty: 0, total_amount: 0
+          });
+        }
+        const s = sales.get(code);
+        if (channel === 'card') {
+          s.card_qty += Number(r.total_qty) || 0;
+          s.card_amount += Number(r.total_amount) || 0;
+        } else {
+          s.etc_qty += Number(r.total_qty) || 0;
+          s.etc_amount += Number(r.total_amount) || 0;
+        }
+        s.total_qty = s.card_qty + s.etc_qty;
+        s.total_amount = Math.round(s.card_amount + s.etc_amount);
+      }
+    };
+    merge(cardRes.recordset || [], 'card');
+    merge(etcRes.recordset || [], 'etc');
+  } catch (e) {
+    return { error: 'MSSQL 조회 실패: ' + e.message };
+  }
+
+  // 4) 작가별 / 품목별 집계
+  const byArtist = new Map();
+  const byProduct = [];
+
+  for (const [code, info] of artistsByCode) {
+    const sale = sales.get(code);
+    const totalQty = sale?.total_qty || 0;
+    const totalAmount = sale?.total_amount || 0;
+    const settlementAmount = Math.round(totalAmount * info.commission_rate / 100);
+
+    byProduct.push({
+      product_code: code,
+      product_name: info.product_name || sale?.mssql_product_name || '',
+      category: info.category,
+      artist_id: info.artist_id,
+      artist_name: info.artist_name,
+      commission_rate: info.commission_rate,
+      total_qty: totalQty,
+      card_amount: sale?.card_amount ? Math.round(sale.card_amount) : 0,
+      etc_amount: sale?.etc_amount ? Math.round(sale.etc_amount) : 0,
+      total_amount: totalAmount,
+      settlement_amount: settlementAmount
+    });
+
+    // 작가별 합계 — artist_id 없는 미매핑 품목은 제외
+    if (info.artist_id) {
+      const ak = info.artist_id;
+      if (!byArtist.has(ak)) {
+        byArtist.set(ak, {
+          artist_id: info.artist_id,
+          name: info.artist_name,
+          commission_rate: info.commission_rate,
+          product_count: 0,
+          categories: new Set(),
+          total_qty: 0, total_amount: 0, settlement_amount: 0
+        });
+      }
+      const a = byArtist.get(ak);
+      a.product_count++;
+      if (info.category) a.categories.add(info.category);
+      a.total_qty += totalQty;
+      a.total_amount += totalAmount;
+      a.settlement_amount += settlementAmount;
+    }
+  }
+
+  const byArtistArr = [...byArtist.values()].map(a => ({
+    artist_id: a.artist_id,
+    name: a.name,
+    commission_rate: a.commission_rate,
+    product_count: a.product_count,
+    category_list: [...a.categories].sort(),
+    total_qty: a.total_qty,
+    total_amount: a.total_amount,
+    settlement_amount: a.settlement_amount
+  })).sort((a, b) => b.settlement_amount - a.settlement_amount);
+
+  byProduct.sort((a, b) => b.settlement_amount - a.settlement_amount);
+
+  const totals = byProduct.reduce((acc, p) => ({
+    total_qty: acc.total_qty + p.total_qty,
+    total_amount: acc.total_amount + p.total_amount,
+    settlement_amount: acc.settlement_amount + p.settlement_amount
+  }), { total_qty: 0, total_amount: 0, settlement_amount: 0 });
+
+  return {
+    period: { start: startDate, end: endDate },
+    totals,
+    by_artist: byArtistArr,
+    by_product: byProduct
+  };
+}
+
 async function apiDashboardComparison(query = {}) {
   const p = await getPool();
   // 카테고리별 필터 + amount 계산식 (apiOrders / apiDashboardSummary 와 동일 패턴).
@@ -5869,6 +6075,13 @@ const server = http.createServer(async (req, res) => {
           if (!r.ok) data = { error: j?.message || '비활성화 실패' };
           else data = { ok: true, item: Array.isArray(j) ? j[0] : j };
         } catch (e) { data = { error: e.message }; }
+      } else if (pathname === '/api/artists/settlements' && req.method === 'GET') {
+        // Phase 3 — 작가별 정산 합계 + 품목별 drill-down.
+        //   기간: settle_date (결제일) 기준. status_seq NOT IN (CARD: 3,5,9 / ETC: 3,5,15).
+        //   매칭: S2_Card.Card_Code == bg_artist_products.product_code
+        //   반환:
+        //     { period: {start, end}, by_artist: [...], by_product: [...] }
+        data = await apiArtistSettlements(parsed.query);
       } else if (pathname === '/api/dashboard/comparison') {
         data = await apiDashboardComparison(parsed.query);
       } else if (pathname === '/api/dashboard/summary') {

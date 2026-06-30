@@ -1740,8 +1740,65 @@ nav.nav-loading a[href^="#"] {
 
   <!-- 탭 -->
   <div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--gray-200)">
-    <button class="btn" id="art-tab-artists" onclick="setArtistTab('artists')" style="border:0;border-bottom:2px solid var(--primary);border-radius:0;color:var(--primary);font-weight:600;padding:8px 14px;background:transparent">👩‍🎨 작가 관리</button>
+    <button class="btn" id="art-tab-settlements" onclick="setArtistTab('settlements')" style="border:0;border-bottom:2px solid var(--primary);border-radius:0;color:var(--primary);font-weight:600;padding:8px 14px;background:transparent">💰 정산 조회</button>
+    <button class="btn" id="art-tab-artists" onclick="setArtistTab('artists')" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">👩‍🎨 작가 관리</button>
     <button class="btn" id="art-tab-products" onclick="setArtistTab('products')" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">🎫 품목 관리</button>
+  </div>
+
+  <!-- 정산 조회 섹션 -->
+  <div id="art-section-settlements">
+    <div class="card" style="padding:16px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0;font-size:14px">💰 작가별 정산 (결제일 기준)</h3>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <div style="display:flex;gap:4px;align-items:center">
+            <select id="art-stl-month" onchange="onSettlementMonthChange()" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
+              <!-- 자동 생성: 최근 12개월 -->
+            </select>
+            <span style="color:var(--gray-400);font-size:11px">또는</span>
+            <input type="date" id="art-stl-start" onchange="document.getElementById('art-stl-month').value=''" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
+            <span style="color:var(--gray-500)">~</span>
+            <input type="date" id="art-stl-end" onchange="document.getElementById('art-stl-month').value=''" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
+          </div>
+          <button class="btn btn-primary" style="padding:6px 12px;font-size:12px" onclick="loadSettlements()">조회</button>
+          <button class="btn" style="padding:6px 12px;font-size:12px" onclick="downloadSettlementCsv()" title="작가별 합계 CSV 다운로드">📥 CSV</button>
+        </div>
+      </div>
+
+      <!-- 총 합계 카드 -->
+      <div id="art-stl-totals" style="display:none;background:linear-gradient(135deg,#eef2ff,#e0e7ff);border-radius:8px;padding:14px;margin-bottom:12px;font-size:13px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+          <div>
+            <span style="color:var(--gray-500);font-size:11px">기간</span>
+            <strong id="art-stl-period" style="margin-left:6px"></strong>
+          </div>
+          <div style="display:flex;gap:24px">
+            <div><span style="color:var(--gray-500);font-size:11px">총 수량</span> <strong id="art-stl-total-qty" style="margin-left:6px"></strong></div>
+            <div><span style="color:var(--gray-500);font-size:11px">총 매출</span> <strong id="art-stl-total-amount" style="margin-left:6px"></strong></div>
+            <div><span style="color:var(--gray-500);font-size:11px">총 정산금액</span> <strong id="art-stl-total-settlement" style="margin-left:6px;color:#7c3aed"></strong></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="art-stl-loading" style="text-align:center;padding:24px;color:var(--gray-500);font-size:13px;display:none">불러오는 중…</div>
+      <div id="art-stl-empty" style="text-align:center;padding:24px;color:var(--gray-500);font-size:13px;display:none">데이터가 없습니다.</div>
+
+      <table class="data-table" id="art-stl-table" style="width:100%;font-size:12px;display:none">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">작가</th>
+            <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">분류</th>
+            <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">품목수</th>
+            <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">매출 수량</th>
+            <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">매출액</th>
+            <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">수수료율</th>
+            <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">정산금액</th>
+            <th style="text-align:center;padding:8px 12px;border-bottom:1px solid var(--gray-200)">상세</th>
+          </tr>
+        </thead>
+        <tbody id="art-stl-tbody"></tbody>
+      </table>
+    </div>
   </div>
 
   <!-- 작가 관리 섹션 -->
@@ -10930,11 +10987,195 @@ function bgShPreviewNextMonth() { bgShPreviewMonth.setMonth(bgShPreviewMonth.get
 // ============================================
 let _artistsCache = [];
 let _productsCache = [];
-let _artistsCurrentTab = 'artists';
+let _artistsCurrentTab = 'settlements';
+let _settlementsInitialized = false;
+let _settlementsData = null;  // 최근 조회 결과 (drill-down 재사용)
+const _settlementsExpanded = new Set();  // 펼친 작가 id
+
+function initSettlementsTab() {
+  // 월 선택 드롭다운 채움 — 최근 12개월
+  const $month = document.getElementById('art-stl-month');
+  if ($month) {
+    const now = new Date();
+    const opts = [];
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      opts.push(`<option value="${ym}"${i === 0 ? ' selected' : ''}>${ym}</option>`);
+    }
+    $month.innerHTML = opts.join('');
+  }
+  // 이번 달 → start/end 자동 설정
+  onSettlementMonthChange();
+  _settlementsInitialized = true;
+  // 자동 조회
+  loadSettlements();
+}
+
+function onSettlementMonthChange() {
+  const $month = document.getElementById('art-stl-month');
+  const ym = $month?.value;
+  if (!ym) return;
+  const [year, month] = ym.split('-').map(Number);
+  const start = new Date(year, month - 1, 1);
+  const end = new Date(year, month, 1);  // exclusive
+  const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  document.getElementById('art-stl-start').value = fmt(start);
+  document.getElementById('art-stl-end').value = fmt(end);
+}
+
+async function loadSettlements() {
+  const start = document.getElementById('art-stl-start').value;
+  const end = document.getElementById('art-stl-end').value;
+  if (!start || !end) { alert('기간을 선택해주세요.'); return; }
+  const $loading = document.getElementById('art-stl-loading');
+  const $empty = document.getElementById('art-stl-empty');
+  const $table = document.getElementById('art-stl-table');
+  const $totals = document.getElementById('art-stl-totals');
+  $loading.style.display = '';
+  $empty.style.display = 'none';
+  $table.style.display = 'none';
+  $totals.style.display = 'none';
+  try {
+    const url = `${API}/api/artists/settlements?start_date=${start}&end_date=${end}`;
+    const r = await fetch(url);
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    _settlementsData = d;
+    renderSettlements();
+  } catch (e) {
+    $loading.style.display = 'none';
+    $empty.textContent = `조회 실패: ${e.message}`;
+    $empty.style.display = '';
+  }
+}
+
+function renderSettlements() {
+  const d = _settlementsData;
+  if (!d) return;
+  const $loading = document.getElementById('art-stl-loading');
+  const $empty = document.getElementById('art-stl-empty');
+  const $table = document.getElementById('art-stl-table');
+  const $tbody = document.getElementById('art-stl-tbody');
+  const $totals = document.getElementById('art-stl-totals');
+  $loading.style.display = 'none';
+
+  // 총 합계 카드
+  document.getElementById('art-stl-period').textContent = `${d.period.start} ~ ${d.period.end} (exclusive)`;
+  document.getElementById('art-stl-total-qty').textContent = fmtNum(d.totals.total_qty);
+  document.getElementById('art-stl-total-amount').textContent = fmtKRW(d.totals.total_amount);
+  document.getElementById('art-stl-total-settlement').textContent = fmtKRW(d.totals.settlement_amount);
+  $totals.style.display = '';
+
+  if (!d.by_artist.length) {
+    $empty.textContent = '매출이 발생한 작가가 없습니다 (또는 매핑되지 않은 품목만 매출 발생).';
+    $empty.style.display = '';
+    $table.style.display = 'none';
+    return;
+  }
+  // 작가별 row + drill-down row
+  const rows = [];
+  for (const a of d.by_artist) {
+    const isOpen = _settlementsExpanded.has(a.artist_id);
+    rows.push(`
+      <tr style="cursor:pointer" onclick="toggleArtistDetail('${esc(a.artist_id)}')">
+        <td style="padding:8px 12px;border-bottom:1px solid var(--gray-100);font-weight:600">${esc(a.name)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--gray-100);font-size:11px;color:var(--gray-500)">${esc(a.category_list.join(', ') || '-')}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${a.product_count}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${fmtNum(a.total_qty)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${fmtKRW(a.total_amount)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${Number(a.commission_rate).toFixed(2)}%</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--gray-100);text-align:right;color:#7c3aed;font-weight:600">${fmtKRW(a.settlement_amount)}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid var(--gray-100);text-align:center;color:var(--gray-500)">${isOpen ? '▼' : '▶'}</td>
+      </tr>
+    `);
+    // drill-down: 해당 작가의 품목들
+    if (isOpen) {
+      const items = d.by_product.filter(p => p.artist_id === a.artist_id);
+      rows.push(`
+        <tr style="background:#fafafa">
+          <td colspan="8" style="padding:0 12px 12px 24px">
+            <table style="width:100%;font-size:11px;border-collapse:collapse">
+              <thead><tr style="color:var(--gray-500)">
+                <th style="text-align:left;padding:6px 8px">분류</th>
+                <th style="text-align:left;padding:6px 8px">품목코드</th>
+                <th style="text-align:left;padding:6px 8px">상품명</th>
+                <th style="text-align:right;padding:6px 8px">수량</th>
+                <th style="text-align:right;padding:6px 8px">바른손카드</th>
+                <th style="text-align:right;padding:6px 8px">바른손몰</th>
+                <th style="text-align:right;padding:6px 8px">매출합</th>
+                <th style="text-align:right;padding:6px 8px">정산금액</th>
+              </tr></thead>
+              <tbody>
+                ${items.map(p => `
+                  <tr ${p.total_amount === 0 ? 'style="opacity:0.5"' : ''}>
+                    <td style="padding:4px 8px">${esc(p.category)}</td>
+                    <td style="padding:4px 8px;font-family:monospace">${esc(p.product_code)}</td>
+                    <td style="padding:4px 8px;color:var(--gray-600)">${esc(p.product_name || '-')}</td>
+                    <td style="padding:4px 8px;text-align:right">${fmtNum(p.total_qty)}</td>
+                    <td style="padding:4px 8px;text-align:right">${fmtKRW(p.card_amount)}</td>
+                    <td style="padding:4px 8px;text-align:right">${fmtKRW(p.etc_amount)}</td>
+                    <td style="padding:4px 8px;text-align:right;font-weight:600">${fmtKRW(p.total_amount)}</td>
+                    <td style="padding:4px 8px;text-align:right;color:#7c3aed">${fmtKRW(p.settlement_amount)}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </td>
+        </tr>
+      `);
+    }
+  }
+  // 미매핑 품목 매출 (있으면 별도 안내)
+  const unmapped = d.by_product.filter(p => !p.artist_id && p.total_amount > 0);
+  if (unmapped.length) {
+    rows.push(`
+      <tr style="background:#fff7ed">
+        <td colspan="8" style="padding:10px 12px;font-size:11px;color:#9a3412">
+          ⚠️ 작가 매핑되지 않은 품목 ${unmapped.length}개에서 매출 발생 (정산 합산 제외):
+          <strong>${fmtKRW(unmapped.reduce((s, p) => s + p.total_amount, 0))}</strong>
+          → 품목 관리 탭에서 작가 매핑 후 재조회 필요
+        </td>
+      </tr>
+    `);
+  }
+  $tbody.innerHTML = rows.join('');
+  $empty.style.display = 'none';
+  $table.style.display = '';
+}
+
+function toggleArtistDetail(artistId) {
+  if (_settlementsExpanded.has(artistId)) _settlementsExpanded.delete(artistId);
+  else _settlementsExpanded.add(artistId);
+  renderSettlements();
+}
+
+function downloadSettlementCsv() {
+  const d = _settlementsData;
+  if (!d || !d.by_artist.length) { alert('조회 결과가 없습니다.'); return; }
+  const headers = ['작가', '분류', '품목수', '매출 수량', '매출액', '수수료율(%)', '정산금액'];
+  const lines = [headers.join(',')];
+  for (const a of d.by_artist) {
+    lines.push([
+      `"${a.name}"`, `"${a.category_list.join('|')}"`, a.product_count,
+      a.total_qty, a.total_amount, a.commission_rate, a.settlement_amount
+    ].join(','));
+  }
+  // 총합 row
+  lines.push(['"합계"', '"-"', '-', d.totals.total_qty, d.totals.total_amount, '-', d.totals.settlement_amount].join(','));
+  // BOM (한글 Excel 호환)
+  const csv = '﻿' + lines.join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `작가정산_${d.period.start}_${d.period.end}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
 function setArtistTab(tab) {
   _artistsCurrentTab = tab;
-  ['artists', 'products'].forEach(t => {
+  ['settlements', 'artists', 'products'].forEach(t => {
     const $btn = document.getElementById(`art-tab-${t}`);
     const $sec = document.getElementById(`art-section-${t}`);
     if ($btn && $sec) {
@@ -10945,6 +11186,10 @@ function setArtistTab(tab) {
       $sec.style.display = isActive ? '' : 'none';
     }
   });
+  // 정산 조회 탭 첫 진입 시 — 월 선택 초기화 + 자동 로드
+  if (tab === 'settlements' && !_settlementsInitialized) {
+    initSettlementsTab();
+  }
 }
 
 // Phase 1 호환 — showPage('bg-artists') 가 이 함수 호출
