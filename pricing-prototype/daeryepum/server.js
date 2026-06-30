@@ -905,7 +905,10 @@ async function apiOrders(query) {
   if (query.category === 'daeryepum' || !query.category) {
     try {
       const coupangStore = require('./coupang/store');
+      // apiOrders 는 주문조회 페이지 — 취소 row 도 표시 (운영자 추적용).
+      //   매출 KPI / 정보입력완료 페이지는 store 기본값 (취소 자동 제외) 그대로 사용.
       const coupangRows = await coupangStore.listCoupangOrders({
+        includeCanceled: true,
         startStr: startDate,
         endStr: endDate,
         byPaid: false, // order_date 기준 (MSSQL 과 일관)
@@ -955,7 +958,10 @@ async function apiOrders(query) {
     // 네이버 스마트스토어 — 쿠팡과 동일 패턴
     try {
       const naverStore = require('./naver/store');
+      // apiOrders 는 주문조회 페이지 — 취소 row 도 표시 (운영자 추적용).
+      //   매출 KPI / 정보입력완료 페이지는 store 기본값 (취소 자동 제외) 그대로 사용.
       const naverRows = await naverStore.listNaverOrders({
+        includeCanceled: true,
         startStr: startDate, endStr: endDate, byPaid: false,
         orderIds: naverIdsList.length ? naverIdsList : undefined,
       });
