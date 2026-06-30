@@ -160,10 +160,13 @@ async function syncRecent({ daysBack = 7, status } = {}) {
   const startMs = endMs - daysBack * 86400000;
   let res;
   try {
-    // status 가 명시되면 그것만, 없으면 ORDER_STATUSES 전체 순회 (dedupe)
+    // status 가 명시되면 그것만, 없으면 ORDER_STATUSES + CANCEL/RETURNS 까지 전체 순회 (dedupe).
+    //   CANCEL/RETURNS 도 sync 해야 출고중지·취소·반품 발생 시 답례품 대시보드에서 정확히 인식.
+    //   매출 집계 측은 status_label='주문취소'/'반품' 자동 필터 (apiOrders/apiSummary 정책).
+    const FULL_STATUSES = [...api.ORDER_STATUSES, 'CANCEL', 'RETURNS'];
     res = await api.listAllOrders({
       startMs, endMs,
-      statuses: status ? [status] : undefined,
+      statuses: status ? [status] : FULL_STATUSES,
     });
   } catch (e) {
     await store.updateSyncState({ last_error: e.message, last_synced_at: new Date().toISOString() });

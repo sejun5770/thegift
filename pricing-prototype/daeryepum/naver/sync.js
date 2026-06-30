@@ -163,6 +163,52 @@ async function syncOneStore(storeConfig, { daysBack = 7 } = {}) {
     return { store_id: storeConfig.id, fetched: 0, upserted: 0, error: e.message };
   }
   const items = res.items || [];
+
+  // ── 취소 변경 별도 fetch (lastChangedType='CANCELED') ──
+  //   direct list 는 active 주문만 응답 → 취소된 주문 누락.
+  //   24h chunk 로 분할, CANCELED 변경 productOrderId 수집 → queryProductOrders 로 detail.
+  //   같은 product_order_id 가 이미 items 에 있으면 CANCELED 가 덮어쓰기 (status='CANCELED' 정확 반영).
+  const CHUNK_MS = 24 * 3600 * 1000;
+  const canceledIds = new Set();
+  for (let from = startMs; from < endMs; from += CHUNK_MS) {
+    const to = Math.min(from + CHUNK_MS, endMs);
+    try {
+      const cr = await api.listChangedStatuses(storeConfig, { fromMs: from, toMs: to, lastChangedType: 'CANCELED' });
+      const arr = cr.data?.lastChangeStatuses || cr.data || [];
+      for (const row of (Array.isArray(arr) ? arr : [])) {
+        if (row && row.productOrderId) canceledIds.add(String(row.productOrderId));
+      }
+    } catch (e) {
+      console.warn(`[naver sync canceled chunk] ${storeConfig.id}: ${e.message}`);
+    }
+  }
+  if (canceledIds.size) {
+    try {
+      const detailRes = await api.queryProductOrders(storeConfig, [...canceledIds]);
+      const detailArr = Array.isArray(detailRes.data) ? detailRes.data : [];
+      // flatten — content 안의 {order, productOrder} 를 root level 로
+      const flat = detailArr.map(it => (
+        it && it.content && (it.content.order || it.content.productOrder)
+          ? { ...it.content, productOrderId: it.productOrderId }
+          : it
+      ));
+      // CANCELED 우선 덮어쓰기 — 같은 productOrderId 가 있으면 CANCELED 가 우선
+      const itemById = new Map();
+      for (const it of items) {
+        const pid = String(it.productOrderId || it.productOrder?.productOrderId || '');
+        if (pid) itemById.set(pid, it);
+      }
+      for (const it of flat) {
+        const pid = String(it.productOrderId || it.productOrder?.productOrderId || '');
+        if (pid) itemById.set(pid, it);
+      }
+      items.length = 0;
+      items.push(...itemById.values());
+      console.log(`[naver sync] ${storeConfig.id}: CANCELED 변경 ${canceledIds.size}개 merge`);
+    } catch (e) {
+      console.warn(`[naver sync canceled detail] ${storeConfig.id}: ${e.message}`);
+    }
+  }
   const filters = resolveFilters(storeConfig);
   const rows = [];
   let filteredOut = 0;
