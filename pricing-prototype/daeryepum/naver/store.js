@@ -85,10 +85,17 @@ async function patchNaverStubEnrichment(orderId, { sticker_selections, desired_s
   return { patched: 1 };
 }
 
-async function listNaverOrders({ startStr, endStr, byPaid = false, orderIds } = {}) {
+/**
+ * 네이버 주문 목록 조회.
+ *   기본 정책: CANCELED/RETURNED/EXCHANGED 자동 제외 (CARD/ETC status_seq NOT IN (3,5,...) 와 동일).
+ *   매출/주문조회/정보입력 등 모든 호출에서 취소 row 자동 필터.
+ *   includeCanceled=true 면 취소 포함 (운영자 진단 / 취소 전용 화면용).
+ *   orderIds 명시 시: 그 ID 들은 status 무관 모두 반환 (특정 취소 주문 검색 가능).
+ */
+async function listNaverOrders({ startStr, endStr, byPaid = false, orderIds, includeCanceled = false } = {}) {
   if (!USE_SUPABASE) return [];
   const col = byPaid ? 'paid_at' : 'ordered_at';
-  // orderIds OR 모드 — product_order_id 기준 (옛날 customer_info 매칭용).
+  // orderIds OR 모드 — product_order_id 기준 (옛날 customer_info 매칭용). status 무관 모두 반환.
   if (Array.isArray(orderIds) && orderIds.length) {
     const params = [];
     if (startStr && endStr) {
@@ -102,6 +109,10 @@ async function listNaverOrders({ startStr, endStr, byPaid = false, orderIds } = 
   const params = [];
   if (startStr) params.push(`${col}=gte.${encodeURIComponent(startStr)}`);
   if (endStr) params.push(`${col}=lt.${encodeURIComponent(endStr)}`);
+  // 취소/반품/교환 자동 제외 (기본). includeCanceled=true 면 제외 안 함.
+  if (!includeCanceled) {
+    params.push('status=not.in.(CANCELED,RETURNED,EXCHANGED)');
+  }
   params.push(`order=${col}.desc`);
   return sbGet('naver_orders', params.join('&'));
 }

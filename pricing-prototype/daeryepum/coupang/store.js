@@ -53,10 +53,17 @@ async function upsertCoupangOrders(rows) {
  *   기간 차원은 ordered_at (paid_at 기준 원하면 byPaid=true)
  *   orderIds: BIGINT 배열 — 지정 시 기간과 OR 조건으로 추가 매칭 (정보입력현황 옛날 CI 매칭용).
  */
-async function listCoupangOrders({ startStr, endStr, byPaid = false, orderIds } = {}) {
+/**
+ * 쿠팡 주문 목록 조회.
+ *   기본 정책: CANCEL/RETURNS 자동 제외 (CARD/ETC status_seq NOT IN (3,5,...) 와 동일).
+ *   매출/주문조회/정보입력 등 모든 호출에서 취소 row 자동 필터.
+ *   includeCanceled=true 면 취소 포함 (운영자 진단 / 취소 전용 화면용).
+ *   orderIds 명시 시: 그 ID 들은 status 무관 모두 반환.
+ */
+async function listCoupangOrders({ startStr, endStr, byPaid = false, orderIds, includeCanceled = false } = {}) {
   if (!USE_SUPABASE) return [];
   const col = byPaid ? 'paid_at' : 'ordered_at';
-  // orderIds OR 모드 — PostgREST `or=(a.eq.x,b.eq.y)` syntax 활용.
+  // orderIds OR 모드 — PostgREST `or=(a.eq.x,b.eq.y)` syntax 활용. status 무관 모두 반환.
   if (Array.isArray(orderIds) && orderIds.length) {
     const inClause = `coupang_order_id=in.(${orderIds.join(',')})`;
     const params = [];
@@ -72,6 +79,10 @@ async function listCoupangOrders({ startStr, endStr, byPaid = false, orderIds } 
   const params = [];
   if (startStr) params.push(`${col}=gte.${encodeURIComponent(startStr)}`);
   if (endStr) params.push(`${col}=lt.${encodeURIComponent(endStr)}`);
+  // 취소/반품 자동 제외 (기본). includeCanceled=true 면 제외 안 함.
+  if (!includeCanceled) {
+    params.push('status=not.in.(CANCEL,RETURNS)');
+  }
   params.push(`order=${col}.desc`);
   return sbGet('coupang_orders', params.join('&'));
 }
