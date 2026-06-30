@@ -5703,6 +5703,172 @@ const server = http.createServer(async (req, res) => {
         } catch (e) {
           data = { error: e.message, items: [] };
         }
+      } else if (pathname === '/api/artists' && req.method === 'GET') {
+        // 작가 목록 (활성/비활성 전체) + 품목 수
+        try {
+          const r = await fetch(`${SUPABASE_URL}/rest/v1/bg_artists?select=id,name,commission_rate,is_active,memo,bg_artist_products(id)&order=name.asc`, {
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+          });
+          const arr = await r.json();
+          if (!r.ok) {
+            data = { error: arr?.message || 'Supabase 조회 실패', items: [] };
+          } else {
+            data = {
+              items: (Array.isArray(arr) ? arr : []).map(a => ({
+                id: a.id, name: a.name, commission_rate: Number(a.commission_rate || 0),
+                is_active: !!a.is_active, memo: a.memo || '',
+                product_count: Array.isArray(a.bg_artist_products) ? a.bg_artist_products.length : 0
+              }))
+            };
+          }
+        } catch (e) { data = { error: e.message, items: [] }; }
+      } else if (pathname === '/api/artists' && req.method === 'POST') {
+        // 작가 신규 생성
+        const body = await new Promise((resolve) => {
+          let raw=''; req.on('data', c=>raw+=c);
+          req.on('end', () => { try { resolve(raw?JSON.parse(raw):{}); } catch { resolve({}); } });
+        });
+        const name = String(body.name || '').trim();
+        const rate = Number(body.commission_rate);
+        if (!name || !Number.isFinite(rate) || rate < 0 || rate > 100) {
+          data = { error: '이름 + 0~100 수수료율 필수' };
+        } else {
+          try {
+            const r = await fetch(`${SUPABASE_URL}/rest/v1/bg_artists`, {
+              method: 'POST',
+              headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type':'application/json', Prefer:'return=representation' },
+              body: JSON.stringify({ name, commission_rate: rate, memo: body.memo || null })
+            });
+            const j = await r.json();
+            if (!r.ok) data = { error: j?.message || '작가 추가 실패' };
+            else data = { ok: true, item: Array.isArray(j) ? j[0] : j };
+          } catch (e) { data = { error: e.message }; }
+        }
+      } else if (pathname.match(/^\/api\/artists\/[a-f0-9-]+$/) && req.method === 'PATCH') {
+        const id = pathname.split('/').pop();
+        const body = await new Promise((resolve) => {
+          let raw=''; req.on('data', c=>raw+=c);
+          req.on('end', () => { try { resolve(raw?JSON.parse(raw):{}); } catch { resolve({}); } });
+        });
+        const patch = {};
+        if (body.name != null) patch.name = String(body.name).trim();
+        if (body.commission_rate != null) {
+          const rate = Number(body.commission_rate);
+          if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+            data = { error: '수수료율은 0~100' };
+          } else patch.commission_rate = rate;
+        }
+        if (body.memo !== undefined) patch.memo = body.memo || null;
+        if (typeof body.is_active === 'boolean') patch.is_active = body.is_active;
+        if (!data && Object.keys(patch).length === 0) data = { error: '변경 항목 없음' };
+        if (!data) {
+          try {
+            const r = await fetch(`${SUPABASE_URL}/rest/v1/bg_artists?id=eq.${encodeURIComponent(id)}`, {
+              method: 'PATCH',
+              headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type':'application/json', Prefer:'return=representation' },
+              body: JSON.stringify(patch)
+            });
+            const j = await r.json();
+            if (!r.ok) data = { error: j?.message || '작가 수정 실패' };
+            else data = { ok: true, item: Array.isArray(j) ? j[0] : j };
+          } catch (e) { data = { error: e.message }; }
+        }
+      } else if (pathname.match(/^\/api\/artists\/[a-f0-9-]+$/) && req.method === 'DELETE') {
+        // is_active = false (시드 손상 방지)
+        const id = pathname.split('/').pop();
+        try {
+          const r = await fetch(`${SUPABASE_URL}/rest/v1/bg_artists?id=eq.${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type':'application/json', Prefer:'return=representation' },
+            body: JSON.stringify({ is_active: false })
+          });
+          const j = await r.json();
+          if (!r.ok) data = { error: j?.message || '비활성화 실패' };
+          else data = { ok: true, item: Array.isArray(j) ? j[0] : j };
+        } catch (e) { data = { error: e.message }; }
+      } else if (pathname === '/api/artists/products' && req.method === 'GET') {
+        // 전체 품목 + 작가 정보
+        try {
+          const r = await fetch(`${SUPABASE_URL}/rest/v1/bg_artist_products?select=id,product_code,product_name,category,is_active,artist_id,bg_artists(id,name,commission_rate)&order=category.asc,product_code.asc`, {
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
+          });
+          const arr = await r.json();
+          if (!r.ok) data = { error: arr?.message || 'Supabase 조회 실패', items: [] };
+          else data = {
+            items: (Array.isArray(arr) ? arr : []).map(p => ({
+              id: p.id, product_code: p.product_code, product_name: p.product_name || '',
+              category: p.category || '', artist_id: p.artist_id || null,
+              artist_name: p.bg_artists?.name || '',
+              commission_rate: Number(p.bg_artists?.commission_rate || 0),
+              is_active: !!p.is_active
+            }))
+          };
+        } catch (e) { data = { error: e.message, items: [] }; }
+      } else if (pathname === '/api/artists/products' && req.method === 'POST') {
+        // 신규 품목 등록
+        const body = await new Promise((resolve) => {
+          let raw=''; req.on('data', c=>raw+=c);
+          req.on('end', () => { try { resolve(raw?JSON.parse(raw):{}); } catch { resolve({}); } });
+        });
+        const code = String(body.product_code || '').trim();
+        const cat = String(body.category || '').trim();
+        if (!code) data = { error: '품목코드 필수' };
+        else if (!['엽서세트','웨딩스탬프','청첩장'].includes(cat)) data = { error: '분류는 엽서세트/웨딩스탬프/청첩장 중 하나' };
+        else {
+          try {
+            const r = await fetch(`${SUPABASE_URL}/rest/v1/bg_artist_products`, {
+              method: 'POST',
+              headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type':'application/json', Prefer:'return=representation' },
+              body: JSON.stringify({
+                product_code: code, product_name: body.product_name || null,
+                category: cat, artist_id: body.artist_id || null
+              })
+            });
+            const j = await r.json();
+            if (!r.ok) data = { error: j?.message || '품목 추가 실패' };
+            else data = { ok: true, item: Array.isArray(j) ? j[0] : j };
+          } catch (e) { data = { error: e.message }; }
+        }
+      } else if (pathname.match(/^\/api\/artists\/products\/[a-f0-9-]+$/) && req.method === 'PATCH') {
+        const id = pathname.split('/').pop();
+        const body = await new Promise((resolve) => {
+          let raw=''; req.on('data', c=>raw+=c);
+          req.on('end', () => { try { resolve(raw?JSON.parse(raw):{}); } catch { resolve({}); } });
+        });
+        const patch = {};
+        if (body.product_name !== undefined) patch.product_name = body.product_name || null;
+        if (body.artist_id !== undefined) patch.artist_id = body.artist_id || null;
+        if (body.category !== undefined) {
+          if (!['엽서세트','웨딩스탬프','청첩장'].includes(body.category)) {
+            data = { error: '분류는 엽서세트/웨딩스탬프/청첩장' };
+          } else patch.category = body.category;
+        }
+        if (typeof body.is_active === 'boolean') patch.is_active = body.is_active;
+        if (!data && Object.keys(patch).length === 0) data = { error: '변경 항목 없음' };
+        if (!data) {
+          try {
+            const r = await fetch(`${SUPABASE_URL}/rest/v1/bg_artist_products?id=eq.${encodeURIComponent(id)}`, {
+              method: 'PATCH',
+              headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type':'application/json', Prefer:'return=representation' },
+              body: JSON.stringify(patch)
+            });
+            const j = await r.json();
+            if (!r.ok) data = { error: j?.message || '품목 수정 실패' };
+            else data = { ok: true, item: Array.isArray(j) ? j[0] : j };
+          } catch (e) { data = { error: e.message }; }
+        }
+      } else if (pathname.match(/^\/api\/artists\/products\/[a-f0-9-]+$/) && req.method === 'DELETE') {
+        const id = pathname.split('/').pop();
+        try {
+          const r = await fetch(`${SUPABASE_URL}/rest/v1/bg_artist_products?id=eq.${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type':'application/json', Prefer:'return=representation' },
+            body: JSON.stringify({ is_active: false })
+          });
+          const j = await r.json();
+          if (!r.ok) data = { error: j?.message || '비활성화 실패' };
+          else data = { ok: true, item: Array.isArray(j) ? j[0] : j };
+        } catch (e) { data = { error: e.message }; }
       } else if (pathname === '/api/dashboard/comparison') {
         data = await apiDashboardComparison(parsed.query);
       } else if (pathname === '/api/dashboard/summary') {

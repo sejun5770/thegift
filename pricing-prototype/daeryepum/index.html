@@ -1729,43 +1729,156 @@ nav.nav-loading a[href^="#"] {
   </div>
 </div>
 
-<!-- ========== 작가 정산 (Phase 1: 셸) ========== -->
+<!-- ========== 작가 정산 (Phase 2: 관리 UI) ========== -->
 <div id="page-bg-artists" class="page">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
     <h2 style="margin:0">🎨 작가 정산</h2>
     <div style="font-size:12px;color:var(--gray-500)">
-      바른손몰 · 바른손카드 품목 매출 기준 작가 수수료 정산
+      바른손몰 · 바른손카드 품목 매출 기준 작가 수수료 정산 · Phase 3 (매출/정산) 진행 예정
     </div>
   </div>
 
-  <!-- 안내 박스 — Phase 1 placeholder -->
-  <div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:16px;margin-bottom:20px;font-size:13px;line-height:1.6">
-    <div style="font-weight:700;margin-bottom:8px;color:#854d0e">⚙️ 작가 정산 페이지 — Phase 1 (DB · 메뉴 구축 완료)</div>
-    <ul style="margin:0;padding-left:20px;color:#713f12">
-      <li>마이그레이션 030 — <code>bg_artists</code> · <code>bg_artist_products</code> 테이블 + 시드 (작가 11명 / 품목 30개+)</li>
-      <li>GNB 메뉴 추가 완료</li>
-      <li>다음 Phase 2 — 작가/품목 CRUD API + 관리 UI</li>
-      <li>Phase 3 — MSSQL 매출 조회 + 정산금액 계산</li>
-      <li>Phase 4 — 월별 정산 합계 + 차트</li>
-    </ul>
+  <!-- 탭 -->
+  <div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--gray-200)">
+    <button class="btn" id="art-tab-artists" onclick="setArtistTab('artists')" style="border:0;border-bottom:2px solid var(--primary);border-radius:0;color:var(--primary);font-weight:600;padding:8px 14px;background:transparent">👩‍🎨 작가 관리</button>
+    <button class="btn" id="art-tab-products" onclick="setArtistTab('products')" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">🎫 품목 관리</button>
   </div>
 
-  <!-- 시드 데이터 미리보기 (Phase 2 전까지 read-only) -->
-  <div class="card" style="padding:16px">
-    <h3 style="margin:0 0 12px;font-size:14px">📋 등록된 작가 · 품목 (시드 데이터)</h3>
-    <div id="artists-preview-loading" style="text-align:center;padding:24px;color:var(--gray-500);font-size:13px">불러오는 중…</div>
-    <div id="artists-preview-content" style="display:none">
-      <table class="data-table" style="width:100%;font-size:12px">
+  <!-- 작가 관리 섹션 -->
+  <div id="art-section-artists">
+    <div class="card" style="padding:16px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0;font-size:14px">👩‍🎨 작가 목록</h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          <label style="font-size:12px;color:var(--gray-600);display:flex;align-items:center;gap:4px">
+            <input type="checkbox" id="art-show-inactive" onchange="renderArtistsTable()"> 비활성 포함
+          </label>
+          <button class="btn btn-primary" style="padding:6px 12px;font-size:12px" onclick="openArtistModal()">+ 작가 추가</button>
+        </div>
+      </div>
+      <div id="art-artists-loading" style="text-align:center;padding:24px;color:var(--gray-500);font-size:13px">불러오는 중…</div>
+      <table class="data-table" id="art-artists-table" style="width:100%;font-size:12px;display:none">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">작가명</th>
+            <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">수수료율</th>
+            <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">품목 수</th>
+            <th style="text-align:center;padding:8px 12px;border-bottom:1px solid var(--gray-200)">상태</th>
+            <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">메모</th>
+            <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">동작</th>
+          </tr>
+        </thead>
+        <tbody id="art-artists-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 품목 관리 섹션 -->
+  <div id="art-section-products" style="display:none">
+    <div class="card" style="padding:16px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0;font-size:14px">🎫 품목 목록</h3>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="art-filter-category" onchange="renderProductsTable()" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
+            <option value="">전체 분류</option>
+            <option value="엽서세트">엽서세트</option>
+            <option value="웨딩스탬프">웨딩스탬프</option>
+            <option value="청첩장">청첩장</option>
+          </select>
+          <select id="art-filter-artist" onchange="renderProductsTable()" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
+            <option value="">전체 작가</option>
+          </select>
+          <label style="font-size:12px;color:var(--gray-600);display:flex;align-items:center;gap:4px">
+            <input type="checkbox" id="art-products-show-inactive" onchange="renderProductsTable()"> 비활성 포함
+          </label>
+          <button class="btn btn-primary" style="padding:6px 12px;font-size:12px" onclick="openProductModal()">+ 품목 추가</button>
+        </div>
+      </div>
+      <div id="art-products-loading" style="text-align:center;padding:24px;color:var(--gray-500);font-size:13px">불러오는 중…</div>
+      <table class="data-table" id="art-products-table" style="width:100%;font-size:12px;display:none">
         <thead>
           <tr>
             <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">분류</th>
-            <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">작가명</th>
             <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">품목코드</th>
+            <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">상품명</th>
+            <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">작가</th>
             <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">수수료율</th>
+            <th style="text-align:center;padding:8px 12px;border-bottom:1px solid var(--gray-200)">상태</th>
+            <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">동작</th>
           </tr>
         </thead>
-        <tbody id="artists-preview-tbody"></tbody>
+        <tbody id="art-products-tbody"></tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<!-- 작가 추가/수정 모달 -->
+<div id="artist-modal" onclick="if(event.target===this)closeArtistModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
+      <h3 id="artist-modal-title" style="margin:0;font-size:16px">작가 추가</h3>
+      <button onclick="closeArtistModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--gray-500)">&times;</button>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:14px">
+      <input type="hidden" id="artist-modal-id">
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">작가명 *</label>
+        <input type="text" id="artist-modal-name" placeholder="예: 차윤" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px">
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">수수료율 (%) *</label>
+        <input type="number" id="artist-modal-rate" placeholder="3" step="0.01" min="0" max="100" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px">
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">메모</label>
+        <textarea id="artist-modal-memo" rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;resize:vertical"></textarea>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:12px 20px;border-top:1px solid var(--gray-200)">
+      <button class="btn" onclick="closeArtistModal()">취소</button>
+      <button class="btn btn-primary" onclick="saveArtist()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 품목 추가/수정 모달 -->
+<div id="product-modal" onclick="if(event.target===this)closeProductModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;max-width:480px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
+      <h3 id="product-modal-title" style="margin:0;font-size:16px">품목 추가</h3>
+      <button onclick="closeProductModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--gray-500)">&times;</button>
+    </div>
+    <div style="padding:20px;display:flex;flex-direction:column;gap:14px">
+      <input type="hidden" id="product-modal-id">
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">품목코드 *</label>
+        <input type="text" id="product-modal-code" placeholder="예: BC0962" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px;font-family:monospace">
+        <div style="font-size:11px;color:var(--gray-500);margin-top:4px">MSSQL S2_Card.Card_Code 와 정확히 일치해야 매출 매칭됩니다.</div>
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">상품명 (선택)</label>
+        <input type="text" id="product-modal-name" placeholder="비워두면 MSSQL Card_Name 자동 표시" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px">
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">분류 *</label>
+        <select id="product-modal-category" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px">
+          <option value="">— 선택 —</option>
+          <option value="엽서세트">엽서세트</option>
+          <option value="웨딩스탬프">웨딩스탬프</option>
+          <option value="청첩장">청첩장</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">작가</label>
+        <select id="product-modal-artist" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px">
+          <option value="">— 미매핑 —</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;padding:12px 20px;border-top:1px solid var(--gray-200)">
+      <button class="btn" onclick="closeProductModal()">취소</button>
+      <button class="btn btn-primary" onclick="saveProduct()">저장</button>
     </div>
   </div>
 </div>
@@ -10813,46 +10926,262 @@ function bgShPreviewNextMonth() { bgShPreviewMonth.setMonth(bgShPreviewMonth.get
 //   사이트: 바른손카드 / 바른손몰 / 디얼디어 / 바른손M카드 / 기타 + 합
 //   주차: 일~토 기준, 월 그리드 (보통 5~6주차)
 // ============================================
-// 🎨 작가 정산 (Phase 1: read-only preview)
+// 🎨 작가 정산 (Phase 2: 작가/품목 CRUD)
 // ============================================
-let _artistsPreviewLoaded = false;
-async function initArtistsPreview() {
-  if (_artistsPreviewLoaded) return;
-  const $loading = document.getElementById('artists-preview-loading');
-  const $content = document.getElementById('artists-preview-content');
-  const $tbody = document.getElementById('artists-preview-tbody');
-  if (!$tbody) return;
-  try {
-    const r = await fetch(`${API}/api/artists/preview`);
-    const d = await r.json();
-    const items = d.items || [];
-    if (!items.length) {
-      $loading.textContent = d.error ? `오류: ${d.error}` : '등록된 데이터가 없습니다.';
-      return;
+let _artistsCache = [];
+let _productsCache = [];
+let _artistsCurrentTab = 'artists';
+
+function setArtistTab(tab) {
+  _artistsCurrentTab = tab;
+  ['artists', 'products'].forEach(t => {
+    const $btn = document.getElementById(`art-tab-${t}`);
+    const $sec = document.getElementById(`art-section-${t}`);
+    if ($btn && $sec) {
+      const isActive = t === tab;
+      $btn.style.borderBottom = isActive ? '2px solid var(--primary)' : '2px solid transparent';
+      $btn.style.color = isActive ? 'var(--primary)' : 'var(--gray-500)';
+      $btn.style.fontWeight = isActive ? '600' : '500';
+      $sec.style.display = isActive ? '' : 'none';
     }
-    // 분류 순서: 엽서세트 → 웨딩스탬프 → 청첩장 → 기타
-    const order = ['엽서세트', '웨딩스탬프', '청첩장'];
-    items.sort((a, b) => {
-      const ai = order.indexOf(a.category); const bi = order.indexOf(b.category);
-      const aRank = ai === -1 ? 999 : ai;
-      const bRank = bi === -1 ? 999 : bi;
-      if (aRank !== bRank) return aRank - bRank;
-      return (a.product_code || '').localeCompare(b.product_code || '');
-    });
-    $tbody.innerHTML = items.map(it => `
-      <tr>
-        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100)">${esc(it.category || '-')}</td>
-        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100)">${esc(it.artist_name || '-')}</td>
-        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);font-family:monospace">${esc(it.product_code)}</td>
-        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${Number(it.commission_rate).toFixed(0)}%</td>
-      </tr>
-    `).join('');
-    $loading.style.display = 'none';
-    $content.style.display = 'block';
-    _artistsPreviewLoaded = true;
+  });
+}
+
+// Phase 1 호환 — showPage('bg-artists') 가 이 함수 호출
+async function initArtistsPreview() { return loadArtists(); }
+
+async function loadArtists() {
+  // 작가 + 품목 동시 로드 (둘 다 페이지에서 사용)
+  try {
+    const [aRes, pRes] = await Promise.all([
+      fetch(`${API}/api/artists`).then(r => r.json()),
+      fetch(`${API}/api/artists/products`).then(r => r.json())
+    ]);
+    _artistsCache = aRes.items || [];
+    _productsCache = pRes.items || [];
+    // 품목 필터 드롭다운 채움
+    const $filterArtist = document.getElementById('art-filter-artist');
+    if ($filterArtist) {
+      $filterArtist.innerHTML = '<option value="">전체 작가</option>'
+        + _artistsCache.filter(a => a.is_active).map(a =>
+          `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
+    }
+    renderArtistsTable();
+    renderProductsTable();
   } catch (e) {
-    $loading.textContent = `로드 실패: ${e.message}`;
+    console.warn('[artists] 로드 실패:', e.message);
+    const $l1 = document.getElementById('art-artists-loading');
+    if ($l1) $l1.textContent = `로드 실패: ${e.message}`;
   }
+}
+
+function renderArtistsTable() {
+  const $loading = document.getElementById('art-artists-loading');
+  const $table = document.getElementById('art-artists-table');
+  const $tbody = document.getElementById('art-artists-tbody');
+  if (!$tbody) return;
+  const showInactive = document.getElementById('art-show-inactive')?.checked;
+  const items = _artistsCache.filter(a => showInactive || a.is_active);
+  if (!items.length) {
+    $loading.textContent = '등록된 작가가 없습니다.';
+    $loading.style.display = '';
+    $table.style.display = 'none';
+    return;
+  }
+  $tbody.innerHTML = items.map(a => `
+    <tr style="${!a.is_active ? 'opacity:0.5' : ''}">
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100)">${esc(a.name)}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${Number(a.commission_rate).toFixed(2)}%</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${a.product_count}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center">
+        ${a.is_active ? '<span style="color:#16a34a;font-weight:600">활성</span>' : '<span style="color:#dc2626">비활성</span>'}
+      </td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);color:var(--gray-500);font-size:11px">${esc(a.memo || '')}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">
+        <button class="btn" style="padding:3px 8px;font-size:11px" onclick="openArtistModal('${esc(a.id)}')">수정</button>
+        ${a.is_active
+          ? `<button class="btn" style="padding:3px 8px;font-size:11px;color:#dc2626;border-color:#fecaca" onclick="toggleArtistActive('${esc(a.id)}',false)">비활성화</button>`
+          : `<button class="btn" style="padding:3px 8px;font-size:11px;color:#16a34a;border-color:#bbf7d0" onclick="toggleArtistActive('${esc(a.id)}',true)">활성화</button>`}
+      </td>
+    </tr>
+  `).join('');
+  $loading.style.display = 'none';
+  $table.style.display = '';
+}
+
+function openArtistModal(id) {
+  const $title = document.getElementById('artist-modal-title');
+  const $id = document.getElementById('artist-modal-id');
+  const $name = document.getElementById('artist-modal-name');
+  const $rate = document.getElementById('artist-modal-rate');
+  const $memo = document.getElementById('artist-modal-memo');
+  if (id) {
+    const a = _artistsCache.find(x => x.id === id);
+    if (!a) return;
+    $title.textContent = '작가 수정';
+    $id.value = a.id;
+    $name.value = a.name;
+    $rate.value = a.commission_rate;
+    $memo.value = a.memo || '';
+  } else {
+    $title.textContent = '작가 추가';
+    $id.value = '';
+    $name.value = '';
+    $rate.value = '3';
+    $memo.value = '';
+  }
+  document.getElementById('artist-modal').style.display = 'flex';
+  setTimeout(() => $name.focus(), 100);
+}
+function closeArtistModal() {
+  document.getElementById('artist-modal').style.display = 'none';
+}
+async function saveArtist() {
+  const id = document.getElementById('artist-modal-id').value;
+  const payload = {
+    name: document.getElementById('artist-modal-name').value.trim(),
+    commission_rate: parseFloat(document.getElementById('artist-modal-rate').value),
+    memo: document.getElementById('artist-modal-memo').value.trim() || null
+  };
+  if (!payload.name) { alert('작가명을 입력해주세요.'); return; }
+  if (!isFinite(payload.commission_rate) || payload.commission_rate < 0 || payload.commission_rate > 100) {
+    alert('수수료율은 0~100 사이입니다.'); return;
+  }
+  try {
+    const url = id ? `${API}/api/artists/${id}` : `${API}/api/artists`;
+    const method = id ? 'PATCH' : 'POST';
+    const r = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const j = await r.json();
+    if (!r.ok || j.error) throw new Error(j.error || '저장 실패');
+    showToast(id ? '작가 수정 완료' : '작가 추가 완료');
+    closeArtistModal();
+    loadArtists();
+  } catch (e) {
+    alert('실패: ' + e.message);
+  }
+}
+async function toggleArtistActive(id, makeActive) {
+  if (!confirm(makeActive ? '활성화하시겠습니까?' : '비활성화하시겠습니까? (시드 데이터 보존됨)')) return;
+  try {
+    const r = await fetch(`${API}/api/artists/${id}`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ is_active: makeActive })
+    });
+    const j = await r.json();
+    if (!r.ok || j.error) throw new Error(j.error || '실패');
+    showToast(makeActive ? '활성화' : '비활성화');
+    loadArtists();
+  } catch (e) { alert('실패: ' + e.message); }
+}
+
+function renderProductsTable() {
+  const $loading = document.getElementById('art-products-loading');
+  const $table = document.getElementById('art-products-table');
+  const $tbody = document.getElementById('art-products-tbody');
+  if (!$tbody) return;
+  const showInactive = document.getElementById('art-products-show-inactive')?.checked;
+  const fCat = document.getElementById('art-filter-category')?.value || '';
+  const fArtist = document.getElementById('art-filter-artist')?.value || '';
+  let items = _productsCache.filter(p => showInactive || p.is_active);
+  if (fCat) items = items.filter(p => p.category === fCat);
+  if (fArtist) items = items.filter(p => p.artist_id === fArtist);
+  if (!items.length) {
+    $loading.textContent = '품목이 없습니다.';
+    $loading.style.display = '';
+    $table.style.display = 'none';
+    return;
+  }
+  $tbody.innerHTML = items.map(p => `
+    <tr style="${!p.is_active ? 'opacity:0.5' : ''}">
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100)">${esc(p.category || '-')}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);font-family:monospace">${esc(p.product_code)}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);color:var(--gray-500);font-size:11px">${esc(p.product_name || '')}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100)">${esc(p.artist_name || '<미매핑>')}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${p.commission_rate ? Number(p.commission_rate).toFixed(2) + '%' : '-'}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center">
+        ${p.is_active ? '<span style="color:#16a34a;font-weight:600">활성</span>' : '<span style="color:#dc2626">비활성</span>'}
+      </td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">
+        <button class="btn" style="padding:3px 8px;font-size:11px" onclick="openProductModal('${esc(p.id)}')">수정</button>
+        ${p.is_active
+          ? `<button class="btn" style="padding:3px 8px;font-size:11px;color:#dc2626;border-color:#fecaca" onclick="toggleProductActive('${esc(p.id)}',false)">비활성화</button>`
+          : `<button class="btn" style="padding:3px 8px;font-size:11px;color:#16a34a;border-color:#bbf7d0" onclick="toggleProductActive('${esc(p.id)}',true)">활성화</button>`}
+      </td>
+    </tr>
+  `).join('');
+  $loading.style.display = 'none';
+  $table.style.display = '';
+}
+
+function openProductModal(id) {
+  const $title = document.getElementById('product-modal-title');
+  const $id = document.getElementById('product-modal-id');
+  const $code = document.getElementById('product-modal-code');
+  const $name = document.getElementById('product-modal-name');
+  const $cat = document.getElementById('product-modal-category');
+  const $artist = document.getElementById('product-modal-artist');
+  // 작가 드롭다운 채움
+  $artist.innerHTML = '<option value="">— 미매핑 —</option>'
+    + _artistsCache.filter(a => a.is_active).map(a =>
+        `<option value="${esc(a.id)}">${esc(a.name)} (${Number(a.commission_rate).toFixed(2)}%)</option>`).join('');
+  if (id) {
+    const p = _productsCache.find(x => x.id === id);
+    if (!p) return;
+    $title.textContent = '품목 수정';
+    $id.value = p.id;
+    $code.value = p.product_code; $code.disabled = true;
+    $name.value = p.product_name || '';
+    $cat.value = p.category || '';
+    $artist.value = p.artist_id || '';
+  } else {
+    $title.textContent = '품목 추가';
+    $id.value = '';
+    $code.value = ''; $code.disabled = false;
+    $name.value = '';
+    $cat.value = '';
+    $artist.value = '';
+  }
+  document.getElementById('product-modal').style.display = 'flex';
+  setTimeout(() => (id ? $name : $code).focus(), 100);
+}
+function closeProductModal() {
+  document.getElementById('product-modal').style.display = 'none';
+}
+async function saveProduct() {
+  const id = document.getElementById('product-modal-id').value;
+  const payload = {
+    product_name: document.getElementById('product-modal-name').value.trim() || null,
+    category: document.getElementById('product-modal-category').value,
+    artist_id: document.getElementById('product-modal-artist').value || null
+  };
+  if (!id) payload.product_code = document.getElementById('product-modal-code').value.trim();
+  if (!id && !payload.product_code) { alert('품목코드를 입력해주세요.'); return; }
+  if (!payload.category) { alert('분류를 선택해주세요.'); return; }
+  try {
+    const url = id ? `${API}/api/artists/products/${id}` : `${API}/api/artists/products`;
+    const method = id ? 'PATCH' : 'POST';
+    const r = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const j = await r.json();
+    if (!r.ok || j.error) throw new Error(j.error || '저장 실패');
+    showToast(id ? '품목 수정 완료' : '품목 추가 완료');
+    closeProductModal();
+    loadArtists();
+  } catch (e) {
+    alert('실패: ' + e.message);
+  }
+}
+async function toggleProductActive(id, makeActive) {
+  if (!confirm(makeActive ? '활성화하시겠습니까?' : '비활성화하시겠습니까?')) return;
+  try {
+    const r = await fetch(`${API}/api/artists/products/${id}`, {
+      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ is_active: makeActive })
+    });
+    const j = await r.json();
+    if (!r.ok || j.error) throw new Error(j.error || '실패');
+    showToast(makeActive ? '활성화' : '비활성화');
+    loadArtists();
+  } catch (e) { alert('실패: ' + e.message); }
 }
 
 // ============================================
