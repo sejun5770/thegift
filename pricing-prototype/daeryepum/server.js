@@ -6433,6 +6433,8 @@ const server = http.createServer(async (req, res) => {
               orderInfo = cardOrderRow;
               const itemRes = await p.request().input('seq', sql.Int, orderSeq).query(`
                 SELECT coi.item_count, coi.item_sale_price,
+                  ISNULL(coi.discount_rate, 0) AS item_discount_rate,
+                  coi.CardDiscount_Seq AS item_carddiscount_seq,
                   c.Card_Code, c.Card_Name, c.Card_Div,
                   ISNULL(NULLIF(c.Unit_Value, 0), 1) AS unit_value
                 FROM custom_order_item coi WITH (NOLOCK)
@@ -6467,7 +6469,7 @@ const server = http.createServer(async (req, res) => {
                 : orderInfo.coupon_price;
               const perItemShare = artistItemCount > 0 ? discountAmount / artistItemCount : 0;
 
-              // 각 아이템별 breakdown
+              // 각 아이템별 breakdown — item 수준 discount_rate/CardDiscount_Seq 도 표시
               const itemsBreakdown = items.map(it => {
                 const isArtistItem = artistCodes.has(String(it.Card_Code).trim().toUpperCase());
                 const gross = it.item_sale_price * it.item_count / it.unit_value;
@@ -6480,6 +6482,8 @@ const server = http.createServer(async (req, res) => {
                   unit_value: it.unit_value,
                   item_count: it.item_count,
                   item_sale_price: it.item_sale_price,
+                  item_discount_rate: it.item_discount_rate || 0,
+                  item_carddiscount_seq: it.item_carddiscount_seq || null,
                   is_artist_item: isArtistItem,
                   gross_amount: Math.round(gross),
                   discount_share: Math.round(share),
