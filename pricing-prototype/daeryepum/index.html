@@ -1749,8 +1749,18 @@ nav.nav-loading a[href^="#"] {
   <div id="art-section-settlements">
     <div class="card" style="padding:16px;margin-bottom:16px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-        <h3 style="margin:0;font-size:14px">💰 작가별 정산 (결제일 기준)</h3>
+        <h3 style="margin:0;font-size:14px">💰 작가별 정산 <span id="art-stl-basis-label" style="font-size:11px;color:var(--gray-500);font-weight:400">(결제일 기준)</span></h3>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <div style="display:flex;gap:2px;background:var(--gray-100);padding:2px;border-radius:6px" title="기준일">
+            <label style="cursor:pointer">
+              <input type="radio" name="art-stl-basis" value="settle" checked onchange="onSettlementBasisChange()" style="display:none">
+              <span class="art-stl-basis-btn" data-basis="settle" style="padding:4px 10px;font-size:11px;border-radius:4px;background:#fff;display:inline-block;font-weight:600">결제일</span>
+            </label>
+            <label style="cursor:pointer">
+              <input type="radio" name="art-stl-basis" value="order" onchange="onSettlementBasisChange()" style="display:none">
+              <span class="art-stl-basis-btn" data-basis="order" style="padding:4px 10px;font-size:11px;border-radius:4px;display:inline-block;font-weight:500">주문일</span>
+            </label>
+          </div>
           <div style="display:flex;gap:4px;align-items:center">
             <select id="art-stl-month" onchange="onSettlementMonthChange()" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
               <!-- 자동 생성: 최근 12개월 -->
@@ -11082,9 +11092,25 @@ function onSettlementMonthChange() {
   document.getElementById('art-stl-end').value = fmt(end);
 }
 
+function onSettlementBasisChange() {
+  // 라디오 버튼 시각 처리 + 라벨 업데이트 + 자동 재조회
+  const basis = document.querySelector('input[name="art-stl-basis"]:checked')?.value || 'settle';
+  document.querySelectorAll('.art-stl-basis-btn').forEach(el => {
+    const active = el.dataset.basis === basis;
+    el.style.background = active ? '#fff' : '';
+    el.style.fontWeight = active ? '600' : '500';
+    el.style.boxShadow = active ? '0 1px 2px rgba(0,0,0,.06)' : '';
+  });
+  const $label = document.getElementById('art-stl-basis-label');
+  if ($label) $label.textContent = basis === 'order' ? '(주문일 기준)' : '(결제일 기준)';
+  // 이미 조회된 결과 있으면 재조회
+  if (_settlementsData) loadSettlements();
+}
+
 async function loadSettlements() {
   const start = document.getElementById('art-stl-start').value;
   const end = document.getElementById('art-stl-end').value;
+  const basis = document.querySelector('input[name="art-stl-basis"]:checked')?.value || 'settle';
   if (!start || !end) { alert('기간을 선택해주세요.'); return; }
   const $loading = document.getElementById('art-stl-loading');
   const $empty = document.getElementById('art-stl-empty');
@@ -11095,7 +11121,7 @@ async function loadSettlements() {
   $table.style.display = 'none';
   $totals.style.display = 'none';
   try {
-    const url = `${API}/api/artists/settlements?start_date=${start}&end_date=${end}`;
+    const url = `${API}/api/artists/settlements?start_date=${start}&end_date=${end}&basis=${basis}`;
     const r = await fetch(url);
     const d = await r.json();
     if (d.error) throw new Error(d.error);

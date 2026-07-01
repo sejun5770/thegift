@@ -1346,6 +1346,11 @@ async function apiArtistSettlements(query = {}) {
   const startDate = query.start_date || defaultStart;
   const endDate = query.end_date || defaultEnd;
 
+  // 기준일 — 'settle' (결제일, default) / 'order' (주문일).
+  //   'ship' (배송완료일) 은 운영자가 정확한 status_seq/컬럼 확정 후 추가 예정.
+  const basis = (query.basis || 'settle').toLowerCase();
+  const dateCol = basis === 'order' ? 'order_date' : 'settle_date';
+
   // 2) Supabase: 활성 작가 + 활성 품목 (artist join)
   const artistsByCode = new Map(); // product_code → { artist_id, artist_name, commission_rate, category, product_name }
   try {
@@ -1388,7 +1393,14 @@ async function apiArtistSettlements(query = {}) {
     const p = await getPool();
     // TRIM + UPPER 매칭 — 진단 endpoint 와 동일 정책. product_code 대소문자/공백 문제 방어.
     const codesUpperEscaped = codesEscaped.toUpperCase();
+    // basis 별 SQL 조각
+    const cardDate = `co.${dateCol}`;
+    const etcDate = `o.${dateCol}`;
+    const cardNullClause = basis === 'settle' ? 'AND co.settle_date IS NOT NULL' : '';
+    const etcNullClause  = basis === 'settle' ? 'AND o.settle_date IS NOT NULL'  : '';
+
     const [cardRes, etcRes] = await Promise.all([
+      // CARD — custom_order 스키마엔 coupon_price 없음 (쿠폰 차감 없음)
       p.request()
         .input('s', sql.VarChar, startDate)
         .input('e', sql.VarChar, endDate)
@@ -1403,10 +1415,11 @@ async function apiArtistSettlements(query = {}) {
           INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
           WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesUpperEscaped})
             AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
-            AND co.settle_date IS NOT NULL
-            AND co.settle_date >= @s AND co.settle_date < @e
+            ${cardNullClause}
+            AND ${cardDate} >= @s AND ${cardDate} < @e
           GROUP BY UPPER(RTRIM(LTRIM(c.Card_Code))), c.Card_Name
         `),
+      // ETC — coupon_price 차감 (같은 order 안 작가 품목 수로 분배). SiteName 유무로 unit_value 나누기 분기.
       p.request()
         .input('s', sql.VarChar, startDate)
         .input('e', sql.VarChar, endDate)
@@ -1415,14 +1428,30 @@ async function apiArtistSettlements(query = {}) {
             UPPER(RTRIM(LTRIM(c.Card_Code))) AS product_code,
             c.Card_Name AS product_name,
             ISNULL(SUM(oi.order_count), 0) AS total_qty,
-            ISNULL(SUM(CAST(oi.card_sale_price AS float) * oi.order_count), 0) AS total_amount
+            ISNULL(SUM(
+              CASE
+                WHEN si.SiteName IS NULL
+                THEN CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                     - ISNULL(o.coupon_price, 0) * 1.0 / NULLIF(ecd.item_count, 0)
+                ELSE CAST(oi.card_sale_price AS float)
+                     - ISNULL(o.coupon_price, 0) * 1.0 / NULLIF(ecd.item_count, 0)
+              END
+            ), 0) AS total_amount
           FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
           INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
           INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+          LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+          LEFT JOIN (
+            SELECT order_seq, COUNT(*) AS item_count
+            FROM CUSTOM_ETC_ORDER_ITEM oi_cpd WITH (NOLOCK)
+            INNER JOIN S2_Card c_cpd WITH (NOLOCK) ON oi_cpd.card_seq = c_cpd.Card_Seq
+            WHERE UPPER(RTRIM(LTRIM(c_cpd.Card_Code))) IN (${codesUpperEscaped})
+            GROUP BY order_seq
+          ) ecd ON o.order_seq = ecd.order_seq
           WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesUpperEscaped})
             AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
-            AND o.settle_date IS NOT NULL
-            AND o.settle_date >= @s AND o.settle_date < @e
+            ${etcNullClause}
+            AND ${etcDate} >= @s AND ${etcDate} < @e
           GROUP BY UPPER(RTRIM(LTRIM(c.Card_Code))), c.Card_Name
         `),
     ]);
