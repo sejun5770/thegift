@@ -6411,10 +6411,12 @@ const server = http.createServer(async (req, res) => {
               }
             } catch {}
 
-            // CARD 시도
+            // CARD 시도 — 쿠폰/할인 관련 컬럼도 함께 조회
             const cardOrder = await p.request().input('seq', sql.Int, orderSeq).query(`
               SELECT order_seq, order_date, settle_date, src_send_date, status_seq,
-                ISNULL(point_price, 0) AS point_price
+                ISNULL(point_price, 0) AS point_price,
+                couponseq, addition_couponseq, PB_Coupon,
+                discount_rate, discount_in_advance
               FROM custom_order WITH (NOLOCK) WHERE order_seq = @seq
             `);
             const etcOrder = await p.request().input('seq', sql.Int, orderSeq).query(`
@@ -6504,6 +6506,71 @@ const server = http.createServer(async (req, res) => {
               };
             }
           }
+        } catch (e) {
+          data = { error: e.message };
+        }
+      } else if (pathname === '/api/artists/coupon-lookup' && req.method === 'GET') {
+        // 쿠폰 마스터 테이블 자동 탐색 + 특정 couponseq 조회.
+        //   ?couponseq=XXX → 쿠폰 관련 테이블에서 그 seq 매칭 시 실제 금액 컬럼 확인.
+        try {
+          const p = await getPool();
+          // 1. 쿠폰 관련 테이블 이름 후보
+          const tblRes = await p.request().query(`
+            SELECT TABLE_NAME
+            FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_TYPE = 'BASE TABLE'
+              AND (
+                TABLE_NAME LIKE '%COUPON%' OR TABLE_NAME LIKE '%coupon%'
+                OR TABLE_NAME LIKE '%DC[_]%' OR TABLE_NAME LIKE '%DISCOUNT%'
+                OR TABLE_NAME LIKE '%discount%'
+              )
+            ORDER BY TABLE_NAME
+          `);
+          const couponTables = (tblRes.recordset || []).map(r => r.TABLE_NAME);
+          // 2. 각 테이블의 컬럼 조사 (couponseq / price 관련)
+          const tableSchemas = {};
+          for (const t of couponTables) {
+            try {
+              const cRes = await p.request().input('t', sql.VarChar, t).query(`
+                SELECT COLUMN_NAME, DATA_TYPE
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME = @t
+                ORDER BY ORDINAL_POSITION
+              `);
+              tableSchemas[t] = cRes.recordset || [];
+            } catch (e) { tableSchemas[t] = { error: e.message }; }
+          }
+          // 3. couponseq 로 각 테이블 조회 시도 (couponseq 컬럼 있는 테이블만)
+          const couponSeq = parsed.query.couponseq;
+          const seqLookup = {};
+          if (couponSeq) {
+            for (const t of couponTables) {
+              const cols = Array.isArray(tableSchemas[t]) ? tableSchemas[t] : [];
+              const hasCouponSeq = cols.find(c =>
+                c.COLUMN_NAME.toLowerCase().includes('couponseq') ||
+                c.COLUMN_NAME.toLowerCase() === 'seq'
+              );
+              if (!hasCouponSeq) continue;
+              try {
+                const seqCol = hasCouponSeq.COLUMN_NAME;
+                // 안전 처리: 테이블/컬럼명 escape
+                const safeT = t.replace(/[^A-Za-z0-9_]/g, '');
+                const safeCol = seqCol.replace(/[^A-Za-z0-9_]/g, '');
+                const rRes = await p.request()
+                  .input('cs', sql.VarChar, String(couponSeq))
+                  .query(`SELECT TOP 3 * FROM [${safeT}] WITH (NOLOCK) WHERE [${safeCol}] = @cs`);
+                if ((rRes.recordset || []).length > 0) {
+                  seqLookup[t] = rRes.recordset;
+                }
+              } catch (e) { /* skip */ }
+            }
+          }
+          data = {
+            coupon_tables: couponTables,
+            table_schemas: tableSchemas,
+            couponseq_query: couponSeq || null,
+            seq_lookup: seqLookup
+          };
         } catch (e) {
           data = { error: e.message };
         }
