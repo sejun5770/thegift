@@ -1386,56 +1386,62 @@ async function apiArtistSettlements(query = {}) {
   const sales = new Map(); // product_code → { card_amount, etc_amount, card_qty, etc_qty, total_amount, total_qty }
   try {
     const p = await getPool();
+    // TRIM + UPPER 매칭 — 진단 endpoint 와 동일 정책. product_code 대소문자/공백 문제 방어.
+    const codesUpperEscaped = codesEscaped.toUpperCase();
     const [cardRes, etcRes] = await Promise.all([
       p.request()
         .input('s', sql.VarChar, startDate)
         .input('e', sql.VarChar, endDate)
         .query(`
           SELECT
-            c.Card_Code AS product_code,
+            UPPER(RTRIM(LTRIM(c.Card_Code))) AS product_code,
             c.Card_Name AS product_name,
             ISNULL(SUM(coi.item_count), 0) AS total_qty,
             ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)), 0) AS total_amount
           FROM custom_order co WITH (NOLOCK)
           INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
           INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-          WHERE c.Card_Code IN (${codesEscaped})
+          WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesUpperEscaped})
             AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
             AND co.settle_date IS NOT NULL
             AND co.settle_date >= @s AND co.settle_date < @e
-          GROUP BY c.Card_Code, c.Card_Name
+          GROUP BY UPPER(RTRIM(LTRIM(c.Card_Code))), c.Card_Name
         `),
       p.request()
         .input('s', sql.VarChar, startDate)
         .input('e', sql.VarChar, endDate)
         .query(`
           SELECT
-            c.Card_Code AS product_code,
+            UPPER(RTRIM(LTRIM(c.Card_Code))) AS product_code,
             c.Card_Name AS product_name,
             ISNULL(SUM(oi.order_count), 0) AS total_qty,
             ISNULL(SUM(CAST(oi.card_sale_price AS float) * oi.order_count), 0) AS total_amount
           FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
           INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
           INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-          WHERE c.Card_Code IN (${codesEscaped})
+          WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesUpperEscaped})
             AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
             AND o.settle_date IS NOT NULL
             AND o.settle_date >= @s AND o.settle_date < @e
-          GROUP BY c.Card_Code, c.Card_Name
+          GROUP BY UPPER(RTRIM(LTRIM(c.Card_Code))), c.Card_Name
         `),
     ]);
+    // MSSQL 응답의 product_code 는 이미 UPPER + TRIM 처리됨.
+    //   Supabase 쪽 원본 code 와 매칭하려면 동일하게 normalize 해서 lookup.
+    const codeNormMap = new Map(); // normalized → original Supabase code
+    for (const c of productCodes) codeNormMap.set(String(c).trim().toUpperCase(), c);
     const merge = (rows, channel) => {
       for (const r of rows) {
-        const code = r.product_code;
-        if (!sales.has(code)) {
-          sales.set(code, {
+        const originalCode = codeNormMap.get(r.product_code) || r.product_code;
+        if (!sales.has(originalCode)) {
+          sales.set(originalCode, {
             mssql_product_name: r.product_name || '',
             card_qty: 0, card_amount: 0,
             etc_qty: 0, etc_amount: 0,
             total_qty: 0, total_amount: 0
           });
         }
-        const s = sales.get(code);
+        const s = sales.get(originalCode);
         if (channel === 'card') {
           s.card_qty += Number(r.total_qty) || 0;
           s.card_amount += Number(r.total_amount) || 0;
@@ -1556,35 +1562,47 @@ async function apiArtistDiagnose() {
   const codes = products.map(p => p.product_code);
   const codesEscaped = codes.map(c => `'${String(c).replace(/'/g, "''")}'`).join(',');
 
-  // 2) MSSQL S2_Card 직접 매칭
+  // 2) MSSQL S2_Card 직접 매칭 — TRIM + case-insensitive 로 방어적 매칭.
+  //   원인 가능성: leading/trailing space, case-sensitive collation, NVARCHAR 유령문자.
   const p = await getPool();
-  const foundCodes = new Map(); // Card_Code → { Card_Name, Card_Div }
+  const foundCodes = new Map(); // input product_code → { Card_Name, Card_Div, actual_card_code }
   try {
     const res = await p.request().query(`
-      SELECT Card_Code, Card_Name, Card_Div
+      SELECT
+        Card_Code AS actual_card_code,
+        UPPER(RTRIM(LTRIM(Card_Code))) AS normalized_code,
+        Card_Name, Card_Div
       FROM S2_Card WITH (NOLOCK)
-      WHERE Card_Code IN (${codesEscaped})
+      WHERE UPPER(RTRIM(LTRIM(Card_Code))) IN (${codesEscaped.toUpperCase()})
     `);
+    // normalized (대문자화 + TRIM) 로 매칭
+    const normMap = new Map();
     for (const r of (res.recordset || [])) {
-      foundCodes.set(r.Card_Code, { name: r.Card_Name, div: r.Card_Div });
+      normMap.set(r.normalized_code, {
+        name: r.Card_Name, div: r.Card_Div, actual: r.actual_card_code
+      });
+    }
+    for (const c of codes) {
+      const key = String(c).trim().toUpperCase();
+      const found = normMap.get(key);
+      if (found) foundCodes.set(c, found);
     }
   } catch (e) {
     return { error: 'MSSQL 매칭 조회 실패: ' + e.message, items: [], summary: {} };
   }
 
-  // 3) 매칭 안 된 코드마다 유사 코드 검색 (prefix 3~4자리 LIKE)
+  // 3) 매칭 안 된 코드마다 유사 코드 검색 (prefix 2자리 LIKE + Card_Name LIKE)
   const similarByCode = new Map();
   const notFound = codes.filter(c => !foundCodes.has(c));
   for (const nc of notFound) {
-    // prefix 3자리 (짧은 코드 방어) — 특수문자/percent 제거 후 escape
-    const prefix = String(nc).slice(0, 3).replace(/%/g, '').replace(/_/g, '');
+    const prefix = String(nc).slice(0, 2).replace(/%/g, '').replace(/_/g, '');
     const safePrefix = prefix.replace(/'/g, "''");
     if (!safePrefix) { similarByCode.set(nc, []); continue; }
     try {
       const res = await p.request().query(`
-        SELECT TOP 8 Card_Code, Card_Name, Card_Div
+        SELECT TOP 10 Card_Code, Card_Name, Card_Div
         FROM S2_Card WITH (NOLOCK)
-        WHERE Card_Code LIKE '${safePrefix}%'
+        WHERE UPPER(RTRIM(LTRIM(Card_Code))) LIKE UPPER('${safePrefix}%')
         ORDER BY Card_Code
       `);
       similarByCode.set(nc, res.recordset || []);
