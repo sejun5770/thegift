@@ -1527,6 +1527,158 @@ async function apiArtistSettlements(query = {}) {
 }
 
 /**
+ * 작가 정산 매출 매칭 진단.
+ *   목적: 시드 product_code 가 MSSQL S2_Card.Card_Code 와 매칭되는지, 이번 달 매출은?
+ *   응답:
+ *     items[i]: { product_code, artist_name, category,
+ *                 mssql_found, mssql_card_name, mssql_card_div,
+ *                 similar_codes: [{Card_Code, Card_Name, Card_Div}],  // 매칭 안 될 때 유사 후보 최대 5개
+ *                 this_month_qty, this_month_amount }
+ *     summary: { total, found, not_found, with_sales, no_sales }
+ */
+async function apiArtistDiagnose() {
+  // 1) Supabase 활성 품목 (bg_artist_products + bg_artists join)
+  let products = [];
+  try {
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/bg_artist_products?select=product_code,product_name,category,is_active,bg_artists(name)&is_active=eq.true&order=category.asc,product_code.asc`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+    );
+    products = await r.json();
+    if (!r.ok) return { error: 'Supabase: ' + (products?.message || r.status), items: [], summary: {} };
+  } catch (e) {
+    return { error: 'Supabase: ' + e.message, items: [], summary: {} };
+  }
+  if (!Array.isArray(products) || !products.length) {
+    return { error: '등록된 활성 품목이 없습니다.', items: [], summary: {} };
+  }
+
+  const codes = products.map(p => p.product_code);
+  const codesEscaped = codes.map(c => `'${String(c).replace(/'/g, "''")}'`).join(',');
+
+  // 2) MSSQL S2_Card 직접 매칭
+  const p = await getPool();
+  const foundCodes = new Map(); // Card_Code → { Card_Name, Card_Div }
+  try {
+    const res = await p.request().query(`
+      SELECT Card_Code, Card_Name, Card_Div
+      FROM S2_Card WITH (NOLOCK)
+      WHERE Card_Code IN (${codesEscaped})
+    `);
+    for (const r of (res.recordset || [])) {
+      foundCodes.set(r.Card_Code, { name: r.Card_Name, div: r.Card_Div });
+    }
+  } catch (e) {
+    return { error: 'MSSQL 매칭 조회 실패: ' + e.message, items: [], summary: {} };
+  }
+
+  // 3) 매칭 안 된 코드마다 유사 코드 검색 (prefix 3~4자리 LIKE)
+  const similarByCode = new Map();
+  const notFound = codes.filter(c => !foundCodes.has(c));
+  for (const nc of notFound) {
+    // prefix 3자리 (짧은 코드 방어) — 특수문자/percent 제거 후 escape
+    const prefix = String(nc).slice(0, 3).replace(/%/g, '').replace(/_/g, '');
+    const safePrefix = prefix.replace(/'/g, "''");
+    if (!safePrefix) { similarByCode.set(nc, []); continue; }
+    try {
+      const res = await p.request().query(`
+        SELECT TOP 8 Card_Code, Card_Name, Card_Div
+        FROM S2_Card WITH (NOLOCK)
+        WHERE Card_Code LIKE '${safePrefix}%'
+        ORDER BY Card_Code
+      `);
+      similarByCode.set(nc, res.recordset || []);
+    } catch { similarByCode.set(nc, []); }
+  }
+
+  // 4) 이번 달 매출 (CARD + ETC) — 매칭된 코드만
+  const todayDate = today();
+  const startDate = fmtDate(new Date(todayDate.getFullYear(), todayDate.getMonth(), 1));
+  const endDate = fmtDate(new Date(todayDate.getFullYear(), todayDate.getMonth() + 1, 1));
+  const salesByCode = new Map();
+  if (foundCodes.size) {
+    const foundList = [...foundCodes.keys()].map(c => `'${c.replace(/'/g, "''")}'`).join(',');
+    try {
+      const [cardRes, etcRes] = await Promise.all([
+        p.request()
+          .input('s', sql.VarChar, startDate)
+          .input('e', sql.VarChar, endDate)
+          .query(`
+            SELECT c.Card_Code AS product_code,
+              ISNULL(SUM(coi.item_count), 0) AS qty,
+              ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)), 0) AS amount
+            FROM custom_order co WITH (NOLOCK)
+            INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+            INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+            WHERE c.Card_Code IN (${foundList})
+              AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+              AND co.settle_date IS NOT NULL
+              AND co.settle_date >= @s AND co.settle_date < @e
+            GROUP BY c.Card_Code
+          `),
+        p.request()
+          .input('s', sql.VarChar, startDate)
+          .input('e', sql.VarChar, endDate)
+          .query(`
+            SELECT c.Card_Code AS product_code,
+              ISNULL(SUM(oi.order_count), 0) AS qty,
+              ISNULL(SUM(CAST(oi.card_sale_price AS float) * oi.order_count), 0) AS amount
+            FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+            INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+            INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+            WHERE c.Card_Code IN (${foundList})
+              AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+              AND o.settle_date IS NOT NULL
+              AND o.settle_date >= @s AND o.settle_date < @e
+            GROUP BY c.Card_Code
+          `),
+      ]);
+      const merge = (rows) => {
+        for (const r of rows || []) {
+          if (!salesByCode.has(r.product_code)) salesByCode.set(r.product_code, { qty: 0, amount: 0 });
+          const s = salesByCode.get(r.product_code);
+          s.qty += Number(r.qty) || 0;
+          s.amount += Number(r.amount) || 0;
+        }
+      };
+      merge(cardRes.recordset);
+      merge(etcRes.recordset);
+    } catch (e) {
+      // 매출 조회 실패해도 매칭 진단은 반환
+      console.warn('[artists diagnose] 매출 조회 실패:', e.message);
+    }
+  }
+
+  // 5) items 조립
+  const items = products.map(p => {
+    const mssql = foundCodes.get(p.product_code);
+    const sale = salesByCode.get(p.product_code);
+    return {
+      product_code: p.product_code,
+      product_name: p.product_name || '',
+      category: p.category || '',
+      artist_name: p.bg_artists?.name || '<미매핑>',
+      mssql_found: !!mssql,
+      mssql_card_name: mssql?.name || null,
+      mssql_card_div: mssql?.div || null,
+      similar_codes: similarByCode.get(p.product_code) || [],
+      this_month_qty: sale?.qty || 0,
+      this_month_amount: Math.round(sale?.amount || 0)
+    };
+  });
+
+  const summary = {
+    total: items.length,
+    found: items.filter(x => x.mssql_found).length,
+    not_found: items.filter(x => !x.mssql_found).length,
+    with_sales: items.filter(x => x.this_month_amount > 0).length,
+    no_sales: items.filter(x => x.mssql_found && x.this_month_amount === 0).length
+  };
+
+  return { period: { start: startDate, end: endDate, label: '이번 달' }, items, summary };
+}
+
+/**
  * Phase 4 — 최근 N개월 월별 정산 합계 추이.
  *   각 월에 대해 apiArtistSettlements 호출 → 합계만 추출.
  *   응답: { months: ['2025-07'...'2026-06'], totals: [...], by_artist: { artistId: [...] }, artist_names: {...} }
@@ -6168,6 +6320,9 @@ const server = http.createServer(async (req, res) => {
         //   반환:
         //     { period: {start, end}, by_artist: [...], by_product: [...] }
         data = await apiArtistSettlements(parsed.query);
+      } else if (pathname === '/api/artists/diagnose' && req.method === 'GET') {
+        // 매출 0 이슈 진단 — 시드 코드가 MSSQL Card_Code 와 매칭되는지 + 이번 달 매출.
+        data = await apiArtistDiagnose();
       } else if (pathname === '/api/artists/settlements/history' && req.method === 'GET') {
         // Phase 4 — 최근 N개월 (default 12) 월별 정산 합계 (전체 + 작가별).
         //   chart 용. 각 월의 apiArtistSettlements 결과를 순차 호출.

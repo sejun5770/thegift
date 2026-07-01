@@ -1762,6 +1762,7 @@ nav.nav-loading a[href^="#"] {
           </div>
           <button class="btn btn-primary" style="padding:6px 12px;font-size:12px" onclick="loadSettlements()">조회</button>
           <button class="btn" style="padding:6px 12px;font-size:12px" onclick="downloadSettlementCsv()" title="작가별 합계 CSV 다운로드">📥 CSV</button>
+          <button class="btn" style="padding:6px 12px;font-size:12px" onclick="openDiagnoseModal()" title="시드 코드가 MSSQL 과 매칭되는지 진단">🔍 진단</button>
         </div>
       </div>
 
@@ -1915,6 +1916,42 @@ nav.nav-loading a[href^="#"] {
     <div style="display:flex;gap:8px;justify-content:flex-end;padding:12px 20px;border-top:1px solid var(--gray-200)">
       <button class="btn" onclick="closeArtistModal()">취소</button>
       <button class="btn btn-primary" onclick="saveArtist()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 진단 모달 (매출 매칭 진단) -->
+<div id="diagnose-modal" onclick="if(event.target===this)closeDiagnoseModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;max-width:920px;width:95%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200);position:sticky;top:0;background:#fff;z-index:1">
+      <h3 style="margin:0;font-size:16px">🔍 매출 매칭 진단 <span style="font-size:11px;color:var(--gray-500);margin-left:8px">이번 달 매출 기준</span></h3>
+      <button onclick="closeDiagnoseModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--gray-500)">&times;</button>
+    </div>
+    <div style="padding:20px">
+      <div id="diagnose-loading" style="text-align:center;padding:40px;color:var(--gray-500);font-size:13px">진단 중… (MSSQL 조회 + 유사 코드 검색)</div>
+      <div id="diagnose-content" style="display:none">
+        <!-- 요약 배지 -->
+        <div id="diagnose-summary" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;font-size:12px"></div>
+        <!-- 미매칭 알림 -->
+        <div id="diagnose-notfound-alert" style="display:none;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px;margin-bottom:12px;font-size:12px;color:#991b1b"></div>
+        <!-- 상세 테이블 -->
+        <table class="data-table" style="width:100%;font-size:11px">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--gray-200)">품목코드</th>
+              <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--gray-200)">분류</th>
+              <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--gray-200)">작가</th>
+              <th style="text-align:center;padding:6px 8px;border-bottom:1px solid var(--gray-200)">MSSQL 매칭</th>
+              <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--gray-200)">MSSQL 상품명</th>
+              <th style="text-align:center;padding:6px 8px;border-bottom:1px solid var(--gray-200)">Card_Div</th>
+              <th style="text-align:right;padding:6px 8px;border-bottom:1px solid var(--gray-200)">이번 달 수량</th>
+              <th style="text-align:right;padding:6px 8px;border-bottom:1px solid var(--gray-200)">이번 달 매출</th>
+              <th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--gray-200)">유사 후보 (미매칭 시)</th>
+            </tr>
+          </thead>
+          <tbody id="diagnose-tbody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
@@ -11181,6 +11218,80 @@ function toggleArtistDetail(artistId) {
   if (_settlementsExpanded.has(artistId)) _settlementsExpanded.delete(artistId);
   else _settlementsExpanded.add(artistId);
   renderSettlements();
+}
+
+// ── 진단 (매출 매칭) ──
+async function openDiagnoseModal() {
+  document.getElementById('diagnose-modal').style.display = 'flex';
+  document.getElementById('diagnose-loading').style.display = '';
+  document.getElementById('diagnose-content').style.display = 'none';
+  try {
+    const r = await fetch(`${API}/api/artists/diagnose`);
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    renderDiagnoseResult(d);
+  } catch (e) {
+    document.getElementById('diagnose-loading').innerHTML =
+      `<div style="color:#dc2626">진단 실패: ${esc(e.message)}</div>`;
+  }
+}
+function closeDiagnoseModal() {
+  document.getElementById('diagnose-modal').style.display = 'none';
+}
+function renderDiagnoseResult(d) {
+  const s = d.summary || {};
+  // 요약 배지
+  document.getElementById('diagnose-summary').innerHTML = `
+    <span style="padding:4px 10px;background:#e0e7ff;color:#4338ca;border-radius:4px;font-weight:600">전체 ${s.total || 0}개</span>
+    <span style="padding:4px 10px;background:#dcfce7;color:#166534;border-radius:4px;font-weight:600">✓ MSSQL 매칭 ${s.found || 0}개</span>
+    <span style="padding:4px 10px;background:#fee2e2;color:#991b1b;border-radius:4px;font-weight:600">✗ 미매칭 ${s.not_found || 0}개</span>
+    <span style="padding:4px 10px;background:#fef3c7;color:#92400e;border-radius:4px;font-weight:600">💰 매출 발생 ${s.with_sales || 0}개</span>
+    <span style="padding:4px 10px;background:#f3f4f6;color:#6b7280;border-radius:4px;font-weight:600">📉 매출 0 (매칭됨) ${s.no_sales || 0}개</span>
+  `;
+  // 미매칭 알림
+  const $alert = document.getElementById('diagnose-notfound-alert');
+  if ((s.not_found || 0) > 0) {
+    $alert.innerHTML = `⚠️ <strong>${s.not_found}개 코드가 MSSQL S2_Card 에 존재하지 않습니다.</strong>
+      아래 "유사 후보" 컬럼에서 정확한 코드 형식 확인 후 <strong>품목 관리 탭</strong>에서 수정하세요.`;
+    $alert.style.display = '';
+  } else {
+    $alert.style.display = 'none';
+  }
+  // 테이블
+  const items = d.items || [];
+  const rows = items.sort((a, b) => {
+    // 미매칭 우선 → 매출 0 → 매출 있음
+    const rank = it => it.mssql_found ? (it.this_month_amount > 0 ? 2 : 1) : 0;
+    const dr = rank(a) - rank(b);
+    if (dr !== 0) return dr;
+    return (a.product_code || '').localeCompare(b.product_code || '');
+  }).map(it => {
+    const foundBadge = it.mssql_found
+      ? '<span style="color:#16a34a;font-weight:600">✓</span>'
+      : '<span style="color:#dc2626;font-weight:600">✗</span>';
+    const similarHtml = (it.similar_codes || []).length
+      ? it.similar_codes.slice(0, 5).map(s =>
+          `<div style="font-family:monospace;font-size:10px;color:var(--gray-600)">${esc(s.Card_Code)} <span style="color:var(--gray-400)">(${esc(s.Card_Name || '').slice(0, 20)})</span></div>`
+        ).join('')
+      : (it.mssql_found ? '<span style="color:var(--gray-400)">-</span>' : '<span style="color:#dc2626;font-size:10px">유사 코드 없음</span>');
+    const rowStyle = !it.mssql_found ? 'background:#fef2f2' : (it.this_month_amount === 0 ? 'background:#f9fafb' : '');
+    return `
+      <tr style="${rowStyle}">
+        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);font-family:monospace">${esc(it.product_code)}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100)">${esc(it.category)}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100)">${esc(it.artist_name)}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);text-align:center">${foundBadge}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);color:var(--gray-600);font-size:10.5px">${esc(it.mssql_card_name || '-')}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);text-align:center;font-family:monospace;font-size:10px">${esc(it.mssql_card_div || '-')}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);text-align:right">${it.this_month_qty > 0 ? fmtNum(it.this_month_qty) : '-'}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);text-align:right;${it.this_month_amount > 0 ? 'color:#7c3aed;font-weight:600' : 'color:var(--gray-400)'}">${it.this_month_amount > 0 ? fmtKRW(it.this_month_amount) : '-'}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100)">${similarHtml}</td>
+      </tr>
+    `;
+  }).join('');
+  document.getElementById('diagnose-tbody').innerHTML = rows;
+  document.getElementById('diagnose-loading').style.display = 'none';
+  document.getElementById('diagnose-content').style.display = '';
 }
 
 // ── Phase 4 — 월별 추이 + 마감 ──
