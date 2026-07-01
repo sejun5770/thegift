@@ -6378,6 +6378,43 @@ const server = http.createServer(async (req, res) => {
       } else if (pathname === '/api/artists/diagnose' && req.method === 'GET') {
         // 매출 0 이슈 진단 — 시드 코드가 MSSQL Card_Code 와 매칭되는지 + 이번 달 매출.
         data = await apiArtistDiagnose();
+      } else if (pathname === '/api/artists/schema-check' && req.method === 'GET') {
+        // custom_order / CUSTOM_ETC_ORDER 스키마 조사 — mod_date / coupon 컬럼 실제 이름 확인.
+        try {
+          const p = await getPool();
+          const res = await p.request().query(`
+            SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_NAME IN ('custom_order', 'custom_order_item', 'CUSTOM_ETC_ORDER', 'CUSTOM_ETC_ORDER_ITEM')
+              AND (
+                COLUMN_NAME LIKE '%mod%' OR COLUMN_NAME LIKE '%update%'
+                OR COLUMN_NAME LIKE '%chg%' OR COLUMN_NAME LIKE '%change%'
+                OR COLUMN_NAME LIKE '%edit%' OR COLUMN_NAME LIKE '%regi%'
+                OR COLUMN_NAME LIKE '%coupon%' OR COLUMN_NAME LIKE '%dc%'
+                OR COLUMN_NAME LIKE '%discount%' OR COLUMN_NAME LIKE '%point%'
+                OR COLUMN_NAME LIKE '%date%'
+              )
+            ORDER BY TABLE_NAME, COLUMN_NAME
+          `);
+          // 카테고리별 분류
+          const rows = res.recordset || [];
+          const byTable = {};
+          for (const r of rows) {
+            if (!byTable[r.TABLE_NAME]) byTable[r.TABLE_NAME] = { date_cols: [], discount_cols: [], other: [] };
+            const bucket = byTable[r.TABLE_NAME];
+            const col = r.COLUMN_NAME.toLowerCase();
+            if (col.includes('coupon') || col.includes('dc') || col.includes('discount') || col.includes('point')) {
+              bucket.discount_cols.push({ name: r.COLUMN_NAME, type: r.DATA_TYPE });
+            } else if (col.includes('date') || col.includes('mod') || col.includes('update') || col.includes('chg') || col.includes('edit') || col.includes('regi')) {
+              bucket.date_cols.push({ name: r.COLUMN_NAME, type: r.DATA_TYPE });
+            } else {
+              bucket.other.push({ name: r.COLUMN_NAME, type: r.DATA_TYPE });
+            }
+          }
+          data = { tables: byTable, total_columns: rows.length };
+        } catch (e) {
+          data = { error: e.message };
+        }
       } else if (pathname === '/api/artists/settlements/history' && req.method === 'GET') {
         // Phase 4 — 최근 N개월 (default 12) 월별 정산 합계 (전체 + 작가별).
         //   chart 용. 각 월의 apiArtistSettlements 결과를 순차 호출.
