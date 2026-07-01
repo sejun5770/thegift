@@ -1408,9 +1408,10 @@ async function apiArtistSettlements(query = {}) {
     const etcNullClause  = basis === 'order' ? '' : `AND o.${etcDateCol} IS NOT NULL`;
 
     const [cardRes, etcRes] = await Promise.all([
-      // CARD — custom_order 는 coupon_price 컬럼 없음 but point_price (포인트 사용액) 있음.
-      //   같은 order 안 작가 품목 수로 point_price 분배 차감 (ETC 쿠폰 처리와 동일 패턴).
-      //   쿠폰 실제 금액 차감은 별도 쿠폰 마스터 테이블 join 필요 → 이번 fix 에서는 skip.
+      // CARD — 실제 할인은 두 곳에 저장:
+      //   · custom_order.point_price (포인트 사용액, int)
+      //   · CUSTOM_ORDER_COUPON.COUPON_AMT (쿠폰 할인 금액, 여러 row 가능 → SUM)
+      //   두 값 합계를 같은 order 안 작가 품목 수로 분배 차감 (ETC 처리와 동일 패턴).
       p.request()
         .input('s', sql.VarChar, startDate)
         .input('e', sql.VarChar, endDate)
@@ -1421,7 +1422,7 @@ async function apiArtistSettlements(query = {}) {
             ISNULL(SUM(coi.item_count), 0) AS total_qty,
             ISNULL(SUM(
               CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)
-              - ISNULL(co.point_price, 0) * 1.0 / NULLIF(cpd_card.item_count, 0)
+              - (ISNULL(co.point_price, 0) + ISNULL(coc.coupon_amt, 0)) * 1.0 / NULLIF(cpd_card.item_count, 0)
             ), 0) AS total_amount
           FROM custom_order co WITH (NOLOCK)
           INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
@@ -1433,6 +1434,11 @@ async function apiArtistSettlements(query = {}) {
             WHERE UPPER(RTRIM(LTRIM(c_cpd.Card_Code))) IN (${codesUpperEscaped})
             GROUP BY order_seq
           ) cpd_card ON co.order_seq = cpd_card.order_seq
+          LEFT JOIN (
+            SELECT ORDER_SEQ, SUM(ISNULL(COUPON_AMT, 0)) AS coupon_amt
+            FROM CUSTOM_ORDER_COUPON WITH (NOLOCK)
+            GROUP BY ORDER_SEQ
+          ) coc ON co.order_seq = coc.ORDER_SEQ
           WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesUpperEscaped})
             AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
             ${cardNullClause}
@@ -6431,6 +6437,17 @@ const server = http.createServer(async (req, res) => {
             if (cardOrderRow) {
               channel = 'CARD';
               orderInfo = cardOrderRow;
+              // CARD 쿠폰 조회 — CUSTOM_ORDER_COUPON 테이블 (order_seq 매칭)
+              try {
+                const couponRes = await p.request().input('seq', sql.Int, orderSeq).query(`
+                  SELECT ORDER_COUPON_SEQ, COUPON_ISSUE_SEQ, COUPON_AMT, REG_DATE
+                  FROM CUSTOM_ORDER_COUPON WITH (NOLOCK)
+                  WHERE ORDER_SEQ = @seq
+                `);
+                const coupons = couponRes.recordset || [];
+                orderInfo.coupons = coupons;
+                orderInfo.total_coupon_amt = coupons.reduce((s, c) => s + (c.COUPON_AMT || 0), 0);
+              } catch { orderInfo.coupons = []; orderInfo.total_coupon_amt = 0; }
               const itemRes = await p.request().input('seq', sql.Int, orderSeq).query(`
                 SELECT coi.item_count, coi.item_sale_price,
                   ISNULL(coi.discount_rate, 0) AS item_discount_rate,
@@ -6464,8 +6481,9 @@ const server = http.createServer(async (req, res) => {
                 artistCodes.has(String(it.Card_Code).trim().toUpperCase())
               );
               const artistItemCount = artistItems.length;
+              // CARD 차감액 = point_price + CUSTOM_ORDER_COUPON 합계 / ETC 는 order.coupon_price
               const discountAmount = channel === 'CARD'
-                ? orderInfo.point_price
+                ? (orderInfo.point_price + (orderInfo.total_coupon_amt || 0))
                 : orderInfo.coupon_price;
               const perItemShare = artistItemCount > 0 ? discountAmount / artistItemCount : 0;
 
@@ -6495,7 +6513,9 @@ const server = http.createServer(async (req, res) => {
                 channel,
                 order: orderInfo,
                 discount: {
-                  type: channel === 'CARD' ? 'point_price' : 'coupon_price',
+                  type: channel === 'CARD' ? 'point + coupon' : 'coupon_price',
+                  point_price: channel === 'CARD' ? (orderInfo.point_price || 0) : 0,
+                  coupon_amt_total: channel === 'CARD' ? (orderInfo.total_coupon_amt || 0) : (orderInfo.coupon_price || 0),
                   amount: discountAmount,
                   artist_item_count: artistItemCount,
                   per_item_share: Math.round(perItemShare)
