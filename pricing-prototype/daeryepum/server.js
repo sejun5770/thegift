@@ -1346,10 +1346,13 @@ async function apiArtistSettlements(query = {}) {
   const startDate = query.start_date || defaultStart;
   const endDate = query.end_date || defaultEnd;
 
-  // 기준일 — 'settle' (결제일, default) / 'order' (주문일).
-  //   'ship' (배송완료일) 은 운영자가 정확한 status_seq/컬럼 확정 후 추가 예정.
+  // 기준일 — 'settle' (결제일, default) / 'order' (주문일) / 'ship' (출고완료일).
+  //   'ship' 은 발송완료 status 진입 시점 = mod_date (사용자 확정).
+  //     · CARD status_seq = 15 (발송완료)
+  //     · ETC  status_seq >= 11 (배송준비 이상, 출고 시작)
+  //   mod_date 는 마지막 업데이트 시점 — 발송 이후 상태 변경 시 그 시점이 됨 (근사).
   const basis = (query.basis || 'settle').toLowerCase();
-  const dateCol = basis === 'order' ? 'order_date' : 'settle_date';
+  const dateCol = basis === 'order' ? 'order_date' : (basis === 'ship' ? 'mod_date' : 'settle_date');
 
   // 2) Supabase: 활성 작가 + 활성 품목 (artist join)
   const artistsByCode = new Map(); // product_code → { artist_id, artist_name, commission_rate, category, product_name }
@@ -1398,6 +1401,9 @@ async function apiArtistSettlements(query = {}) {
     const etcDate = `o.${dateCol}`;
     const cardNullClause = basis === 'settle' ? 'AND co.settle_date IS NOT NULL' : '';
     const etcNullClause  = basis === 'settle' ? 'AND o.settle_date IS NOT NULL'  : '';
+    // 출고완료일 기준 시 — 발송완료 status 이상만 (아직 출고 안 된 주문 제외)
+    const cardShipFilter = basis === 'ship' ? 'AND co.status_seq >= 15' : '';
+    const etcShipFilter  = basis === 'ship' ? 'AND o.status_seq >= 11'  : '';
 
     const [cardRes, etcRes] = await Promise.all([
       // CARD — custom_order 스키마엔 coupon_price 없음 (쿠폰 차감 없음)
@@ -1415,6 +1421,7 @@ async function apiArtistSettlements(query = {}) {
           INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
           WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesUpperEscaped})
             AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+            ${cardShipFilter}
             ${cardNullClause}
             AND ${cardDate} >= @s AND ${cardDate} < @e
           GROUP BY UPPER(RTRIM(LTRIM(c.Card_Code))), c.Card_Name
@@ -1450,6 +1457,7 @@ async function apiArtistSettlements(query = {}) {
           ) ecd ON o.order_seq = ecd.order_seq
           WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesUpperEscaped})
             AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+            ${etcShipFilter}
             ${etcNullClause}
             AND ${etcDate} >= @s AND ${etcDate} < @e
           GROUP BY UPPER(RTRIM(LTRIM(c.Card_Code))), c.Card_Name

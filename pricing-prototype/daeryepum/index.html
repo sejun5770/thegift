@@ -1760,6 +1760,10 @@ nav.nav-loading a[href^="#"] {
               <input type="radio" name="art-stl-basis" value="order" onchange="onSettlementBasisChange()" style="display:none">
               <span class="art-stl-basis-btn" data-basis="order" style="padding:4px 10px;font-size:11px;border-radius:4px;display:inline-block;font-weight:500">주문일</span>
             </label>
+            <label style="cursor:pointer" title="발송완료 status 진입 시점 (mod_date) 기준">
+              <input type="radio" name="art-stl-basis" value="ship" onchange="onSettlementBasisChange()" style="display:none">
+              <span class="art-stl-basis-btn" data-basis="ship" style="padding:4px 10px;font-size:11px;border-radius:4px;display:inline-block;font-weight:500">출고완료일</span>
+            </label>
           </div>
           <div style="display:flex;gap:4px;align-items:center">
             <select id="art-stl-month" onchange="onSettlementMonthChange()" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
@@ -11102,7 +11106,11 @@ function onSettlementBasisChange() {
     el.style.boxShadow = active ? '0 1px 2px rgba(0,0,0,.06)' : '';
   });
   const $label = document.getElementById('art-stl-basis-label');
-  if ($label) $label.textContent = basis === 'order' ? '(주문일 기준)' : '(결제일 기준)';
+  if ($label) {
+    $label.textContent = basis === 'order' ? '(주문일 기준)'
+      : basis === 'ship' ? '(출고완료일 기준)'
+      : '(결제일 기준)';
+  }
   // 이미 조회된 결과 있으면 재조회
   if (_settlementsData) loadSettlements();
 }
