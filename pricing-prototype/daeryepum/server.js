@@ -6390,6 +6390,123 @@ const server = http.createServer(async (req, res) => {
       } else if (pathname === '/api/artists/diagnose' && req.method === 'GET') {
         // 매출 0 이슈 진단 — 시드 코드가 MSSQL Card_Code 와 매칭되는지 + 이번 달 매출.
         data = await apiArtistDiagnose();
+      } else if (pathname === '/api/artists/order-detail' && req.method === 'GET') {
+        // 특정 주문의 매출/point_price 분배 상세 (진단용).
+        //   ?order_seq=4750519 → CARD/ETC 자동 감지 + 각 아이템별 매출 계산 breakdown.
+        try {
+          const orderSeq = parseInt(parsed.query.order_seq || '0');
+          if (!orderSeq) { data = { error: 'order_seq 필수' }; }
+          else {
+            const p = await getPool();
+            // Supabase 활성 작가 상품 목록 (매칭 확인용)
+            let artistCodes = new Set();
+            try {
+              const r = await fetch(
+                `${SUPABASE_URL}/rest/v1/bg_artist_products?select=product_code&is_active=eq.true`,
+                { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+              );
+              const arr = await r.json();
+              for (const p2 of (Array.isArray(arr) ? arr : [])) {
+                artistCodes.add(String(p2.product_code).trim().toUpperCase());
+              }
+            } catch {}
+
+            // CARD 시도
+            const cardOrder = await p.request().input('seq', sql.Int, orderSeq).query(`
+              SELECT order_seq, order_date, settle_date, src_send_date, status_seq,
+                ISNULL(point_price, 0) AS point_price
+              FROM custom_order WITH (NOLOCK) WHERE order_seq = @seq
+            `);
+            const etcOrder = await p.request().input('seq', sql.Int, orderSeq).query(`
+              SELECT order_seq, order_date, settle_date, delivery_date, status_seq,
+                ISNULL(coupon_price, 0) AS coupon_price
+              FROM CUSTOM_ETC_ORDER WITH (NOLOCK) WHERE order_seq = @seq
+            `);
+            const cardOrderRow = (cardOrder.recordset || [])[0];
+            const etcOrderRow = (etcOrder.recordset || [])[0];
+
+            let channel, orderInfo, items;
+            if (cardOrderRow) {
+              channel = 'CARD';
+              orderInfo = cardOrderRow;
+              const itemRes = await p.request().input('seq', sql.Int, orderSeq).query(`
+                SELECT coi.item_count, coi.item_sale_price,
+                  c.Card_Code, c.Card_Name, c.Card_Div,
+                  ISNULL(NULLIF(c.Unit_Value, 0), 1) AS unit_value
+                FROM custom_order_item coi WITH (NOLOCK)
+                INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                WHERE coi.order_seq = @seq
+              `);
+              items = itemRes.recordset || [];
+            } else if (etcOrderRow) {
+              channel = 'ETC';
+              orderInfo = etcOrderRow;
+              const itemRes = await p.request().input('seq', sql.Int, orderSeq).query(`
+                SELECT oi.order_count AS item_count, oi.card_sale_price AS item_sale_price,
+                  c.Card_Code, c.Card_Name, c.Card_Div,
+                  ISNULL(NULLIF(c.Unit_Value, 0), 1) AS unit_value
+                FROM CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK)
+                INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                WHERE oi.order_seq = @seq
+              `);
+              items = itemRes.recordset || [];
+            } else {
+              data = { error: `order_seq=${orderSeq} 를 CARD/ETC 어디에도 찾을 수 없음.` };
+            }
+
+            if (!data) {
+              // 작가 품목 수 (분배 divisor)
+              const artistItems = items.filter(it =>
+                artistCodes.has(String(it.Card_Code).trim().toUpperCase())
+              );
+              const artistItemCount = artistItems.length;
+              const discountAmount = channel === 'CARD'
+                ? orderInfo.point_price
+                : orderInfo.coupon_price;
+              const perItemShare = artistItemCount > 0 ? discountAmount / artistItemCount : 0;
+
+              // 각 아이템별 breakdown
+              const itemsBreakdown = items.map(it => {
+                const isArtistItem = artistCodes.has(String(it.Card_Code).trim().toUpperCase());
+                const gross = it.item_sale_price * it.item_count / it.unit_value;
+                const share = isArtistItem ? perItemShare : 0;
+                const net = gross - share;
+                return {
+                  card_code: it.Card_Code,
+                  card_name: it.Card_Name,
+                  card_div: it.Card_Div,
+                  unit_value: it.unit_value,
+                  item_count: it.item_count,
+                  item_sale_price: it.item_sale_price,
+                  is_artist_item: isArtistItem,
+                  gross_amount: Math.round(gross),
+                  discount_share: Math.round(share),
+                  net_amount: Math.round(net)
+                };
+              });
+
+              data = {
+                channel,
+                order: orderInfo,
+                discount: {
+                  type: channel === 'CARD' ? 'point_price' : 'coupon_price',
+                  amount: discountAmount,
+                  artist_item_count: artistItemCount,
+                  per_item_share: Math.round(perItemShare)
+                },
+                items: itemsBreakdown,
+                totals: {
+                  gross: Math.round(itemsBreakdown.reduce((s, x) => s + x.gross_amount, 0)),
+                  artist_gross: Math.round(itemsBreakdown.filter(x => x.is_artist_item).reduce((s, x) => s + x.gross_amount, 0)),
+                  artist_discount: Math.round(itemsBreakdown.reduce((s, x) => s + x.discount_share, 0)),
+                  artist_net: Math.round(itemsBreakdown.filter(x => x.is_artist_item).reduce((s, x) => s + x.net_amount, 0))
+                }
+              };
+            }
+          }
+        } catch (e) {
+          data = { error: e.message };
+        }
       } else if (pathname === '/api/artists/schema-check' && req.method === 'GET') {
         // custom_order / CUSTOM_ETC_ORDER 스키마 조사 — mod_date / coupon 컬럼 실제 이름 확인.
         try {
