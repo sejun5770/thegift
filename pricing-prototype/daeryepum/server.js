@@ -6486,6 +6486,110 @@ const server = http.createServer(async (req, res) => {
       } else if (pathname === '/api/artists/diagnose' && req.method === 'GET') {
         // 매출 0 이슈 진단 — 시드 코드가 MSSQL Card_Code 와 매칭되는지 + 이번 달 매출.
         data = await apiArtistDiagnose();
+      } else if (pathname === '/api/artists/duplicate-card-codes' && req.method === 'GET') {
+        // 답례품 카테고리 (D01 + COM_) 에서 같은 Card_Code 인데 Card_Name 이 다른 케이스 자동 조회.
+        //   각 Card_Seq 별 참조 수 + 최근 주문일 + 정정 SQL 자동 생성.
+        try {
+          const p = await getPool();
+          const res = await p.request().query(`
+            WITH duplicate_codes AS (
+              SELECT Card_Code
+              FROM S2_Card WITH (NOLOCK)
+              WHERE Card_Div = 'D01' OR Card_Code LIKE 'COM[_]%'
+              GROUP BY Card_Code
+              HAVING COUNT(*) > 1 AND COUNT(DISTINCT Card_Name) > 1
+            )
+            SELECT
+              c.Card_Code, c.Card_Name, c.Card_Seq, c.Unit_Value,
+              ISNULL((SELECT COUNT(*) FROM custom_order_item WITH (NOLOCK) WHERE card_seq = c.Card_Seq), 0) AS card_orders,
+              ISNULL((SELECT COUNT(*) FROM CUSTOM_ETC_ORDER_ITEM WITH (NOLOCK) WHERE card_seq = c.Card_Seq), 0) AS etc_orders,
+              (
+                SELECT MAX(x.d) FROM (
+                  SELECT co.order_date AS d FROM custom_order co WITH (NOLOCK)
+                    INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+                    WHERE coi.card_seq = c.Card_Seq
+                  UNION ALL
+                  SELECT o.order_date FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                    INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                    WHERE oi.card_seq = c.Card_Seq
+                ) x
+              ) AS max_order_date
+            FROM S2_Card c WITH (NOLOCK)
+            WHERE c.Card_Code IN (SELECT Card_Code FROM duplicate_codes)
+            ORDER BY c.Card_Code, c.Card_Seq
+          `);
+          const rows = res.recordset || [];
+          // Card_Code 별 그룹화 + 정상 이름 판단
+          const casesByCode = new Map();
+          for (const r of rows) {
+            if (!casesByCode.has(r.Card_Code)) casesByCode.set(r.Card_Code, []);
+            casesByCode.get(r.Card_Code).push({
+              card_seq: r.Card_Seq,
+              card_name: r.Card_Name,
+              unit_value: r.Unit_Value,
+              card_orders: r.card_orders,
+              etc_orders: r.etc_orders,
+              total_orders: r.card_orders + r.etc_orders,
+              max_order_date: r.max_order_date
+            });
+          }
+          const cases = [];
+          for (const [code, rowList] of casesByCode) {
+            // 정상 이름 후보 — 가장 최근 max_order_date 를 가진 row
+            const sorted = [...rowList].sort((a, b) => {
+              const ad = a.max_order_date ? new Date(a.max_order_date).getTime() : 0;
+              const bd = b.max_order_date ? new Date(b.max_order_date).getTime() : 0;
+              return bd - ad;
+            });
+            const suggestedRow = sorted[0];
+            const suggestedName = suggestedRow?.card_name || '';
+            const suggestedSeq = suggestedRow?.card_seq;
+            // 정정 대상 = suggestedName 이외의 이름을 가진 row
+            const targetSeqs = rowList
+              .filter(r => r.card_name !== suggestedName)
+              .map(r => r.card_seq);
+            const totalRefs = rowList.reduce((s, r) => s + r.total_orders, 0);
+            const safeUpdate = rowList
+              .filter(r => r.card_name !== suggestedName)
+              .every(r => r.total_orders === 0);
+            const cleanupSql = targetSeqs.length
+              ? `UPDATE S2_Card SET Card_Name = '${suggestedName.replace(/'/g, "''")}' WHERE Card_Seq IN (${targetSeqs.join(', ')});`
+              : null;
+            cases.push({
+              card_code: code,
+              row_count: rowList.length,
+              unique_names: [...new Set(rowList.map(r => r.card_name))].length,
+              rows: rowList,
+              suggested_name: suggestedName,
+              suggested_seq: suggestedSeq,
+              target_seqs_to_update: targetSeqs,
+              total_references: totalRefs,
+              safe_to_update: safeUpdate,
+              cleanup_sql: cleanupSql
+            });
+          }
+          // 정렬: 참조 많은 순 (영향 큰 케이스 상단)
+          cases.sort((a, b) => b.total_references - a.total_references);
+          const allSql = cases
+            .filter(c => c.cleanup_sql)
+            .map(c => `-- ${c.card_code} (${c.rows.length} rows, ${c.total_references} orders, safe=${c.safe_to_update})\n${c.cleanup_sql}`)
+            .join('\n\n');
+          data = {
+            total_cases: cases.length,
+            summary: {
+              total_cases: cases.length,
+              safe_cases: cases.filter(c => c.safe_to_update).length,
+              risky_cases: cases.filter(c => !c.safe_to_update).length,
+              total_target_seqs: cases.reduce((s, c) => s + c.target_seqs_to_update.length, 0),
+              total_affected_orders: cases.reduce((s, c) =>
+                s + c.rows.filter(r => r.card_name !== c.suggested_name).reduce((ss, r) => ss + r.total_orders, 0), 0)
+            },
+            cases,
+            all_cleanup_sql: allSql
+          };
+        } catch (e) {
+          data = { error: e.message };
+        }
       } else if (pathname === '/api/artists/card-seq-usage' && req.method === 'GET') {
         // Card_Seq 별 실제 주문 참조 내역 조회.
         //   ?seqs=41765,41767,41769 → 각 Card_Seq 의 CARD/ETC 주문 수 + 기간.
