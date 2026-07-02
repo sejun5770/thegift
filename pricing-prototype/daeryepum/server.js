@@ -6678,6 +6678,117 @@ const server = http.createServer(async (req, res) => {
         } catch (e) {
           data = { error: e.message };
         }
+      } else if (pathname === '/api/artists/canonical-mismatches' && req.method === 'GET') {
+        // canonical name 로직이 실제로 raw 이름 → canonical 이름으로 대체하는 (Card_Code, Card_Seq) 리스트.
+        //   같은 Card_Code 안에서 canonical (DISPLAY_YORN='Y' 우선 → MAX Card_Seq) 선정 후
+        //   Card_Name 이 canonical 과 다른 row 만 반환.
+        //   ?category=D01|COM → 답례품 카테고리만 필터. 기본은 전체.
+        //   ?used=1 → 실제 주문 참조 있는 raw_seq 만 필터 (dashboard 노출되는 케이스).
+        const category = String(parsed.query.category || '').trim().toUpperCase();
+        const usedOnly = String(parsed.query.used || '') === '1';
+        let categoryClause = '';
+        if (category === 'D01') categoryClause = `AND c.Card_Div = 'D01'`;
+        else if (category === 'COM') categoryClause = `AND c.Card_Code LIKE 'COM[_]%'`;
+        else if (category === 'DAERYEPUM') categoryClause = `AND (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')`;
+        try {
+          const p = await getPool();
+          const request = p.request();
+          request.timeout = 120000;
+          const res = await request.query(`
+            WITH mismatched AS (
+              SELECT
+                c.Card_Code,
+                c.Card_Seq AS raw_seq,
+                c.Card_Name AS raw_name,
+                c.DISPLAY_YORN AS raw_display,
+                canon.canonical_seq,
+                canon.canonical_name,
+                canon.canonical_display
+              FROM S2_Card c WITH (NOLOCK)
+              CROSS APPLY (
+                SELECT TOP 1
+                  c2.Card_Seq AS canonical_seq,
+                  c2.Card_Name AS canonical_name,
+                  c2.DISPLAY_YORN AS canonical_display
+                FROM S2_Card c2 WITH (NOLOCK)
+                WHERE c2.Card_Code = c.Card_Code
+                ORDER BY
+                  CASE WHEN c2.DISPLAY_YORN = 'Y' THEN 0 ELSE 1 END,
+                  c2.Card_Seq DESC
+              ) canon
+              WHERE c.Card_Name <> canon.canonical_name
+                ${categoryClause}
+            ),
+            card_agg AS (
+              SELECT coi.card_seq, COUNT(*) AS cnt, MAX(co.order_date) AS max_date
+              FROM custom_order_item coi WITH (NOLOCK)
+              INNER JOIN custom_order co WITH (NOLOCK) ON coi.order_seq = co.order_seq
+              WHERE coi.card_seq IN (SELECT raw_seq FROM mismatched)
+              GROUP BY coi.card_seq
+            ),
+            etc_agg AS (
+              SELECT oi.card_seq, COUNT(*) AS cnt, MAX(o.order_date) AS max_date
+              FROM CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK)
+              INNER JOIN CUSTOM_ETC_ORDER o WITH (NOLOCK) ON oi.order_seq = o.order_seq
+              WHERE oi.card_seq IN (SELECT raw_seq FROM mismatched)
+              GROUP BY oi.card_seq
+            )
+            SELECT
+              m.Card_Code,
+              m.raw_seq,
+              m.raw_name,
+              m.raw_display,
+              m.canonical_seq,
+              m.canonical_name,
+              m.canonical_display,
+              ISNULL(ca.cnt, 0) AS card_orders,
+              ISNULL(ea.cnt, 0) AS etc_orders,
+              CASE
+                WHEN ca.max_date IS NULL AND ea.max_date IS NULL THEN NULL
+                WHEN ca.max_date IS NULL THEN ea.max_date
+                WHEN ea.max_date IS NULL THEN ca.max_date
+                WHEN ca.max_date > ea.max_date THEN ca.max_date
+                ELSE ea.max_date
+              END AS max_order_date
+            FROM mismatched m
+            LEFT JOIN card_agg ca ON ca.card_seq = m.raw_seq
+            LEFT JOIN etc_agg ea ON ea.card_seq = m.raw_seq
+            ${usedOnly ? 'WHERE ISNULL(ca.cnt, 0) + ISNULL(ea.cnt, 0) > 0' : ''}
+            ORDER BY m.Card_Code, m.raw_seq
+          `);
+          const rows = res.recordset || [];
+          // Card_Code 별 그룹화 (canonical_name 은 그룹당 1개 고정)
+          const groupsByCode = new Map();
+          for (const r of rows) {
+            if (!groupsByCode.has(r.Card_Code)) {
+              groupsByCode.set(r.Card_Code, {
+                card_code: r.Card_Code,
+                canonical_name: r.canonical_name,
+                canonical_seq: r.canonical_seq,
+                canonical_display: r.canonical_display,
+                mismatched_rows: []
+              });
+            }
+            groupsByCode.get(r.Card_Code).mismatched_rows.push({
+              card_seq: r.raw_seq,
+              raw_name: r.raw_name,
+              display_yorn: r.raw_display,
+              card_orders: r.card_orders,
+              etc_orders: r.etc_orders,
+              total_orders: r.card_orders + r.etc_orders,
+              max_order_date: r.max_order_date
+            });
+          }
+          const groups = Array.from(groupsByCode.values());
+          data = {
+            filter: { category: category || 'ALL', used_only: usedOnly },
+            total_groups: groups.length,
+            total_mismatched_rows: rows.length,
+            groups
+          };
+        } catch (e) {
+          data = { error: e.message };
+        }
       } else if (pathname === '/api/artists/card-seq-usage' && req.method === 'GET') {
         // Card_Seq 별 실제 주문 참조 내역 조회.
         //   ?seqs=41765,41767,41769 → 각 Card_Seq 의 CARD/ETC 주문 수 + 기간.
