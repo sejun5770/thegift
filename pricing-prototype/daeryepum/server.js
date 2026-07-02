@@ -6486,6 +6486,52 @@ const server = http.createServer(async (req, res) => {
       } else if (pathname === '/api/artists/diagnose' && req.method === 'GET') {
         // 매출 0 이슈 진단 — 시드 코드가 MSSQL Card_Code 와 매칭되는지 + 이번 달 매출.
         data = await apiArtistDiagnose();
+      } else if (pathname === '/api/artists/card-seq-detail' && req.method === 'GET') {
+        // 근본 원인 조사 — 여러 Card_Seq 의 모든 컬럼 비교.
+        //   ?seqs=41765,41767,41769 → 스키마 + SELECT * + 차이점 자동 추출.
+        const seqsStr = String(parsed.query.seqs || '').trim();
+        const seqs = seqsStr.split(',').map(s => parseInt(s.trim())).filter(n => n > 0);
+        if (!seqs.length) { data = { error: 'seqs 필수 (콤마 구분)' }; }
+        else {
+          try {
+            const p = await getPool();
+            const schemaRes = await p.request().query(`
+              SELECT COLUMN_NAME, DATA_TYPE
+              FROM INFORMATION_SCHEMA.COLUMNS
+              WHERE TABLE_NAME = 'S2_Card'
+              ORDER BY ORDINAL_POSITION
+            `);
+            const seqList = seqs.join(', ');
+            const rowsRes = await p.request().query(`
+              SELECT * FROM S2_Card WITH (NOLOCK)
+              WHERE Card_Seq IN (${seqList})
+              ORDER BY Card_Seq
+            `);
+            const schemaCols = (schemaRes.recordset || []).map(c => c.COLUMN_NAME);
+            const rows = rowsRes.recordset || [];
+            // 컬럼별 값 다양성 — row 간 값이 다른 컬럼만 추출 (원인 후보)
+            const diffCols = [];
+            for (const col of schemaCols) {
+              const uniqueVals = new Set(rows.map(r => JSON.stringify(r[col])));
+              if (uniqueVals.size > 1) {
+                diffCols.push({
+                  column: col,
+                  values: rows.map(r => ({ card_seq: r.Card_Seq, value: r[col] }))
+                });
+              }
+            }
+            data = {
+              schema_column_count: schemaCols.length,
+              rows_count: rows.length,
+              schema: schemaRes.recordset,
+              rows,
+              different_columns: diffCols,
+              hint: diffCols.length === 0
+                ? '모든 컬럼 값 동일 — 완전 중복 등록'
+                : `${diffCols.length}개 컬럼에서 차이 있음 — 이 컬럼들이 Card_Seq 분리 원인 가능성`
+            };
+          } catch (e) { data = { error: e.message }; }
+        }
       } else if (pathname === '/api/artists/duplicate-card-codes' && req.method === 'GET') {
         // 답례품 카테고리 (D01 + COM_) 에서 같은 Card_Code 인데 Card_Name 이 다른 케이스 자동 조회.
         //   각 Card_Seq 별 참조 수 + 최근 주문일 + 정정 SQL 자동 생성.
