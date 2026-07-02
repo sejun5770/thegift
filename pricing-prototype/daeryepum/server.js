@@ -6534,33 +6534,52 @@ const server = http.createServer(async (req, res) => {
         }
       } else if (pathname === '/api/artists/duplicate-card-codes' && req.method === 'GET') {
         // 답례품 카테고리 (D01 + COM_) 에서 같은 Card_Code 인데 Card_Name 이 다른 케이스 자동 조회.
-        //   각 Card_Seq 별 참조 수 + 최근 주문일 + 정정 SQL 자동 생성.
+        //   최적화: 각 row 별 subquery 반복 → CTE + LEFT JOIN 으로 1회 pass 처리.
+        //   requestTimeout 120초 (기본 30~60초 초과 방지).
         try {
           const p = await getPool();
-          const res = await p.request().query(`
+          const request = p.request();
+          request.timeout = 120000; // 120s
+          const res = await request.query(`
             WITH duplicate_codes AS (
               SELECT Card_Code
               FROM S2_Card WITH (NOLOCK)
               WHERE Card_Div = 'D01' OR Card_Code LIKE 'COM[_]%'
               GROUP BY Card_Code
               HAVING COUNT(*) > 1 AND COUNT(DISTINCT Card_Name) > 1
+            ),
+            target_seqs AS (
+              SELECT Card_Seq FROM S2_Card WITH (NOLOCK)
+              WHERE Card_Code IN (SELECT Card_Code FROM duplicate_codes)
+            ),
+            card_agg AS (
+              SELECT coi.card_seq, COUNT(*) AS cnt, MAX(co.order_date) AS max_date
+              FROM custom_order_item coi WITH (NOLOCK)
+              INNER JOIN custom_order co WITH (NOLOCK) ON coi.order_seq = co.order_seq
+              WHERE coi.card_seq IN (SELECT Card_Seq FROM target_seqs)
+              GROUP BY coi.card_seq
+            ),
+            etc_agg AS (
+              SELECT oi.card_seq, COUNT(*) AS cnt, MAX(o.order_date) AS max_date
+              FROM CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK)
+              INNER JOIN CUSTOM_ETC_ORDER o WITH (NOLOCK) ON oi.order_seq = o.order_seq
+              WHERE oi.card_seq IN (SELECT Card_Seq FROM target_seqs)
+              GROUP BY oi.card_seq
             )
             SELECT
               c.Card_Code, c.Card_Name, c.Card_Seq, c.Unit_Value,
-              ISNULL((SELECT COUNT(*) FROM custom_order_item WITH (NOLOCK) WHERE card_seq = c.Card_Seq), 0) AS card_orders,
-              ISNULL((SELECT COUNT(*) FROM CUSTOM_ETC_ORDER_ITEM WITH (NOLOCK) WHERE card_seq = c.Card_Seq), 0) AS etc_orders,
-              (
-                SELECT MAX(x.d) FROM (
-                  SELECT co.order_date AS d FROM custom_order co WITH (NOLOCK)
-                    INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
-                    WHERE coi.card_seq = c.Card_Seq
-                  UNION ALL
-                  SELECT o.order_date FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-                    INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-                    WHERE oi.card_seq = c.Card_Seq
-                ) x
-              ) AS max_order_date
+              ISNULL(ca.cnt, 0) AS card_orders,
+              ISNULL(ea.cnt, 0) AS etc_orders,
+              CASE
+                WHEN ca.max_date IS NULL AND ea.max_date IS NULL THEN NULL
+                WHEN ca.max_date IS NULL THEN ea.max_date
+                WHEN ea.max_date IS NULL THEN ca.max_date
+                WHEN ca.max_date > ea.max_date THEN ca.max_date
+                ELSE ea.max_date
+              END AS max_order_date
             FROM S2_Card c WITH (NOLOCK)
+            LEFT JOIN card_agg ca ON ca.card_seq = c.Card_Seq
+            LEFT JOIN etc_agg ea ON ea.card_seq = c.Card_Seq
             WHERE c.Card_Code IN (SELECT Card_Code FROM duplicate_codes)
             ORDER BY c.Card_Code, c.Card_Seq
           `);
