@@ -6486,6 +6486,41 @@ const server = http.createServer(async (req, res) => {
       } else if (pathname === '/api/artists/diagnose' && req.method === 'GET') {
         // 매출 0 이슈 진단 — 시드 코드가 MSSQL Card_Code 와 매칭되는지 + 이번 달 매출.
         data = await apiArtistDiagnose();
+      } else if (pathname === '/api/artists/card-seq-usage' && req.method === 'GET') {
+        // Card_Seq 별 실제 주문 참조 내역 조회.
+        //   ?seqs=41765,41767,41769 → 각 Card_Seq 의 CARD/ETC 주문 수 + 기간.
+        const seqsStr = String(parsed.query.seqs || '').trim();
+        const seqs = seqsStr.split(',').map(s => parseInt(s.trim())).filter(n => n > 0);
+        if (!seqs.length) { data = { error: 'seqs 필수 (콤마 구분 정수)' }; }
+        else {
+          try {
+            const p = await getPool();
+            const results = [];
+            for (const seq of seqs) {
+              const res = await p.request().input('seq', sql.Int, seq).query(`
+                SELECT
+                  (SELECT COUNT(*) FROM custom_order_item WITH (NOLOCK) WHERE card_seq = @seq) AS card_orders,
+                  (SELECT COUNT(*) FROM CUSTOM_ETC_ORDER_ITEM WITH (NOLOCK) WHERE card_seq = @seq) AS etc_orders,
+                  (SELECT MIN(co.order_date) FROM custom_order co WITH (NOLOCK) INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq WHERE coi.card_seq = @seq) AS card_min_date,
+                  (SELECT MAX(co.order_date) FROM custom_order co WITH (NOLOCK) INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq WHERE coi.card_seq = @seq) AS card_max_date,
+                  (SELECT MIN(o.order_date) FROM CUSTOM_ETC_ORDER o WITH (NOLOCK) INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq WHERE oi.card_seq = @seq) AS etc_min_date,
+                  (SELECT MAX(o.order_date) FROM CUSTOM_ETC_ORDER o WITH (NOLOCK) INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq WHERE oi.card_seq = @seq) AS etc_max_date
+              `);
+              const r = res.recordset[0] || {};
+              results.push({
+                card_seq: seq,
+                card_orders: r.card_orders || 0,
+                etc_orders: r.etc_orders || 0,
+                total_orders: (r.card_orders || 0) + (r.etc_orders || 0),
+                card_min_date: r.card_min_date,
+                card_max_date: r.card_max_date,
+                etc_min_date: r.etc_min_date,
+                etc_max_date: r.etc_max_date
+              });
+            }
+            data = { results };
+          } catch (e) { data = { error: e.message }; }
+        }
       } else if (pathname === '/api/artists/card-lookup' && req.method === 'GET') {
         // Card_Code 로 S2_Card + bg_product_settings 동시 조회 — 매핑/캐시 진단.
         //   ?code=TGJBK09O22_A → 정확 매치 + LIKE 매치 + Supabase settings row.
