@@ -11193,8 +11193,8 @@ function renderStockTable() {
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center;font-size:10px;color:var(--gray-500)">${it.is_com ? '위탁' : '자체'}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${fmtNum(it.current_qty)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;${it.available_qty <= 0 ? 'color:#dc2626;font-weight:600' : ''}">${fmtNum(it.available_qty)}</td>
-        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;color:var(--gray-600)">${fmtNum(it.unit_price)}</td>
-        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;font-weight:600">${fmtNum(it.stock_value)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;color:var(--gray-600)">${it.unit_price === null ? '<span style="color:var(--gray-400)">-</span>' : fmtNum(it.unit_price)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;font-weight:600">${it.stock_value === null ? '<span style="color:var(--gray-400)">-</span>' : fmtNum(it.stock_value)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${fmtNum(it.sales_qty_30d)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;color:var(--gray-600)">${fmtNum(it.sales_amount_30d)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;color:var(--gray-600)">${it.daily_avg_30d}</td>

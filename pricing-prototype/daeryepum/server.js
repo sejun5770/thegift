@@ -6259,9 +6259,10 @@ const server = http.createServer(async (req, res) => {
         // 답례품 재고 조회 — S2_Card (D01 OR COM_%) + S2_CARD_ERP_STOCK 매칭.
         //   기간 매출도 함께 (최근 30일 default). 소진 예상일 = available / (30일 판매량 / 30).
         //   금액:
-        //     unit_price   = Card_Sale_Price / Unit_Value (묶음 판매 구조 대응)
-        //     stock_value  = available_qty × unit_price (재고 자산액)
-        //     sales_30d    = S2_CARD_ERP_STOCK.TOTAL_SALE_PRICE_30_DAY (30일 매출 금액)
+        //     sales_amount_30d = S2_CARD_ERP_STOCK.TOTAL_SALE_PRICE_30_DAY (30일 매출 금액)
+        //     unit_price       = sales_amount_30d / sales_qty_30d (실판매 평균 단가; 프로모션/할인 반영)
+        //     stock_value      = available_qty × unit_price (재고 자산액)
+        //   Note: S2_Card 마스터에 단가 컬럼이 없어 실판매 기반 계산. 30일 무판매 SKU 는 단가 미상.
         try {
           const p = await getPool();
           const [stockRes, salesRes] = await Promise.all([
@@ -6270,8 +6271,6 @@ const server = http.createServer(async (req, res) => {
                 c.Card_Code AS product_code,
                 c.Card_Name AS product_name,
                 c.Card_Div,
-                ISNULL(NULLIF(c.Unit_Value, 0), 1) AS unit_value,
-                CAST(ISNULL(c.Card_Sale_Price, 0) AS float) AS card_sale_price,
                 ISNULL(s.INVENTORY_CURRENT_QTY, 0) AS current_qty,
                 ISNULL(s.INVENTORY_AVAILABLE_QTY, 0) AS available_qty,
                 ISNULL(s.TOTAL_SALE_PRICE_30_DAY, 0) AS sales_amount_30d
@@ -6311,12 +6310,11 @@ const server = http.createServer(async (req, res) => {
             const daysLeft = (dailyAvg > 0 && r.available_qty > 0)
               ? Math.round(r.available_qty / dailyAvg)
               : null;
-            // 답례품 단가 — 묶음 판매가 / 묶음 단위 수량
-            const unitValue = Number(r.unit_value) || 1;
-            const cardSalePrice = Number(r.card_sale_price) || 0;
-            const unitPrice = Math.round(cardSalePrice / unitValue);
-            const stockValue = Math.round(unitPrice * (Number(r.available_qty) || 0));
+            // 실판매 기반 단가 — 30일 매출액 / 30일 판매수량 (프로모션/할인 반영)
             const salesAmount30d = Math.round(Number(r.sales_amount_30d) || 0);
+            const availableQty = Number(r.available_qty) || 0;
+            const unitPrice = qty30 > 0 ? Math.round(salesAmount30d / qty30) : null;
+            const stockValue = unitPrice !== null ? Math.round(unitPrice * availableQty) : null;
             return {
               product_code: r.product_code,
               product_name: r.product_name || '',
@@ -6339,8 +6337,8 @@ const server = http.createServer(async (req, res) => {
               with_stock: items.filter(x => x.available_qty > 0).length,
               soldout: items.filter(x => x.available_qty <= 0).length,
               urgent_30d: items.filter(x => x.days_to_soldout !== null && x.days_to_soldout <= 30).length,
-              total_stock_value: items.reduce((s, x) => s + (x.stock_value || 0), 0),
-              total_sales_30d: items.reduce((s, x) => s + (x.sales_amount_30d || 0), 0)
+              total_stock_value: items.reduce((s, x) => s + (Number(x.stock_value) || 0), 0),
+              total_sales_30d: items.reduce((s, x) => s + (Number(x.sales_amount_30d) || 0), 0)
             }
           };
         } catch (e) {
