@@ -789,7 +789,10 @@ async function apiOrders(query) {
         o.recv_hphone AS recv_hphone,
         CONCAT(o.recv_address, ' ', ISNULL(o.recv_address_detail,'')) AS recv_address,
         o.recv_msg AS recv_msg,
-        c.Card_Name AS card_name,
+        -- canonical name: 같은 Card_Code 여러 Card_Seq 존재 시 DISPLAY_YORN='Y' 우선 + 최신 Card_Seq 의 이름.
+        --   오타/중복 등록 케이스에서 최신 정정 이름을 자동 표시.
+        ISNULL(canon.canonical_name, c.Card_Name) AS card_name,
+        c.Card_Name AS card_name_raw,  -- 원본 (실제 참조된 Card_Seq 의 이름)
         c.Card_Code AS card_code,
         ISNULL(NULLIF(c.Unit_Value, 0), 1) AS unit_value,  -- 판매단위 수량 (인쇄수량 산식: item_count × unit_value)
         oi.order_count AS item_count,
@@ -808,6 +811,15 @@ async function apiOrders(query) {
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
       LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
       ${etcCouponDivisorForCategory}
+      OUTER APPLY (
+        -- canonical name — 같은 Card_Code 여러 Card_Seq 있을 때 대표 이름 선정
+        SELECT TOP 1 c2.Card_Name AS canonical_name
+        FROM S2_Card c2 WITH (NOLOCK)
+        WHERE c2.Card_Code = c.Card_Code
+        ORDER BY
+          CASE WHEN c2.DISPLAY_YORN = 'Y' THEN 0 ELSE 1 END,
+          c2.Card_Seq DESC
+      ) canon
       OUTER APPLY (
         SELECT TOP 1 w2.event_year, w2.event_month, w2.event_Day
         FROM custom_order co2 WITH (NOLOCK)
@@ -836,7 +848,9 @@ async function apiOrders(query) {
         ISNULL(di.HPHONE, di.PHONE) AS recv_hphone,
         CONCAT(ISNULL(di.ADDR,''), ' ', ISNULL(di.ADDR_DETAIL,'')) AS recv_address,
         di.DELIVERY_MEMO AS recv_msg,
-        c.Card_Name AS card_name,
+        -- canonical name: 같은 Card_Code 여러 Card_Seq 존재 시 DISPLAY_YORN='Y' 우선 + 최신 Card_Seq 의 이름.
+        ISNULL(canon.canonical_name, c.Card_Name) AS card_name,
+        c.Card_Name AS card_name_raw,  -- 원본
         c.Card_Code AS card_code,
         ISNULL(NULLIF(c.Unit_Value, 0), 1) AS unit_value,  -- 판매단위 수량 (인쇄수량 산식: item_count × unit_value)
         -- dd_count (DELIVERY_INFO_DETAIL 의 '답례품' row 수량) 는 답례품(D01) 전용.
@@ -859,6 +873,15 @@ async function apiOrders(query) {
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
       LEFT JOIN card_copurchase_orders cp ON co.order_seq = cp.order_seq
+      OUTER APPLY (
+        -- canonical name — 같은 Card_Code 여러 Card_Seq 있을 때 대표 이름 선정
+        SELECT TOP 1 c2.Card_Name AS canonical_name
+        FROM S2_Card c2 WITH (NOLOCK)
+        WHERE c2.Card_Code = c.Card_Code
+        ORDER BY
+          CASE WHEN c2.DISPLAY_YORN = 'Y' THEN 0 ELSE 1 END,
+          c2.Card_Seq DESC
+      ) canon
       INNER JOIN (
         -- 배송지별 답례품 수량: DELIVERY_INFO_DETAIL 있으면 배송지별, 없으면 첫 배송지 1건
         --   delivery_seq 노출 — 같은 order_seq 에 여러 배송지가 있을 때 frontend 가
