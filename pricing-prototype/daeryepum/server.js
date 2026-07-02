@@ -6486,6 +6486,53 @@ const server = http.createServer(async (req, res) => {
       } else if (pathname === '/api/artists/diagnose' && req.method === 'GET') {
         // 매출 0 이슈 진단 — 시드 코드가 MSSQL Card_Code 와 매칭되는지 + 이번 달 매출.
         data = await apiArtistDiagnose();
+      } else if (pathname === '/api/artists/card-lookup' && req.method === 'GET') {
+        // Card_Code 로 S2_Card + bg_product_settings 동시 조회 — 매핑/캐시 진단.
+        //   ?code=TGJBK09O22_A → 정확 매치 + LIKE 매치 + Supabase settings row.
+        const code = String(parsed.query.code || '').trim();
+        if (!code) { data = { error: 'code 파라미터 필수' }; }
+        else {
+          try {
+            const p = await getPool();
+            // S2_Card — 정확 매치 + 유사 매치
+            const cardRes = await p.request()
+              .input('code', sql.VarChar, code)
+              .query(`
+                SELECT Card_Code, Card_Name, Card_Seq, Card_Div, Unit_Value
+                FROM S2_Card WITH (NOLOCK)
+                WHERE Card_Code = @code OR Card_Code LIKE @code + '%'
+                ORDER BY
+                  CASE WHEN Card_Code = @code THEN 0 ELSE 1 END,
+                  Card_Code, Card_Seq
+              `);
+            const cards = cardRes.recordset || [];
+            // Supabase bg_product_settings 조회 — 답례품 대시보드 자체 캐시된 이름 확인
+            let productSettings = null;
+            try {
+              const sr = await fetch(
+                `${SUPABASE_URL}/rest/v1/bg_product_settings?product_id=eq.${encodeURIComponent(code)}&select=*`,
+                { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+              );
+              const arr = await sr.json();
+              productSettings = Array.isArray(arr) ? arr : null;
+            } catch { productSettings = null; }
+            data = {
+              query_code: code,
+              s2_card_matches: cards,
+              s2_card_exact_count: cards.filter(c => c.Card_Code === code).length,
+              bg_product_settings: productSettings,
+              hint: cards.length === 0
+                ? 'S2_Card 에 해당 코드 없음'
+                : cards.filter(c => c.Card_Code === code).length > 1
+                  ? '⚠️ 동일 Card_Code 여러 row — order 가 잘못된 Card_Seq pointing 가능성'
+                  : (productSettings && productSettings.length > 0 && productSettings[0].product_name
+                    ? 'bg_product_settings 에 별도 저장된 이름 존재 — 우선 사용될 수 있음'
+                    : 'S2_Card 정확 매치 1건 + Supabase 캐시 없음/일치')
+            };
+          } catch (e) {
+            data = { error: e.message };
+          }
+        }
       } else if (pathname === '/api/artists/order-detail' && req.method === 'GET') {
         // 특정 주문의 매출/point_price 분배 상세 (진단용).
         //   ?order_seq=4750519 → CARD/ETC 자동 감지 + 각 아이템별 매출 계산 breakdown.
