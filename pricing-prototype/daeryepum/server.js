@@ -813,10 +813,20 @@ async function apiOrders(query) {
       ${etcCouponDivisorForCategory}
       OUTER APPLY (
         -- canonical name — 같은 Card_Code 여러 Card_Seq 있을 때 대표 이름 선정
-        SELECT TOP 1 c2.Card_Name AS canonical_name
+        --   1) 프리픽스 ([시크릿특가]/[XX%할인] 등) 없는 row 우선
+        --   2) DISPLAY_YORN='Y' 우선
+        --   3) 최신 Card_Seq
+        --   canonical row 이름에 프리픽스 있으면 첫 ']' 이후 문자열 반환 (제거)
+        SELECT TOP 1
+          CASE
+            WHEN c2.Card_Name LIKE '[[]%[]]%'
+              THEN LTRIM(SUBSTRING(c2.Card_Name, CHARINDEX(']', c2.Card_Name) + 1, LEN(c2.Card_Name)))
+            ELSE c2.Card_Name
+          END AS canonical_name
         FROM S2_Card c2 WITH (NOLOCK)
         WHERE c2.Card_Code = c.Card_Code
         ORDER BY
+          CASE WHEN c2.Card_Name LIKE '[[]%' THEN 1 ELSE 0 END,
           CASE WHEN c2.DISPLAY_YORN = 'Y' THEN 0 ELSE 1 END,
           c2.Card_Seq DESC
       ) canon
@@ -875,10 +885,20 @@ async function apiOrders(query) {
       LEFT JOIN card_copurchase_orders cp ON co.order_seq = cp.order_seq
       OUTER APPLY (
         -- canonical name — 같은 Card_Code 여러 Card_Seq 있을 때 대표 이름 선정
-        SELECT TOP 1 c2.Card_Name AS canonical_name
+        --   1) 프리픽스 ([시크릿특가]/[XX%할인] 등) 없는 row 우선
+        --   2) DISPLAY_YORN='Y' 우선
+        --   3) 최신 Card_Seq
+        --   canonical row 이름에 프리픽스 있으면 첫 ']' 이후 문자열 반환 (제거)
+        SELECT TOP 1
+          CASE
+            WHEN c2.Card_Name LIKE '[[]%[]]%'
+              THEN LTRIM(SUBSTRING(c2.Card_Name, CHARINDEX(']', c2.Card_Name) + 1, LEN(c2.Card_Name)))
+            ELSE c2.Card_Name
+          END AS canonical_name
         FROM S2_Card c2 WITH (NOLOCK)
         WHERE c2.Card_Code = c.Card_Code
         ORDER BY
+          CASE WHEN c2.Card_Name LIKE '[[]%' THEN 1 ELSE 0 END,
           CASE WHEN c2.DISPLAY_YORN = 'Y' THEN 0 ELSE 1 END,
           c2.Card_Seq DESC
       ) canon
@@ -6708,11 +6728,16 @@ const server = http.createServer(async (req, res) => {
               CROSS APPLY (
                 SELECT TOP 1
                   c2.Card_Seq AS canonical_seq,
-                  c2.Card_Name AS canonical_name,
+                  CASE
+                    WHEN c2.Card_Name LIKE '[[]%[]]%'
+                      THEN LTRIM(SUBSTRING(c2.Card_Name, CHARINDEX(']', c2.Card_Name) + 1, LEN(c2.Card_Name)))
+                    ELSE c2.Card_Name
+                  END AS canonical_name,
                   c2.DISPLAY_YORN AS canonical_display
                 FROM S2_Card c2 WITH (NOLOCK)
                 WHERE c2.Card_Code = c.Card_Code
                 ORDER BY
+                  CASE WHEN c2.Card_Name LIKE '[[]%' THEN 1 ELSE 0 END,
                   CASE WHEN c2.DISPLAY_YORN = 'Y' THEN 0 ELSE 1 END,
                   c2.Card_Seq DESC
               ) canon
