@@ -285,6 +285,7 @@ nav.nav-loading a[href^="#"] {
   <a href="#bg-settlements" onclick="showPage('bg-settlements')">💰 위탁정산</a>
   <a href="#bg-vendor-dashboard" onclick="showPage('bg-vendor-dashboard')">📈 위탁 대시보드</a>
   <a href="#bg-artists" onclick="showPage('bg-artists')">🎨 작가 정산</a>
+  <a href="#daeryepum-stock" onclick="showPage('daeryepum-stock')">📦 답례품 재고</a>
   <a href="#wedding-calendar" onclick="showPage('wedding-calendar')">💍 예식일 캘린더</a>
   <a href="#admin-nav-settings" onclick="showPage('admin-nav-settings')" id="nav-link-admin-nav-settings" style="display:none">⚙️ GNB 설정</a>
   <div class="user-area" id="user-area"></div>
@@ -2011,6 +2012,63 @@ nav.nav-loading a[href^="#"] {
   </div>
 </div>
 
+<!-- ========== 답례품 재고 (Phase 1) ========== -->
+<div id="page-daeryepum-stock" class="page">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <h2 style="margin:0">📦 답례품 재고 현황</h2>
+    <div style="font-size:12px;color:var(--gray-500)">
+      S2_CARD_ERP_STOCK 실시간 조회 · 답례품 SKU (D01 + COM_) 전체
+    </div>
+  </div>
+
+  <!-- 요약 배지 -->
+  <div class="card" style="padding:12px;margin-bottom:12px">
+    <div id="stock-summary" style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px">불러오는 중…</div>
+  </div>
+
+  <!-- 필터 툴바 -->
+  <div class="card" style="padding:12px;margin-bottom:12px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input type="text" id="stock-search" placeholder="🔍 품목코드/상품명 검색"
+             oninput="renderStockTable()"
+             style="flex:1;min-width:200px;padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
+      <select id="stock-filter-source" onchange="renderStockTable()" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
+        <option value="">전체</option>
+        <option value="d01">자체 답례품 (D01)</option>
+        <option value="com">위탁 답례품 (COM_)</option>
+      </select>
+      <select id="stock-filter-status" onchange="renderStockTable()" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
+        <option value="">전체 상태</option>
+        <option value="urgent">⚠️ 30일 내 소진</option>
+        <option value="soldout">❌ 재고 없음</option>
+        <option value="in_stock">✅ 재고 있음</option>
+      </select>
+      <button class="btn" style="padding:6px 12px;font-size:12px" onclick="loadDaeryepumStock()">🔄 새로고침</button>
+      <button class="btn" style="padding:6px 12px;font-size:12px" onclick="downloadStockCsv()">📥 CSV</button>
+    </div>
+  </div>
+
+  <!-- 테이블 -->
+  <div class="card" style="padding:0;margin-bottom:16px;overflow:hidden">
+    <div id="stock-loading" style="text-align:center;padding:40px;color:var(--gray-500);font-size:13px">불러오는 중…</div>
+    <table class="data-table" id="stock-table" style="width:100%;font-size:12px;display:none">
+      <thead>
+        <tr>
+          <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">품목코드</th>
+          <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">상품명</th>
+          <th style="text-align:center;padding:8px 12px;border-bottom:1px solid var(--gray-200)">구분</th>
+          <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">현 재고</th>
+          <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">가용 재고</th>
+          <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">30일 판매</th>
+          <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">일평균</th>
+          <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">소진 예상</th>
+        </tr>
+      </thead>
+      <tbody id="stock-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
 <!-- ========== 예식일 캘린더 ========== -->
 <div id="page-wedding-calendar" class="page">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
@@ -3167,6 +3225,7 @@ function showPage(name) {
   if (name === 'bg-settlements') initBgSettlements();
   if (name === 'bg-vendor-dashboard') initBgVendorDashboard();
   if (name === 'bg-artists') initArtistsPreview();
+  if (name === 'daeryepum-stock') initDaeryepumStock();
   if (name === 'wedding-calendar') initWeddingCalendar();
 }
 
@@ -11053,6 +11112,113 @@ function bgShPreviewNextMonth() { bgShPreviewMonth.setMonth(bgShPreviewMonth.get
 //   데이터 소스: /api/dashboard/wedding-calendar?year=Y&month=M
 //   사이트: 바른손카드 / 바른손몰 / 디얼디어 / 바른손M카드 / 기타 + 합
 //   주차: 일~토 기준, 월 그리드 (보통 5~6주차)
+// ============================================
+// 📦 답례품 재고 현황 (Phase 1: 조회)
+// ============================================
+let _stockData = [];
+let _stockLoaded = false;
+
+async function initDaeryepumStock() {
+  if (_stockLoaded) return;
+  await loadDaeryepumStock();
+}
+
+async function loadDaeryepumStock() {
+  const $loading = document.getElementById('stock-loading');
+  const $table = document.getElementById('stock-table');
+  const $summary = document.getElementById('stock-summary');
+  if ($loading) { $loading.style.display = ''; $loading.textContent = '불러오는 중…'; }
+  if ($table) $table.style.display = 'none';
+  try {
+    const r = await fetch(`${API}/api/daeryepum-stock`);
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    _stockData = d.items || [];
+    _stockLoaded = true;
+    // 요약 배지
+    const s = d.summary || {};
+    $summary.innerHTML = `
+      <span style="padding:4px 10px;background:#e0e7ff;color:#4338ca;border-radius:4px;font-weight:600">전체 ${s.total || 0}개</span>
+      <span style="padding:4px 10px;background:#dcfce7;color:#166534;border-radius:4px;font-weight:600">재고 있음 ${s.with_stock || 0}개</span>
+      <span style="padding:4px 10px;background:#fef3c7;color:#92400e;border-radius:4px;font-weight:600">⚠️ 30일 내 소진 ${s.urgent_30d || 0}개</span>
+      <span style="padding:4px 10px;background:#fee2e2;color:#991b1b;border-radius:4px;font-weight:600">❌ 소진 ${s.soldout || 0}개</span>
+    `;
+    renderStockTable();
+  } catch (e) {
+    if ($loading) $loading.textContent = `로드 실패: ${e.message}`;
+  }
+}
+
+function renderStockTable() {
+  const $loading = document.getElementById('stock-loading');
+  const $table = document.getElementById('stock-table');
+  const $tbody = document.getElementById('stock-tbody');
+  if (!$tbody) return;
+  const q = (document.getElementById('stock-search')?.value || '').trim().toLowerCase();
+  const src = document.getElementById('stock-filter-source')?.value || '';
+  const status = document.getElementById('stock-filter-status')?.value || '';
+  let items = _stockData;
+  if (q) items = items.filter(it =>
+    (it.product_code || '').toLowerCase().includes(q) ||
+    (it.product_name || '').toLowerCase().includes(q)
+  );
+  if (src === 'd01') items = items.filter(it => !it.is_com);
+  if (src === 'com') items = items.filter(it => it.is_com);
+  if (status === 'urgent') items = items.filter(it => it.days_to_soldout !== null && it.days_to_soldout <= 30 && it.available_qty > 0);
+  if (status === 'soldout') items = items.filter(it => it.available_qty <= 0);
+  if (status === 'in_stock') items = items.filter(it => it.available_qty > 0);
+  if (!items.length) {
+    $loading.textContent = '조건에 맞는 품목이 없습니다.';
+    $loading.style.display = '';
+    $table.style.display = 'none';
+    return;
+  }
+  $tbody.innerHTML = items.map(it => {
+    const soldoutBg = it.available_qty <= 0 ? 'background:#fef2f2' :
+      (it.days_to_soldout !== null && it.days_to_soldout <= 30 ? 'background:#fef3c7' : '');
+    const daysCell = it.days_to_soldout === null
+      ? '<span style="color:var(--gray-400)">-</span>'
+      : (it.days_to_soldout <= 30
+          ? `<span style="color:#dc2626;font-weight:600">${it.days_to_soldout}일</span>`
+          : `<span>${it.days_to_soldout}일</span>`);
+    return `
+      <tr style="${soldoutBg}">
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px">${esc(it.product_code)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100)">${esc(it.product_name || '-')}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center;font-size:10px;color:var(--gray-500)">${it.is_com ? '위탁' : '자체'}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${fmtNum(it.current_qty)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;${it.available_qty <= 0 ? 'color:#dc2626;font-weight:600' : ''}">${fmtNum(it.available_qty)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${fmtNum(it.sales_qty_30d)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;color:var(--gray-600)">${it.daily_avg_30d}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${daysCell}</td>
+      </tr>
+    `;
+  }).join('');
+  $loading.style.display = 'none';
+  $table.style.display = '';
+}
+
+function downloadStockCsv() {
+  if (!_stockData.length) { alert('데이터가 없습니다.'); return; }
+  const headers = ['품목코드', '상품명', '구분', '현 재고', '가용 재고', '30일 판매', '일평균', '소진 예상일수'];
+  const lines = [headers.join(',')];
+  for (const it of _stockData) {
+    lines.push([
+      it.product_code, `"${(it.product_name || '').replace(/"/g, '""')}"`,
+      it.is_com ? '위탁' : '자체',
+      it.current_qty, it.available_qty, it.sales_qty_30d, it.daily_avg_30d,
+      it.days_to_soldout ?? ''
+    ].join(','));
+  }
+  const csv = '﻿' + lines.join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `답례품재고_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 // ============================================
 // 🎨 작가 정산 (Phase 2: 작가/품목 CRUD)
 // ============================================

@@ -6212,6 +6212,79 @@ const server = http.createServer(async (req, res) => {
       let data;
       if (pathname === '/api/orders') {
         data = await apiOrders(parsed.query);
+      } else if (pathname === '/api/daeryepum-stock' && req.method === 'GET') {
+        // 답례품 재고 조회 — S2_Card (D01 OR COM_%) + S2_CARD_ERP_STOCK 매칭.
+        //   기간 매출도 함께 (최근 30일 default). 소진 예상일 = available / (30일 판매량 / 30).
+        try {
+          const p = await getPool();
+          const [stockRes, salesRes] = await Promise.all([
+            p.request().query(`
+              SELECT
+                c.Card_Code AS product_code,
+                c.Card_Name AS product_name,
+                c.Card_Div,
+                ISNULL(s.INVENTORY_CURRENT_QTY, 0) AS current_qty,
+                ISNULL(s.INVENTORY_AVAILABLE_QTY, 0) AS available_qty
+              FROM S2_Card c WITH (NOLOCK)
+              LEFT JOIN S2_CARD_ERP_STOCK s WITH (NOLOCK) ON s.CARD_CODE = c.Card_Code
+              WHERE c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%'
+            `),
+            p.request().query(`
+              SELECT card_code, SUM(qty) AS qty_30d
+              FROM (
+                SELECT c.Card_Code AS card_code, coi.item_count AS qty
+                FROM custom_order co WITH (NOLOCK)
+                INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+                INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')
+                  AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+                  AND co.settle_date >= DATEADD(day, -30, GETDATE())
+                UNION ALL
+                SELECT c.Card_Code, oi.order_count
+                FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')
+                  AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+                  AND o.settle_date >= DATEADD(day, -30, GETDATE())
+              ) AS all_sales
+              GROUP BY card_code
+            `)
+          ]);
+          const salesMap = new Map();
+          for (const r of (salesRes.recordset || [])) {
+            salesMap.set(r.card_code, Number(r.qty_30d) || 0);
+          }
+          const items = (stockRes.recordset || []).map(r => {
+            const qty30 = salesMap.get(r.product_code) || 0;
+            const dailyAvg = qty30 / 30;
+            const daysLeft = (dailyAvg > 0 && r.available_qty > 0)
+              ? Math.round(r.available_qty / dailyAvg)
+              : null;
+            return {
+              product_code: r.product_code,
+              product_name: r.product_name || '',
+              card_div: r.Card_Div,
+              is_com: (r.product_code || '').startsWith('COM_'),
+              current_qty: r.current_qty,
+              available_qty: r.available_qty,
+              sales_qty_30d: qty30,
+              daily_avg_30d: Math.round(dailyAvg * 100) / 100,
+              days_to_soldout: daysLeft
+            };
+          }).sort((a, b) => (a.days_to_soldout ?? 99999) - (b.days_to_soldout ?? 99999));
+          data = {
+            items,
+            summary: {
+              total: items.length,
+              with_stock: items.filter(x => x.available_qty > 0).length,
+              soldout: items.filter(x => x.available_qty <= 0).length,
+              urgent_30d: items.filter(x => x.days_to_soldout !== null && x.days_to_soldout <= 30).length
+            }
+          };
+        } catch (e) {
+          data = { error: e.message, items: [], summary: {} };
+        }
       } else if (pathname === '/api/artists/preview' && req.method === 'GET') {
         // Phase 1 — 작가/품목 시드 데이터 read-only 미리보기.
         //   bg_artist_products + bg_artists join (artist_id FK).
