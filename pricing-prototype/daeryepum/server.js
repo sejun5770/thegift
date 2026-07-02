@@ -1408,10 +1408,10 @@ async function apiArtistSettlements(query = {}) {
     const etcNullClause  = basis === 'order' ? '' : `AND o.${etcDateCol} IS NOT NULL`;
 
     const [cardRes, etcRes] = await Promise.all([
-      // CARD — 실제 할인은 두 곳에 저장:
-      //   · custom_order.point_price (포인트 사용액, int)
-      //   · CUSTOM_ORDER_COUPON.COUPON_AMT (쿠폰 할인 금액, 여러 row 가능 → SUM)
-      //   두 값 합계를 같은 order 안 작가 품목 수로 분배 차감 (ETC 처리와 동일 패턴).
+      // CARD — 금액 비례 분배 (정률/정액 쿠폰 모두 정확):
+      //   · point_price + CUSTOM_ORDER_COUPON.COUPON_AMT 합계 = 총 할인
+      //   · 각 작가 아이템 gross 비율대로 배분 차감 (아이템 수 균등 X → 금액 비례)
+      //   · 예: A 200,000 + B 100,000 + 쿠폰 30,000 → A -20,000 / B -10,000 (2:1)
       p.request()
         .input('s', sql.VarChar, startDate)
         .input('e', sql.VarChar, endDate)
@@ -1422,17 +1422,21 @@ async function apiArtistSettlements(query = {}) {
             ISNULL(SUM(coi.item_count), 0) AS total_qty,
             ISNULL(SUM(
               CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)
-              - (ISNULL(co.point_price, 0) + ISNULL(coc.coupon_amt, 0)) * 1.0 / NULLIF(cpd_card.item_count, 0)
+              - (ISNULL(co.point_price, 0) + ISNULL(coc.coupon_amt, 0))
+                * (CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1))
+                / NULLIF(cpd_card.artist_gross, 0)
             ), 0) AS total_amount
           FROM custom_order co WITH (NOLOCK)
           INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
           INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
           LEFT JOIN (
-            SELECT order_seq, COUNT(*) AS item_count
+            SELECT coi_cpd.order_seq,
+              SUM(CAST(coi_cpd.item_sale_price AS float) * coi_cpd.item_count
+                  / ISNULL(NULLIF(c_cpd.Unit_Value, 0), 1)) AS artist_gross
             FROM custom_order_item coi_cpd WITH (NOLOCK)
             INNER JOIN S2_Card c_cpd WITH (NOLOCK) ON coi_cpd.card_seq = c_cpd.Card_Seq
             WHERE UPPER(RTRIM(LTRIM(c_cpd.Card_Code))) IN (${codesUpperEscaped})
-            GROUP BY order_seq
+            GROUP BY coi_cpd.order_seq
           ) cpd_card ON co.order_seq = cpd_card.order_seq
           LEFT JOIN (
             SELECT ORDER_SEQ, SUM(ISNULL(COUPON_AMT, 0)) AS coupon_amt
@@ -1445,7 +1449,9 @@ async function apiArtistSettlements(query = {}) {
             AND ${cardDate} >= @s AND ${cardDate} < @e
           GROUP BY UPPER(RTRIM(LTRIM(c.Card_Code))), c.Card_Name
         `),
-      // ETC — coupon_price 차감 (같은 order 안 작가 품목 수로 분배). SiteName 유무로 unit_value 나누기 분기.
+      // ETC — 금액 비례 분배 (CARD 와 동일 패턴):
+      //   · o.coupon_price 를 각 작가 아이템 gross 비율대로 배분 차감.
+      //   · SiteName IS NULL 이면 unit_value 나누기, ELSE 그대로 (기존 정책 유지).
       p.request()
         .input('s', sql.VarChar, startDate)
         .input('e', sql.VarChar, endDate)
@@ -1458,9 +1464,13 @@ async function apiArtistSettlements(query = {}) {
               CASE
                 WHEN si.SiteName IS NULL
                 THEN CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)
-                     - ISNULL(o.coupon_price, 0) * 1.0 / NULLIF(ecd.item_count, 0)
+                     - ISNULL(o.coupon_price, 0)
+                       * (CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1))
+                       / NULLIF(ecd.artist_gross, 0)
                 ELSE CAST(oi.card_sale_price AS float)
-                     - ISNULL(o.coupon_price, 0) * 1.0 / NULLIF(ecd.item_count, 0)
+                     - ISNULL(o.coupon_price, 0)
+                       * CAST(oi.card_sale_price AS float)
+                       / NULLIF(ecd.artist_gross, 0)
               END
             ), 0) AS total_amount
           FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
@@ -1468,11 +1478,18 @@ async function apiArtistSettlements(query = {}) {
           INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
           LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
           LEFT JOIN (
-            SELECT order_seq, COUNT(*) AS item_count
+            SELECT oi_cpd.order_seq,
+              SUM(CASE WHEN si_cpd.SiteName IS NULL
+                       THEN CAST(oi_cpd.card_sale_price AS float) * oi_cpd.order_count
+                            / ISNULL(NULLIF(c_cpd.Unit_Value, 0), 1)
+                       ELSE CAST(oi_cpd.card_sale_price AS float)
+                  END) AS artist_gross
             FROM CUSTOM_ETC_ORDER_ITEM oi_cpd WITH (NOLOCK)
             INNER JOIN S2_Card c_cpd WITH (NOLOCK) ON oi_cpd.card_seq = c_cpd.Card_Seq
+            INNER JOIN CUSTOM_ETC_ORDER o_cpd WITH (NOLOCK) ON oi_cpd.order_seq = o_cpd.order_seq
+            LEFT JOIN SiteInfo si_cpd WITH (NOLOCK) ON o_cpd.company_Seq = si_cpd.CompayCode
             WHERE UPPER(RTRIM(LTRIM(c_cpd.Card_Code))) IN (${codesUpperEscaped})
-            GROUP BY order_seq
+            GROUP BY oi_cpd.order_seq
           ) ecd ON o.order_seq = ecd.order_seq
           WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesUpperEscaped})
             AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
