@@ -14945,13 +14945,13 @@ function copyBgUnified() {
 
   const selectedRows = checked.map(cb => bgUnifiedRows[parseInt(cb.dataset.idx)]);
 
-  // 24열 구조: A='', B=택배, C=일반, D=주문번호, E=수령인, F=연락처, G='', H=배송지, I='',
+  // 23열 구조: A='', B=택배, C=일반, D=주문번호, E=수령인, F=연락처, G='', H=배송지, I='',
   //            J=상품명, K=품목코드1(1번째 자유옵션 코드 or baseCode),
   //            L=품목코드2(2번째 자유옵션 코드), M=박스컬러(box_code or TGJBK09O_ 조합코드),
   //            N=스티커코드(수량), O='',
   //            P=옵션선택(K/L 로 매핑 안 된 3번째+ 그룹들만, '그룹명: 이름' / ' / ' 구분),
-  //            Q=스티커 문구(고객 입력), R=배송메세지(MSSQL recv_msg), S='', T='', U=주문수량,
-  //            V='', W=희망출고일(빠른출고시 짙은빨강), X=희망출고일
+  //            Q=스티커 문구(고객 입력), R=배송메세지(MSSQL recv_msg), S=주문수량, T='', U='',
+  //            V=희망출고일(빠른출고시 짙은빨강), W=희망출고일
   //
   // 자유 옵션 매핑 정책 (신상품 등 사례):
   //   - 상품의 custom_options 그룹 정의 순서 기준 (admin 이 그룹을 만든 순서 = insertion order)
@@ -14967,7 +14967,7 @@ function copyBgUnified() {
   //     그 외 (수건+수건 조합) → TGJBK09D3
   //   - 그 외 상품: sel.box_code (박스 컬러 선택된 상품)
   const buildCells = ({ order, ci, sel, product_code, product_name, product_qty }) => {
-    const cells = Array(24).fill('');
+    const cells = Array(23).fill('');
     cells[1] = '택배';
     cells[2] = '일반';
     cells[3] = String(order.order_seq).replace(/^ETC-/, '');
@@ -15078,22 +15078,22 @@ function copyBgUnified() {
     if (order.recv_msg) {
       cells[17] = String(order.recv_msg).replace(/[\t\r\n]+/g, ' ').trim();
     }
-    // U열(index 20) = 주문수량 — 나눔배송 대응 (product_qty 우선, sel.quantity 는 주문 전체라 폴백용)
-    cells[20] = product_qty || sel?.quantity || '';
-    // W/X열 = 출고일 — product 단위 (멀티 그룹 호환): sel.desired_ship_date 우선, 없으면 ci.desired_ship_date
+    // S열(index 18) = 주문수량 — 나눔배송 대응 (product_qty 우선, sel.quantity 는 주문 전체라 폴백용)
+    cells[18] = product_qty || sel?.quantity || '';
+    // V/W열 = 출고일 — product 단위 (멀티 그룹 호환): sel.desired_ship_date 우선, 없으면 ci.desired_ship_date
     const tsvShipDate = sel?.desired_ship_date || ci?.desired_ship_date || '';
     const tsvIsExpress = (typeof sel?.is_express === 'boolean') ? sel.is_express : !!ci?.is_express;
-    if (tsvIsExpress) cells[22] = tsvShipDate;
-    cells[23] = tsvShipDate;
+    if (tsvIsExpress) cells[21] = tsvShipDate;
+    cells[22] = tsvShipDate;
     return cells;
   };
 
   const htmlRows = selectedRows.map(row => {
     const cells = buildCells(row);
-    // W열(빠른출고 출고일) 빨간색 강조 — product 단위 is_express (멀티 그룹 호환)
+    // V열(빠른출고 출고일) 빨간색 강조 — product 단위 is_express (멀티 그룹 호환)
     const rowIsExpress = (typeof row.sel?.is_express === 'boolean') ? row.sel.is_express : !!row.ci?.is_express;
     return '<tr>' + cells.map((val, ci) => {
-      const style = (ci === 22 && rowIsExpress) ? ' style="color:#8B0000;font-weight:bold"' : '';
+      const style = (ci === 21 && rowIsExpress) ? ' style="color:#8B0000;font-weight:bold"' : '';
       return `<td${style}>${val}</td>`;
     }).join('') + '</tr>';
   }).join('');
