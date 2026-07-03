@@ -15010,7 +15010,21 @@ function copyBgUnified() {
       cells[11] = sel.box_code;
     }
 
-    if (sel?.sticker_code) {
+    // M열(index 12) 처리
+    //   1) TGJBK09O_ 수건 답례품 세트: 스티커 대신 조합 판정 코드 (박스컬러) 삽입
+    //      자유옵션 그룹명 기준:
+    //        핸드워시 그룹 존재 → TGJBK09D1
+    //        주방세제 그룹 존재 → TGJBK09D2
+    //        그 외 (수건+수건 조합)  → TGJBK09D3
+    //   2) 그 외 상품: 기존 스티커코드(수량) 삽입
+    if (/^TGJBK09O\d+/i.test(baseCode)) {
+      const gLower = orderedGroupNames.map(g => String(g).toLowerCase());
+      const hasHandwash = gLower.some(g => g.includes('핸드워시'));
+      const hasDishwash = gLower.some(g => g.includes('주방세제'));
+      if (hasHandwash) cells[12] = 'TGJBK09D1';
+      else if (hasDishwash) cells[12] = 'TGJBK09D2';
+      else cells[12] = 'TGJBK09D3';
+    } else if (sel?.sticker_code) {
       // 나눔배송 대응 — product_qty(배송지별 수량) 우선, 없으면 sel.quantity(주문 전체) 폴백
       const qty = product_qty || sel.quantity;
       const qtyStr = qty ? `(${qty}개)` : '';
