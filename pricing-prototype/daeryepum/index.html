@@ -13259,7 +13259,7 @@ function renderBgUnified() {
     // 자유 옵션 그룹 선택 — sel.custom_options = {그룹명: {code, name} | code} 형태.
     //   legacy string-only 저장 형식도 호환. 여러 그룹 줄바꿈 분리.
     //   canonical 순서 (product settings 정의 순서) 로 표시 → TSV K/L/O 매핑 순서와 일관.
-    //   1번째 → 'K↗' 뱃지 (품목코드 매핑), 2번째 → 'L↗' (박스코드 매핑) 힌트.
+    //   1번째 → 'K↗' 뱃지 (품목코드1 매핑), 2번째 → 'L↗' (품목코드2 매핑) 힌트.
     const customOptsCell = (() => {
       const co = sel?.custom_options;
       if (!co || typeof co !== 'object') return '<span style="color:var(--gray-300)">-</span>';
@@ -13284,8 +13284,8 @@ function renderBgUnified() {
           : '';
         // K/L 매핑 힌트 뱃지 (3번째 이상은 O열로)
         let targetBadge = '';
-        if (i === 0) targetBadge = '<span style="background:#dbeafe;color:#1e40af;font-size:9px;font-weight:600;padding:1px 4px;border-radius:3px;margin-right:4px" title="수집복사 K열(품목코드) 매핑">K↗</span>';
-        else if (i === 1) targetBadge = '<span style="background:#fce7f3;color:#9d174d;font-size:9px;font-weight:600;padding:1px 4px;border-radius:3px;margin-right:4px" title="수집복사 L열(박스코드) 매핑">L↗</span>';
+        if (i === 0) targetBadge = '<span style="background:#dbeafe;color:#1e40af;font-size:9px;font-weight:600;padding:1px 4px;border-radius:3px;margin-right:4px" title="수집복사 K열(품목코드1) 매핑">K↗</span>';
+        else if (i === 1) targetBadge = '<span style="background:#fce7f3;color:#9d174d;font-size:9px;font-weight:600;padding:1px 4px;border-radius:3px;margin-right:4px" title="수집복사 L열(품목코드2) 매핑">L↗</span>';
         return `<div>${targetBadge}<span style="color:var(--gray-500)">${esc(gName)}:</span> ${esc(name)}${codePart}</div>`;
       }).filter(Boolean);
       return entries.length ? entries.join('') : '<span style="color:var(--gray-300)">-</span>';
@@ -14945,22 +14945,29 @@ function copyBgUnified() {
 
   const selectedRows = checked.map(cb => bgUnifiedRows[parseInt(cb.dataset.idx)]);
 
-  // 23열 구조: A='', B=택배, C=일반, D=주문번호, E=수령인, F=연락처, G='', H=배송지, I='',
-  //            J=상품명, K=품목코드(또는 1번째 자유옵션 코드), L=박스코드(또는 2번째 자유옵션 코드),
-  //            M=스티커코드(수량), N='',
-  //            O=옵션선택(K/L 로 매핑 안 된 3번째+ 그룹들만, '그룹명: 이름' / ' / ' 구분),
-  //            P=스티커 문구(고객 입력), Q=배송메세지(MSSQL recv_msg), R='', S='', T=주문수량,
-  //            U='', V=희망출고일(빠른출고시 짙은빨강), W=희망출고일
+  // 24열 구조: A='', B=택배, C=일반, D=주문번호, E=수령인, F=연락처, G='', H=배송지, I='',
+  //            J=상품명, K=품목코드1(1번째 자유옵션 코드 or baseCode),
+  //            L=품목코드2(2번째 자유옵션 코드), M=박스컬러(box_code or TGJBK09O_ 조합코드),
+  //            N=스티커코드(수량), O='',
+  //            P=옵션선택(K/L 로 매핑 안 된 3번째+ 그룹들만, '그룹명: 이름' / ' / ' 구분),
+  //            Q=스티커 문구(고객 입력), R=배송메세지(MSSQL recv_msg), S='', T='', U=주문수량,
+  //            V='', W=희망출고일(빠른출고시 짙은빨강), X=희망출고일
   //
   // 자유 옵션 매핑 정책 (신상품 등 사례):
   //   - 상품의 custom_options 그룹 정의 순서 기준 (admin 이 그룹을 만든 순서 = insertion order)
-  //   - 1번째 그룹 (예: 수건 색상) → K열 덮어쓰기. 옵션 미선택이면 원래 product_code fallback.
-  //   - 2번째 그룹 (예: 고리수건 타입) → L열 덮어쓰기. 옵션 미선택이면 원래 box_code fallback.
-  //   - 3번째 이상 그룹 → O열에 '그룹명: 이름' 형태로 노출
-  //   - K/L 로 매핑된 그룹은 O열에서 제외 (중복 방지)
-  //   - custom_options 정의가 없는 상품은 기존 그대로 (K=품목코드, L=박스코드).
+  //   - 1번째 그룹 (예: 수건 색상 / 핸드워시) → K열 덮어쓰기. 옵션 미선택이면 baseCode fallback.
+  //   - 2번째 그룹 (예: 고리수건 타입) → L열 덮어쓰기. 옵션 미선택이면 빈 값.
+  //   - 3번째 이상 그룹 → P열에 '그룹명: 이름' 형태로 노출 (K/L 로 매핑된 그룹은 제외)
+  //   - custom_options 정의가 없는 상품은 K=baseCode, L=빈 값.
+  //
+  // M열(박스컬러) 정책:
+  //   - TGJBK09O_ 수건 답례품 세트: 자유옵션 그룹명 기준 조합 판정 코드
+  //     핸드워시 그룹 존재 → TGJBK09D1
+  //     주방세제 그룹 존재 → TGJBK09D2
+  //     그 외 (수건+수건 조합) → TGJBK09D3
+  //   - 그 외 상품: sel.box_code (박스 컬러 선택된 상품)
   const buildCells = ({ order, ci, sel, product_code, product_name, product_qty }) => {
-    const cells = Array(23).fill('');
+    const cells = Array(24).fill('');
     cells[1] = '택배';
     cells[2] = '일반';
     cells[3] = String(order.order_seq).replace(/^ETC-/, '');
@@ -15000,23 +15007,20 @@ function copyBgUnified() {
     const firstGroupOpt = orderedGroupNames[0] ? getOpt(orderedGroupNames[0]) : null;
     const secondGroupOpt = orderedGroupNames[1] ? getOpt(orderedGroupNames[1]) : null;
 
-    // K열(index 10) = 품목코드 — 자유옵션 1번째 그룹(canonical 순서) 있으면 그 code, 없으면 상품설정 매핑된 base.
+    // K열(index 10) = 품목코드1 — 자유옵션 1번째 그룹 있으면 그 code, 없으면 baseCode
     cells[10] = (firstGroupOpt && firstGroupOpt.code) ? firstGroupOpt.code : baseCode;
 
-    // L열(index 11) = 박스코드 — 자유옵션 2번째 그룹 있으면 그 code, 없으면 sel.box_code.
+    // L열(index 11) = 품목코드2 — 자유옵션 2번째 그룹 있으면 그 code, 없으면 빈 값
     if (secondGroupOpt && secondGroupOpt.code) {
       cells[11] = secondGroupOpt.code;
-    } else if (sel?.box_code) {
-      cells[11] = sel.box_code;
     }
 
-    // M열(index 12) 처리
-    //   1) TGJBK09O_ 수건 답례품 세트: 스티커 대신 조합 판정 코드 (박스컬러) 삽입
-    //      자유옵션 그룹명 기준:
-    //        핸드워시 그룹 존재 → TGJBK09D1
-    //        주방세제 그룹 존재 → TGJBK09D2
-    //        그 외 (수건+수건 조합)  → TGJBK09D3
-    //   2) 그 외 상품: 기존 스티커코드(수량) 삽입
+    // M열(index 12) = 박스컬러
+    //   - TGJBK09O_ 수건 답례품 세트: 자유옵션 그룹명 기준 조합 판정 코드
+    //     핸드워시 그룹 존재 → TGJBK09D1
+    //     주방세제 그룹 존재 → TGJBK09D2
+    //     그 외 (수건+수건 조합) → TGJBK09D3
+    //   - 그 외 상품: sel.box_code
     if (/^TGJBK09O\d+/i.test(baseCode)) {
       const gLower = orderedGroupNames.map(g => String(g).toLowerCase());
       const hasHandwash = gLower.some(g => g.includes('핸드워시'));
@@ -15024,14 +15028,18 @@ function copyBgUnified() {
       if (hasHandwash) cells[12] = 'TGJBK09D1';
       else if (hasDishwash) cells[12] = 'TGJBK09D2';
       else cells[12] = 'TGJBK09D3';
-    } else if (sel?.sticker_code) {
-      // 나눔배송 대응 — product_qty(배송지별 수량) 우선, 없으면 sel.quantity(주문 전체) 폴백
-      const qty = product_qty || sel.quantity;
-      const qtyStr = qty ? `(${qty}개)` : '';
-      cells[12] = `${sel.sticker_code}${qtyStr}`;
+    } else if (sel?.box_code) {
+      cells[12] = sel.box_code;
     }
 
-    // O열(index 14) = K/L 로 매핑되지 않은 3번째+ 그룹들만 '그룹명: 이름' 형태로 노출 (canonical 순서).
+    // N열(index 13) = 스티커코드(수량) — 나눔배송 대응 (product_qty 우선, sel.quantity 폴백)
+    if (sel?.sticker_code) {
+      const qty = product_qty || sel.quantity;
+      const qtyStr = qty ? `(${qty}개)` : '';
+      cells[13] = `${sel.sticker_code}${qtyStr}`;
+    }
+
+    // P열(index 15) = K/L 로 매핑되지 않은 3번째+ 그룹들만 '그룹명: 이름' 형태로 노출 (canonical 순서).
     //   TSV 안전: 탭/개행 → 공백 치환. 매핑할 그룹 없으면 셀 빈 채로 유지.
     if (orderedGroupNames.length > 2) {
       const safeStr = v => String(v).replace(/[\t\r\n]+/g, ' ').trim();
@@ -15040,9 +15048,9 @@ function copyBgUnified() {
         if (!opt || !opt.name) return '';
         return `${safeStr(gName)}: ${safeStr(opt.name)}`;
       }).filter(Boolean);
-      if (parts.length) cells[14] = parts.join(' / ');
+      if (parts.length) cells[15] = parts.join(' / ');
     }
-    // P열(index 15) = 고객이 입력한 스티커 문구 (custom_values)
+    // Q열(index 16) = 고객이 입력한 스티커 문구 (custom_values)
     //   - sticker_input='custom' 일 때만 값 존재. 'none'/'선택안함'이면 빈 문자열.
     //   - 스티커 custom_fields 정의 순서대로, '필드라벨: 값' 형태로 연결 (' / ' 구분).
     //   - default 단일 'text' 필드는 라벨 없이 값만 (기존 동작 유지, 가독성).
@@ -15058,34 +15066,34 @@ function copyBgUnified() {
           if (entries.length === 1 && e.key === 'text') return v;
           return `${e.label}: ${v}`;
         }).filter(Boolean);
-        if (parts.length) cells[15] = parts.join(' / ');
+        if (parts.length) cells[16] = parts.join(' / ');
       }
     }
     if (sel?.logo_url) {
       const logoTag = `📷 이미지: ${String(sel.logo_url).replace(/[\t\r\n]+/g, ' ').trim()}`;
-      cells[15] = cells[15] ? `${cells[15]} / ${logoTag}` : logoTag;
+      cells[16] = cells[16] ? `${cells[16]} / ${logoTag}` : logoTag;
     }
-    // Q열(index 16) = 배송메세지 (MSSQL recv_msg — ETC: o.recv_msg / CARD: di.DELIVERY_MEMO)
+    // R열(index 17) = 배송메세지 (MSSQL recv_msg — ETC: o.recv_msg / CARD: di.DELIVERY_MEMO)
     //   TSV 안전: 탭/개행 → 공백으로 치환.
     if (order.recv_msg) {
-      cells[16] = String(order.recv_msg).replace(/[\t\r\n]+/g, ' ').trim();
+      cells[17] = String(order.recv_msg).replace(/[\t\r\n]+/g, ' ').trim();
     }
-    // T열 = 주문수량 — 나눔배송 대응 (product_qty 우선, sel.quantity 는 주문 전체라 폴백용)
-    cells[19] = product_qty || sel?.quantity || '';
-    // V/W열 = 출고일 — product 단위 (멀티 그룹 호환): sel.desired_ship_date 우선, 없으면 ci.desired_ship_date
+    // U열(index 20) = 주문수량 — 나눔배송 대응 (product_qty 우선, sel.quantity 는 주문 전체라 폴백용)
+    cells[20] = product_qty || sel?.quantity || '';
+    // W/X열 = 출고일 — product 단위 (멀티 그룹 호환): sel.desired_ship_date 우선, 없으면 ci.desired_ship_date
     const tsvShipDate = sel?.desired_ship_date || ci?.desired_ship_date || '';
     const tsvIsExpress = (typeof sel?.is_express === 'boolean') ? sel.is_express : !!ci?.is_express;
-    if (tsvIsExpress) cells[21] = tsvShipDate;
-    cells[22] = tsvShipDate;
+    if (tsvIsExpress) cells[22] = tsvShipDate;
+    cells[23] = tsvShipDate;
     return cells;
   };
 
   const htmlRows = selectedRows.map(row => {
     const cells = buildCells(row);
-    // V열(빠른출고 출고일) 빨간색 강조 — product 단위 is_express (멀티 그룹 호환)
+    // W열(빠른출고 출고일) 빨간색 강조 — product 단위 is_express (멀티 그룹 호환)
     const rowIsExpress = (typeof row.sel?.is_express === 'boolean') ? row.sel.is_express : !!row.ci?.is_express;
     return '<tr>' + cells.map((val, ci) => {
-      const style = (ci === 21 && rowIsExpress) ? ' style="color:#8B0000;font-weight:bold"' : '';
+      const style = (ci === 22 && rowIsExpress) ? ' style="color:#8B0000;font-weight:bold"' : '';
       return `<td${style}>${val}</td>`;
     }).join('') + '</tr>';
   }).join('');
