@@ -6344,6 +6344,136 @@ const server = http.createServer(async (req, res) => {
         } catch (e) {
           data = { error: e.message, items: [], summary: {} };
         }
+      } else if (pathname === '/api/daeryepum-stock-verify' && req.method === 'GET') {
+        // 재고 데이터 검증 — S2_CARD_ERP_STOCK 저장값 vs 실 order 계산치 대조.
+        //   1) 테이블 스키마 dump (컬럼 리스트 + 데이터 타입)
+        //   2) 상위 SKU (매출액 큰 순) 30개에 대해:
+        //      ERP TOTAL_SALE_PRICE_30_DAY (저장값)
+        //      실 30일 매출 계산치 (custom_order + CUSTOM_ETC_ORDER, settle_date 기준, 결제완료만)
+        //      편차 % = (ERP - 실계산) / max(실계산, 1) × 100
+        //   3) 편차 큰 순으로 정렬해 문제 SKU 우선 노출
+        //   ?code=CARD_CODE 지정 시 해당 SKU 만 상세 조회
+        const specificCode = String(parsed.query.code || '').trim();
+        const limit = Math.max(5, Math.min(200, parseInt(parsed.query.limit) || 30));
+        try {
+          const p = await getPool();
+          const req0 = p.request();
+          req0.timeout = 120000;
+          // 1) 스키마
+          const schemaRes = await req0.query(`
+            SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_NAME = 'S2_CARD_ERP_STOCK'
+            ORDER BY ORDINAL_POSITION
+          `);
+          const schema_columns = (schemaRes.recordset || []).map(c => ({
+            name: c.COLUMN_NAME, type: c.DATA_TYPE, nullable: c.IS_NULLABLE
+          }));
+
+          // 2) SKU 후보 (답례품 카테고리 + 재고 존재 or 매출 존재)
+          const codeFilter = specificCode
+            ? `AND s.CARD_CODE = '${specificCode.replace(/'/g, "''")}'`
+            : '';
+          const req1 = p.request();
+          req1.timeout = 120000;
+          const skusRes = await req1.query(`
+            SELECT TOP ${specificCode ? 5 : limit}
+              s.CARD_CODE AS card_code,
+              c.Card_Name AS card_name,
+              c.Card_Div AS card_div,
+              ISNULL(s.INVENTORY_CURRENT_QTY, 0) AS current_qty,
+              ISNULL(s.INVENTORY_AVAILABLE_QTY, 0) AS available_qty,
+              ISNULL(s.TOTAL_SALE_PRICE_30_DAY, 0) AS erp_sales_30d
+            FROM S2_CARD_ERP_STOCK s WITH (NOLOCK)
+            LEFT JOIN S2_Card c WITH (NOLOCK) ON c.Card_Code = s.CARD_CODE
+            WHERE (c.Card_Div = 'D01' OR s.CARD_CODE LIKE 'COM[_]%')
+              ${codeFilter}
+            ORDER BY ISNULL(s.TOTAL_SALE_PRICE_30_DAY, 0) DESC
+          `);
+          const skus = skusRes.recordset || [];
+          const codes = skus.map(r => r.card_code).filter(Boolean);
+
+          // 3) 각 SKU 의 실 30일 매출/수량 계산 (settle_date 기준, 결제완료 상태만)
+          let actualByCode = new Map();
+          if (codes.length) {
+            const codeList = codes.map(c => `'${c.replace(/'/g, "''")}'`).join(',');
+            const req2 = p.request();
+            req2.timeout = 120000;
+            const actualRes = await req2.query(`
+              SELECT card_code, SUM(revenue) AS actual_sales, SUM(qty) AS actual_qty
+              FROM (
+                -- CARD (custom_order)
+                SELECT c.Card_Code AS card_code,
+                       CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1) AS revenue,
+                       coi.item_count AS qty
+                FROM custom_order co WITH (NOLOCK)
+                INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+                INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                WHERE c.Card_Code IN (${codeList})
+                  AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+                  AND co.settle_date >= DATEADD(day, -30, GETDATE())
+                UNION ALL
+                -- ETC (CUSTOM_ETC_ORDER)
+                SELECT c.Card_Code,
+                       CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1) AS revenue,
+                       oi.order_count
+                FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                WHERE c.Card_Code IN (${codeList})
+                  AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+                  AND o.settle_date >= DATEADD(day, -30, GETDATE())
+              ) t
+              GROUP BY card_code
+            `);
+            (actualRes.recordset || []).forEach(r => {
+              actualByCode.set(r.card_code, {
+                actual_sales: Math.round(Number(r.actual_sales) || 0),
+                actual_qty: Number(r.actual_qty) || 0
+              });
+            });
+          }
+
+          // 4) 대조 결과
+          const rows = skus.map(s => {
+            const actual = actualByCode.get(s.card_code) || { actual_sales: 0, actual_qty: 0 };
+            const erp = Number(s.erp_sales_30d) || 0;
+            const diff = erp - actual.actual_sales;
+            const diffPct = actual.actual_sales > 0
+              ? Math.round(diff / actual.actual_sales * 1000) / 10  // 0.1% 단위
+              : (erp > 0 ? 999 : 0);
+            return {
+              card_code: s.card_code,
+              card_name: s.card_name || '',
+              card_div: s.card_div,
+              current_qty: s.current_qty,
+              available_qty: s.available_qty,
+              erp_sales_30d: erp,
+              actual_sales_30d: actual.actual_sales,
+              actual_qty_30d: actual.actual_qty,
+              diff_amount: diff,
+              diff_pct: diffPct,
+              status: Math.abs(diffPct) < 10 ? 'OK'
+                    : Math.abs(diffPct) < 30 ? 'WARN'
+                    : 'MISMATCH'
+            };
+          }).sort((a, b) => Math.abs(b.diff_pct) - Math.abs(a.diff_pct));
+
+          data = {
+            filter: { code: specificCode || null, limit },
+            schema_columns,
+            total_checked: rows.length,
+            summary: {
+              ok: rows.filter(r => r.status === 'OK').length,
+              warn: rows.filter(r => r.status === 'WARN').length,
+              mismatch: rows.filter(r => r.status === 'MISMATCH').length
+            },
+            hint: 'diff_pct: (ERP - 실계산) / 실계산 %. 10% 이내 OK / 30% 이내 WARN / 30% 초과 MISMATCH.',
+            rows
+          };
+        } catch (e) {
+          data = { error: e.message };
+        }
       } else if (pathname === '/api/artists/preview' && req.method === 'GET') {
         // Phase 1 — 작가/품목 시드 데이터 read-only 미리보기.
         //   bg_artist_products + bg_artists join (artist_id FK).
