@@ -813,9 +813,11 @@ async function apiOrders(query) {
       ${etcCouponDivisorForCategory}
       OUTER APPLY (
         -- canonical name — 같은 Card_Code 여러 Card_Seq 있을 때 대표 이름 선정
-        --   1) 프리픽스 ([시크릿특가]/[XX%할인] 등) 없는 row 우선
-        --   2) DISPLAY_YORN='Y' 우선
-        --   3) 최신 Card_Seq
+        --   후보 필터: 이상 이름 (빈 문자열/사용X/사용안함/삭제/테스트) 제외
+        --   우선순위:
+        --     1) DISPLAY_YORN='Y' 우선
+        --     2) 프리픽스 ([시크릿특가]/[XX%할인] 등) 없는 row 우선
+        --     3) 최신 Card_Seq
         --   canonical row 이름에 프리픽스 있으면 첫 ']' 이후 문자열 반환 (제거)
         SELECT TOP 1
           CASE
@@ -825,9 +827,14 @@ async function apiOrders(query) {
           END AS canonical_name
         FROM S2_Card c2 WITH (NOLOCK)
         WHERE c2.Card_Code = c.Card_Code
+          AND LTRIM(RTRIM(ISNULL(c2.Card_Name, ''))) <> ''
+          AND c2.Card_Name NOT LIKE '%사용X%'
+          AND c2.Card_Name NOT LIKE '%사용안함%'
+          AND c2.Card_Name NOT LIKE '%삭제%'
+          AND c2.Card_Name NOT LIKE '%테스트%'
         ORDER BY
-          CASE WHEN c2.Card_Name LIKE '[[]%' THEN 1 ELSE 0 END,
           CASE WHEN c2.DISPLAY_YORN = 'Y' THEN 0 ELSE 1 END,
+          CASE WHEN c2.Card_Name LIKE '[[]%' THEN 1 ELSE 0 END,
           c2.Card_Seq DESC
       ) canon
       OUTER APPLY (
@@ -885,9 +892,11 @@ async function apiOrders(query) {
       LEFT JOIN card_copurchase_orders cp ON co.order_seq = cp.order_seq
       OUTER APPLY (
         -- canonical name — 같은 Card_Code 여러 Card_Seq 있을 때 대표 이름 선정
-        --   1) 프리픽스 ([시크릿특가]/[XX%할인] 등) 없는 row 우선
-        --   2) DISPLAY_YORN='Y' 우선
-        --   3) 최신 Card_Seq
+        --   후보 필터: 이상 이름 (빈 문자열/사용X/사용안함/삭제/테스트) 제외
+        --   우선순위:
+        --     1) DISPLAY_YORN='Y' 우선
+        --     2) 프리픽스 ([시크릿특가]/[XX%할인] 등) 없는 row 우선
+        --     3) 최신 Card_Seq
         --   canonical row 이름에 프리픽스 있으면 첫 ']' 이후 문자열 반환 (제거)
         SELECT TOP 1
           CASE
@@ -897,9 +906,14 @@ async function apiOrders(query) {
           END AS canonical_name
         FROM S2_Card c2 WITH (NOLOCK)
         WHERE c2.Card_Code = c.Card_Code
+          AND LTRIM(RTRIM(ISNULL(c2.Card_Name, ''))) <> ''
+          AND c2.Card_Name NOT LIKE '%사용X%'
+          AND c2.Card_Name NOT LIKE '%사용안함%'
+          AND c2.Card_Name NOT LIKE '%삭제%'
+          AND c2.Card_Name NOT LIKE '%테스트%'
         ORDER BY
-          CASE WHEN c2.Card_Name LIKE '[[]%' THEN 1 ELSE 0 END,
           CASE WHEN c2.DISPLAY_YORN = 'Y' THEN 0 ELSE 1 END,
+          CASE WHEN c2.Card_Name LIKE '[[]%' THEN 1 ELSE 0 END,
           c2.Card_Seq DESC
       ) canon
       INNER JOIN (
@@ -6882,9 +6896,14 @@ const server = http.createServer(async (req, res) => {
                   c2.DISPLAY_YORN AS canonical_display
                 FROM S2_Card c2 WITH (NOLOCK)
                 WHERE c2.Card_Code = c.Card_Code
+                  AND LTRIM(RTRIM(ISNULL(c2.Card_Name, ''))) <> ''
+                  AND c2.Card_Name NOT LIKE '%사용X%'
+                  AND c2.Card_Name NOT LIKE '%사용안함%'
+                  AND c2.Card_Name NOT LIKE '%삭제%'
+                  AND c2.Card_Name NOT LIKE '%테스트%'
                 ORDER BY
-                  CASE WHEN c2.Card_Name LIKE '[[]%' THEN 1 ELSE 0 END,
                   CASE WHEN c2.DISPLAY_YORN = 'Y' THEN 0 ELSE 1 END,
+                  CASE WHEN c2.Card_Name LIKE '[[]%' THEN 1 ELSE 0 END,
                   c2.Card_Seq DESC
               ) canon
               WHERE c.Card_Name <> canon.canonical_name
