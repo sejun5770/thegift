@@ -6281,20 +6281,48 @@ const server = http.createServer(async (req, res) => {
         //     unit_price       = sales_amount_30d / sales_qty_30d (실판매 평균 단가; 프로모션/할인 반영)
         //     stock_value      = available_qty × unit_price (재고 자산액)
         //   Note: S2_Card 마스터에 단가 컬럼이 없어 실판매 기반 계산. 30일 무판매 SKU 는 단가 미상.
+        //   상품명: 주문조회와 동일한 canonical name 로직 적용
+        //     · DISPLAY_YORN='Y' 우선 → 프리픽스 없음 → 최신 Card_Seq
+        //     · 이상 이름 필터: 빈 문자열/사용X/사용안함/삭제/테스트 제외
+        //     · '[프리픽스]이름' 형태이면 첫 ']' 이후 문자열 반환
+        //   Card_Code 별 dedup — 같은 Card_Code 여러 Card_Seq 있을 때 1행만 노출.
         try {
           const p = await getPool();
           const [stockRes, salesRes] = await Promise.all([
             p.request().query(`
               SELECT
-                c.Card_Code AS product_code,
-                c.Card_Name AS product_name,
-                c.Card_Div,
+                codes.Card_Code AS product_code,
+                canon.canonical_name AS product_name,
+                codes.Card_Div,
                 ISNULL(s.INVENTORY_CURRENT_QTY, 0) AS current_qty,
                 ISNULL(s.INVENTORY_AVAILABLE_QTY, 0) AS available_qty,
                 ISNULL(s.TOTAL_SALE_PRICE_30_DAY, 0) AS sales_amount_30d
-              FROM S2_Card c WITH (NOLOCK)
-              LEFT JOIN S2_CARD_ERP_STOCK s WITH (NOLOCK) ON s.CARD_CODE = c.Card_Code
-              WHERE c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%'
+              FROM (
+                SELECT Card_Code, MAX(Card_Div) AS Card_Div
+                FROM S2_Card WITH (NOLOCK)
+                WHERE Card_Div = 'D01' OR Card_Code LIKE 'COM[_]%'
+                GROUP BY Card_Code
+              ) codes
+              LEFT JOIN S2_CARD_ERP_STOCK s WITH (NOLOCK) ON s.CARD_CODE = codes.Card_Code
+              OUTER APPLY (
+                SELECT TOP 1
+                  CASE
+                    WHEN c2.Card_Name LIKE '[[]%[]]%'
+                      THEN LTRIM(SUBSTRING(c2.Card_Name, CHARINDEX(']', c2.Card_Name) + 1, LEN(c2.Card_Name)))
+                    ELSE c2.Card_Name
+                  END AS canonical_name
+                FROM S2_Card c2 WITH (NOLOCK)
+                WHERE c2.Card_Code = codes.Card_Code
+                  AND LTRIM(RTRIM(ISNULL(c2.Card_Name, ''))) <> ''
+                  AND c2.Card_Name NOT LIKE '%사용X%'
+                  AND c2.Card_Name NOT LIKE '%사용안함%'
+                  AND c2.Card_Name NOT LIKE '%삭제%'
+                  AND c2.Card_Name NOT LIKE '%테스트%'
+                ORDER BY
+                  CASE WHEN c2.DISPLAY_YORN = 'Y' THEN 0 ELSE 1 END,
+                  CASE WHEN c2.Card_Name LIKE '[[]%' THEN 1 ELSE 0 END,
+                  c2.Card_Seq DESC
+              ) canon
             `),
             p.request().query(`
               SELECT card_code, SUM(qty) AS qty_30d
