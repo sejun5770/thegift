@@ -6275,12 +6275,13 @@ const server = http.createServer(async (req, res) => {
         data = await apiOrders(parsed.query);
       } else if (pathname === '/api/daeryepum-stock' && req.method === 'GET') {
         // 답례품 재고 조회 — S2_Card (D01 OR COM_%) + S2_CARD_ERP_STOCK 매칭.
-        //   기간 매출도 함께 (최근 30일 default). 소진 예상일 = available / (30일 판매량 / 30).
-        //   금액:
-        //     sales_amount_30d = S2_CARD_ERP_STOCK.TOTAL_SALE_PRICE_30_DAY (30일 매출 금액)
-        //     unit_price       = sales_amount_30d / sales_qty_30d (실판매 평균 단가; 프로모션/할인 반영)
-        //     stock_value      = available_qty × unit_price (재고 자산액)
-        //   Note: S2_Card 마스터에 단가 컬럼이 없어 실판매 기반 계산. 30일 무판매 SKU 는 단가 미상.
+        //   금액 (2026-07-07 변경):
+        //     sales_amount_30d = 실 order 30일 매출 SUM(item_sale_price × item_count / Unit_Value)
+        //     · S2_CARD_ERP_STOCK.TOTAL_SALE_PRICE_30_DAY 는 갱신 이상으로 실 판매의 0.001%
+        //       수준 오차 발생 (운영팀 인지) → 자체 계산치로 대체.
+        //     unit_price  = sales_amount_30d / sales_qty_30d (실판매 평균 단가; 프로모션/할인 반영)
+        //     stock_value = available_qty × unit_price (재고 자산액)
+        //   재고 수량 (INVENTORY_CURRENT_QTY / INVENTORY_AVAILABLE_QTY) 은 ERP 값 그대로 사용.
         //   상품명: 주문조회와 동일한 canonical name 로직 적용
         //     · DISPLAY_YORN='Y' 우선 → 프리픽스 없음 → 최신 Card_Seq
         //     · 이상 이름 필터: 빈 문자열/사용X/사용안함/삭제/테스트 제외
@@ -6295,8 +6296,7 @@ const server = http.createServer(async (req, res) => {
                 canon.canonical_name AS product_name,
                 codes.Card_Div,
                 ISNULL(s.INVENTORY_CURRENT_QTY, 0) AS current_qty,
-                ISNULL(s.INVENTORY_AVAILABLE_QTY, 0) AS available_qty,
-                ISNULL(s.TOTAL_SALE_PRICE_30_DAY, 0) AS sales_amount_30d
+                ISNULL(s.INVENTORY_AVAILABLE_QTY, 0) AS available_qty
               FROM (
                 SELECT Card_Code, MAX(Card_Div) AS Card_Div
                 FROM S2_Card WITH (NOLOCK)
@@ -6325,9 +6325,16 @@ const server = http.createServer(async (req, res) => {
               ) canon
             `),
             p.request().query(`
-              SELECT card_code, SUM(qty) AS qty_30d
+              -- 실 order 30일 매출/수량 집계 (Card_Code 단위).
+              --   D01 답례품: item_sale_price × item_count / Unit_Value (묶음 단위 가격 대응)
+              --   결제완료 상태만 (CARD: status_seq NOT IN 3,5,9 / ETC: NOT IN 3,5,15)
+              --   S2_CARD_ERP_STOCK.TOTAL_SALE_PRICE_30_DAY 는 갱신 이상으로 미사용.
+              SELECT card_code, SUM(qty) AS qty_30d, SUM(revenue) AS revenue_30d
               FROM (
-                SELECT c.Card_Code AS card_code, coi.item_count AS qty
+                SELECT c.Card_Code AS card_code,
+                       coi.item_count AS qty,
+                       CAST(coi.item_sale_price AS float) * coi.item_count
+                         / ISNULL(NULLIF(c.Unit_Value, 0), 1) AS revenue
                 FROM custom_order co WITH (NOLOCK)
                 INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
                 INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
@@ -6335,7 +6342,10 @@ const server = http.createServer(async (req, res) => {
                   AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
                   AND co.settle_date >= DATEADD(day, -30, GETDATE())
                 UNION ALL
-                SELECT c.Card_Code, oi.order_count
+                SELECT c.Card_Code,
+                       oi.order_count,
+                       CAST(oi.card_sale_price AS float) * oi.order_count
+                         / ISNULL(NULLIF(c.Unit_Value, 0), 1) AS revenue
                 FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
                 INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
                 INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
@@ -6348,16 +6358,20 @@ const server = http.createServer(async (req, res) => {
           ]);
           const salesMap = new Map();
           for (const r of (salesRes.recordset || [])) {
-            salesMap.set(r.card_code, Number(r.qty_30d) || 0);
+            salesMap.set(r.card_code, {
+              qty: Number(r.qty_30d) || 0,
+              revenue: Math.round(Number(r.revenue_30d) || 0),
+            });
           }
           const items = (stockRes.recordset || []).map(r => {
-            const qty30 = salesMap.get(r.product_code) || 0;
+            const salesRec = salesMap.get(r.product_code) || { qty: 0, revenue: 0 };
+            const qty30 = salesRec.qty;
+            const salesAmount30d = salesRec.revenue;
             const dailyAvg = qty30 / 30;
             const daysLeft = (dailyAvg > 0 && r.available_qty > 0)
               ? Math.round(r.available_qty / dailyAvg)
               : null;
             // 실판매 기반 단가 — 30일 매출액 / 30일 판매수량 (프로모션/할인 반영)
-            const salesAmount30d = Math.round(Number(r.sales_amount_30d) || 0);
             const availableQty = Number(r.available_qty) || 0;
             const unitPrice = qty30 > 0 ? Math.round(salesAmount30d / qty30) : null;
             const stockValue = unitPrice !== null ? Math.round(unitPrice * availableQty) : null;
@@ -6422,17 +6436,37 @@ const server = http.createServer(async (req, res) => {
             : '';
           const req1 = p.request();
           req1.timeout = 120000;
+          // canonical name + Card_Code 단위 dedup — LEFT JOIN 대신 OUTER APPLY 로 대표 이름 1개만.
           const skusRes = await req1.query(`
             SELECT TOP ${specificCode ? 5 : limit}
               s.CARD_CODE AS card_code,
-              c.Card_Name AS card_name,
-              c.Card_Div AS card_div,
+              canon.canonical_name AS card_name,
+              canon.card_div AS card_div,
               ISNULL(s.INVENTORY_CURRENT_QTY, 0) AS current_qty,
               ISNULL(s.INVENTORY_AVAILABLE_QTY, 0) AS available_qty,
               ISNULL(s.TOTAL_SALE_PRICE_30_DAY, 0) AS erp_sales_30d
             FROM S2_CARD_ERP_STOCK s WITH (NOLOCK)
-            LEFT JOIN S2_Card c WITH (NOLOCK) ON c.Card_Code = s.CARD_CODE
-            WHERE (c.Card_Div = 'D01' OR s.CARD_CODE LIKE 'COM[_]%')
+            OUTER APPLY (
+              SELECT TOP 1
+                CASE
+                  WHEN c2.Card_Name LIKE '[[]%[]]%'
+                    THEN LTRIM(SUBSTRING(c2.Card_Name, CHARINDEX(']', c2.Card_Name) + 1, LEN(c2.Card_Name)))
+                  ELSE c2.Card_Name
+                END AS canonical_name,
+                c2.Card_Div AS card_div
+              FROM S2_Card c2 WITH (NOLOCK)
+              WHERE c2.Card_Code = s.CARD_CODE
+                AND LTRIM(RTRIM(ISNULL(c2.Card_Name, ''))) <> ''
+                AND c2.Card_Name NOT LIKE '%사용X%'
+                AND c2.Card_Name NOT LIKE '%사용안함%'
+                AND c2.Card_Name NOT LIKE '%삭제%'
+                AND c2.Card_Name NOT LIKE '%테스트%'
+              ORDER BY
+                CASE WHEN c2.DISPLAY_YORN = 'Y' THEN 0 ELSE 1 END,
+                CASE WHEN c2.Card_Name LIKE '[[]%' THEN 1 ELSE 0 END,
+                c2.Card_Seq DESC
+            ) canon
+            WHERE (canon.card_div = 'D01' OR s.CARD_CODE LIKE 'COM[_]%')
               ${codeFilter}
             ORDER BY ISNULL(s.TOTAL_SALE_PRICE_30_DAY, 0) DESC
           `);
