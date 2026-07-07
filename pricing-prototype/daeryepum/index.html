@@ -2550,12 +2550,6 @@ nav.nav-loading a[href^="#"] {
       <label id="uni-hide-processed-wrap" style="font-size:13px;cursor:pointer;display:none;align-items:center;gap:4px">
         <input type="checkbox" id="uni-hide-processed" onchange="renderBgUnified()"> 수집완료 숨기기
       </label>
-      <label style="font-size:13px;display:flex;align-items:center;gap:4px" title="주문사이트별 필터 (바른손카드/바른손몰/쿠팡/네이버 등)">
-        주문사이트
-        <select id="uni-filter-site" onchange="renderBgUnified()" style="padding:3px 8px;font-size:12px;border:1px solid var(--gray-300);border-radius:4px">
-          <option value="">전체</option>
-        </select>
-      </label>
       <button class="btn" onclick="loadBgUnified()" title="목록 새로고침" style="padding:4px 10px;font-size:12px">🔄 새로고침</button>
     </div>
   </div>
@@ -2601,6 +2595,29 @@ nav.nav-loading a[href^="#"] {
 
   <!-- 전체 탭 전용: 복사 컬럼 선택 UI (주문조회 페이지와 유사) -->
   <div id="uni-all-col-selector" class="col-selector" style="display:none;margin-bottom:12px"></div>
+
+  <!-- 주문사이트 필터 (체크박스 그룹) — 모든 탭 노출, 정렬 옵션 상위 -->
+  <div id="uni-site-filter" style="display:flex;gap:14px;align-items:center;padding:9px 12px;background:#f8fafc;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:10px;font-size:13px;flex-wrap:wrap">
+    <span style="color:var(--gray-600);font-weight:500">주문사이트:</span>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" data-site="card" checked onchange="renderBgUnified()"> 바른손카드
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="모든 제휴사 통합">
+      <input type="checkbox" data-site="etc" checked onchange="renderBgUnified()"> 바른손몰
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" data-site="nv_card" checked onchange="renderBgUnified()"> 네이버_바른손카드
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" data-site="nv_tnt" checked onchange="renderBgUnified()"> 네이버_테넷텐
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" data-site="coupang" checked onchange="renderBgUnified()"> 쿠팡
+    </label>
+    <div style="flex:1"></div>
+    <button class="btn" onclick="document.querySelectorAll('#uni-site-filter input').forEach(c=>c.checked=true);renderBgUnified()" style="padding:3px 8px;font-size:11px" title="모든 사이트 체크">전체선택</button>
+    <button class="btn" onclick="document.querySelectorAll('#uni-site-filter input').forEach(c=>c.checked=false);renderBgUnified()" style="padding:3px 8px;font-size:11px" title="모두 해제">해제</button>
+  </div>
 
   <!-- 정렬 옵션 — 입력완료 ~ 출고완료 탭 (미입력 제외) -->
   <div id="uni-sort-options" style="display:none;align-items:center;gap:10px;margin-bottom:10px;font-size:12px;color:var(--gray-600)">
@@ -13064,21 +13081,19 @@ function renderBgUnified() {
   // 탭 상태 = 필터 소스 (submitted / unsubmitted). 기존 '전체' 옵션은 제거됨.
   const activeTab = document.getElementById('uni-active-tab')?.value || 'unsubmitted';
 
-  // 주문사이트 필터 옵션 populate — bgUnifiedOrders 의 unique site_name 을 dropdown 옵션으로 채움
-  //   (선택값 보존 위해 innerHTML 재구성은 옵션 목록 변경 시에만)
-  const siteFilterEl = document.getElementById('uni-filter-site');
-  const selectedSite = siteFilterEl?.value || '';
-  if (siteFilterEl && bgUnifiedOrders.length) {
-    const sites = Array.from(new Set(bgUnifiedOrders.map(o => o.site_name).filter(Boolean))).sort();
-    const currentOpts = [...siteFilterEl.options].map(o => o.value).slice(1).join(',');
-    const newOpts = sites.join(',');
-    if (currentOpts !== newOpts) {
-      const wanted = selectedSite;
-      siteFilterEl.innerHTML = '<option value="">전체</option>' +
-        sites.map(s => `<option value="${s.replace(/"/g,'&quot;')}">${s}</option>`).join('');
-      if (wanted && sites.includes(wanted)) siteFilterEl.value = wanted;
-    }
-  }
+  // 주문사이트 카테고리 매칭 — order_type + 네이버 store 문자열 검사로 분류.
+  //   네이버 store 는 문자열 substring 검사 (site_name / naver_store_id).
+  const SITE_CATS = [
+    { key: 'card',    match: o => o.order_type === 'CARD' },
+    { key: 'etc',     match: o => o.order_type === 'ETC' },  // 바른손몰 (모든 제휴사 통합)
+    { key: 'nv_card', match: o => o.order_type === 'NAVER' && /바른손/i.test(String(o.site_name || '') + '|' + String(o.naver_store_id || '')) },
+    { key: 'nv_tnt',  match: o => o.order_type === 'NAVER' && /테넷텐|tenetten|tnt/i.test(String(o.site_name || '') + '|' + String(o.naver_store_id || '')) },
+    { key: 'coupang', match: o => o.order_type === 'COUPANG' },
+  ];
+  const activeSiteKeys = new Set(
+    [...document.querySelectorAll('#uni-site-filter input:checked')].map(cb => cb.dataset.site)
+  );
+  const passSite = o => SITE_CATS.some(c => activeSiteKeys.has(c.key) && c.match(o));
 
   const receiptLabel = { personal: '소득공제', business: '지출증빙' };
 
@@ -13096,7 +13111,7 @@ function renderBgUnified() {
   const visibleBase = bgUnifiedOrders.filter(o =>
     (!hideCancel  || !isCancelled(o)) &&
     (!hidePending || !isPaymentPending(o)) &&
-    (!selectedSite || o.site_name === selectedSite)
+    passSite(o)
   );
   // 마켓플레이스 주문(쿠팡/네이버)은 고객 정보입력 불필요 → 자동 '입력완료' 처리.
   //   미입력 탭에 안 나오고, 입력완료 탭에 ci 없어도 노출됨.
