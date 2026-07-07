@@ -2593,6 +2593,9 @@ nav.nav-loading a[href^="#"] {
   <!-- 현재 활성 탭 상태 (내부) -->
   <input type="hidden" id="uni-active-tab" value="unsubmitted">
 
+  <!-- 전체 탭 전용: 복사 컬럼 선택 UI (주문조회 페이지와 유사) -->
+  <div id="uni-all-col-selector" class="col-selector" style="display:none;margin-bottom:12px"></div>
+
   <!-- 정렬 옵션 — 입력완료 ~ 출고완료 탭 (미입력 제외) -->
   <div id="uni-sort-options" style="display:none;align-items:center;gap:10px;margin-bottom:10px;font-size:12px;color:var(--gray-600)">
     <span>정렬:</span>
@@ -2624,8 +2627,9 @@ nav.nav-loading a[href^="#"] {
       <span id="uni-row-count" style="font-size:13px;color:var(--gray-500);flex-shrink:0"></span>
       <div style="flex:1"></div>
       <!-- 액션 버튼들 — 선택 상태에 따라 지능적으로 show/hide -->
-      <button class="btn" onclick="openBgManualOrderForm()" style="padding:6px 12px;font-size:12px;background:#fef3c7;border-color:#fbbf24;color:#92400e" title="MSSQL 동기화 사고 등으로 시스템에 안 잡힌 주문을 수동 등록합니다 (정보입력현황 + 워크플로우 통합)">➕ 수동 주문 등록</button>
+      <button class="btn" id="uni-btn-manual-order" onclick="openBgManualOrderForm()" style="padding:6px 12px;font-size:12px;background:#fef3c7;border-color:#fbbf24;color:#92400e" title="MSSQL 동기화 사고 등으로 시스템에 안 잡힌 주문을 수동 등록합니다 (정보입력현황 + 워크플로우 통합)">➕ 수동 주문 등록</button>
       <button class="btn" id="uni-btn-copy" onclick="copyBgUnified()" style="padding:6px 12px;font-size:12px;display:none">📋 수집복사</button>
+      <button class="btn btn-primary" id="uni-btn-copy-all" onclick="copyBgUnifiedAll()" style="padding:6px 12px;font-size:12px;display:none" title="선택된 행 (없으면 전체) 을 선택된 컬럼 기준으로 클립보드 복사 (수집상태 영향 없음)">📋 <span id="uni-btn-copy-all-label">선택 복사</span></button>
       <button class="btn" id="uni-btn-copy-receipt" onclick="copyExpressReceiptInfo()" style="padding:6px 12px;font-size:12px;display:none;background:#fef3c7;border-color:#fbbf24;color:#92400e" title="선택된 빠른출고 주문의 현금영수증 정보만 복사 — 형식: 주문번호 / 주문자명 / 영수증정보"><span id="uni-btn-copy-receipt-label">⚡ 현금영수증 복사</span></button>
       <button class="btn" id="uni-btn-send-alimtalk" onclick="bulkSendAlimtalkViaSp()" style="padding:6px 12px;font-size:12px;display:none;border-color:#fbbf24;color:#92400e;background:#fef9c3" title="선택된 미입력 주문에 답례품 정보 입력 안내 알림톡 발송 (SP_GIFT_ORDER_BIZTALK_PROC)">💬 <span id="uni-btn-send-alimtalk-label">알림톡 발송</span></button>
       <button class="btn btn-primary" id="uni-btn-mark-processed" onclick="bulkProcessedAction(true)" style="padding:6px 12px;font-size:12px;display:none" title="선택된 주문을 주문수집 완료로 처리 (복사 없이 마킹만)">📋 <span id="uni-btn-mark-processed-label">수집처리</span></button>
@@ -12472,6 +12476,61 @@ let bgUnifiedProductMap = new Map(); // order_seq → Map(card_code → card_nam
 let bgUnifiedCiMap = new Map(); // order_id → customer_info
 let bgUnifiedRows = [];     // 평탄화된 렌더 행
 
+// 전체 탭 복사용 컬럼 정의 — 주문조회 페이지 ALL_COLS 와 유사 구조.
+//   valueFn(row) 은 rowIdx 위치의 { order, ci, sel, product_name, product_qty } 를 받아 셀 값 반환.
+const UNI_ALL_COLS = [
+  { key: 'order_seq',     label: '주문번호',      default: true,  valueFn: r => r.order?.order_seq || '' },
+  { key: 'order_date',    label: '주문일',        default: true,  valueFn: r => r.order?.order_date || '' },
+  { key: 'member_id',     label: '주문자ID',      default: true,  valueFn: r => r.order?.member_id || '' },
+  { key: 'order_name',    label: '주문자명',      default: true,  valueFn: r => r.order?.order_name || '' },
+  { key: 'order_hphone',  label: '주문자 연락처', default: true,  valueFn: r => r.order?.order_hphone || '' },
+  { key: 'site_name',     label: '주문사이트',    default: true,  valueFn: r => r.order?.site_name || '' },
+  { key: 'recv_name',     label: '수령인',        default: false, valueFn: r => r.order?.recv_name || r.order?.display_name || '' },
+  { key: 'recv_hphone',   label: '수령인 연락처', default: false, valueFn: r => r.order?.recv_hphone || '' },
+  { key: 'recv_address',  label: '배송지',        default: false, valueFn: r => r.order?.recv_address || '' },
+  { key: 'recv_msg',      label: '배송메세지',    default: false, valueFn: r => r.order?.recv_msg || '' },
+  { key: 'product_name',  label: '상품명',        default: true,  valueFn: r => r.sel?.product_name || r.product_name || '' },
+  { key: 'product_code',  label: '상품코드',      default: false, valueFn: r => r.product_code || r.sel?.product_code || '' },
+  { key: 'product_qty',   label: '수량',          default: true,  valueFn: r => r.product_qty || r.sel?.quantity || '' },
+  { key: 'desired_ship_date', label: '희망출고일', default: true, valueFn: r => r.sel?.desired_ship_date || r.ci?.desired_ship_date || '' },
+  { key: 'submitted_at',  label: '입력일시',      default: false, valueFn: r => r.ci?.updated_at || r.ci?.submitted_at || '' },
+  { key: 'sticker_code',  label: '스티커코드',    default: false, valueFn: r => r.sel?.sticker_code || '' },
+];
+
+function buildUniAllColSelector() {
+  const el = document.getElementById('uni-all-col-selector');
+  if (!el) return;
+  el.innerHTML = UNI_ALL_COLS.map(c =>
+    `<label><input type="checkbox" data-key="${c.key}" ${c.default ? 'checked' : ''}><span>${c.label}</span></label>`
+  ).join('');
+}
+
+function getSelectedUniAllCols() {
+  return UNI_ALL_COLS.filter(c => {
+    const cb = document.querySelector(`#uni-all-col-selector input[data-key="${c.key}"]`);
+    return cb && cb.checked;
+  });
+}
+
+/** 전체 탭 선택 복사 — 수집상태 markup 없음 (copyBgUnified 와 달리 markOrdersProcessedBatch 호출 안 함). */
+function copyBgUnifiedAll() {
+  const cols = getSelectedUniAllCols();
+  if (!cols.length) { showToast('복사할 컬럼을 최소 1개 선택해주세요'); return; }
+  const checked = [...document.querySelectorAll('.uni-row-check:checked')];
+  const rows = checked.length
+    ? checked.map(cb => bgUnifiedRows[parseInt(cb.dataset.idx)]).filter(Boolean)
+    : bgUnifiedRows.slice();  // 선택 없으면 화면 전체
+  if (!rows.length) { showToast('복사할 행이 없습니다'); return; }
+  const safeCell = v => String(v ?? '').replace(/[\t\r\n]+/g, ' ').trim();
+  const header = cols.map(c => c.label).join('\t');
+  const body = rows.map(r => cols.map(c => safeCell(c.valueFn(r))).join('\t')).join('\n');
+  const tsv = header + '\n' + body;
+  navigator.clipboard.writeText(tsv).then(
+    () => showToast(`${rows.length}건 클립보드 복사 완료 (${cols.length}컬럼)`),
+    () => alert('클립보드 복사 실패')
+  );
+}
+
 // 통합현황 최대 조회 범위 (일) — DEPRECATED (2026-05-15): 기간 필터 제거되어 미사용. 향후 참조 없으면 삭제.
 const BG_UNIFIED_MAX_RANGE_DAYS = 90;
 
@@ -12911,6 +12970,14 @@ function switchUniTab(tab) {
   document.querySelectorAll('.uni-col-all').forEach(el => {
     el.style.display = (tab === 'all') ? '' : 'none';
   });
+  // 전체 탭 전용: 컬럼 셀렉터 + 수동주문등록 버튼 hide
+  const colSelectorEl = document.getElementById('uni-all-col-selector');
+  if (colSelectorEl) {
+    if (tab === 'all' && !colSelectorEl.innerHTML) buildUniAllColSelector();
+    colSelectorEl.style.display = (tab === 'all') ? '' : 'none';
+  }
+  const btnManualOrder = document.getElementById('uni-btn-manual-order');
+  if (btnManualOrder) btnManualOrder.style.display = (tab === 'all') ? 'none' : '';
   // 정렬 옵션 — 미입력 외 모든 탭 노출. 기본 정렬 힌트는 탭별로 다름.
   const sortOpts = document.getElementById('uni-sort-options');
   if (sortOpts) sortOpts.style.display = (tab !== 'unsubmitted') ? 'flex' : 'none';
@@ -14431,6 +14498,32 @@ function updateBgUnifiedSelectedCount() {
   document.getElementById('uni-selected-count').textContent = cnt + '건 선택';
 
   const activeTab = document.getElementById('uni-active-tab')?.value;
+
+  // 전체 탭 — 복사만 노출, 다른 모든 액션 버튼 hide (수집상태 영향 없음)
+  //   선택 없으면 '선택 복사 (전체 N건)', 선택 있으면 '선택 복사 (X건)'.
+  const btnCopyAll = document.getElementById('uni-btn-copy-all');
+  const btnCopyAllLabel = document.getElementById('uni-btn-copy-all-label');
+  if (activeTab === 'all') {
+    if (btnCopyAll) {
+      btnCopyAll.style.display = '';
+      if (btnCopyAllLabel) {
+        btnCopyAllLabel.textContent = cnt > 0
+          ? `선택 복사 (${cnt}건)`
+          : `선택 복사 (전체 ${bgUnifiedRows.length}건)`;
+      }
+    }
+    // 다른 액션 버튼 모두 hide
+    ['uni-btn-copy','uni-btn-copy-receipt','uni-btn-mark-processed','uni-btn-unmark-processed',
+     'uni-btn-bulk-delete','uni-btn-mark-manual','uni-btn-send-alimtalk','uni-btn-bulk-upload',
+     'uni-btn-advance-stage','uni-btn-ship','uni-btn-rollback'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+    return;
+  }
+  // 다른 탭 — 복사(전체) 버튼 hide
+  if (btnCopyAll) btnCopyAll.style.display = 'none';
+
   const btnCopy = document.getElementById('uni-btn-copy');
   const btnCopyReceipt = document.getElementById('uni-btn-copy-receipt');
   const btnCopyReceiptLabel = document.getElementById('uni-btn-copy-receipt-label');
