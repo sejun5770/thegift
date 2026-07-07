@@ -2550,6 +2550,12 @@ nav.nav-loading a[href^="#"] {
       <label id="uni-hide-processed-wrap" style="font-size:13px;cursor:pointer;display:none;align-items:center;gap:4px">
         <input type="checkbox" id="uni-hide-processed" onchange="renderBgUnified()"> 수집완료 숨기기
       </label>
+      <label style="font-size:13px;display:flex;align-items:center;gap:4px" title="주문사이트별 필터 (바른손카드/바른손몰/쿠팡/네이버 등)">
+        주문사이트
+        <select id="uni-filter-site" onchange="renderBgUnified()" style="padding:3px 8px;font-size:12px;border:1px solid var(--gray-300);border-radius:4px">
+          <option value="">전체</option>
+        </select>
+      </label>
       <button class="btn" onclick="loadBgUnified()" title="목록 새로고침" style="padding:4px 10px;font-size:12px">🔄 새로고침</button>
     </div>
   </div>
@@ -13058,6 +13064,22 @@ function renderBgUnified() {
   // 탭 상태 = 필터 소스 (submitted / unsubmitted). 기존 '전체' 옵션은 제거됨.
   const activeTab = document.getElementById('uni-active-tab')?.value || 'unsubmitted';
 
+  // 주문사이트 필터 옵션 populate — bgUnifiedOrders 의 unique site_name 을 dropdown 옵션으로 채움
+  //   (선택값 보존 위해 innerHTML 재구성은 옵션 목록 변경 시에만)
+  const siteFilterEl = document.getElementById('uni-filter-site');
+  const selectedSite = siteFilterEl?.value || '';
+  if (siteFilterEl && bgUnifiedOrders.length) {
+    const sites = Array.from(new Set(bgUnifiedOrders.map(o => o.site_name).filter(Boolean))).sort();
+    const currentOpts = [...siteFilterEl.options].map(o => o.value).slice(1).join(',');
+    const newOpts = sites.join(',');
+    if (currentOpts !== newOpts) {
+      const wanted = selectedSite;
+      siteFilterEl.innerHTML = '<option value="">전체</option>' +
+        sites.map(s => `<option value="${s.replace(/"/g,'&quot;')}">${s}</option>`).join('');
+      if (wanted && sites.includes(wanted)) siteFilterEl.value = wanted;
+    }
+  }
+
   const receiptLabel = { personal: '소득공제', business: '지출증빙' };
 
   // 결제대기 판별 — status_seq=1 (결제대기) 또는 9 (초안컨펌완료/결제대기) + settle_date 없음
@@ -13073,7 +13095,8 @@ function renderBgUnified() {
   );
   const visibleBase = bgUnifiedOrders.filter(o =>
     (!hideCancel  || !isCancelled(o)) &&
-    (!hidePending || !isPaymentPending(o))
+    (!hidePending || !isPaymentPending(o)) &&
+    (!selectedSite || o.site_name === selectedSite)
   );
   // 마켓플레이스 주문(쿠팡/네이버)은 고객 정보입력 불필요 → 자동 '입력완료' 처리.
   //   미입력 탭에 안 나오고, 입력완료 탭에 ci 없어도 노출됨.
