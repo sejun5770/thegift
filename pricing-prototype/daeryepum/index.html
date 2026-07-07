@@ -6464,6 +6464,8 @@ function renderLeadtime3way(d) {
  *   실패해도 silent (loadDashboard 다른 부분 영향 X).
  */
 async function loadStickerAnalytics() {
+  // 대시보드 페이지 벗어난 상태에서 fetch 완료 시 DOM 요소가 없을 수 있음 → 조기 return.
+  if (!document.getElementById('sa-products')) return;
   const start = document.getElementById('dash-start').value;
   const end = document.getElementById('dash-end').value;
   const params = new URLSearchParams();
@@ -6476,14 +6478,17 @@ async function loadStickerAnalytics() {
     renderStickerAnalytics(d);
   } catch (e) {
     console.warn('[sticker-analytics] 로드 실패:', e.message);
-    document.getElementById('sa-products').innerHTML = '<div style="color:var(--red);text-align:center;padding:20px;font-size:12px">조회 실패</div>';
-    document.getElementById('sa-messages').innerHTML = '<div style="color:var(--red);text-align:center;padding:20px;font-size:12px">조회 실패</div>';
+    const productsEl = document.getElementById('sa-products');
+    const messagesEl = document.getElementById('sa-messages');
+    if (productsEl) productsEl.innerHTML = '<div style="color:var(--red);text-align:center;padding:20px;font-size:12px">조회 실패</div>';
+    if (messagesEl) messagesEl.innerHTML = '<div style="color:var(--red);text-align:center;padding:20px;font-size:12px">조회 실패</div>';
   }
 }
 
 function renderStickerAnalytics(d) {
   // === 좌: 상품별 스티커 인기도 ===
   const productsEl = document.getElementById('sa-products');
+  if (!productsEl) return;  // 대시보드 페이지 아니면 skip
   if (!d.products?.length) {
     productsEl.innerHTML = '<div style="color:var(--gray-400);text-align:center;padding:20px;font-size:12px">분석 데이터 없음 — 정보입력 완료된 주문이 없습니다.</div>';
   } else {
@@ -6516,6 +6521,7 @@ function renderStickerAnalytics(d) {
 
   // === 우: 메시지 분석 ===
   const msgEl = document.getElementById('sa-messages');
+  if (!msgEl) return;  // 대시보드 페이지 아니면 skip
   const m = d.messages || {};
   const inputRate = m.total > 0 ? Math.round(m.non_empty / m.total * 100) : 0;
 
