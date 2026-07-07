@@ -2596,8 +2596,8 @@ nav.nav-loading a[href^="#"] {
   <!-- 전체 탭 전용: 복사 컬럼 선택 UI (주문조회 페이지와 유사) -->
   <div id="uni-all-col-selector" class="col-selector" style="display:none;margin-bottom:12px"></div>
 
-  <!-- 주문사이트 필터 (체크박스 그룹) — 모든 탭 노출, 정렬 옵션 상위 -->
-  <div id="uni-site-filter" style="display:flex;gap:14px;align-items:center;padding:9px 12px;background:#f8fafc;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:10px;font-size:13px;flex-wrap:wrap">
+  <!-- 주문사이트 필터 (체크박스 그룹) — 전체 탭 전용, 다른 탭에 영향 없음 -->
+  <div id="uni-site-filter" style="display:none;gap:14px;align-items:center;padding:9px 12px;background:#f8fafc;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:10px;font-size:13px;flex-wrap:wrap">
     <span style="color:var(--gray-600);font-weight:500">주문사이트:</span>
     <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
       <input type="checkbox" data-site="card" checked onchange="renderBgUnified()"> 바른손카드
@@ -13001,6 +13001,9 @@ function switchUniTab(tab) {
   }
   const btnManualOrder = document.getElementById('uni-btn-manual-order');
   if (btnManualOrder) btnManualOrder.style.display = (tab === 'all') ? 'none' : '';
+  // 주문사이트 필터 UI — 전체 탭에서만 노출 (다른 탭과 격리)
+  const siteFilterEl2 = document.getElementById('uni-site-filter');
+  if (siteFilterEl2) siteFilterEl2.style.display = (tab === 'all') ? 'flex' : 'none';
   // 정렬 옵션 — 미입력 외 모든 탭 노출. 기본 정렬 힌트는 탭별로 다름.
   const sortOpts = document.getElementById('uni-sort-options');
   if (sortOpts) sortOpts.style.display = (tab !== 'unsubmitted') ? 'flex' : 'none';
@@ -13090,10 +13093,13 @@ function renderBgUnified() {
     { key: 'nv_tnt',  match: o => o.order_type === 'NAVER' && /테넷텐|tenetten|tnt/i.test(String(o.site_name || '') + '|' + String(o.naver_store_id || '')) },
     { key: 'coupang', match: o => o.order_type === 'COUPANG' },
   ];
+  // 사이트 필터는 전체 탭 전용 — 다른 탭에서는 항상 통과 (독립적 동작)
   const activeSiteKeys = new Set(
     [...document.querySelectorAll('#uni-site-filter input:checked')].map(cb => cb.dataset.site)
   );
-  const passSite = o => SITE_CATS.some(c => activeSiteKeys.has(c.key) && c.match(o));
+  const passSite = (activeTab === 'all')
+    ? (o => SITE_CATS.some(c => activeSiteKeys.has(c.key) && c.match(o)))
+    : (() => true);
 
   const receiptLabel = { personal: '소득공제', business: '지출증빙' };
 
