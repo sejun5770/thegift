@@ -2300,8 +2300,9 @@ nav.nav-loading a[href^="#"] {
       <input type="text" id="bg-p-sticker-search" placeholder="🔍 스티커 이름 또는 코드 검색 (예: TGJSD08)" oninput="renderBgStickerList()"
         style="padding:8px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:13px;outline:none;width:100%;box-sizing:border-box">
 
-      <!-- 스티커 목록 (스크롤) -->
-      <div id="bg-p-sticker-list" style="flex:1;overflow-y:auto;border:1px solid var(--gray-200);border-radius:8px;min-height:0"></div>
+      <!-- 스티커 목록 (스크롤) — 항상 최소 220px 확보 (선택 스티커 chips 가 많아도 스크롤 인지 가능) -->
+      <div id="bg-p-sticker-list-info" style="font-size:11px;color:var(--gray-500);padding:2px 4px"></div>
+      <div id="bg-p-sticker-list" style="flex:1;overflow-y:auto;border:1px solid var(--gray-200);border-radius:8px;min-height:220px;max-height:400px"></div>
 
       <!-- 박스 패키지 옵션 (선택) — 비타민답례품, 이코복스 등 박스 컬러 선택 가능한 상품용 -->
       <details style="border:1px solid var(--gray-200);border-radius:8px;background:#fafafa" id="bg-p-box-section">
@@ -9775,6 +9776,16 @@ function renderBgStickerList() {
     const code = (s.sticker_code || '').toLowerCase();
     return name.includes(q) || code.includes(q);
   });
+
+  // 결과 개수 안내 — 스크롤로만 접근 가능한 경우 인지 개선
+  const infoEl = document.getElementById('bg-p-sticker-list-info');
+  if (infoEl) {
+    if (q) {
+      infoEl.innerHTML = `<span style="color:var(--primary);font-weight:600">🔍 ${unselected.length}개</span> 매칭 <span style="color:var(--gray-400)">— 아래 목록에서 선택 (스크롤 가능)</span>`;
+    } else {
+      infoEl.innerHTML = `<span style="color:var(--gray-500)">전체 <b>${unselected.length}</b>개 스티커 선택 가능</span>`;
+    }
+  }
 
   const el = document.getElementById('bg-p-sticker-list');
   if (unselected.length === 0) {
