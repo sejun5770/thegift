@@ -2584,6 +2584,11 @@ nav.nav-loading a[href^="#"] {
       style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">
       🚚 출고완료 <span id="uni-count-shipped" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
     </button>
+    <button class="uni-tab" data-uni-tab="all" onclick="switchUniTab('all')"
+      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap"
+      title="스티커 여부와 관계없이 모든 답례품 카테고리 주문 노출 (주문자 정보 포함)">
+      📚 전체 <span id="uni-count-all" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+    </button>
   </div>
   <!-- 현재 활성 탭 상태 (내부) -->
   <input type="hidden" id="uni-active-tab" value="unsubmitted">
@@ -2640,6 +2645,9 @@ nav.nav-loading a[href^="#"] {
             <th style="width:36px"></th>
             <th>주문번호</th>
             <th>주문일</th>
+            <th class="uni-col-all" style="white-space:nowrap;display:none" title="MSSQL member_id / 마켓플레이스는 null">주문자ID</th>
+            <th class="uni-col-all" style="white-space:nowrap;display:none">주문자명</th>
+            <th class="uni-col-all" style="white-space:nowrap;display:none" title="쿠팡/네이버는 buyer 마스킹 — 수령인 연락처로 폴백">주문자 연락처</th>
             <th class="uni-col-input" style="white-space:nowrap">입력일시</th>
             <th class="uni-col-processed" style="white-space:nowrap;display:none" title="정보수집이 완료되어 주문수집 스프레드시트로 등록이 완료된 주문건입니다.">주문수집 <span style="font-size:10px;color:var(--gray-400);font-weight:400;cursor:help">ⓘ</span></th>
             <th>상품명</th>
@@ -12899,6 +12907,10 @@ function switchUniTab(tab) {
   document.querySelectorAll('.uni-col-input').forEach(el => {
     el.style.display = (tab !== 'unsubmitted') ? '' : 'none';
   });
+  // 전체 탭 전용 컬럼 (주문자ID/명/연락처) — 'all' 탭에서만 노출
+  document.querySelectorAll('.uni-col-all').forEach(el => {
+    el.style.display = (tab === 'all') ? '' : 'none';
+  });
   // 정렬 옵션 — 미입력 외 모든 탭 노출. 기본 정렬 힌트는 탭별로 다름.
   const sortOpts = document.getElementById('uni-sort-options');
   if (sortOpts) sortOpts.style.display = (tab !== 'unsubmitted') ? 'flex' : 'none';
@@ -13056,7 +13068,7 @@ function renderBgUnified() {
     r._stage = computeRowStage(r.order, r.ci, r.sel);
   });
 
-  // 탭 별 카운트 (row 기준)
+  // 탭 별 카운트 (row 기준) — 'all' 은 stage 무관 전체
   const stageCounts = {
     unsubmitted: 0, submitted: 0, sticker_completed: 0,
     printed: 0, bound: 0, packed: 0, shipped: 0,
@@ -13066,6 +13078,8 @@ function renderBgUnified() {
     const el = document.getElementById('uni-count-' + stage);
     if (el) el.textContent = '(' + stageCounts[stage] + ')';
   });
+  const allCountEl = document.getElementById('uni-count-all');
+  if (allCountEl) allCountEl.textContent = '(' + bgUnifiedRows.length + ')';
 
   // 입력완료 탭 요약 카드 (수집처리 대기/완료) — submitted stage row 기준
   if (activeTab === 'submitted') {
@@ -13082,9 +13096,9 @@ function renderBgUnified() {
     if (sum) sum.innerHTML = '⏳ 처리대기 <b style="color:#b45309">' + pendingCnt + '</b>건 · ✅ 처리완료 <b style="color:#059669">' + processedCnt + '</b>건';
   }
 
-  // 탭 필터 (row 단위)
+  // 탭 필터 (row 단위) — 'all' 은 stage 필터 skip (전체 노출)
   bgUnifiedRows = bgUnifiedRows.filter(r => {
-    if (r._stage !== activeTab) return false;
+    if (activeTab !== 'all' && r._stage !== activeTab) return false;
     // 입력완료 탭 + '수집완료 숨기기' 체크 시 processed_at 있는 행 제외
     if (activeTab === 'submitted' && hideProcessed && r.ci?.processed_at) return false;
     return true;
@@ -13117,8 +13131,8 @@ function renderBgUnified() {
       if (_subAt(a) !== _subAt(b)) return _subAt(a).localeCompare(_subAt(b));
       return (a.sticker_index || 0) - (b.sticker_index || 0);
     });
-  } else if (activeTab === 'unsubmitted') {
-    // 미입력: 최신 주문일시 DESC
+  } else if (activeTab === 'unsubmitted' || activeTab === 'all') {
+    // 미입력 / 전체: 최신 주문일시 DESC
     bgUnifiedRows.sort((a, b) => {
       if (_orderDate(a) !== _orderDate(b)) return _orderDate(b).localeCompare(_orderDate(a));
       if (_seqStr(a) !== _seqStr(b)) return _seqStr(b).localeCompare(_seqStr(a));
@@ -13177,7 +13191,7 @@ function renderBgUnified() {
   //   상단: 처리 대기 (processed_at NULL), 하단: 처리 완료 (processed_at SET).
   //   각 섹션 시작에 색상 구분 헤더 row 삽입. 정렬 로직이 이미 미수집→수집 순으로 정렬해둠.
   const isSubmittedTab = activeTab === 'submitted';
-  const COLSPAN_FULL = 20; // table 전체 컬럼 수 (헤더 row colspan 용)
+  const COLSPAN_FULL = 23; // table 전체 컬럼 수 (헤더 row colspan 용) — 주문자ID/명/연락처 3열 추가
   let pendingCount = 0, processedCount = 0;
   if (isSubmittedTab) {
     const seenPending = new Set(), seenProcessed = new Set();
@@ -13397,6 +13411,9 @@ function renderBgUnified() {
       <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()" onclick="event.stopPropagation()"></td>
       <td style="${orderSeqStyle}">${orderSeqContent}</td>
       <td style="font-size:12px;color:var(--gray-500);white-space:nowrap">${orderDateFmt}</td>
+      <td class="uni-col-all" style="font-size:12px;white-space:nowrap${activeTab === 'all' ? '' : ';display:none'}">${esc(order.member_id || '-')}</td>
+      <td class="uni-col-all" style="font-size:12px;white-space:nowrap${activeTab === 'all' ? '' : ';display:none'}">${esc(order.order_name || '-')}</td>
+      <td class="uni-col-all" style="font-size:12px;white-space:nowrap${activeTab === 'all' ? '' : ';display:none'}">${esc(order.order_hphone || '-')}</td>
       <td class="uni-col-input" style="font-size:12px${activeTab === 'unsubmitted' ? ';display:none' : ''}">${inputBadge}</td>
       ${processedCellHtml}
       <td style="font-size:12px">${productName}</td>

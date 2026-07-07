@@ -785,6 +785,7 @@ async function apiOrders(query) {
         CONVERT(varchar(19), o.order_date, 120) AS order_date,
         CONVERT(varchar(19), o.settle_date, 120) AS settle_date,
         o.order_name AS order_name,
+        o.order_hphone AS order_hphone,
         o.recv_name AS recv_name,
         o.recv_hphone AS recv_hphone,
         CONCAT(o.recv_address, ' ', ISNULL(o.recv_address_detail,'')) AS recv_address,
@@ -861,6 +862,7 @@ async function apiOrders(query) {
         CONVERT(varchar(19), co.order_date, 120) AS order_date,
         CONVERT(varchar(19), co.settle_date, 120) AS settle_date,
         co.order_name,
+        co.order_hphone AS order_hphone,
         di.NAME AS recv_name,
         ISNULL(di.HPHONE, di.PHONE) AS recv_hphone,
         CONCAT(ISNULL(di.ADDR,''), ' ', ISNULL(di.ADDR_DETAIL,'')) AS recv_address,
@@ -977,6 +979,7 @@ async function apiOrders(query) {
           order_date: r.ordered_at,
           settle_date: r.paid_at,
           order_name: r.recv_name || '',
+          order_hphone: r.recv_hphone || '',  // 쿠팡 buyer 마스킹 → 수령인 연락처 폴백
           recv_name: r.recv_name || '',
           recv_hphone: r.recv_hphone || '',
           recv_address: r.recv_address || '',
@@ -1028,6 +1031,7 @@ async function apiOrders(query) {
           order_date: r.ordered_at,
           settle_date: r.paid_at,
           order_name: r.recv_name || '',
+          order_hphone: r.recv_hphone || '',  // 네이버 buyer 마스킹 → 수령인 연락처 폴백
           recv_name: r.recv_name || '',
           recv_hphone: r.recv_hphone || '',
           recv_address: r.recv_address || '',
