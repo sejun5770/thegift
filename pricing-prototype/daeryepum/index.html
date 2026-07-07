@@ -2596,6 +2596,20 @@ nav.nav-loading a[href^="#"] {
   <!-- 전체 탭 전용: 복사 컬럼 선택 UI (주문조회 페이지와 유사) -->
   <div id="uni-all-col-selector" class="col-selector" style="display:none;margin-bottom:12px"></div>
 
+  <!-- 희망출고일 필터 (라디오) — 전체 탭 전용, row 단위 desired_ship_date 판정 -->
+  <div id="uni-ship-date-filter" style="display:none;gap:14px;align-items:center;padding:9px 12px;background:#f8fafc;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:10px;font-size:13px;flex-wrap:wrap">
+    <span style="color:var(--gray-600);font-weight:500">희망출고일:</span>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="radio" name="uni-ship-date" value="all" checked onchange="renderBgUnified()"> 전체
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="radio" name="uni-ship-date" value="filled" onchange="renderBgUnified()"> 입력만
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="radio" name="uni-ship-date" value="empty" onchange="renderBgUnified()"> 미입력만
+    </label>
+  </div>
+
   <!-- 주문사이트 필터 (체크박스 그룹) — 전체 탭 전용, 다른 탭에 영향 없음 -->
   <div id="uni-site-filter" style="display:none;gap:14px;align-items:center;padding:9px 12px;background:#f8fafc;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:10px;font-size:13px;flex-wrap:wrap">
     <span style="color:var(--gray-600);font-weight:500">주문사이트:</span>
@@ -13004,6 +13018,9 @@ function switchUniTab(tab) {
   // 주문사이트 필터 UI — 전체 탭에서만 노출 (다른 탭과 격리)
   const siteFilterEl2 = document.getElementById('uni-site-filter');
   if (siteFilterEl2) siteFilterEl2.style.display = (tab === 'all') ? 'flex' : 'none';
+  // 희망출고일 필터 UI — 전체 탭에서만 노출
+  const shipDateFilterEl = document.getElementById('uni-ship-date-filter');
+  if (shipDateFilterEl) shipDateFilterEl.style.display = (tab === 'all') ? 'flex' : 'none';
   // 정렬 옵션 — 미입력 외 모든 탭 노출. 기본 정렬 힌트는 탭별로 다름.
   const sortOpts = document.getElementById('uni-sort-options');
   if (sortOpts) sortOpts.style.display = (tab !== 'unsubmitted') ? 'flex' : 'none';
@@ -13207,11 +13224,22 @@ function renderBgUnified() {
     if (sum) sum.innerHTML = '⏳ 처리대기 <b style="color:#b45309">' + pendingCnt + '</b>건 · ✅ 처리완료 <b style="color:#059669">' + processedCnt + '</b>건';
   }
 
+  // 희망출고일 필터 (전체 탭 전용, row 단위 sel.desired_ship_date > ci.desired_ship_date)
+  const shipDateMode = (activeTab === 'all')
+    ? (document.querySelector('input[name="uni-ship-date"]:checked')?.value || 'all')
+    : 'all';
   // 탭 필터 (row 단위) — 'all' 은 stage 필터 skip (전체 노출)
   bgUnifiedRows = bgUnifiedRows.filter(r => {
     if (activeTab !== 'all' && r._stage !== activeTab) return false;
     // 입력완료 탭 + '수집완료 숨기기' 체크 시 processed_at 있는 행 제외
     if (activeTab === 'submitted' && hideProcessed && r.ci?.processed_at) return false;
+    // 희망출고일 필터
+    if (shipDateMode !== 'all') {
+      const ship = r.sel?.desired_ship_date || r.ci?.desired_ship_date || '';
+      const hasShip = !!String(ship).trim();
+      if (shipDateMode === 'filled' && !hasShip) return false;
+      if (shipDateMode === 'empty' && hasShip) return false;
+    }
     return true;
   });
 
