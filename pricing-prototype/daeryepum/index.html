@@ -2556,6 +2556,11 @@ nav.nav-loading a[href^="#"] {
 
   <!-- 탭: 7단계 워크플로우 (미입력 → 출고완료) -->
   <div id="uni-tab-strip" style="display:flex;gap:2px;border-bottom:2px solid var(--gray-200);margin-bottom:12px;flex-wrap:wrap;overflow-x:auto">
+    <button class="uni-tab" data-uni-tab="all" onclick="switchUniTab('all')"
+      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap"
+      title="스티커 여부와 관계없이 모든 답례품 카테고리 주문 노출 (주문자 정보 포함)">
+      📚 전체 <span id="uni-count-all" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+    </button>
     <button class="uni-tab" data-uni-tab="unsubmitted" onclick="switchUniTab('unsubmitted')"
       style="padding:9px 14px;background:none;border:none;border-bottom:3px solid var(--primary);color:var(--primary);font-weight:600;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">
       ⏳ 미입력 <span id="uni-count-unsubmitted" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
@@ -2583,11 +2588,6 @@ nav.nav-loading a[href^="#"] {
     <button class="uni-tab" data-uni-tab="shipped" onclick="switchUniTab('shipped')"
       style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">
       🚚 출고완료 <span id="uni-count-shipped" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
-    </button>
-    <button class="uni-tab" data-uni-tab="all" onclick="switchUniTab('all')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap"
-      title="스티커 여부와 관계없이 모든 답례품 카테고리 주문 노출 (주문자 정보 포함)">
-      📚 전체 <span id="uni-count-all" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
     </button>
   </div>
   <!-- 현재 활성 탭 상태 (내부) -->
