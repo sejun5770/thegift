@@ -2252,6 +2252,45 @@ async function apiDashboardComparison(query = {}) {
       console.warn('[getPeriodTotal] 쿠팡 로켓그로스 머지 실패 (무시):', e.message);
     }
 
+    // 바른손더기프트 (bg_manual_orders) 머지 — 답례품 카테고리에서만.
+    //   API 미연동 채널이라 CSV 업로드 등으로 관리자 등록. status_seq 결제완료만 카운트.
+    //   실 매출 = items[].item_amount SUM (CSV Q열 판매금액 기반).
+    //   copurchase 개념 없음 → standalone 으로 전체 처리.
+    if (_isDaeryepumCmp) try {
+      const bgStore = require('./barungift/store');
+      const manualOrders = await bgStore.listManualOrders({
+        category: 'daeryepum', startDate: startStr, endDate: endStr,
+      });
+      const validOrders = (manualOrders || []).filter(mo => {
+        const st = Number(mo.status_seq) || 0;
+        return st >= 2 && ![3, 5, 15].includes(st);
+      });
+      if (validOrders.length) {
+        let amount = 0, qty = 0;
+        for (const mo of validOrders) {
+          const items = Array.isArray(mo.items) ? mo.items : [];
+          for (const it of items) {
+            const q = Number(it.quantity) || 0;
+            const a = Number(it.item_amount) || (Number(it.unit_price) || 0) * q;
+            amount += a;
+            qty += q;
+          }
+        }
+        const site = ensureSite('바른손더기프트');
+        site.order_count += validOrders.length;
+        site.total_amount += amount;
+        site.total_qty += qty;
+        site.standalone.amount += amount;
+        site.standalone.orders += validOrders.length;
+        site.standalone.qty += qty;
+        standalone_amount += amount;
+        standalone_orders += validOrders.length;
+        standalone_qty += qty;
+      }
+    } catch (e) {
+      console.warn('[getPeriodTotal] 바른손더기프트 머지 실패 (무시):', e.message);
+    }
+
     // 전체 합계
     let order_count = 0, total_amount = 0, total_qty = 0;
     for (const v of Object.values(siteMap)) {
@@ -3505,14 +3544,17 @@ async function apiDashboardByShipDate(query) {
   const inWindow = cInfos.filter(ci => _ciInDateWindow(ci, startDate, endInclusive));
   if (!inWindow.length) return empty;
 
-  // order_id → ci 매핑 (ETC-/raw 접두어 분리)
+  // order_id → ci 매핑 (ETC-/MO-/raw 접두어 분리)
   const ciByCardSeq = new Map();   // CARD: order_seq → ci
   const ciByEtcSeq = new Map();    // ETC: order_seq → ci
+  const ciByManualId = new Map();  // MANUAL (바른손더기프트): manual_order_id → ci
   inWindow.forEach(ci => {
     const oid = String(ci.order_id || '');
     if (oid.startsWith('ETC-')) {
       const seq = parseInt(oid.slice(4));
       if (seq) ciByEtcSeq.set(seq, ci);
+    } else if (oid.startsWith('MO-')) {
+      ciByManualId.set(oid.slice(3), ci);
     } else {
       const seq = parseInt(oid);
       if (seq) ciByCardSeq.set(seq, ci);
@@ -3576,6 +3618,30 @@ async function apiDashboardByShipDate(query) {
     console.warn('[by-ship-date] MSSQL lookup 실패:', e.message);
     return { ...empty, error: 'mssql: ' + e.message };
   }
+  // MANUAL (바른손더기프트) — bg_manual_orders 에서 매출 조회.
+  //   items[].item_amount SUM. copurchase 개념 없음 (is_copurchase=0).
+  if (ciByManualId.size) {
+    try {
+      const bgStore = require('./barungift/store');
+      for (const [moId, _ci] of ciByManualId) {
+        try {
+          const mo = await bgStore.getManualOrder(moId);
+          if (!mo) continue;
+          const st = Number(mo.status_seq) || 0;
+          if (st < 1 || [3, 5, 15].includes(st)) continue;
+          const items = Array.isArray(mo.items) ? mo.items : [];
+          let amount = 0, qty = 0;
+          for (const it of items) {
+            const q = Number(it.quantity) || 0;
+            const a = Number(it.item_amount) || (Number(it.unit_price) || 0) * q;
+            amount += a;
+            qty += q;
+          }
+          salesRows.push({ order_seq: moId, is_copurchase: 0, amount, qty, _src: 'MANUAL' });
+        } catch (e) { console.warn(`[by-ship-date] MANUAL ${moId} 실패 (무시):`, e.message); }
+      }
+    } catch (e) { console.warn('[by-ship-date] MANUAL lookup 실패:', e.message); }
+  }
 
   // 출고일별 그룹핑
   const buckets = {}; // date → { amount, orders, qty, express, regular, copurchase, standalone }
@@ -3593,7 +3659,9 @@ async function apiDashboardByShipDate(query) {
   }
   let totalAmount = 0, totalOrders = 0, totalQty = 0;
   salesRows.forEach(r => {
-    const ci = r._src === 'ETC' ? ciByEtcSeq.get(r.order_seq) : ciByCardSeq.get(r.order_seq);
+    const ci = r._src === 'ETC' ? ciByEtcSeq.get(r.order_seq)
+             : r._src === 'MANUAL' ? ciByManualId.get(r.order_seq)
+             : ciByCardSeq.get(r.order_seq);
     if (!ci) return;
     const date = String(ci.desired_ship_date).slice(0, 10);
     const b = ensureBucket(date);
