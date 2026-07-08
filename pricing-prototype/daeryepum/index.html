@@ -16425,8 +16425,12 @@ async function saveBgOrderEdit() {
 const BG_CSV_COL = {
   판매자: 1, 주문상품상태: 2, 주문번호: 3, 수령인: 4, 수령인휴대폰: 5,
   전체주소: 7, 상품명: 8, 바코드: 9, 추가입력옵션: 10,
-  사용자메모: 11, 보낼수량: 14, 희망배송일: 15,
-  판매금액: 16,  // Q열 — 상품별 합계 (수량 × 단가). 서버에서 주문 settle_price = SUM 계산. CSV 에 없으면 0.
+  사용자메모: 11,
+  주문수량: 12,   // M열 (참조용)
+  보낸수량: 13,   // N열 — 출고완료 이후 사용
+  보낼수량: 14,   // O열 — 출고완료 이전 사용
+  희망배송일: 15,
+  판매금액: 16,   // Q열 — 상품별 합계 (수량 × 단가). 서버에서 주문 settle_price = SUM 계산. CSV 에 없으면 0.
 };
 
 // 주문상품상태 → status_seq 매핑 (FirstMall 코드).
@@ -16438,6 +16442,17 @@ function _bgStatusToSeq(raw) {
   if (s.includes('환불')) return 5;
   if (s.includes('반품') && s.includes('완료')) return 15;
   return 4;
+}
+
+// 출고완료 이후 판정 — 수량 참조 분기용.
+//   True: 보낸수량 (N열) 사용, False: 보낼수량 (O열) 사용.
+//   '출고완료', '배송중', '배송완료', '배송출발' 등을 이후로 판정. '배송준비중' 은 이전.
+function _bgIsAfterShipping(status) {
+  const s = String(status || '').trim();
+  if (!s) return false;
+  if (/준비/.test(s)) return false;         // 배송준비중 / 출고준비중 등은 이전
+  if (/출고완료|배송/.test(s)) return true; // 출고완료, 배송중, 배송완료 등
+  return false;
 }
 
 // 코드 상수
@@ -16574,11 +16589,19 @@ function _bgCsvBuildOrders(rows) {
       _inputMsg: (first[BG_CSV_COL.추가입력옵션] || '').toString().trim(),
     };
     // 상품/박스/스티커 분류
+    //   수량 참조: 주문상품상태에 따라 분기
+    //     · 출고완료 이전 → 보낼수량 (O열)
+    //     · 출고완료 이후 → 보낸수량 (N열, 실제 발송된 수량)
     const items = [];
+    const orderIsAfterShipping = _bgIsAfterShipping(baseInfo.status_raw);
     group.forEach((r, rowIndex) => {
       const itemName = (r[BG_CSV_COL.상품명] || '').toString();
       const barcode = (r[BG_CSV_COL.바코드] || '').toString().trim();
-      const quantity = parseInt(r[BG_CSV_COL.보낼수량]) || 0;
+      // 행별로 상태가 다를 수 있어 개별 판정 (같은 주문에도 상태 컬럼 다를 수 있음)
+      const rowStatus = (r[BG_CSV_COL.주문상품상태] || '').toString().trim() || baseInfo.status_raw;
+      const rowIsAfterShipping = _bgIsAfterShipping(rowStatus);
+      const rawQty = rowIsAfterShipping ? r[BG_CSV_COL.보낸수량] : r[BG_CSV_COL.보낼수량];
+      const quantity = parseInt(rawQty) || 0;
       // 판매금액 (Q열=16) — 상품별 합계. 쉼표/원 표기 허용.
       const rawAmount = (r[BG_CSV_COL.판매금액] || '').toString().replace(/[,\s원]/g, '');
       const itemAmount = parseInt(rawAmount) || 0;
