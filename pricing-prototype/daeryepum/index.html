@@ -16441,14 +16441,27 @@ const BG_CSV_COL = {
   결제일자: 17,   // R열 — 매출 집계 기준일. bg_manual_orders.order_date 로 저장.
 };
 
-// CSV 결제일자 파싱 — 'YYYY-MM-DD', 'YYYY/MM/DD', 'YYYY-MM-DD HH:mm:ss' 등 다양한 형식 허용.
-//   유효하지 않으면 null 반환 (호출부에서 fallback).
+// CSV 결제일자 파싱 — 다양한 형식 허용.
+//   지원: 'YYYY-MM-DD', 'YYYY/MM/DD', 'YYYY.MM.DD', 'YYYY-MM-DD HH:mm:ss',
+//         'YYYYMMDD', 'YYYY MM DD' 등. 유효하지 않으면 null.
 function _bgParseCsvDate(raw) {
-  const s = String(raw || '').trim();
+  let s = String(raw || '').trim();
   if (!s) return null;
-  // 슬래시 → 대시 통일
-  const normalized = s.replace(/\//g, '-').replace(/\s+/, 'T');
-  const d = new Date(normalized);
+  // 1) 슬래시/dot/스페이스 → 대시 통일 (구분자 다양성 대응)
+  //    단, 공백은 날짜/시간 사이 T 로 변환 필요
+  s = s.replace(/[./]/g, '-');
+  // YYYYMMDD (8자리 숫자) → YYYY-MM-DD
+  if (/^\d{8}$/.test(s)) {
+    s = `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+  }
+  // 'YYYY MM DD' 공백 구분자 → 대시 (첫 두 공백만, 시간 부분 보존)
+  const spaceParts = s.split(/\s+/);
+  if (spaceParts.length >= 3 && /^\d{4}$/.test(spaceParts[0]) && /^\d{1,2}$/.test(spaceParts[1])) {
+    s = `${spaceParts[0]}-${spaceParts[1].padStart(2,'0')}-${spaceParts[2].padStart(2,'0')}` + (spaceParts.length > 3 ? 'T' + spaceParts.slice(3).join(' ') : '');
+  } else {
+    s = s.replace(/\s+/, 'T');
+  }
+  const d = new Date(s);
   if (isNaN(d.getTime())) return null;
   return d.toISOString();
 }
@@ -16583,6 +16596,18 @@ function _bgCsvParseText(text) {
 // CSV → 주문건 배열 (bg_manual_orders 형식)
 function _bgCsvBuildOrders(rows) {
   if (rows.length <= 1) return { orders: [], filteredCount: 0, totalCount: 0 };
+  // 헤더 자동 감지 — '결제일자' 컬럼 위치를 헤더 이름으로 찾음.
+  //   위치가 R열(17) 이 아닐 수 있어 자동 매핑. 못 찾으면 기존 하드코딩(17) 사용.
+  const header = rows[0] || [];
+  const settleDateIdx = header.findIndex(h => {
+    const s = String(h || '').trim();
+    return /결제일/.test(s);  // 결제일, 결제일자, 결제일시 등 매칭
+  });
+  const COL = { ...BG_CSV_COL };
+  if (settleDateIdx >= 0) {
+    COL.결제일자 = settleDateIdx;
+    console.log(`[CSV] 결제일자 컬럼 자동 감지 — index ${settleDateIdx} (헤더: "${header[settleDateIdx]}")`);
+  }
   const dataRows = rows.slice(1); // 첫 행은 header
   // "본사" 필터
   const filtered = dataRows.filter(r => (r[BG_CSV_COL.판매자] || '').toString().trim() === '본사');
@@ -16607,7 +16632,7 @@ function _bgCsvBuildOrders(rows) {
       recv_msg: (first[BG_CSV_COL.사용자메모] || '').toString().trim(),
       _shipDate: (first[BG_CSV_COL.희망배송일] || '').toString().trim(),
       _inputMsg: (first[BG_CSV_COL.추가입력옵션] || '').toString().trim(),
-      _settleDate: _bgParseCsvDate(first[BG_CSV_COL.결제일자]),  // R열 결제일자 — 매출 집계 기준일
+      _settleDate: _bgParseCsvDate(first[COL.결제일자]),  // 결제일자 — 매출 집계 기준일 (헤더 자동 감지, 없으면 R열=17)
     };
     // 상품/박스/스티커 분류
     //   수량 참조: 주문상품상태에 따라 분기
