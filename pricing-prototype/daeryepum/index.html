@@ -16690,11 +16690,35 @@ function _bgCsvClear() {
 async function _bgCsvOnFile(file) {
   if (!file) return;
   document.getElementById('bg-csv-file-name').textContent = file.name;
-  const text = await file.text();
+  const text = await _bgCsvReadWithEncoding(file);
   const rows = _bgCsvParseText(text);
   const parsed = _bgCsvBuildOrders(rows);
   _bgCsvParsed = parsed;
   _bgCsvRender(parsed);
+}
+
+// CSV 인코딩 자동 감지 — UTF-8 시도 후 깨짐 감지되면 EUC-KR (CP949) 로 재시도.
+//   Excel 이 한국어 환경에서 저장하는 CSV 는 CP949 인 경우가 많음.
+//   Google Sheets / 웹 툴은 대부분 UTF-8.
+async function _bgCsvReadWithEncoding(file) {
+  const buf = await file.arrayBuffer();
+  // 1) UTF-8 (with BOM 도 자동 처리)
+  const utf8 = new TextDecoder('utf-8', { fatal: false }).decode(buf);
+  // 깨짐 감지 — U+FFFD replacement character 다수 or 한글 부재 시 EUC-KR 로 재시도
+  const hasReplacement = (utf8.match(/�/g) || []).length > 2;
+  const hasHangul = /[가-힣]/.test(utf8);
+  if (!hasReplacement && hasHangul) return utf8;
+  // 2) EUC-KR 재시도 (브라우저 표준 지원)
+  try {
+    const eucKr = new TextDecoder('euc-kr', { fatal: false }).decode(buf);
+    if (/[가-힣]/.test(eucKr) && (eucKr.match(/�/g) || []).length < (utf8.match(/�/g) || []).length) {
+      console.log('[CSV] EUC-KR 인코딩으로 감지되어 재해석했습니다.');
+      return eucKr;
+    }
+  } catch (e) {
+    console.warn('[CSV] EUC-KR 디코더 실패, UTF-8 결과 사용:', e.message);
+  }
+  return utf8;
 }
 function _bgCsvRender(parsed) {
   const summary = document.getElementById('bg-csv-summary');
