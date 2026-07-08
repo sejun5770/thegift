@@ -1117,6 +1117,7 @@ nav.nav-loading a[href^="#"] {
     <button class="cat-tab active" data-cat="daeryepum" onclick="switchCategory('daeryepum')">🎁 답례품</button>
     <button class="cat-tab" data-cat="deco" onclick="switchCategory('deco')">✨ 데코소품</button>
     <button class="cat-tab" data-cat="flower" onclick="switchCategory('flower')">💐 꽃다발</button>
+    <button class="cat-tab" data-cat="bhands_gift" onclick="switchCategory('bhands_gift')" title="API 미연동 채널 — CSV 업로드로 수동 등록">🎁 바른손더기프트</button>
   </div>
   <!-- 필터바: 날짜/검색/조회 + 표시 필터 통합 -->
   <div class="toolbar" style="gap:12px">
@@ -3484,12 +3485,13 @@ function switchCategory(cat) {
   document.querySelectorAll('.cat-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === cat));
   // 마켓플레이스 동기화 버튼은 답례품 카테고리에서만 노출 (꽃다발/데코소품 채널 X)
   const showMarketplaceSync = (cat === 'daeryepum');
+  const showCsvUpload = (cat === 'bhands_gift');
   const cpBtn = document.getElementById('ord-btn-coupang-sync');
   const nvBtn = document.getElementById('ord-btn-naver-sync');
   const csvBtn = document.getElementById('ord-btn-csv-upload');
   if (cpBtn) cpBtn.style.display = showMarketplaceSync ? '' : 'none';
   if (nvBtn) nvBtn.style.display = showMarketplaceSync ? '' : 'none';
-  if (csvBtn) csvBtn.style.display = showMarketplaceSync ? '' : 'none';
+  if (csvBtn) csvBtn.style.display = showCsvUpload ? '' : 'none';
   loadOrders();
 }
 
@@ -13050,11 +13052,17 @@ async function loadBgUnified() {
       ? Promise.resolve(null)
       : fetch(`${API}/api/bg/products/settings`, { signal }).then(r => r.ok ? r.json() : { settings: [] });
 
+    // 정보입력현황은 답례품 + 바른손더기프트 두 카테고리 병합 노출.
+    //   apiOrders 는 category 별 분기: daeryepum → MSSQL+쿠팡+네이버 / bhands_gift → bg_manual_orders.
+    //   두 결과를 이어 붙여 rawOrders 로 다룸 (동일 스키마 정규화됨).
+    const fetchOrdersForCategory = c => fetch(`${API}/api/orders?start_date=${start}&end_date=${endPlus}&category=${c}`, { signal })
+      .then(r => { if (!r.ok) throw new Error(`orders API ${c} ${r.status}`); return r.json(); })
+      .then(v => Array.isArray(v) ? v : []);
     const [ordersRes, ciRes, psRes] = await Promise.allSettled([
-      fetch(`${API}/api/orders?start_date=${start}&end_date=${endPlus}&category=daeryepum`, { signal }).then(r => {
-        if (!r.ok) throw new Error(`orders API ${r.status}`);
-        return r.json();
-      }),
+      Promise.all([
+        fetchOrdersForCategory('daeryepum'),
+        fetchOrdersForCategory('bhands_gift').catch(e => { console.warn('[loadBgUnified] bhands_gift 조회 실패 (무시):', e.message); return []; }),
+      ]).then(([a, b]) => [...a, ...b]),
       fetch(`${API}/api/bg/customer-infos`, { signal }).then(r => {
         if (!r.ok) throw new Error(`customer-infos API ${r.status}`);
         return r.json();

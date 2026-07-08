@@ -540,9 +540,11 @@ function normalizeNaverSite(siteName) {
 //   주문조회 / 정보입력 / 대시보드 모두 답례품 통합 노출 (사용자 합의: 2026-06-17, 주문 3246815 케이스).
 const DAERYEPUM_FILTER_SQL = `(c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')`;
 const CATEGORY_FILTERS = {
-  daeryepum: { label: '답례품', filter: DAERYEPUM_FILTER_SQL },
-  deco:      { label: '데코소품', filter: `(c.Card_Div = 'C29' OR c.Card_Code LIKE '2026_qr%')` },
-  flower:    { label: '꽃다발', filter: `c.Card_Div = 'D02'` },
+  daeryepum:   { label: '답례품', filter: DAERYEPUM_FILTER_SQL },
+  deco:        { label: '데코소품', filter: `(c.Card_Div = 'C29' OR c.Card_Code LIKE '2026_qr%')` },
+  flower:      { label: '꽃다발', filter: `c.Card_Div = 'D02'` },
+  // 바른손더기프트 — API 미연동 채널. MSSQL 조회 결과 없음 (bg_manual_orders 만 UNION).
+  bhands_gift: { label: '바른손더기프트', filter: `1 = 0` },
 };
 // 모듈 레벨 D01_FILTER — 위탁답례품 포함 답례품 기본 필터로 alias
 const D01_FILTER = DAERYEPUM_FILTER_SQL;
@@ -1065,9 +1067,12 @@ async function apiOrders(query) {
     } catch (e) {
       console.warn('[apiOrders] 네이버 주문 UNION 실패 (무시):', e.message);
     }
-    // 바른손더기프트 수동 등록 주문 (bg_manual_orders category='daeryepum') UNION.
-    //   API 미연동 채널이라 CSV 업로드 등으로 관리자가 직접 등록. items JSONB → 상품별 row 로 flatten.
-    //   MSSQL 주문과 스키마 정규화 후 rows.push.
+  }
+  // 바른손더기프트 수동 등록 주문 (bg_manual_orders) UNION — category='bhands_gift' 시에만.
+  //   답례품 카테고리와 분리 → 매출 이중 계산 방지. 검증 편의성.
+  //   API 미연동 채널이라 CSV 업로드 등으로 관리자가 직접 등록.
+  //   items JSONB → 상품별 row 로 flatten. MSSQL 주문과 스키마 정규화 후 rows.push.
+  if (query.category === 'bhands_gift') {
     try {
       const bgStore = require('./barungift/store');
       const manualOrders = await bgStore.listManualOrders({
