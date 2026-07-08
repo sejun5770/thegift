@@ -3628,8 +3628,12 @@ function renderOrderTable() {
   let filtered = getFilteredOrders();
   if (hideCollected) filtered = filtered.filter(r => !collected.has(String(r.order_seq)));
 
+  // MANUAL (바른손더기프트) 주문에만 편집/삭제 액션 컬럼 노출.
+  //   답례품_더기프트 탭 (currentCategory==='bhands_gift') 에서만 컬럼 표시.
+  const showActionCol = (currentCategory === 'bhands_gift');
   document.getElementById('order-thead').innerHTML =
     `<th style="width:36px"><input type="checkbox" id="select-all" onchange="toggleSelectAll(this)"></th>` +
+    (showActionCol ? `<th style="width:64px;text-align:center">액션</th>` : '') +
     cols.map(c => `<th>${c.label}</th>`).join('');
   document.getElementById('order-tbody').innerHTML = filtered.map((r, i) => {
     const key = String(r.order_seq);
@@ -3646,8 +3650,15 @@ function renderOrderTable() {
     else if (isCollected) cls = 'row-collected';
     else if (isCancelStatus) cls = 'row-cancelled';
     else if (isPendingStatus) cls = 'row-pending';
+    // MANUAL 주문 편집 버튼
+    const actionCell = showActionCol
+      ? (r.order_type === 'MANUAL'
+        ? `<td style="text-align:center"><button class="btn" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();openBhgEditByOrderId('${esc(r.order_seq)}')">수정</button></td>`
+        : `<td></td>`)
+      : '';
     return `<tr class="${cls}" style="cursor:pointer" onclick="_onOrderRowClick(${i}, event)">` +
       `<td><input type="checkbox" class="row-check" data-idx="${i}" onchange="updateSelectedCount()" onclick="event.stopPropagation()"></td>` +
+      actionCell +
       cols.map(c => `<td class="${c.num?'num':''}">${r[c.key] ?? ''}</td>`).join('') +
       `</tr>`;
   }).join('');
@@ -16853,6 +16864,22 @@ function renderBhgOrders() {
 function openBhgEdit(orderId) {
   const o = _bhgOrders.find(x => x.order_id === orderId);
   if (!o) { alert('주문을 찾을 수 없습니다.'); return; }
+  _bhgEditSetup(o, 'bhg-manage');
+}
+
+/** 주문조회 페이지에서 편집 진입 — 서버에서 최신 데이터 fetch 후 모달 세팅. */
+async function openBhgEditByOrderId(orderId) {
+  try {
+    const r = await fetch(`${API}/api/bg/manual-orders/${encodeURIComponent(orderId)}`);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    _bhgEditSetup(data, 'orders');
+  } catch (e) {
+    alert('주문 조회 실패: ' + e.message);
+  }
+}
+
+function _bhgEditSetup(o, context) {
   document.getElementById('bhg-edit-order-id').value = o.order_id;
   document.getElementById('bhg-edit-title').textContent = `주문 편집 — ${o.order_id}`;
   document.getElementById('bhg-edit-status').value = String(o.status_seq || 4);
@@ -16863,9 +16890,22 @@ function openBhgEdit(orderId) {
   const dtStr = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
   document.getElementById('bhg-edit-date').value = dtStr;
   document.getElementById('bhg-edit-memo').value = o.source_memo || '';
-  document.getElementById('bhg-edit-modal').style.display = 'flex';
+  const modal = document.getElementById('bhg-edit-modal');
+  modal.dataset.context = context || 'bhg-manage';  // 저장/삭제 후 어떤 페이지 재조회할지
+  modal.style.display = 'flex';
 }
 function closeBhgEdit() { document.getElementById('bhg-edit-modal').style.display = 'none'; }
+
+// 저장/삭제 후 어느 페이지 재조회할지 결정
+function _bhgAfterEdit() {
+  const ctx = document.getElementById('bhg-edit-modal').dataset.context || 'bhg-manage';
+  if (ctx === 'orders') {
+    if (typeof loadOrders === 'function') loadOrders();
+    if (typeof loadBgUnified === 'function') loadBgUnified();  // 정보입력현황도 갱신
+  } else {
+    if (typeof loadBhgOrders === 'function') loadBhgOrders();
+  }
+}
 
 async function saveBhgEdit() {
   const orderId = document.getElementById('bhg-edit-order-id').value;
@@ -16885,7 +16925,7 @@ async function saveBhgEdit() {
     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
     showToast('저장되었습니다.');
     closeBhgEdit();
-    loadBhgOrders();
+    _bhgAfterEdit();
   } catch (e) {
     alert('저장 실패: ' + e.message);
   }
@@ -16893,7 +16933,7 @@ async function saveBhgEdit() {
 async function deleteBhgOrder() {
   const orderId = document.getElementById('bhg-edit-order-id').value;
   if (!orderId) return;
-  if (!confirm(`주문 ${orderId} 를 완전히 삭제합니다. 계속하시겠습니까?`)) return;
+  if (!confirm(`주문 ${orderId} 를 완전히 삭제합니다.\n정보입력현황의 자동 stub 도 함께 삭제됩니다. 계속하시겠습니까?`)) return;
   try {
     const r = await fetch(`${API}/api/bg/manual-orders/${encodeURIComponent(orderId)}`, { method: 'DELETE' });
     if (!r.ok) {
@@ -16902,7 +16942,7 @@ async function deleteBhgOrder() {
     }
     showToast('삭제되었습니다.');
     closeBhgEdit();
-    loadBhgOrders();
+    _bhgAfterEdit();
   } catch (e) {
     alert('삭제 실패: ' + e.message);
   }

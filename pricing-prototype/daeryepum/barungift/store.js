@@ -1286,13 +1286,25 @@ async function updateManualOrder(orderId, data) {
 
 async function deleteManualOrder(orderId) {
   if (!orderId) throw new Error('order_id 필수');
+  // 연쇄 삭제: bg_order_customer_info stub (MO-{order_id}) 도 함께 정리 → 정보입력현황에서도 사라짐.
+  //   stub 없어도 무시 (idempotent).
+  const stubId = `MO-${orderId}`;
   if (USE_SUPABASE) {
     await sbDelete('bg_manual_orders', `order_id=eq.${encodeURIComponent(orderId)}`);
+    try {
+      await sbDelete('bg_order_customer_info', `order_id=eq.${encodeURIComponent(stubId)}`);
+    } catch (e) { console.warn(`[deleteManualOrder] stub 삭제 무시 (${stubId}):`, e.message); }
     return { ok: true };
   }
   const list = readJson(FILES.manualOrders, []);
   const next = list.filter(r => r.order_id !== orderId);
   writeJson(FILES.manualOrders, next);
+  // 로컬 파일 fallback 도 stub 삭제
+  try {
+    const infos = readJson(FILES.customerInfo, []);
+    const nextInfos = infos.filter(i => i.order_id !== stubId);
+    writeJson(FILES.customerInfo, nextInfos);
+  } catch (e) { /* ignore */ }
   return { ok: true };
 }
 
