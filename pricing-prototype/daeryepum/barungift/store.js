@@ -1198,7 +1198,7 @@ async function createManualOrder(data) {
  *   items 배열에서 sticker_selections 로 정규화.
  *   반환: 'created' | 'exists' | 'recreated' | 'error:{msg}'
  */
-async function _ensureStubForManualOrder(mo, { force = false } = {}) {
+async function _ensureStubForManualOrder(mo, { force = false, stickerMap = null } = {}) {
   const orderId = (mo.order_id || '').trim();
   if (!orderId) return 'error:missing order_id';
   const stubId = `MO-${orderId}`;
@@ -1214,20 +1214,38 @@ async function _ensureStubForManualOrder(mo, { force = false } = {}) {
       writeJson(FILES.customerInfo, infos.filter(i => i.order_id !== stubId));
     }
   }
+  // bg_stickers 매핑 준비 (매번 로드 방지 위해 caller 가 stickerMap 전달 가능)
+  if (!stickerMap) {
+    try {
+      const all = await getAllStickers();
+      stickerMap = new Map((all || []).map(s => [String(s.sticker_code || '').trim().toUpperCase(), { id: s.id, name: s.name }]));
+    } catch (e) {
+      console.warn('[_ensureStubForManualOrder] bg_stickers 로드 실패 (sticker_name 매칭 skip):', e.message);
+      stickerMap = new Map();
+    }
+  }
   const items = Array.isArray(mo.items) ? mo.items : [];
-  const stickerSelections = items.map(it => ({
-    product_code: it.product_code || '',
-    product_code_2: it.product_code_2 || '',
-    product_name: it.product_name || '',
-    quantity: Number(it.quantity) || 0,
-    box_code: it.box_code || '',
-    sticker_id: null,
-    sticker_code: (Array.isArray(it.stickers) && it.stickers[0]?.code) || '',
-    sticker_name: '',
-    custom_values: {},
-    custom_options: {},
-    desired_ship_date: mo._desired_ship_date || null,
-  }));
+  const stickerSelections = items.map(it => {
+    // 스티커 코드 — items[i].stickers[0].code 우선. 없으면 빈 문자열.
+    const stickerCode = (Array.isArray(it.stickers) && it.stickers[0]?.code) || '';
+    const codeKey = String(stickerCode).trim().toUpperCase();
+    const stickerInfo = codeKey ? stickerMap.get(codeKey) : null;
+    // 문구 — sticker_note (K열 추가입력옵션) 을 custom_values.text 로 매핑 → 정보입력현황 문구 컬럼 노출
+    const noteText = String(it.sticker_note || '').trim();
+    return {
+      product_code: it.product_code || '',
+      product_code_2: it.product_code_2 || '',
+      product_name: it.product_name || '',
+      quantity: Number(it.quantity) || 0,
+      box_code: it.box_code || '',
+      sticker_id: stickerInfo?.id || null,
+      sticker_code: stickerCode,
+      sticker_name: stickerInfo?.name || '',
+      custom_values: noteText ? { text: noteText } : {},
+      custom_options: {},
+      desired_ship_date: mo._desired_ship_date || null,
+    };
+  });
   try {
     await saveCustomerInfo(stubId, {
       is_express: false,
@@ -1254,9 +1272,15 @@ async function _ensureStubForManualOrder(mo, { force = false } = {}) {
  */
 async function backfillManualOrderStubs({ category = 'daeryepum', force = false } = {}) {
   const orders = await listManualOrders({ category });
+  // stickerMap 사전 로드 — 반복 호출 방지 (수백 건도 1회만 조회)
+  let stickerMap = new Map();
+  try {
+    const all = await getAllStickers();
+    stickerMap = new Map((all || []).map(s => [String(s.sticker_code || '').trim().toUpperCase(), { id: s.id, name: s.name }]));
+  } catch (e) { console.warn('[backfill] stickerMap 로드 실패:', e.message); }
   const result = { total: orders.length, created: 0, exists: 0, recreated: 0, failed: 0, details: [] };
   for (const mo of orders) {
-    const status = await _ensureStubForManualOrder(mo, { force });
+    const status = await _ensureStubForManualOrder(mo, { force, stickerMap });
     if (status === 'created') { result.created++; result.details.push({ order_id: mo.order_id, status: 'created' }); }
     else if (status === 'recreated') { result.recreated++; result.details.push({ order_id: mo.order_id, status: 'recreated' }); }
     else if (status === 'exists') { result.exists++; }
@@ -1275,6 +1299,12 @@ async function backfillManualOrderStubs({ category = 'daeryepum', force = false 
  */
 async function bulkCreateManualOrders(orders, { dryRun = false, overwrite = false } = {}) {
   if (!Array.isArray(orders)) throw new Error('orders 는 배열이어야 합니다');
+  // stickerMap 사전 로드 — 반복 호출 방지
+  let stickerMap = new Map();
+  try {
+    const all = await getAllStickers();
+    stickerMap = new Map((all || []).map(s => [String(s.sticker_code || '').trim().toUpperCase(), { id: s.id, name: s.name }]));
+  } catch (e) { console.warn('[bulkCreate] stickerMap 로드 실패:', e.message); }
   const results = { total: orders.length, success: 0, failed: 0, skipped: 0, updated: 0, details: [] };
   for (const [idx, data] of orders.entries()) {
     try {
@@ -1305,14 +1335,14 @@ async function bulkCreateManualOrders(orders, { dryRun = false, overwrite = fals
           if (USE_SUPABASE) {
             try { await sbDelete('bg_order_customer_info', `order_id=eq.${encodeURIComponent(stubId)}`); } catch { /* ignore */ }
           }
-          const stubStatus = await _ensureStubForManualOrder(data);
+          const stubStatus = await _ensureStubForManualOrder(data, { stickerMap });
           results.updated++;
           results.details.push({ index: idx, order_id: orderId, status: 'updated', stub: stubStatus });
           continue;
         }
         // 기본 (overwrite=false): 기존 유지, stub 만 backfill.
         let stubStatus = 'exists';
-        try { stubStatus = await _ensureStubForManualOrder({ ...existing, _desired_ship_date: data._desired_ship_date, _customer_request: data._customer_request }); }
+        try { stubStatus = await _ensureStubForManualOrder({ ...existing, _desired_ship_date: data._desired_ship_date, _customer_request: data._customer_request }, { stickerMap }); }
         catch (e) { stubStatus = 'error'; }
         results.skipped++;
         results.details.push({ index: idx, order_id: orderId, status: 'skipped', reason: '이미 존재', stub: stubStatus });
@@ -1325,7 +1355,7 @@ async function bulkCreateManualOrders(orders, { dryRun = false, overwrite = fals
       }
       await createManualOrder(data);
       // stub 저장 — 헬퍼 재사용 (실패해도 manual_order 는 유지).
-      const stubStatus = await _ensureStubForManualOrder(data);
+      const stubStatus = await _ensureStubForManualOrder(data, { stickerMap });
       results.success++;
       results.details.push({ index: idx, order_id: orderId, status: 'created', stub: stubStatus });
     } catch (e) {
