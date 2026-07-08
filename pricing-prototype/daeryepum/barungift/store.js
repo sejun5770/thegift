@@ -1190,6 +1190,42 @@ async function createManualOrder(data) {
   return local;
 }
 
+/**
+ * 배치 등록 — CSV 업로드 등 일괄 insert.
+ *   각 주문 개별 try/catch → 실패한 것도 결과에 기록. 전체 실패는 없음.
+ *   dryRun=true 면 실제 insert 하지 않고 valid/invalid 만 판정.
+ */
+async function bulkCreateManualOrders(orders, { dryRun = false } = {}) {
+  if (!Array.isArray(orders)) throw new Error('orders 는 배열이어야 합니다');
+  const results = { total: orders.length, success: 0, failed: 0, skipped: 0, details: [] };
+  for (const [idx, data] of orders.entries()) {
+    try {
+      const orderId = (data.order_id || '').trim();
+      if (!orderId) throw new Error('order_id 누락');
+      if (!data.order_name || !String(data.order_name).trim()) throw new Error('order_name 누락');
+      // 중복 체크 — 이미 있으면 skip
+      const existing = await getManualOrder(orderId);
+      if (existing) {
+        results.skipped++;
+        results.details.push({ index: idx, order_id: orderId, status: 'skipped', reason: '이미 존재' });
+        continue;
+      }
+      if (dryRun) {
+        results.success++;
+        results.details.push({ index: idx, order_id: orderId, status: 'ok' });
+        continue;
+      }
+      await createManualOrder(data);
+      results.success++;
+      results.details.push({ index: idx, order_id: orderId, status: 'created' });
+    } catch (e) {
+      results.failed++;
+      results.details.push({ index: idx, order_id: data.order_id || '', status: 'failed', reason: e.message });
+    }
+  }
+  return results;
+}
+
 async function updateManualOrder(orderId, data) {
   if (!orderId) throw new Error('order_id 필수');
   const patch = {};
@@ -1272,6 +1308,7 @@ module.exports = {
   listManualOrders,
   getManualOrder,
   createManualOrder,
+  bulkCreateManualOrders,
   updateManualOrder,
   deleteManualOrder,
 };

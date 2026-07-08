@@ -2680,6 +2680,7 @@ nav.nav-loading a[href^="#"] {
       <div style="flex:1"></div>
       <!-- 액션 버튼들 — 선택 상태에 따라 지능적으로 show/hide -->
       <button class="btn" id="uni-btn-manual-order" onclick="openBgManualOrderForm()" style="padding:6px 12px;font-size:12px;background:#fef3c7;border-color:#fbbf24;color:#92400e" title="MSSQL 동기화 사고 등으로 시스템에 안 잡힌 주문을 수동 등록합니다 (정보입력현황 + 워크플로우 통합)">➕ 수동 주문 등록</button>
+      <button class="btn" id="uni-btn-csv-upload" onclick="openBgCsvUpload()" style="padding:6px 12px;font-size:12px;background:#dbeafe;border-color:#93c5fd;color:#1e40af" title="바른손더기프트 스프레드시트 CSV 를 업로드하여 여러 주문을 한 번에 등록합니다">📤 CSV 업로드 (바른손더기프트)</button>
       <button class="btn" id="uni-btn-copy" onclick="copyBgUnified()" style="padding:6px 12px;font-size:12px;display:none">📋 수집복사</button>
       <button class="btn btn-primary" id="uni-btn-copy-all" onclick="copyBgUnifiedAll()" style="padding:6px 12px;font-size:12px;display:none" title="선택된 행 (없으면 전체) 을 선택된 컬럼 기준으로 클립보드 복사 (수집상태 영향 없음)">📋 <span id="uni-btn-copy-all-label">선택 복사</span></button>
       <button class="btn" id="uni-btn-copy-receipt" onclick="copyExpressReceiptInfo()" style="padding:6px 12px;font-size:12px;display:none;background:#fef3c7;border-color:#fbbf24;color:#92400e" title="선택된 빠른출고 주문의 현금영수증 정보만 복사 — 형식: 주문번호 / 주문자명 / 영수증정보"><span id="uni-btn-copy-receipt-label">⚡ 현금영수증 복사</span></button>
@@ -2732,6 +2733,63 @@ nav.nav-loading a[href^="#"] {
 
 <!-- 고객입력 수정 모달 -->
 <!-- 수동 주문 등록 모달 (MSSQL 누락 사고 케이스) -->
+<!-- CSV 업로드 모달 (바른손더기프트) -->
+<div id="bg-csv-upload-modal" onclick="if(event.target===this)closeBgCsvUpload()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;max-width:1100px;width:96%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
+      <h3 style="margin:0;font-size:16px">📤 바른손더기프트 CSV 업로드</h3>
+      <button onclick="closeBgCsvUpload()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--gray-500)">&times;</button>
+    </div>
+    <div style="padding:16px 20px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:12px">
+      <!-- 안내 -->
+      <div style="padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:12px;color:#1e40af;line-height:1.6">
+        <b>사용법</b>: 스프레드시트 apps script 와 동일한 CSV 를 업로드하세요.<br>
+        · <b>본사</b> 필터 (B열), 주문번호 (D열) 그룹핑, 상품/박스/스티커 자동 분류<br>
+        · 품목코드1/2, 박스컬러 자동 결정 (핸드워시/주방세제/수건 세트 로직)<br>
+        · 미리보기 검증 후 [등록] 버튼으로 저장 (중복 order_id 는 자동 skip)
+      </div>
+      <!-- 파일 선택 -->
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="file" id="bg-csv-file" accept=".csv,text/csv" onchange="_bgCsvOnFile(this.files[0])"
+          style="padding:6px 8px;font-size:12px;border:1px solid var(--gray-300);border-radius:6px;background:#fff">
+        <span id="bg-csv-file-name" style="font-size:12px;color:var(--gray-500)">파일 미선택</span>
+        <div style="flex:1"></div>
+        <button class="btn" onclick="_bgCsvClear()" style="padding:4px 10px;font-size:11px">초기화</button>
+      </div>
+      <!-- 파싱 요약 배지 -->
+      <div id="bg-csv-summary" style="display:none;padding:10px 14px;background:#f8fafc;border:1px solid var(--gray-200);border-radius:8px;font-size:12px;gap:10px;flex-wrap:wrap"></div>
+      <!-- 미리보기 테이블 -->
+      <div id="bg-csv-preview-wrap" style="display:none;overflow:auto;border:1px solid var(--gray-200);border-radius:8px;flex:1;min-height:0">
+        <table id="bg-csv-preview" style="width:100%;font-size:11.5px;border-collapse:collapse">
+          <thead style="position:sticky;top:0;background:var(--gray-50);z-index:1">
+            <tr>
+              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);white-space:nowrap">상태</th>
+              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);white-space:nowrap">주문번호</th>
+              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);white-space:nowrap">주문자</th>
+              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);white-space:nowrap">연락처</th>
+              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200)">수령지</th>
+              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200)">상품</th>
+              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);white-space:nowrap">품목1</th>
+              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);white-space:nowrap">품목2</th>
+              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);white-space:nowrap">박스</th>
+              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);white-space:nowrap">스티커</th>
+              <th style="padding:8px 10px;text-align:right;border-bottom:1px solid var(--gray-200);white-space:nowrap">수량</th>
+              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);white-space:nowrap">희망출고일</th>
+            </tr>
+          </thead>
+          <tbody id="bg-csv-preview-tbody"></tbody>
+        </table>
+      </div>
+      <div id="bg-csv-empty" style="display:none;padding:40px;text-align:center;color:var(--gray-400);font-size:13px">CSV 파일을 선택해주세요.</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;padding:12px 20px;border-top:1px solid var(--gray-200);background:#fafafa">
+      <div id="bg-csv-status" style="font-size:12px;color:var(--gray-500);flex:1"></div>
+      <button class="btn" onclick="closeBgCsvUpload()">취소</button>
+      <button class="btn btn-primary" id="bg-csv-submit-btn" onclick="submitBgCsvUpload()" disabled style="padding:6px 14px;font-size:13px;opacity:.5">💾 등록 (0건)</button>
+    </div>
+  </div>
+</div>
+
 <div id="bg-manual-order-modal" onclick="if(event.target===this)closeBgManualOrderForm()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:12px;max-width:780px;width:95%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
@@ -16178,6 +16236,338 @@ async function saveBgOrderEdit() {
     loadBgUnified();
   } catch(e) {
     alert('저장 실패: ' + e.message);
+  }
+}
+
+// ============================================
+// 📤 바른손더기프트 CSV 업로드 (스프레드시트 apps script 로직 이식)
+// ============================================
+
+// CSV 컬럼 인덱스 (0-based) — apps script CONFIG.RAW_COL 와 동일
+const BG_CSV_COL = {
+  판매자: 1, 주문번호: 3, 수령인: 4, 수령인휴대폰: 5,
+  전체주소: 7, 상품명: 8, 바코드: 9, 추가입력옵션: 10,
+  사용자메모: 11, 보낼수량: 14, 희망배송일: 15,
+};
+
+// 코드 상수
+const BG_HANDWASH_CODE = 'TGJBK01O2';
+const BG_KITCHEN_SOAP_CODE = 'TGJBK03O1';
+const BG_BOX_HANDWASH = 'TGJBK09D1';
+const BG_BOX_KITCHEN  = 'TGJBK09D2';
+const BG_BOX_TOWEL    = 'TGJBK09D3';
+
+function _bgIsTowelCode(code) {
+  if (!code) return false;
+  const m = String(code).trim().match(/^TGJBK09O(\d+)$/);
+  if (!m) return false;
+  const n = parseInt(m[1]);
+  return n >= 1 && n <= 23;
+}
+function _bgIsStickerCode(code) {
+  if (!code) return false;
+  return /^TG[A-Z]+\d+S\d*$/.test(String(code).trim());
+}
+function _bgParseCombinedCode(code) {
+  if (!code) return null;
+  const s = String(code).trim();
+  const secondTgIndex = s.indexOf('TG', 1);
+  if (secondTgIndex > 0) return { part1: s.substring(0, secondTgIndex), part2: s.substring(secondTgIndex) };
+  return null;
+}
+function _bgIsRelevantCode(code) {
+  return code === BG_HANDWASH_CODE || code === BG_KITCHEN_SOAP_CODE || _bgIsTowelCode(code);
+}
+function _bgOrderCodesForTowelSet(a, b) {
+  const aPri = (a === BG_HANDWASH_CODE || a === BG_KITCHEN_SOAP_CODE);
+  const bPri = (b === BG_HANDWASH_CODE || b === BG_KITCHEN_SOAP_CODE);
+  if (aPri && !bPri) return [a, b];
+  if (bPri && !aPri) return [b, a];
+  return [a, b];
+}
+function _bgDetermineBoxCode(c1, c2) {
+  if (!c1 || !c2) return '';
+  const c1H = c1 === BG_HANDWASH_CODE, c1K = c1 === BG_KITCHEN_SOAP_CODE;
+  const c1T = _bgIsTowelCode(c1), c2T = _bgIsTowelCode(c2);
+  if (c1H && c2T) return BG_BOX_HANDWASH;
+  if (c1K && c2T) return BG_BOX_KITCHEN;
+  if (c1T && c2T) return BG_BOX_TOWEL;
+  return '';
+}
+function _bgExtractTwoCodes(product) {
+  const code = (product.code || '').trim();
+  const opt = (product.inputMsg || '').trim();
+  if (code) {
+    const parsed = _bgParseCombinedCode(code);
+    if (parsed && (_bgIsRelevantCode(parsed.part1) || _bgIsRelevantCode(parsed.part2))) {
+      return { first: parsed.part1, second: parsed.part2 };
+    }
+  }
+  if (opt) {
+    const codes = opt.match(/TG[A-Z0-9]+/g);
+    if (codes && codes.length >= 2) return { first: codes[0], second: codes[1] };
+  }
+  return null;
+}
+function _bgDetermineCodes(product, boxes, productIndex) {
+  const result = { code1: '', code2: '', boxCode: '' };
+  const productCode = (product.code || '').trim();
+  const productName = (product.name || '');
+  if (productName.includes('비타민 답례품')) {
+    const parsed = _bgParseCombinedCode(productCode);
+    if (parsed) { result.code1 = parsed.part1; result.boxCode = parsed.part2; }
+    else result.code1 = productCode;
+    return result;
+  }
+  const twoCodes = _bgExtractTwoCodes(product);
+  if (twoCodes) {
+    const [c1, c2] = _bgOrderCodesForTowelSet(twoCodes.first, twoCodes.second);
+    result.code1 = c1; result.code2 = c2;
+    const boxCode = _bgDetermineBoxCode(c1, c2);
+    if (boxCode) result.boxCode = boxCode;
+    else if (productIndex === 0 && boxes.length > 0) result.boxCode = boxes[0].code;
+    return result;
+  }
+  result.code1 = productCode;
+  if (productIndex === 0 && boxes.length > 0) result.boxCode = boxes[0].code;
+  return result;
+}
+
+// CSV 파서 (RFC 4180 간이 지원: quote, escaped quote, newline in quote)
+function _bgCsvParseText(text) {
+  const rows = [];
+  let cur = [], field = '', inQuote = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuote) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') { inQuote = false; }
+      else { field += c; }
+    } else {
+      if (c === '"') inQuote = true;
+      else if (c === ',') { cur.push(field); field = ''; }
+      else if (c === '\r') { /* skip */ }
+      else if (c === '\n') { cur.push(field); rows.push(cur); cur = []; field = ''; }
+      else { field += c; }
+    }
+  }
+  if (field.length || cur.length) { cur.push(field); rows.push(cur); }
+  return rows;
+}
+
+// CSV → 주문건 배열 (bg_manual_orders 형식)
+function _bgCsvBuildOrders(rows) {
+  if (rows.length <= 1) return { orders: [], filteredCount: 0, totalCount: 0 };
+  const dataRows = rows.slice(1); // 첫 행은 header
+  // "본사" 필터
+  const filtered = dataRows.filter(r => (r[BG_CSV_COL.판매자] || '').toString().trim() === '본사');
+  // 주문번호별 그룹핑
+  const groups = new Map();
+  filtered.forEach(r => {
+    const key = (r[BG_CSV_COL.주문번호] || '').toString().trim();
+    if (!key) return;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  });
+  const orders = [];
+  for (const [orderNum, group] of groups) {
+    const first = group[0];
+    const baseInfo = {
+      order_id: orderNum,
+      recv_name: (first[BG_CSV_COL.수령인] || '').toString().trim(),
+      recv_hphone: (first[BG_CSV_COL.수령인휴대폰] || '').toString().trim(),
+      recv_address: (first[BG_CSV_COL.전체주소] || '').toString().trim(),
+      recv_msg: (first[BG_CSV_COL.사용자메모] || '').toString().trim(),
+      _shipDate: (first[BG_CSV_COL.희망배송일] || '').toString().trim(),
+      _inputMsg: (first[BG_CSV_COL.추가입력옵션] || '').toString().trim(),
+    };
+    // 상품/박스/스티커 분류
+    const items = [];
+    group.forEach((r, rowIndex) => {
+      const itemName = (r[BG_CSV_COL.상품명] || '').toString();
+      const barcode = (r[BG_CSV_COL.바코드] || '').toString().trim();
+      const quantity = parseInt(r[BG_CSV_COL.보낼수량]) || 0;
+      if (!barcode || itemName === '(상동)' || itemName === '상동') return;
+      const lower = itemName.toLowerCase();
+      let itemType = 'product';
+      if (itemName.includes('박스') || lower.includes('box')) itemType = 'box';
+      else if (itemName.includes('스티커') || itemName.includes('STICKER') || lower.includes('sticker')) itemType = 'sticker';
+      else if (_bgIsStickerCode(barcode)) {
+        const hasEarlierProduct = items.some(it => it.type === 'product');
+        itemType = hasEarlierProduct ? 'sticker' : 'product';
+      }
+      items.push({
+        type: itemType, name: itemName, code: barcode, quantity,
+        inputMsg: (r[BG_CSV_COL.추가입력옵션] || '').toString(),
+        originalIndex: rowIndex,
+      });
+    });
+    const products = items.filter(i => i.type === 'product');
+    const boxes = items.filter(i => i.type === 'box');
+    const stickers = items.filter(i => i.type === 'sticker');
+    if (!products.length) {
+      // 상품 없는 주문 — 빈 상품 추가 (spread apps script 로직 동일)
+      products.push({ type: 'product', name: '', code: '', quantity: 0, inputMsg: '', originalIndex: -1 });
+    }
+    // 각 상품별 items 배열 (bg_manual_orders.items JSONB)
+    const orderItems = products.map((product, pIdx) => {
+      const codes = _bgDetermineCodes(product, boxes, pIdx);
+      // 스티커 매칭 (apps script 로직: originalIndex 사이 or code 포함)
+      const productStickers = [];
+      if (products.length > 1 && product.originalIndex >= 0) {
+        const cur = product.originalIndex;
+        const next = pIdx < products.length - 1 ? products[pIdx + 1].originalIndex : Infinity;
+        stickers.forEach(s => { if (s.originalIndex > cur && s.originalIndex < next) productStickers.push(s); });
+        if (!productStickers.length && product.code) {
+          stickers.forEach(s => { if (s.code.includes(product.code)) productStickers.push(s); });
+        }
+      } else {
+        productStickers.push(...stickers);
+      }
+      const cleanedStickers = [];
+      productStickers.forEach(s => {
+        let cc = s.code;
+        if (product.code) cc = cc.replace(product.code, '');
+        if (!cc.trim()) return;
+        let qty = s.quantity;
+        if (productStickers.length === 1 && product.quantity > 0) qty = product.quantity;
+        cleanedStickers.push({ code: cc.trim(), qty });
+      });
+      return {
+        product_code: codes.code1 || product.code || '',
+        product_code_2: codes.code2 || '',
+        box_code: codes.boxCode || '',
+        product_name: product.name,
+        quantity: product.quantity,
+        stickers: cleanedStickers,
+        sticker_note: product.inputMsg || '',
+      };
+    });
+    orders.push({
+      order_id: baseInfo.order_id,
+      order_name: baseInfo.recv_name || '이름없음',
+      order_hphone: baseInfo.recv_hphone,
+      recv_name: baseInfo.recv_name,
+      recv_hphone: baseInfo.recv_hphone,
+      recv_address: baseInfo.recv_address,
+      recv_msg: baseInfo.recv_msg,
+      order_date: new Date().toISOString(),
+      settle_price: 0,
+      status_seq: 4,
+      items: orderItems,
+      site_name: '바른손더기프트',
+      category: 'daeryepum',
+      source_memo: 'CSV 업로드 (바른손더기프트)',
+      _desired_ship_date: baseInfo._shipDate,
+      _customer_request: baseInfo._inputMsg,
+    });
+  }
+  return { orders, filteredCount: filtered.length, totalCount: dataRows.length };
+}
+
+// 파싱 결과 상태 저장
+let _bgCsvParsed = null;
+
+function openBgCsvUpload() {
+  document.getElementById('bg-csv-upload-modal').style.display = 'flex';
+  _bgCsvClear();
+}
+function closeBgCsvUpload() {
+  document.getElementById('bg-csv-upload-modal').style.display = 'none';
+}
+function _bgCsvClear() {
+  _bgCsvParsed = null;
+  document.getElementById('bg-csv-file').value = '';
+  document.getElementById('bg-csv-file-name').textContent = '파일 미선택';
+  document.getElementById('bg-csv-summary').style.display = 'none';
+  document.getElementById('bg-csv-preview-wrap').style.display = 'none';
+  document.getElementById('bg-csv-empty').style.display = 'block';
+  document.getElementById('bg-csv-status').textContent = '';
+  const btn = document.getElementById('bg-csv-submit-btn');
+  btn.disabled = true; btn.style.opacity = '.5';
+  btn.textContent = '💾 등록 (0건)';
+}
+async function _bgCsvOnFile(file) {
+  if (!file) return;
+  document.getElementById('bg-csv-file-name').textContent = file.name;
+  const text = await file.text();
+  const rows = _bgCsvParseText(text);
+  const parsed = _bgCsvBuildOrders(rows);
+  _bgCsvParsed = parsed;
+  _bgCsvRender(parsed);
+}
+function _bgCsvRender(parsed) {
+  const summary = document.getElementById('bg-csv-summary');
+  const wrap = document.getElementById('bg-csv-preview-wrap');
+  const empty = document.getElementById('bg-csv-empty');
+  const tbody = document.getElementById('bg-csv-preview-tbody');
+  if (!parsed.orders.length) {
+    empty.style.display = 'block'; empty.textContent = 'CSV 안에 "본사" 필터 통과 주문이 없습니다.';
+    wrap.style.display = 'none'; summary.style.display = 'none';
+    return;
+  }
+  summary.style.display = 'flex';
+  summary.innerHTML = `
+    <span style="padding:4px 10px;background:#e0e7ff;color:#4338ca;border-radius:4px;font-weight:600">전체 ${parsed.totalCount}행</span>
+    <span style="padding:4px 10px;background:#dcfce7;color:#166534;border-radius:4px;font-weight:600">본사 ${parsed.filteredCount}행</span>
+    <span style="padding:4px 10px;background:#fef3c7;color:#92400e;border-radius:4px;font-weight:600">📦 주문 ${parsed.orders.length}건</span>
+  `;
+  const rowsHtml = [];
+  parsed.orders.forEach(o => {
+    (o.items || []).forEach((it, idx) => {
+      const stickersLabel = (it.stickers || []).map(s => `${s.code}(${s.qty})`).join(' / ') || '-';
+      rowsHtml.push(`<tr>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100)"><span style="background:#dbeafe;color:#1e40af;font-size:10px;font-weight:600;padding:1px 6px;border-radius:3px">대기</span></td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);font-family:monospace">${idx === 0 ? esc(o.order_id) : ''}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100)">${idx === 0 ? esc(o.order_name) : ''}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100)">${idx === 0 ? esc(o.order_hphone || '-') : ''}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${idx === 0 ? esc(o.recv_address || '-') : ''}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);max-width:200px">${esc(it.product_name || '-')}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);font-family:monospace">${esc(it.product_code || '-')}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);font-family:monospace">${esc(it.product_code_2 || '-')}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);font-family:monospace">${esc(it.box_code || '-')}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:10.5px">${esc(stickersLabel)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);text-align:right">${it.quantity || 0}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);white-space:nowrap">${idx === 0 ? esc(o._desired_ship_date || '-') : ''}</td>
+      </tr>`);
+    });
+  });
+  tbody.innerHTML = rowsHtml.join('');
+  wrap.style.display = 'block';
+  empty.style.display = 'none';
+  const btn = document.getElementById('bg-csv-submit-btn');
+  btn.disabled = false; btn.style.opacity = '1';
+  btn.textContent = `💾 등록 (${parsed.orders.length}건)`;
+}
+async function submitBgCsvUpload() {
+  if (!_bgCsvParsed || !_bgCsvParsed.orders.length) return;
+  const orders = _bgCsvParsed.orders;
+  const btn = document.getElementById('bg-csv-submit-btn');
+  const status = document.getElementById('bg-csv-status');
+  btn.disabled = true; btn.style.opacity = '.5';
+  status.textContent = '등록 중…';
+  try {
+    const r = await fetch(`${API}/api/bg/manual-orders/bulk`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orders }),
+    });
+    const result = await r.json();
+    if (!r.ok) throw new Error(result.error || `HTTP ${r.status}`);
+    status.innerHTML = `<b style="color:#16a34a">등록 완료</b> — 성공 ${result.success} · skip ${result.skipped} · 실패 ${result.failed}`;
+    showToast(`CSV 등록 완료 — 성공 ${result.success}건 · 실패 ${result.failed}건`);
+    if (typeof loadBgUnified === 'function') loadBgUnified();
+    // 실패 있으면 상세 표시
+    if (result.failed) {
+      const failedRows = result.details.filter(d => d.status === 'failed');
+      status.innerHTML += `<br><span style="color:#dc2626;font-size:11px">실패: ${failedRows.map(d => `${d.order_id || '(?)'}: ${d.reason}`).join(', ').slice(0, 400)}</span>`;
+    } else {
+      // 성공만 있으면 자동 닫기 (2초 후)
+      setTimeout(() => closeBgCsvUpload(), 2000);
+    }
+  } catch (e) {
+    status.innerHTML = `<b style="color:#dc2626">등록 실패:</b> ${esc(e.message)}`;
+  } finally {
+    btn.disabled = false; btn.style.opacity = '1';
   }
 }
 

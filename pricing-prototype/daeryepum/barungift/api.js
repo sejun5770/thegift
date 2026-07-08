@@ -978,6 +978,23 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       return json(res, { error: err.message }, 400);
     }
   }
+  // POST /api/bg/manual-orders/bulk — CSV 업로드 등 일괄 등록.
+  //   body: { orders: [...], dryRun?: bool }
+  //   response: { total, success, failed, skipped, details: [{index, order_id, status, reason?}] }
+  if (pathname === '/api/bg/manual-orders/bulk' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const orders = Array.isArray(body.orders) ? body.orders : [];
+      const dryRun = !!body.dryRun;
+      const createdBy = req._session?.user?.user_id || req._session?.user?.id || 'admin';
+      orders.forEach(o => { if (!o.created_by) o.created_by = createdBy; });
+      const result = await store.bulkCreateManualOrders(orders, { dryRun });
+      return json(res, result);
+    } catch (err) {
+      console.error('[manual-orders bulk POST] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
   // GET/PUT/DELETE /api/bg/manual-orders/:order_id
   const manualOrderMatch = pathname.match(/^\/api\/bg\/manual-orders\/([^/]+)$/);
   if (manualOrderMatch && method === 'GET') {
