@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>답례품 주문 관리</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<!-- SheetJS (xlsx 파일 지원) — 바른손더기프트 CSV/Excel 업로드용. -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 :root{--primary:#2563eb;--primary-light:#dbeafe;--green:#16a34a;--green-bg:#dcfce7;--red:#dc2626;--red-bg:#fee2e2;--orange:#ea580c;--yellow:#fbbf24;--gray-50:#f9fafb;--gray-100:#f3f4f6;--gray-200:#e5e7eb;--gray-300:#d1d5db;--gray-500:#6b7280;--gray-700:#374151;--gray-900:#111827;--radius:8px}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -1155,7 +1157,7 @@ nav.nav-loading a[href^="#"] {
     <button class="btn" onclick="downloadExcel()" style="padding:5px 12px;font-size:12px" title="선택된 주문 (없으면 전체) 을 엑셀로 다운로드">📥 엑셀</button>
     <button class="btn" id="ord-btn-coupang-sync" onclick="syncCoupangOrders(this)" style="padding:5px 12px;font-size:12px;background:#fef2f2;border-color:#fecaca" title="쿠팡 Wing API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟥 쿠팡 동기화 <span id="ord-coupang-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
     <button class="btn" id="ord-btn-naver-sync" onclick="syncNaverOrders(this)" style="padding:5px 12px;font-size:12px;background:#ecfdf5;border-color:#a7f3d0" title="네이버 커머스 API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟩 네이버 동기화 <span id="ord-naver-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
-    <button class="btn" id="ord-btn-csv-upload" onclick="openBgCsvUpload()" style="padding:5px 12px;font-size:12px;background:#dbeafe;border-color:#93c5fd;color:#1e40af;display:none" title="바른손더기프트 스프레드시트 CSV 를 업로드하여 여러 주문을 한 번에 등록합니다 (답례품 카테고리 전용)">📤 CSV 업로드</button>
+    <button class="btn" id="ord-btn-csv-upload" onclick="openBgCsvUpload()" style="padding:5px 12px;font-size:12px;background:#dbeafe;border-color:#93c5fd;color:#1e40af;display:none" title="바른손더기프트 퍼스트몰 원본 Excel(.xlsx) 또는 CSV 를 업로드하여 여러 주문을 한 번에 등록합니다">📤 CSV/Excel 업로드</button>
     <button class="btn" id="ord-btn-bhg-backfill" onclick="backfillBhgStubs()" style="padding:5px 12px;font-size:12px;background:#eef2ff;border-color:#c7d2fe;color:#4338ca;display:none" title="이전에 등록된 바른손더기프트 주문 중 정보입력현황 stub 이 없는 것을 일괄 생성 (스티커/희망출고일 정보 backfill)">🔧 stub 재생성</button>
     <button class="btn" id="ord-btn-bhg-bulk-cancel" onclick="bulkCancelBhg()" style="padding:5px 12px;font-size:12px;background:#fef3c7;border-color:#fbbf24;color:#92400e;display:none" title="선택된 바른손더기프트 주문을 취소 상태 (status_seq=3) 로 변경">🚫 선택 취소</button>
     <button class="btn" id="ord-btn-bhg-bulk-delete" onclick="bulkDeleteBhg()" style="padding:5px 12px;font-size:12px;background:#fef2f2;border-color:#fca5a5;color:#dc2626;display:none" title="선택된 바른손더기프트 주문을 완전 삭제 (정보입력현황 stub 도 함께 사라짐)">🗑️ 선택 삭제</button>
@@ -2836,22 +2838,25 @@ nav.nav-loading a[href^="#"] {
 <div id="bg-csv-upload-modal" onclick="if(event.target===this)closeBgCsvUpload()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:12px;max-width:1100px;width:96%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
-      <h3 style="margin:0;font-size:16px">📤 바른손더기프트 CSV 업로드</h3>
+      <h3 style="margin:0;font-size:16px">📤 바른손더기프트 CSV/Excel 업로드</h3>
       <button onclick="closeBgCsvUpload()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--gray-500)">&times;</button>
     </div>
     <div style="padding:16px 20px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:12px">
       <!-- 안내 -->
       <div style="padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:12px;color:#1e40af;line-height:1.6">
-        <b>사용법</b>: 스프레드시트 apps script 와 동일한 CSV 를 업로드하세요.<br>
+        <b>사용법</b>: 퍼스트몰 원본 <b>Excel(.xlsx)</b> 또는 스프레드시트 <b>CSV</b> 업로드.<br>
         · <b>본사</b> 필터 (B열), 주문번호 (D열) 그룹핑, 상품/박스/스티커 자동 분류<br>
         · 품목코드1/2, 박스컬러 자동 결정 (핸드워시/주방세제/수건 세트 로직)<br>
+        · 결제일자 컬럼은 헤더에서 자동 감지<br>
         · 미리보기 검증 후 [등록] 버튼으로 저장 (중복 order_id 는 자동 skip)
       </div>
       <!-- 파일 선택 -->
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <input type="file" id="bg-csv-file" accept=".csv,text/csv" onchange="_bgCsvOnFile(this.files[0])"
+        <input type="file" id="bg-csv-file"
+          accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+          onchange="_bgCsvOnFile(this.files[0])"
           style="padding:6px 8px;font-size:12px;border:1px solid var(--gray-300);border-radius:6px;background:#fff">
-        <span id="bg-csv-file-name" style="font-size:12px;color:var(--gray-500)">파일 미선택</span>
+        <span id="bg-csv-file-name" style="font-size:12px;color:var(--gray-500)">파일 미선택 (CSV/Excel)</span>
         <div style="flex:1"></div>
         <button class="btn" onclick="_bgCsvClear()" style="padding:4px 10px;font-size:11px">초기화</button>
       </div>
@@ -16761,8 +16766,25 @@ function _bgCsvClear() {
 async function _bgCsvOnFile(file) {
   if (!file) return;
   document.getElementById('bg-csv-file-name').textContent = file.name;
-  const text = await _bgCsvReadWithEncoding(file);
-  const rows = _bgCsvParseText(text);
+  const isXlsx = /\.(xlsx|xls)$/i.test(file.name);
+  let rows;
+  if (isXlsx) {
+    // xlsx: SheetJS 로 파싱 → 2D 배열 반환
+    if (typeof XLSX === 'undefined') {
+      alert('Excel 파서 라이브러리(SheetJS)가 로드되지 않았습니다. 페이지 새로고침 후 재시도해주세요.');
+      return;
+    }
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const firstSheet = wb.Sheets[wb.SheetNames[0]];
+    // header:1 로 2D array. blankrows:false 로 빈 행 제거. defval 로 undefined → ''
+    rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, blankrows: false, defval: '' });
+    console.log(`[XLSX] ${file.name} 로드 완료 — ${rows.length}행 (시트: ${wb.SheetNames[0]})`);
+  } else {
+    // csv: 기존 인코딩 자동 감지 로직
+    const text = await _bgCsvReadWithEncoding(file);
+    rows = _bgCsvParseText(text);
+  }
   const parsed = _bgCsvBuildOrders(rows);
   _bgCsvParsed = parsed;
   _bgCsvRender(parsed);
