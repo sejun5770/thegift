@@ -2879,7 +2879,10 @@ nav.nav-loading a[href^="#"] {
       </div>
       <div id="bg-csv-empty" style="display:none;padding:40px;text-align:center;color:var(--gray-400);font-size:13px">CSV 파일을 선택해주세요.</div>
     </div>
-    <div style="display:flex;gap:8px;align-items:center;padding:12px 20px;border-top:1px solid var(--gray-200);background:#fafafa">
+    <div style="display:flex;gap:8px;align-items:center;padding:12px 20px;border-top:1px solid var(--gray-200);background:#fafafa;flex-wrap:wrap">
+      <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--gray-700);cursor:pointer" title="이미 등록된 주문번호가 있으면 items/스티커 정보를 최신 CSV 값으로 갱신합니다. 옛날 파서로 등록되어 스티커 정보가 누락된 데이터를 재파싱하고 싶을 때 사용.">
+        <input type="checkbox" id="bg-csv-overwrite"> 기존 덮어쓰기 (재파싱)
+      </label>
       <div id="bg-csv-status" style="font-size:12px;color:var(--gray-500);flex:1"></div>
       <button class="btn" onclick="closeBgCsvUpload()">취소</button>
       <button class="btn btn-primary" id="bg-csv-submit-btn" onclick="submitBgCsvUpload()" disabled style="padding:6px 14px;font-size:13px;opacity:.5">💾 등록 (0건)</button>
@@ -16875,20 +16878,23 @@ async function backfillBhgStubs() {
 async function submitBgCsvUpload() {
   if (!_bgCsvParsed || !_bgCsvParsed.orders.length) return;
   const orders = _bgCsvParsed.orders;
+  const overwrite = !!document.getElementById('bg-csv-overwrite')?.checked;
   const btn = document.getElementById('bg-csv-submit-btn');
   const status = document.getElementById('bg-csv-status');
   btn.disabled = true; btn.style.opacity = '.5';
-  status.textContent = '등록 중…';
+  status.textContent = overwrite ? '등록 중 (덮어쓰기 모드)…' : '등록 중…';
   try {
     const r = await fetch(`${API}/api/bg/manual-orders/bulk`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orders }),
+      body: JSON.stringify({ orders, overwrite }),
     });
     const result = await r.json();
     if (!r.ok) throw new Error(result.error || `HTTP ${r.status}`);
-    status.innerHTML = `<b style="color:#16a34a">등록 완료</b> — 성공 ${result.success} · skip ${result.skipped} · 실패 ${result.failed}`;
-    showToast(`CSV 등록 완료 — 성공 ${result.success}건 · 실패 ${result.failed}건`);
+    const updatedCnt = result.updated || 0;
+    status.innerHTML = `<b style="color:#16a34a">등록 완료</b> — 신규 ${result.success} · 갱신 ${updatedCnt} · skip ${result.skipped} · 실패 ${result.failed}`;
+    showToast(`CSV ${overwrite ? '재파싱' : '등록'} 완료 — 신규 ${result.success} · 갱신 ${updatedCnt} · 실패 ${result.failed}`);
     if (typeof loadBgUnified === 'function') loadBgUnified();
+    if (typeof loadOrders === 'function') loadOrders();
     // 실패 있으면 상세 표시
     if (result.failed) {
       const failedRows = result.details.filter(d => d.status === 'failed');

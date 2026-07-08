@@ -999,9 +999,10 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const body = await parseBody(req);
       const orders = Array.isArray(body.orders) ? body.orders : [];
       const dryRun = !!body.dryRun;
+      const overwrite = !!body.overwrite;
       const createdBy = req._session?.user?.user_id || req._session?.user?.id || 'admin';
       orders.forEach(o => { if (!o.created_by) o.created_by = createdBy; });
-      const result = await store.bulkCreateManualOrders(orders, { dryRun });
+      const result = await store.bulkCreateManualOrders(orders, { dryRun, overwrite });
       return json(res, result);
     } catch (err) {
       console.error('[manual-orders bulk POST] error:', err.message);

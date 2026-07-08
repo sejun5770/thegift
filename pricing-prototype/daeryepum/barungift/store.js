@@ -1255,10 +1255,12 @@ async function backfillManualOrderStubs({ category = 'daeryepum' } = {}) {
  *   각 주문 개별 try/catch → 실패한 것도 결과에 기록. 전체 실패는 없음.
  *   dryRun=true 면 실제 insert 하지 않고 valid/invalid 만 판정.
  *   재업로드 케이스: skip 되더라도 stub 은 확인/생성 (backfill 겸함).
+ *   overwrite=true 이면 기존 있는 주문의 items 를 덮어씀 + stub 도 재생성.
+ *     → 옛날 파서 결과 (스티커 정보 누락 등) 를 최신 파서 결과로 갱신 가능.
  */
-async function bulkCreateManualOrders(orders, { dryRun = false } = {}) {
+async function bulkCreateManualOrders(orders, { dryRun = false, overwrite = false } = {}) {
   if (!Array.isArray(orders)) throw new Error('orders 는 배열이어야 합니다');
-  const results = { total: orders.length, success: 0, failed: 0, skipped: 0, details: [] };
+  const results = { total: orders.length, success: 0, failed: 0, skipped: 0, updated: 0, details: [] };
   for (const [idx, data] of orders.entries()) {
     try {
       const orderId = (data.order_id || '').trim();
@@ -1267,7 +1269,33 @@ async function bulkCreateManualOrders(orders, { dryRun = false } = {}) {
       // 중복 체크 — 이미 있으면 manual_order 는 skip, 하지만 ci stub 만 없으면 backfill 로 생성.
       const existing = await getManualOrder(orderId);
       if (existing) {
-        // stub backfill 시도 (기존 로직 개선: 배포 전 등록분에 stub 없어도 재업로드로 자동 생성).
+        if (overwrite && !dryRun) {
+          // 기존 items 등을 최신 파싱 결과로 갱신 + stub 삭제 후 재생성.
+          const patch = {
+            order_name: data.order_name,
+            order_hphone: data.order_hphone || null,
+            recv_name: data.recv_name || data.order_name || null,
+            recv_hphone: data.recv_hphone || data.order_hphone || null,
+            recv_address: data.recv_address || null,
+            recv_msg: data.recv_msg || null,
+            settle_price: data.settle_price || 0,
+            status_seq: data.status_seq || 4,
+            items: Array.isArray(data.items) ? data.items : [],
+            site_name: data.site_name || '바른손더기프트',
+            source_memo: data.source_memo || null,
+          };
+          await updateManualOrder(orderId, patch);
+          // 기존 stub 삭제 후 새로 생성 (sticker_selections 최신화)
+          const stubId = `MO-${orderId}`;
+          if (USE_SUPABASE) {
+            try { await sbDelete('bg_order_customer_info', `order_id=eq.${encodeURIComponent(stubId)}`); } catch { /* ignore */ }
+          }
+          const stubStatus = await _ensureStubForManualOrder(data);
+          results.updated++;
+          results.details.push({ index: idx, order_id: orderId, status: 'updated', stub: stubStatus });
+          continue;
+        }
+        // 기본 (overwrite=false): 기존 유지, stub 만 backfill.
         let stubStatus = 'exists';
         try { stubStatus = await _ensureStubForManualOrder({ ...existing, _desired_ship_date: data._desired_ship_date, _customer_request: data._customer_request }); }
         catch (e) { stubStatus = 'error'; }
