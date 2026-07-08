@@ -16428,7 +16428,7 @@ async function saveBgOrderEdit() {
 // ============================================
 
 // CSV 컬럼 인덱스 (0-based) — apps script CONFIG.RAW_COL 와 동일
-//   주문상품상태(C열=2), 판매금액(Q열=16) 은 신규 확장.
+//   주문상품상태(C열=2), 판매금액(Q열=16), 결제일자(R열=17) 는 신규 확장.
 const BG_CSV_COL = {
   판매자: 1, 주문상품상태: 2, 주문번호: 3, 수령인: 4, 수령인휴대폰: 5,
   전체주소: 7, 상품명: 8, 바코드: 9, 추가입력옵션: 10,
@@ -16438,7 +16438,20 @@ const BG_CSV_COL = {
   보낼수량: 14,   // O열 — 출고완료 이전 사용
   희망배송일: 15,
   판매금액: 16,   // Q열 — 상품별 합계 (수량 × 단가). 서버에서 주문 settle_price = SUM 계산. CSV 에 없으면 0.
+  결제일자: 17,   // R열 — 매출 집계 기준일. bg_manual_orders.order_date 로 저장.
 };
+
+// CSV 결제일자 파싱 — 'YYYY-MM-DD', 'YYYY/MM/DD', 'YYYY-MM-DD HH:mm:ss' 등 다양한 형식 허용.
+//   유효하지 않으면 null 반환 (호출부에서 fallback).
+function _bgParseCsvDate(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  // 슬래시 → 대시 통일
+  const normalized = s.replace(/\//g, '-').replace(/\s+/, 'T');
+  const d = new Date(normalized);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
 
 // 주문상품상태 → status_seq 매핑 (FirstMall 코드).
 //   결제확인/결제완료/배송준비중 = 4, 취소 = 3, 환불 = 5, 반품완료 = 15, 그 외 = 4 (default)
@@ -16594,6 +16607,7 @@ function _bgCsvBuildOrders(rows) {
       recv_msg: (first[BG_CSV_COL.사용자메모] || '').toString().trim(),
       _shipDate: (first[BG_CSV_COL.희망배송일] || '').toString().trim(),
       _inputMsg: (first[BG_CSV_COL.추가입력옵션] || '').toString().trim(),
+      _settleDate: _bgParseCsvDate(first[BG_CSV_COL.결제일자]),  // R열 결제일자 — 매출 집계 기준일
     };
     // 상품/박스/스티커 분류
     //   수량 참조: 주문상품상태에 따라 분기
@@ -16681,7 +16695,9 @@ function _bgCsvBuildOrders(rows) {
       recv_hphone: baseInfo.recv_hphone,
       recv_address: baseInfo.recv_address,
       recv_msg: baseInfo.recv_msg,
-      order_date: new Date().toISOString(),
+      // 결제일자 (R열) 있으면 사용, 없으면 등록 시각 fallback.
+      //   bg_manual_orders.order_date 로 저장 → 대시보드/매출 집계가 이 값 기준.
+      order_date: baseInfo._settleDate || new Date().toISOString(),
       settle_price: orderSettlePrice,
       status_seq: baseInfo.status_seq,  // CSV 주문상품상태 (C열) 파싱 결과
       items: orderItems,
