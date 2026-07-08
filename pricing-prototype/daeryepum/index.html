@@ -286,7 +286,6 @@ nav.nav-loading a[href^="#"] {
   <a href="#bg-vendor-dashboard" onclick="showPage('bg-vendor-dashboard')">📈 위탁 대시보드</a>
   <a href="#bg-artists" onclick="showPage('bg-artists')">🎨 작가 정산</a>
   <a href="#daeryepum-stock" onclick="showPage('daeryepum-stock')">📦 답례품 재고</a>
-  <a href="#bhands-gift" onclick="showPage('bhands-gift')">🎁 바른손더기프트</a>
   <a href="#wedding-calendar" onclick="showPage('wedding-calendar')">💍 예식일 캘린더</a>
   <a href="#admin-nav-settings" onclick="showPage('admin-nav-settings')" id="nav-link-admin-nav-settings" style="display:none">⚙️ GNB 설정</a>
   <div class="user-area" id="user-area"></div>
@@ -1117,7 +1116,7 @@ nav.nav-loading a[href^="#"] {
     <button class="cat-tab active" data-cat="daeryepum" onclick="switchCategory('daeryepum')">🎁 답례품</button>
     <button class="cat-tab" data-cat="deco" onclick="switchCategory('deco')">✨ 데코소품</button>
     <button class="cat-tab" data-cat="flower" onclick="switchCategory('flower')">💐 꽃다발</button>
-    <button class="cat-tab" data-cat="bhands_gift" onclick="switchCategory('bhands_gift')" title="API 미연동 채널 — CSV 업로드로 수동 등록">🎁 바른손더기프트</button>
+    <button class="cat-tab" data-cat="bhands_gift" onclick="switchCategory('bhands_gift')" title="API 미연동 채널 — CSV 업로드로 수동 등록">🎁 답례품_더기프트</button>
   </div>
   <!-- 필터바: 날짜/검색/조회 + 표시 필터 통합 -->
   <div class="toolbar" style="gap:12px">
@@ -13275,7 +13274,7 @@ function switchUniTab(tab) {
  *   마켓플레이스(쿠팡/네이버) 는 ci 자동 생성되어 항상 submitted 이상.
  */
 function computeRowStage(order, ci, sel) {
-  const isMarketplace = order?.order_type === 'COUPANG' || order?.order_type === 'NAVER';
+  const isMarketplace = order?.order_type === 'COUPANG' || order?.order_type === 'NAVER' || order?.order_type === 'MANUAL';
   if (!ci && !isMarketplace) return 'unsubmitted';
   if (!sel) return 'submitted';
   if (sel.shipped_at) return 'shipped';
@@ -13300,6 +13299,7 @@ function bgCiKey(order) {
   if (order.order_type === 'ETC') return `ETC-${order.order_seq}`;
   if (order.order_type === 'COUPANG') return `CP-${order.order_seq}`;
   if (order.order_type === 'NAVER') return `NV-${order.order_seq}`;
+  if (order.order_type === 'MANUAL') return `MO-${order.order_seq}`;  // 바른손더기프트 CSV 등록
   return String(order.order_seq);
 }
 
@@ -13372,7 +13372,7 @@ function renderBgUnified() {
   );
   // 마켓플레이스 주문(쿠팡/네이버)은 고객 정보입력 불필요 → 자동 '입력완료' 처리.
   //   미입력 탭에 안 나오고, 입력완료 탭에 ci 없어도 노출됨.
-  const isMarketplace = o => o.order_type === 'COUPANG' || o.order_type === 'NAVER';
+  const isMarketplace = o => o.order_type === 'COUPANG' || o.order_type === 'NAVER' || o.order_type === 'MANUAL';
 
   // 모든 visibleBase 주문 → 일단 그대로 (탭 필터링은 row 빌드 후 stage 단위로)
   const hideProcessed = document.getElementById('uni-hide-processed')?.checked;
@@ -16349,13 +16349,24 @@ async function saveBgOrderEdit() {
 // ============================================
 
 // CSV 컬럼 인덱스 (0-based) — apps script CONFIG.RAW_COL 와 동일
-//   판매금액(Q열=16) 은 원본 스프레드시트 확장 신규. 상품별 합계 (수량 × 단가) 로 저장.
+//   주문상품상태(C열=2), 판매금액(Q열=16) 은 신규 확장.
 const BG_CSV_COL = {
-  판매자: 1, 주문번호: 3, 수령인: 4, 수령인휴대폰: 5,
+  판매자: 1, 주문상품상태: 2, 주문번호: 3, 수령인: 4, 수령인휴대폰: 5,
   전체주소: 7, 상품명: 8, 바코드: 9, 추가입력옵션: 10,
   사용자메모: 11, 보낼수량: 14, 희망배송일: 15,
-  판매금액: 16,  // Q열 — 상품별 합계 (수량 × 단가). 서버에서 주문 settle_price = SUM 계산.
+  판매금액: 16,  // Q열 — 상품별 합계 (수량 × 단가). 서버에서 주문 settle_price = SUM 계산. CSV 에 없으면 0.
 };
+
+// 주문상품상태 → status_seq 매핑 (FirstMall 코드).
+//   결제확인/결제완료/배송준비중 = 4, 취소 = 3, 환불 = 5, 반품완료 = 15, 그 외 = 4 (default)
+function _bgStatusToSeq(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return 4;
+  if (s.includes('취소')) return 3;
+  if (s.includes('환불')) return 5;
+  if (s.includes('반품') && s.includes('완료')) return 15;
+  return 4;
+}
 
 // 코드 상수
 const BG_HANDWASH_CODE = 'TGJBK01O2';
@@ -16481,6 +16492,8 @@ function _bgCsvBuildOrders(rows) {
     const first = group[0];
     const baseInfo = {
       order_id: orderNum,
+      status_seq: _bgStatusToSeq(first[BG_CSV_COL.주문상품상태]),
+      status_raw: (first[BG_CSV_COL.주문상품상태] || '').toString().trim(),
       recv_name: (first[BG_CSV_COL.수령인] || '').toString().trim(),
       recv_hphone: (first[BG_CSV_COL.수령인휴대폰] || '').toString().trim(),
       recv_address: (first[BG_CSV_COL.전체주소] || '').toString().trim(),
@@ -16568,7 +16581,7 @@ function _bgCsvBuildOrders(rows) {
       recv_msg: baseInfo.recv_msg,
       order_date: new Date().toISOString(),
       settle_price: orderSettlePrice,
-      status_seq: 4,
+      status_seq: baseInfo.status_seq,  // CSV 주문상품상태 (C열) 파싱 결과
       items: orderItems,
       site_name: '바른손더기프트',
       category: 'daeryepum',

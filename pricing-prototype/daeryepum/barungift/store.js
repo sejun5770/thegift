@@ -1216,6 +1216,40 @@ async function bulkCreateManualOrders(orders, { dryRun = false } = {}) {
         continue;
       }
       await createManualOrder(data);
+      // bg_order_customer_info stub 자동 생성 → 정보입력현황 '입력완료' 탭 자동 노출.
+      //   order_id 형식: 'MO-{order_id}' (기존 CP-{}/NV-{} 패턴 통일).
+      //   sticker_selections 는 items 에서 상품별 정보 뽑아 저장 (product_code, box_code, sticker_code 등).
+      //   실패해도 manual_order 는 유지 (부수적 stub 실패는 전체 결과에 영향 X).
+      try {
+        const stickerSelections = (Array.isArray(data.items) ? data.items : []).map(it => ({
+          product_code: it.product_code || '',
+          product_code_2: it.product_code_2 || '',
+          product_name: it.product_name || '',
+          quantity: Number(it.quantity) || 0,
+          box_code: it.box_code || '',
+          sticker_id: null,
+          sticker_code: (Array.isArray(it.stickers) && it.stickers[0]?.code) || '',
+          sticker_name: '',
+          custom_values: {},
+          custom_options: {},
+          desired_ship_date: data._desired_ship_date || null,
+        }));
+        await saveCustomerInfo(`MO-${orderId}`, {
+          is_express: false,
+          express_fee: 0,
+          desired_ship_date: data._desired_ship_date || null,
+          sticker_selections: stickerSelections,
+          cash_receipt_yn: false,
+          receipt_type: null,
+          receipt_number: null,
+          customer_request: data._customer_request || null,
+        });
+      } catch (stubErr) {
+        // ALREADY_SUBMITTED (덮어쓰기 방지) 는 정상 — 재실행 시 기존 stub 유지.
+        if (!/already/i.test(stubErr.message || '')) {
+          console.warn(`[bulkCreate] stub 저장 실패 (${orderId}):`, stubErr.message);
+        }
+      }
       results.success++;
       results.details.push({ index: idx, order_id: orderId, status: 'created' });
     } catch (e) {

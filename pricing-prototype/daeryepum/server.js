@@ -1118,6 +1118,7 @@ async function apiOrders(query) {
               coupon_price: 0,
               status_seq: mo.status_seq || 4,
               status: null,
+              status_label: ({ 4: '결제확인', 3: '취소', 5: '환불', 15: '반품완료' })[mo.status_seq] || '결제확인',
               settle_method: mo.settle_method || null,
               wedding_date: null,
               site_name: mo.site_name || '바른손더기프트',
