@@ -1157,6 +1157,8 @@ nav.nav-loading a[href^="#"] {
     <button class="btn" id="ord-btn-naver-sync" onclick="syncNaverOrders(this)" style="padding:5px 12px;font-size:12px;background:#ecfdf5;border-color:#a7f3d0" title="네이버 커머스 API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟩 네이버 동기화 <span id="ord-naver-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
     <button class="btn" id="ord-btn-csv-upload" onclick="openBgCsvUpload()" style="padding:5px 12px;font-size:12px;background:#dbeafe;border-color:#93c5fd;color:#1e40af;display:none" title="바른손더기프트 스프레드시트 CSV 를 업로드하여 여러 주문을 한 번에 등록합니다 (답례품 카테고리 전용)">📤 CSV 업로드</button>
     <button class="btn" id="ord-btn-bhg-backfill" onclick="backfillBhgStubs()" style="padding:5px 12px;font-size:12px;background:#eef2ff;border-color:#c7d2fe;color:#4338ca;display:none" title="이전에 등록된 바른손더기프트 주문 중 정보입력현황 stub 이 없는 것을 일괄 생성 (스티커/희망출고일 정보 backfill)">🔧 stub 재생성</button>
+    <button class="btn" id="ord-btn-bhg-bulk-cancel" onclick="bulkCancelBhg()" style="padding:5px 12px;font-size:12px;background:#fef3c7;border-color:#fbbf24;color:#92400e;display:none" title="선택된 바른손더기프트 주문을 취소 상태 (status_seq=3) 로 변경">🚫 선택 취소</button>
+    <button class="btn" id="ord-btn-bhg-bulk-delete" onclick="bulkDeleteBhg()" style="padding:5px 12px;font-size:12px;background:#fef2f2;border-color:#fca5a5;color:#dc2626;display:none" title="선택된 바른손더기프트 주문을 완전 삭제 (정보입력현황 stub 도 함께 사라짐)">🗑️ 선택 삭제</button>
   </div>
 
   <div class="card" style="padding:0;overflow-x:auto">
@@ -3705,10 +3707,14 @@ function updateSelectedCount() {
   const btnUnmark = document.getElementById('ord-btn-unmark');
   const btnMarkLabel = document.getElementById('ord-btn-mark-label');
   const btnUnmarkLabel = document.getElementById('ord-btn-unmark-label');
+  const btnBhgCancel = document.getElementById('ord-btn-bhg-bulk-cancel');
+  const btnBhgDelete = document.getElementById('ord-btn-bhg-bulk-delete');
 
   if (cnt === 0) {
     if (btnMark) btnMark.style.display = 'none';
     if (btnUnmark) btnUnmark.style.display = 'none';
+    if (btnBhgCancel) btnBhgCancel.style.display = 'none';
+    if (btnBhgDelete) btnBhgDelete.style.display = 'none';
     return;
   }
 
@@ -3717,13 +3723,25 @@ function updateSelectedCount() {
     ? getFilteredOrders().filter(r => !collected.has(String(r.order_seq)))
     : getFilteredOrders();
   let pendingCnt = 0, collectedCnt = 0;
+  const manualSeqs = [];
   checkedBoxes.forEach(cb => {
     const idx = parseInt(cb.dataset.idx);
     const row = filtered[idx];
     if (!row) return;
     if (collected.has(String(row.order_seq))) collectedCnt++;
     else pendingCnt++;
+    if (row.order_type === 'MANUAL') manualSeqs.push(String(row.order_seq));
   });
+  // MANUAL (바른손더기프트) 일괄 취소/삭제 버튼 — 답례품_더기프트 카테고리에서만 노출.
+  const showBhgBulk = (currentCategory === 'bhands_gift') && (manualSeqs.length > 0);
+  if (btnBhgCancel) {
+    btnBhgCancel.style.display = showBhgBulk ? '' : 'none';
+    if (showBhgBulk) btnBhgCancel.textContent = `🚫 선택 취소 (${manualSeqs.length}건)`;
+  }
+  if (btnBhgDelete) {
+    btnBhgDelete.style.display = showBhgBulk ? '' : 'none';
+    if (showBhgBulk) btnBhgDelete.textContent = `🗑️ 선택 삭제 (${manualSeqs.length}건)`;
+  }
 
   // 미수집 행이 있으면 '수집완료' 버튼, 건수는 실제 전환 대상만
   if (btnMark) {
@@ -16724,6 +16742,67 @@ function _bgCsvRender(parsed) {
   btn.disabled = false; btn.style.opacity = '1';
   btn.textContent = `💾 등록 (${parsed.orders.length}건)`;
 }
+// 선택된 MANUAL 주문 seq 배열 수집 (답례품_더기프트 전용 헬퍼)
+function _getSelectedManualOrderSeqs() {
+  const checked = [...document.querySelectorAll('.row-check:checked')];
+  const collectedSet = getCollectedSet();
+  const filtered = document.getElementById('hide-collected')?.checked
+    ? getFilteredOrders().filter(r => !collectedSet.has(String(r.order_seq)))
+    : getFilteredOrders();
+  const seqs = [];
+  checked.forEach(cb => {
+    const idx = parseInt(cb.dataset.idx);
+    const row = filtered[idx];
+    if (row && row.order_type === 'MANUAL') seqs.push(String(row.order_seq));
+  });
+  return [...new Set(seqs)];
+}
+
+// 선택된 MANUAL 주문 일괄 삭제
+async function bulkDeleteBhg() {
+  const targets = _getSelectedManualOrderSeqs();
+  if (!targets.length) { showToast('삭제할 바른손더기프트 주문을 선택해주세요'); return; }
+  if (!confirm(`${targets.length}건 완전 삭제합니다.\n정보입력현황의 stub 도 함께 사라집니다. 계속하시겠습니까?`)) return;
+  const btn = document.getElementById('ord-btn-bhg-bulk-delete');
+  const prev = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 삭제 중…'; }
+  const result = { ok: 0, failed: 0 };
+  for (const id of targets) {
+    try {
+      const r = await fetch(`${API}/api/bg/manual-orders/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (r.ok) result.ok++; else result.failed++;
+    } catch { result.failed++; }
+  }
+  if (btn) { btn.disabled = false; btn.textContent = prev; }
+  showToast(`삭제 완료 — 성공 ${result.ok} · 실패 ${result.failed}`);
+  if (typeof loadOrders === 'function') loadOrders();
+  if (typeof loadBgUnified === 'function') loadBgUnified();
+}
+
+// 선택된 MANUAL 주문 일괄 취소 (status_seq=3)
+async function bulkCancelBhg() {
+  const targets = _getSelectedManualOrderSeqs();
+  if (!targets.length) { showToast('취소 처리할 바른손더기프트 주문을 선택해주세요'); return; }
+  if (!confirm(`${targets.length}건을 취소 상태 (status_seq=3) 로 변경합니다. 계속하시겠습니까?`)) return;
+  const btn = document.getElementById('ord-btn-bhg-bulk-cancel');
+  const prev = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 처리 중…'; }
+  const result = { ok: 0, failed: 0 };
+  for (const id of targets) {
+    try {
+      const r = await fetch(`${API}/api/bg/manual-orders/${encodeURIComponent(id)}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status_seq: 3 }),
+      });
+      if (r.ok) result.ok++; else result.failed++;
+    } catch { result.failed++; }
+  }
+  if (btn) { btn.disabled = false; btn.textContent = prev; }
+  showToast(`취소 처리 완료 — 성공 ${result.ok} · 실패 ${result.failed}`);
+  if (typeof loadOrders === 'function') loadOrders();
+  if (typeof loadBgUnified === 'function') loadBgUnified();
+}
+
 // 이전 등록분 stub 일괄 backfill — 재업로드 없이 원클릭.
 async function backfillBhgStubs() {
   const btn = document.getElementById('ord-btn-bhg-backfill');
