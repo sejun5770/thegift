@@ -1232,6 +1232,11 @@ async function _ensureStubForManualOrder(mo, { force = false, stickerMap = null 
     const stickerInfo = codeKey ? stickerMap.get(codeKey) : null;
     // 문구 — sticker_note (K열 추가입력옵션) 을 custom_values.text 로 매핑 → 정보입력현황 문구 컬럼 노출
     const noteText = String(it.sticker_note || '').trim();
+    // custom_options — 수집복사가 K/L 열을 이 값에서 뽑음 (그룹명 순서로 firstGroupOpt/secondGroupOpt).
+    //   수건 등 자유옵션 2개 있는 상품은 두 code 를 그룹으로 저장 → 수집복사 K/L 모두 정상.
+    const customOptions = {};
+    if (it.product_code) customOptions['품목1'] = { code: it.product_code, name: it.product_name || it.product_code };
+    if (it.product_code_2) customOptions['품목2'] = { code: it.product_code_2, name: '' };
     return {
       product_code: it.product_code || '',
       product_code_2: it.product_code_2 || '',
@@ -1242,7 +1247,7 @@ async function _ensureStubForManualOrder(mo, { force = false, stickerMap = null 
       sticker_code: stickerCode,
       sticker_name: stickerInfo?.name || '',
       custom_values: noteText ? { text: noteText } : {},
-      custom_options: {},
+      custom_options: customOptions,
       desired_ship_date: mo._desired_ship_date || null,
     };
   });
