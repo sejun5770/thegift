@@ -16912,25 +16912,58 @@ async function submitBgCsvUpload() {
   const btn = document.getElementById('bg-csv-submit-btn');
   const status = document.getElementById('bg-csv-status');
   btn.disabled = true; btn.style.opacity = '.5';
-  status.textContent = overwrite ? '등록 중 (덮어쓰기 모드)…' : '등록 중…';
+  // 청크 분할 — 대용량 CSV / 덮어쓰기 모드에서 504 Gateway Timeout 방지.
+  //   각 배치는 프록시 60초 timeout 안에 완료되도록 크기 조정 (기본 30건).
+  //   덮어쓰기 모드는 처리 시간 3~5배 → 청크 더 작게 (15건).
+  const CHUNK_SIZE = overwrite ? 15 : 30;
+  const totalChunks = Math.ceil(orders.length / CHUNK_SIZE);
+  const totalResult = { success: 0, updated: 0, skipped: 0, failed: 0, details: [] };
+  const failedReasons = [];
   try {
-    const r = await fetch(`${API}/api/bg/manual-orders/bulk`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orders, overwrite }),
-    });
-    const result = await r.json();
-    if (!r.ok) throw new Error(result.error || `HTTP ${r.status}`);
-    const updatedCnt = result.updated || 0;
-    status.innerHTML = `<b style="color:#16a34a">등록 완료</b> — 신규 ${result.success} · 갱신 ${updatedCnt} · skip ${result.skipped} · 실패 ${result.failed}`;
-    showToast(`CSV ${overwrite ? '재파싱' : '등록'} 완료 — 신규 ${result.success} · 갱신 ${updatedCnt} · 실패 ${result.failed}`);
+    for (let i = 0; i < orders.length; i += CHUNK_SIZE) {
+      const chunk = orders.slice(i, i + CHUNK_SIZE);
+      const chunkIdx = Math.floor(i / CHUNK_SIZE) + 1;
+      status.innerHTML = `<b>등록 중</b> — 배치 ${chunkIdx}/${totalChunks} (${i + 1}~${Math.min(i + chunk.length, orders.length)} / ${orders.length}건)${overwrite ? ' <span style="color:#7c3aed">덮어쓰기 모드</span>' : ''}`;
+      try {
+        const r = await fetch(`${API}/api/bg/manual-orders/bulk`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orders: chunk, overwrite }),
+        });
+        if (!r.ok) {
+          // 504 등 서버 에러: 이 청크 전체를 failed 처리 후 계속 진행
+          const reason = r.status === 504 ? '서버 응답 지연 (504) — 청크 재시도 필요' : `HTTP ${r.status}`;
+          chunk.forEach(o => {
+            totalResult.failed++;
+            failedReasons.push(`${o.order_id}: ${reason}`);
+          });
+          continue;
+        }
+        const result = await r.json();
+        totalResult.success += Number(result.success) || 0;
+        totalResult.updated += Number(result.updated) || 0;
+        totalResult.skipped += Number(result.skipped) || 0;
+        totalResult.failed += Number(result.failed) || 0;
+        if (Array.isArray(result.details)) {
+          result.details.filter(d => d.status === 'failed').forEach(d => {
+            failedReasons.push(`${d.order_id || '(?)'}: ${d.reason || 'unknown'}`);
+          });
+        }
+      } catch (e) {
+        // 네트워크 실패 — 이 청크 전체를 failed 처리 후 계속
+        chunk.forEach(o => {
+          totalResult.failed++;
+          failedReasons.push(`${o.order_id}: ${e.message}`);
+        });
+      }
+    }
+    // 최종 결과
+    status.innerHTML = `<b style="color:#16a34a">등록 완료</b> — 신규 ${totalResult.success} · 갱신 ${totalResult.updated} · skip ${totalResult.skipped} · 실패 ${totalResult.failed}`;
+    showToast(`CSV ${overwrite ? '재파싱' : '등록'} 완료 — 신규 ${totalResult.success} · 갱신 ${totalResult.updated} · 실패 ${totalResult.failed}`);
     if (typeof loadBgUnified === 'function') loadBgUnified();
     if (typeof loadOrders === 'function') loadOrders();
-    // 실패 있으면 상세 표시
-    if (result.failed) {
-      const failedRows = result.details.filter(d => d.status === 'failed');
-      status.innerHTML += `<br><span style="color:#dc2626;font-size:11px">실패: ${failedRows.map(d => `${d.order_id || '(?)'}: ${d.reason}`).join(', ').slice(0, 400)}</span>`;
+    if (failedReasons.length) {
+      status.innerHTML += `<br><span style="color:#dc2626;font-size:11px">실패: ${esc(failedReasons.join(', ').slice(0, 500))}</span>`;
     } else {
-      // 성공만 있으면 자동 닫기 (2초 후)
       setTimeout(() => closeBgCsvUpload(), 2000);
     }
   } catch (e) {
