@@ -338,6 +338,9 @@ async function saveCustomerInfo(orderId, data) {
     receipt_type: data.receipt_type || null,
     receipt_number: data.receipt_number || null,
     customer_request: data.customer_request || null,
+    is_special_shipping: !!data.is_special_shipping,
+    special_shipping_reason: data.special_shipping_reason || null,
+    special_shipping_memo: data.special_shipping_memo || null,
     submitted_at: now(),
   };
 
@@ -416,7 +419,7 @@ async function getCustomerInfosWithShipDate() {
  * ALREADY_SUBMITTED 체크 없이 덮어쓰기.
  */
 async function updateCustomerInfo(orderId, data) {
-  const allowed = ['desired_ship_date', 'is_express', 'express_fee', 'sticker_selections', 'cash_receipt_yn', 'receipt_type', 'receipt_number', 'customer_request'];
+  const allowed = ['desired_ship_date', 'is_express', 'express_fee', 'sticker_selections', 'cash_receipt_yn', 'receipt_type', 'receipt_number', 'customer_request', 'is_special_shipping', 'special_shipping_reason', 'special_shipping_memo'];
   const patch = {};
   for (const k of allowed) { if (k in data) patch[k] = data[k]; }
   // L7: express_fee 음수/NaN 가드
@@ -473,6 +476,9 @@ async function updateCustomerInfo(orderId, data) {
       receipt_type: data.receipt_type || null,
       receipt_number: data.receipt_number || null,
       customer_request: data.customer_request || null,
+      is_special_shipping: !!data.is_special_shipping,
+      special_shipping_reason: data.special_shipping_reason || null,
+      special_shipping_memo: data.special_shipping_memo || null,
       submitted_at: now(),
     };
     // migration 미적용 대응

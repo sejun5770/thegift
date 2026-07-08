@@ -2611,6 +2611,20 @@ nav.nav-loading a[href^="#"] {
     </label>
   </div>
 
+  <!-- 기타출고 필터 (라디오) — 전체 탭 전용, ci.is_special_shipping 판정 -->
+  <div id="uni-special-shipping-filter" style="display:none;gap:14px;align-items:center;padding:9px 12px;background:#f8fafc;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:10px;font-size:13px;flex-wrap:wrap">
+    <span style="color:var(--gray-600);font-weight:500">🚨 기타출고:</span>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="radio" name="uni-special-shipping" value="all" checked onchange="renderBgUnified()"> 전체
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="radio" name="uni-special-shipping" value="special" onchange="renderBgUnified()"> 기타출고만
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="radio" name="uni-special-shipping" value="normal" onchange="renderBgUnified()"> 정상만
+    </label>
+  </div>
+
   <!-- 주문사이트 필터 (체크박스 그룹) — 전체 탭 전용, 다른 탭에 영향 없음 -->
   <div id="uni-site-filter" style="display:none;gap:14px;align-items:center;padding:9px 12px;background:#f8fafc;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:10px;font-size:13px;flex-wrap:wrap">
     <span style="color:var(--gray-600);font-weight:500">주문사이트:</span>
@@ -2895,6 +2909,36 @@ nav.nav-loading a[href^="#"] {
       <div>
         <label style="font-size:12px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:6px">고객 요청사항</label>
         <textarea id="bg-edit-request" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px;resize:vertical"></textarea>
+      </div>
+
+      <!-- 기타출고 처리 (사고 케이스: 수량부족, 상품훼손, 주문누락 등) -->
+      <div style="padding:12px;background:#fef9c3;border:1px solid #facc15;border-radius:8px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <input type="checkbox" id="bg-edit-special-shipping" onchange="toggleBgSpecialShippingEdit(this.checked)">
+          <label for="bg-edit-special-shipping" style="font-size:13px;font-weight:600;color:#92400e;cursor:pointer">
+            🚨 기타출고 처리
+          </label>
+          <span style="font-size:11px;color:var(--gray-500)">(사고건: 수량부족·상품훼손·주문누락 등)</span>
+        </div>
+        <div id="bg-edit-special-shipping-detail" style="display:none;padding-top:8px;border-top:1px dashed #fcd34d;margin-top:6px">
+          <label style="font-size:11px;font-weight:600;color:#92400e;display:block;margin-bottom:6px">사유</label>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+            <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
+              <input type="radio" name="bg-edit-special-shipping-reason" value="shortage" onchange="_bgToggleSpecialReasonMemo()"> 수량부족
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
+              <input type="radio" name="bg-edit-special-shipping-reason" value="damage" onchange="_bgToggleSpecialReasonMemo()"> 상품훼손
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
+              <input type="radio" name="bg-edit-special-shipping-reason" value="omission" onchange="_bgToggleSpecialReasonMemo()"> 주문누락
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
+              <input type="radio" name="bg-edit-special-shipping-reason" value="other" onchange="_bgToggleSpecialReasonMemo()"> 기타
+            </label>
+          </div>
+          <textarea id="bg-edit-special-shipping-memo" placeholder="기타 선택 시 사유를 입력해주세요" rows="2"
+            style="display:none;width:100%;padding:6px 8px;border:1px solid #fcd34d;border-radius:4px;font-size:12px;resize:vertical;box-sizing:border-box"></textarea>
+        </div>
       </div>
 
       <!-- 고객 화면 보안 링크 (HMAC 서명) -->
@@ -13045,6 +13089,9 @@ function switchUniTab(tab) {
   // 희망출고일 필터 UI — 전체 탭에서만 노출
   const shipDateFilterEl = document.getElementById('uni-ship-date-filter');
   if (shipDateFilterEl) shipDateFilterEl.style.display = (tab === 'all') ? 'flex' : 'none';
+  // 기타출고 필터 UI — 전체 탭에서만 노출
+  const specialShippingFilterEl = document.getElementById('uni-special-shipping-filter');
+  if (specialShippingFilterEl) specialShippingFilterEl.style.display = (tab === 'all') ? 'flex' : 'none';
   // 정렬 옵션 — 미입력 외 모든 탭 노출. 기본 정렬 힌트는 탭별로 다름.
   const sortOpts = document.getElementById('uni-sort-options');
   if (sortOpts) sortOpts.style.display = (tab !== 'unsubmitted') ? 'flex' : 'none';
@@ -13252,6 +13299,10 @@ function renderBgUnified() {
   const shipDateMode = (activeTab === 'all')
     ? (document.querySelector('input[name="uni-ship-date"]:checked')?.value || 'all')
     : 'all';
+  // 기타출고 필터 (전체 탭 전용, ci.is_special_shipping)
+  const specialShippingMode = (activeTab === 'all')
+    ? (document.querySelector('input[name="uni-special-shipping"]:checked')?.value || 'all')
+    : 'all';
   // 탭 필터 (row 단위) — 'all' 은 stage 필터 skip (전체 노출)
   bgUnifiedRows = bgUnifiedRows.filter(r => {
     if (activeTab !== 'all' && r._stage !== activeTab) return false;
@@ -13263,6 +13314,12 @@ function renderBgUnified() {
       const hasShip = !!String(ship).trim();
       if (shipDateMode === 'filled' && !hasShip) return false;
       if (shipDateMode === 'empty' && hasShip) return false;
+    }
+    // 기타출고 필터
+    if (specialShippingMode !== 'all') {
+      const isSpecial = !!r.ci?.is_special_shipping;
+      if (specialShippingMode === 'special' && !isSpecial) return false;
+      if (specialShippingMode === 'normal' && isSpecial) return false;
     }
     return true;
   });
@@ -13393,9 +13450,15 @@ function renderBgUnified() {
       ? 'border-top:2px solid var(--gray-200)'
       : (isFirstOfDelivery ? 'border-top:1px dashed var(--gray-300)' : '');
     // 결제대기 우선 표시 (취소가 더 강한 상태이긴 하지만 둘 다 발생할 일 거의 없음).
-    const rowClass = isCancelled(order)
+    //   기타출고 처리된 주문은 취소/결제대기 아니면 노란색 강조 (사고 케이스 시각적 flag).
+    const isSpecialShipping = !!ci?.is_special_shipping;
+    let rowClass = isCancelled(order)
       ? 'row-cancelled'
       : (isPaymentPending(order) ? 'row-pending' : '');
+    let rowInlineStyle = '';
+    if (!rowClass && isSpecialShipping) {
+      rowInlineStyle = 'background:#fef9c3';
+    }
 
     const orderDateFmt = esc(order.order_date_fmt || '-');
     const recvName = esc(order.display_name || '-');
@@ -13570,7 +13633,7 @@ function renderBgUnified() {
       ? `<span title="${esc(String(ci.customer_request).slice(0, 200))}">📝 ${esc(order.order_seq)}</span>`
       : esc(order.order_seq);
     const orderSeqContent = expressPrefix + logoPrefix + orderSeqInner;
-    html += `<tr class="${rowClass}" style="${borderStyle};cursor:pointer" onclick="_onUniRowClick(${rowIdx}, event)">
+    html += `<tr class="${rowClass}" style="${borderStyle}${rowInlineStyle ? ';' + rowInlineStyle : ''};cursor:pointer" onclick="_onUniRowClick(${rowIdx}, event)">
       <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()" onclick="event.stopPropagation()"></td>
       <td style="${orderSeqStyle}">${orderSeqContent}</td>
       <td style="font-size:12px;color:var(--gray-500);white-space:nowrap">${orderDateFmt}</td>
@@ -15627,6 +15690,17 @@ async function openBgOrderEdit(info) {
   document.getElementById('bg-edit-request').value = info.customer_request || '';
   toggleBgReceiptEdit(!!info.cash_receipt_yn);
 
+  // 기타출고 세팅
+  const specialChecked = !!info.is_special_shipping;
+  document.getElementById('bg-edit-special-shipping').checked = specialChecked;
+  document.getElementById('bg-edit-special-shipping-detail').style.display = specialChecked ? 'block' : 'none';
+  document.querySelectorAll('input[name="bg-edit-special-shipping-reason"]').forEach(r => {
+    r.checked = (r.value === info.special_shipping_reason);
+  });
+  const memoEl = document.getElementById('bg-edit-special-shipping-memo');
+  memoEl.value = info.special_shipping_memo || '';
+  memoEl.style.display = (specialChecked && info.special_shipping_reason === 'other') ? 'block' : 'none';
+
   const stickerWrap = document.getElementById('bg-edit-stickers');
   // 주문의 원본 상품 목록(bgUnifiedProductMap) 을 기준으로 sticker_selections 를 보강.
   //   고객이 '입력안함' 선택 시 sticker_selections 에서 row 가 제외돼 admin 이 추가 불가했던 이슈 수정.
@@ -15984,6 +16058,23 @@ function toggleBgReceiptEdit(checked) {
   document.getElementById('bg-edit-receipt-detail').style.display = checked ? 'flex' : 'none';
 }
 
+// 기타출고 UI 토글 — 체크박스 on/off 로 사유 라디오 영역 노출
+function toggleBgSpecialShippingEdit(checked) {
+  document.getElementById('bg-edit-special-shipping-detail').style.display = checked ? 'block' : 'none';
+  if (!checked) {
+    // 해제 시 라디오/메모 초기화
+    document.querySelectorAll('input[name="bg-edit-special-shipping-reason"]').forEach(r => r.checked = false);
+    document.getElementById('bg-edit-special-shipping-memo').value = '';
+    document.getElementById('bg-edit-special-shipping-memo').style.display = 'none';
+  }
+}
+
+// 사유 라디오 '기타' 선택 시 텍스트 입력 노출
+function _bgToggleSpecialReasonMemo() {
+  const sel = document.querySelector('input[name="bg-edit-special-shipping-reason"]:checked')?.value;
+  document.getElementById('bg-edit-special-shipping-memo').style.display = (sel === 'other') ? 'block' : 'none';
+}
+
 function closeBgOrderEdit() {
   document.getElementById('bg-order-edit-modal').style.display = 'none';
 }
@@ -16035,6 +16126,23 @@ async function saveBgOrderEdit() {
     sel.custom_values = collected[idx] || {};
   });
 
+  // 기타출고 payload
+  const isSpecial = document.getElementById('bg-edit-special-shipping').checked;
+  const specialReason = isSpecial
+    ? (document.querySelector('input[name="bg-edit-special-shipping-reason"]:checked')?.value || null)
+    : null;
+  const specialMemo = isSpecial && specialReason === 'other'
+    ? (document.getElementById('bg-edit-special-shipping-memo').value || '').trim()
+    : null;
+  if (isSpecial && !specialReason) {
+    alert('기타출고 사유를 선택해주세요.');
+    return;
+  }
+  if (isSpecial && specialReason === 'other' && !specialMemo) {
+    alert('기타 사유를 직접 입력해주세요.');
+    return;
+  }
+
   const payload = {
     desired_ship_date: document.getElementById('bg-edit-ship-date').value,
     is_express: document.getElementById('bg-edit-shipping-type').value === 'true',
@@ -16043,6 +16151,9 @@ async function saveBgOrderEdit() {
     receipt_type: document.getElementById('bg-edit-receipt-type').value,
     receipt_number: document.getElementById('bg-edit-receipt-number').value,
     customer_request: document.getElementById('bg-edit-request').value,
+    is_special_shipping: isSpecial,
+    special_shipping_reason: specialReason,
+    special_shipping_memo: specialMemo,
   };
 
   try {
