@@ -1191,9 +1191,70 @@ async function createManualOrder(data) {
 }
 
 /**
+ * MANUAL 주문 → bg_order_customer_info stub 생성 헬퍼.
+ *   order_id 는 `MO-{manualOrderId}` 형식. 이미 있으면 skip.
+ *   items 배열에서 sticker_selections 로 정규화.
+ *   반환: 'created' | 'exists' | 'error:{msg}'
+ */
+async function _ensureStubForManualOrder(mo) {
+  const orderId = (mo.order_id || '').trim();
+  if (!orderId) return 'error:missing order_id';
+  const stubId = `MO-${orderId}`;
+  const existing = await getCustomerInfo(stubId);
+  if (existing) return 'exists';
+  const items = Array.isArray(mo.items) ? mo.items : [];
+  const stickerSelections = items.map(it => ({
+    product_code: it.product_code || '',
+    product_code_2: it.product_code_2 || '',
+    product_name: it.product_name || '',
+    quantity: Number(it.quantity) || 0,
+    box_code: it.box_code || '',
+    sticker_id: null,
+    sticker_code: (Array.isArray(it.stickers) && it.stickers[0]?.code) || '',
+    sticker_name: '',
+    custom_values: {},
+    custom_options: {},
+    desired_ship_date: mo._desired_ship_date || null,
+  }));
+  try {
+    await saveCustomerInfo(stubId, {
+      is_express: false,
+      express_fee: 0,
+      desired_ship_date: mo._desired_ship_date || null,
+      sticker_selections: stickerSelections,
+      cash_receipt_yn: false,
+      receipt_type: null,
+      receipt_number: null,
+      customer_request: mo._customer_request || null,
+    });
+    return 'created';
+  } catch (e) {
+    if (/already/i.test(e.message || '')) return 'exists';
+    return `error:${e.message}`;
+  }
+}
+
+/**
+ * 이미 등록된 bg_manual_orders 중 ci stub 없는 것들을 일괄 backfill.
+ *   category (default 'daeryepum') 필터. 반환: {total, created, exists, failed, details}
+ */
+async function backfillManualOrderStubs({ category = 'daeryepum' } = {}) {
+  const orders = await listManualOrders({ category });
+  const result = { total: orders.length, created: 0, exists: 0, failed: 0, details: [] };
+  for (const mo of orders) {
+    const status = await _ensureStubForManualOrder(mo);
+    if (status === 'created') { result.created++; result.details.push({ order_id: mo.order_id, status: 'created' }); }
+    else if (status === 'exists') { result.exists++; }
+    else { result.failed++; result.details.push({ order_id: mo.order_id, status: 'failed', reason: status.replace(/^error:/, '') }); }
+  }
+  return result;
+}
+
+/**
  * 배치 등록 — CSV 업로드 등 일괄 insert.
  *   각 주문 개별 try/catch → 실패한 것도 결과에 기록. 전체 실패는 없음.
  *   dryRun=true 면 실제 insert 하지 않고 valid/invalid 만 판정.
+ *   재업로드 케이스: skip 되더라도 stub 은 확인/생성 (backfill 겸함).
  */
 async function bulkCreateManualOrders(orders, { dryRun = false } = {}) {
   if (!Array.isArray(orders)) throw new Error('orders 는 배열이어야 합니다');
@@ -1203,11 +1264,15 @@ async function bulkCreateManualOrders(orders, { dryRun = false } = {}) {
       const orderId = (data.order_id || '').trim();
       if (!orderId) throw new Error('order_id 누락');
       if (!data.order_name || !String(data.order_name).trim()) throw new Error('order_name 누락');
-      // 중복 체크 — 이미 있으면 skip
+      // 중복 체크 — 이미 있으면 manual_order 는 skip, 하지만 ci stub 만 없으면 backfill 로 생성.
       const existing = await getManualOrder(orderId);
       if (existing) {
+        // stub backfill 시도 (기존 로직 개선: 배포 전 등록분에 stub 없어도 재업로드로 자동 생성).
+        let stubStatus = 'exists';
+        try { stubStatus = await _ensureStubForManualOrder({ ...existing, _desired_ship_date: data._desired_ship_date, _customer_request: data._customer_request }); }
+        catch (e) { stubStatus = 'error'; }
         results.skipped++;
-        results.details.push({ index: idx, order_id: orderId, status: 'skipped', reason: '이미 존재' });
+        results.details.push({ index: idx, order_id: orderId, status: 'skipped', reason: '이미 존재', stub: stubStatus });
         continue;
       }
       if (dryRun) {
@@ -1216,42 +1281,10 @@ async function bulkCreateManualOrders(orders, { dryRun = false } = {}) {
         continue;
       }
       await createManualOrder(data);
-      // bg_order_customer_info stub 자동 생성 → 정보입력현황 '입력완료' 탭 자동 노출.
-      //   order_id 형식: 'MO-{order_id}' (기존 CP-{}/NV-{} 패턴 통일).
-      //   sticker_selections 는 items 에서 상품별 정보 뽑아 저장 (product_code, box_code, sticker_code 등).
-      //   실패해도 manual_order 는 유지 (부수적 stub 실패는 전체 결과에 영향 X).
-      try {
-        const stickerSelections = (Array.isArray(data.items) ? data.items : []).map(it => ({
-          product_code: it.product_code || '',
-          product_code_2: it.product_code_2 || '',
-          product_name: it.product_name || '',
-          quantity: Number(it.quantity) || 0,
-          box_code: it.box_code || '',
-          sticker_id: null,
-          sticker_code: (Array.isArray(it.stickers) && it.stickers[0]?.code) || '',
-          sticker_name: '',
-          custom_values: {},
-          custom_options: {},
-          desired_ship_date: data._desired_ship_date || null,
-        }));
-        await saveCustomerInfo(`MO-${orderId}`, {
-          is_express: false,
-          express_fee: 0,
-          desired_ship_date: data._desired_ship_date || null,
-          sticker_selections: stickerSelections,
-          cash_receipt_yn: false,
-          receipt_type: null,
-          receipt_number: null,
-          customer_request: data._customer_request || null,
-        });
-      } catch (stubErr) {
-        // ALREADY_SUBMITTED (덮어쓰기 방지) 는 정상 — 재실행 시 기존 stub 유지.
-        if (!/already/i.test(stubErr.message || '')) {
-          console.warn(`[bulkCreate] stub 저장 실패 (${orderId}):`, stubErr.message);
-        }
-      }
+      // stub 저장 — 헬퍼 재사용 (실패해도 manual_order 는 유지).
+      const stubStatus = await _ensureStubForManualOrder(data);
       results.success++;
-      results.details.push({ index: idx, order_id: orderId, status: 'created' });
+      results.details.push({ index: idx, order_id: orderId, status: 'created', stub: stubStatus });
     } catch (e) {
       results.failed++;
       results.details.push({ index: idx, order_id: data.order_id || '', status: 'failed', reason: e.message });
@@ -1355,6 +1388,7 @@ module.exports = {
   getManualOrder,
   createManualOrder,
   bulkCreateManualOrders,
+  backfillManualOrderStubs,
   updateManualOrder,
   deleteManualOrder,
 };

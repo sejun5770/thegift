@@ -1156,6 +1156,7 @@ nav.nav-loading a[href^="#"] {
     <button class="btn" id="ord-btn-coupang-sync" onclick="syncCoupangOrders(this)" style="padding:5px 12px;font-size:12px;background:#fef2f2;border-color:#fecaca" title="쿠팡 Wing API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟥 쿠팡 동기화 <span id="ord-coupang-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
     <button class="btn" id="ord-btn-naver-sync" onclick="syncNaverOrders(this)" style="padding:5px 12px;font-size:12px;background:#ecfdf5;border-color:#a7f3d0" title="네이버 커머스 API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟩 네이버 동기화 <span id="ord-naver-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
     <button class="btn" id="ord-btn-csv-upload" onclick="openBgCsvUpload()" style="padding:5px 12px;font-size:12px;background:#dbeafe;border-color:#93c5fd;color:#1e40af;display:none" title="바른손더기프트 스프레드시트 CSV 를 업로드하여 여러 주문을 한 번에 등록합니다 (답례품 카테고리 전용)">📤 CSV 업로드</button>
+    <button class="btn" id="ord-btn-bhg-backfill" onclick="backfillBhgStubs()" style="padding:5px 12px;font-size:12px;background:#eef2ff;border-color:#c7d2fe;color:#4338ca;display:none" title="이전에 등록된 바른손더기프트 주문 중 정보입력현황 stub 이 없는 것을 일괄 생성 (스티커/희망출고일 정보 backfill)">🔧 stub 재생성</button>
   </div>
 
   <div class="card" style="padding:0;overflow-x:auto">
@@ -3489,9 +3490,11 @@ function switchCategory(cat) {
   const cpBtn = document.getElementById('ord-btn-coupang-sync');
   const nvBtn = document.getElementById('ord-btn-naver-sync');
   const csvBtn = document.getElementById('ord-btn-csv-upload');
+  const bhgBackfillBtn = document.getElementById('ord-btn-bhg-backfill');
   if (cpBtn) cpBtn.style.display = showMarketplaceSync ? '' : 'none';
   if (nvBtn) nvBtn.style.display = showMarketplaceSync ? '' : 'none';
   if (csvBtn) csvBtn.style.display = showCsvUpload ? '' : 'none';
+  if (bhgBackfillBtn) bhgBackfillBtn.style.display = showCsvUpload ? '' : 'none';
   loadOrders();
 }
 
@@ -16721,6 +16724,28 @@ function _bgCsvRender(parsed) {
   btn.disabled = false; btn.style.opacity = '1';
   btn.textContent = `💾 등록 (${parsed.orders.length}건)`;
 }
+// 이전 등록분 stub 일괄 backfill — 재업로드 없이 원클릭.
+async function backfillBhgStubs() {
+  const btn = document.getElementById('ord-btn-bhg-backfill');
+  const prev = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 처리 중…'; }
+  try {
+    const r = await fetch(`${API}/api/bg/manual-orders/backfill-stubs`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ category: 'daeryepum' }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    showToast(`stub 재생성 완료 — 신규 ${data.created}건 · 기존 ${data.exists}건 · 실패 ${data.failed}건`);
+    if (typeof loadOrders === 'function') loadOrders();
+    if (typeof loadBgUnified === 'function') loadBgUnified();
+  } catch (e) {
+    alert('stub 재생성 실패: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = prev || '🔧 stub 재생성'; }
+  }
+}
+
 async function submitBgCsvUpload() {
   if (!_bgCsvParsed || !_bgCsvParsed.orders.length) return;
   const orders = _bgCsvParsed.orders;

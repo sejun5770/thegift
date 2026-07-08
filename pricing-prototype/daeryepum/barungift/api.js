@@ -978,6 +978,19 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       return json(res, { error: err.message }, 400);
     }
   }
+  // POST /api/bg/manual-orders/backfill-stubs — 기존 MANUAL 주문에 ci stub 일괄 생성.
+  //   body: { category?: 'daeryepum' }  (default daeryepum)
+  //   response: { total, created, exists, failed, details }
+  if (pathname === '/api/bg/manual-orders/backfill-stubs' && method === 'POST') {
+    try {
+      const body = await parseBody(req).catch(() => ({}));
+      const result = await store.backfillManualOrderStubs({ category: body.category || 'daeryepum' });
+      return json(res, result);
+    } catch (err) {
+      console.error('[manual-orders backfill-stubs] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
   // POST /api/bg/manual-orders/bulk — CSV 업로드 등 일괄 등록.
   //   body: { orders: [...], dryRun?: bool }
   //   response: { total, success, failed, skipped, details: [{index, order_id, status, reason?}] }
