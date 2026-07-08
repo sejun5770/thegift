@@ -13382,17 +13382,47 @@ function renderBgUnified() {
   // - 미입력 상태(sels=[]): 주문의 모든 상품에 대해 각각 sel=null 행 생성
   // - 입력완료: 각 상품마다 매칭되는 sticker_selection을 찾아 붙이고, 없으면 null
   bgUnifiedRows = [];
+  const _manualDiag = { totalManual: 0, ciFound: 0, selsCount: 0, pmFound: 0, sampleOrder: null };
   filtered.forEach(order => {
     // bgFindCi: primary key 매칭 실패 시 orphan (prefix 누락) raw seq 로 fallback.
     const ci = bgFindCi(bgUnifiedCiMap, order);
     const sels = ci?.sticker_selections || [];
     // 배송지별 상품 매칭 — 복합키 사용 (order_seq + delivery_seq)
     const pm = bgUnifiedProductMap.get(order._composite_key || `${order.order_seq}::${order.delivery_seq||1}`);
+    // MANUAL 주문 진단 (첫 케이스만 상세 로그, 나머지는 count)
+    if (order.order_type === 'MANUAL') {
+      _manualDiag.totalManual++;
+      if (ci) _manualDiag.ciFound++;
+      _manualDiag.selsCount += sels.length;
+      if (pm && pm.size > 0) _manualDiag.pmFound++;
+      if (!_manualDiag.sampleOrder) {
+        _manualDiag.sampleOrder = {
+          order_seq: order.order_seq,
+          ci_key_expected: bgCiKey(order),
+          ci_found: !!ci,
+          ci_stickers_count: sels.length,
+          ci_stickers_preview: sels.slice(0, 3).map(s => ({ product_code: s.product_code, sticker_code: s.sticker_code, sticker_name: s.sticker_name })),
+          pm_size: pm ? pm.size : 0,
+          pm_codes: pm ? [...pm.keys()] : [],
+        };
+      }
+    }
 
     if (pm && pm.size > 0) {
       // 주문의 각 상품에 대해 1행씩 + sticker_index 명시 추적 (워크플로우 PATCH 용)
+      //   MANUAL 주문은 CSV 파싱 후 product_code 가 파생 코드 (예: TGJBK09O10) 라서
+      //   sel.product_code 와 정확 매치 안 되는 케이스 → 남은 sel 을 순서대로 fallback.
+      const usedSelIdx = new Set();
+      let fallbackIter = 0;
       for (const [productCode, productInfo] of pm) {
-        const selIdx = sels.findIndex(s => s.product_code === productCode);
+        // 1) product_code 정확 매칭
+        let selIdx = sels.findIndex((s, i) => !usedSelIdx.has(i) && s.product_code === productCode);
+        // 2) fallback — 남은 sel 을 순서대로 (MANUAL 등 CSV 파생 케이스)
+        if (selIdx < 0 && sels.length) {
+          while (fallbackIter < sels.length && usedSelIdx.has(fallbackIter)) fallbackIter++;
+          if (fallbackIter < sels.length) selIdx = fallbackIter++;
+        }
+        if (selIdx >= 0) usedSelIdx.add(selIdx);
         const sel = selIdx >= 0 ? sels[selIdx] : null;
         bgUnifiedRows.push({
           order, ci, sel, sticker_index: selIdx,
@@ -13422,6 +13452,16 @@ function renderBgUnified() {
       });
     }
   });
+  // MANUAL 진단 로그 (F12 콘솔 확인용) — 매칭 문제 원인 파악에 활용
+  if (_manualDiag.totalManual > 0) {
+    console.log('[MANUAL 진단]', {
+      manual_주문수: _manualDiag.totalManual,
+      ci_있음: _manualDiag.ciFound,
+      sels_총_개수: _manualDiag.selsCount,
+      productMap_있음: _manualDiag.pmFound,
+      샘플: _manualDiag.sampleOrder,
+    });
+  }
 
   // ============================================
   // Row 단위 워크플로우 stage 태깅 + 7-탭 카운트
