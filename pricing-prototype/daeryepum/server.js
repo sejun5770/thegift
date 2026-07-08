@@ -1065,6 +1065,68 @@ async function apiOrders(query) {
     } catch (e) {
       console.warn('[apiOrders] 네이버 주문 UNION 실패 (무시):', e.message);
     }
+    // 바른손더기프트 수동 등록 주문 (bg_manual_orders category='daeryepum') UNION.
+    //   API 미연동 채널이라 CSV 업로드 등으로 관리자가 직접 등록. items JSONB → 상품별 row 로 flatten.
+    //   MSSQL 주문과 스키마 정규화 후 rows.push.
+    try {
+      const bgStore = require('./barungift/store');
+      const manualOrders = await bgStore.listManualOrders({
+        category: 'daeryepum',
+        startDate,
+        endDate: endDate,  // listManualOrders 는 end 를 <= 로 처리 (T23:59:59 append)
+      });
+      if (manualOrders && manualOrders.length) {
+        const normalized = [];
+        for (const mo of manualOrders) {
+          const items = Array.isArray(mo.items) ? mo.items : [];
+          const orderDateStr = (mo.order_date || '').toString().slice(0, 19).replace('T', ' ');
+          const settlePrice = Number(mo.settle_price) || 0;
+          // items 없으면 order 자체를 1 row 로 (상품 정보 없음)
+          const iterItems = items.length ? items : [{ product_code: '', product_name: '', quantity: 0 }];
+          iterItems.forEach((it, idx) => {
+            const qty = Number(it.quantity) || 0;
+            const unitPrice = Number(it.unit_price) || 0;
+            const itemAmount = unitPrice * qty || (idx === 0 ? settlePrice : 0);
+            normalized.push({
+              order_seq: mo.order_id,
+              member_id: null,
+              order_type: 'MANUAL',   // 새 타입 — 클라이언트에서 배지 구분 가능
+              has_copurchase: 0,
+              order_date: orderDateStr,
+              settle_date: orderDateStr,
+              order_name: mo.order_name || '',
+              order_hphone: mo.order_hphone || '',
+              recv_name: mo.recv_name || mo.order_name || '',
+              recv_hphone: mo.recv_hphone || mo.order_hphone || '',
+              recv_address: mo.recv_address || '',
+              recv_msg: mo.recv_msg || '',
+              card_name: it.product_name || '',
+              card_code: it.product_code || '',
+              unit_value: 1,
+              item_count: qty,
+              item_amount: itemAmount,
+              settle_price: settlePrice,
+              coupon_price: 0,
+              status_seq: mo.status_seq || 4,
+              status: null,
+              settle_method: mo.settle_method || null,
+              wedding_date: null,
+              site_name: mo.site_name || '바른손더기프트',
+              file_count: 0,
+              delivery_seq: 1,
+              source: 'manual',
+              manual_order_id: mo.order_id,
+              manual_source_memo: mo.source_memo || null,
+              display_name: mo.recv_name || mo.order_name || '',
+            });
+          });
+        }
+        rows.push(...normalized);
+        rows.sort((a, b) => String(b.order_date || '').localeCompare(String(a.order_date || '')));
+      }
+    } catch (e) {
+      console.warn('[apiOrders] bg_manual_orders UNION 실패 (무시):', e.message);
+    }
   }
 
   return rows;

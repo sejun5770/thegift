@@ -286,6 +286,7 @@ nav.nav-loading a[href^="#"] {
   <a href="#bg-vendor-dashboard" onclick="showPage('bg-vendor-dashboard')">📈 위탁 대시보드</a>
   <a href="#bg-artists" onclick="showPage('bg-artists')">🎨 작가 정산</a>
   <a href="#daeryepum-stock" onclick="showPage('daeryepum-stock')">📦 답례품 재고</a>
+  <a href="#bhands-gift" onclick="showPage('bhands-gift')">🎁 바른손더기프트</a>
   <a href="#wedding-calendar" onclick="showPage('wedding-calendar')">💍 예식일 캘린더</a>
   <a href="#admin-nav-settings" onclick="showPage('admin-nav-settings')" id="nav-link-admin-nav-settings" style="display:none">⚙️ GNB 설정</a>
   <div class="user-area" id="user-area"></div>
@@ -1154,6 +1155,7 @@ nav.nav-loading a[href^="#"] {
     <button class="btn" onclick="downloadExcel()" style="padding:5px 12px;font-size:12px" title="선택된 주문 (없으면 전체) 을 엑셀로 다운로드">📥 엑셀</button>
     <button class="btn" id="ord-btn-coupang-sync" onclick="syncCoupangOrders(this)" style="padding:5px 12px;font-size:12px;background:#fef2f2;border-color:#fecaca" title="쿠팡 Wing API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟥 쿠팡 동기화 <span id="ord-coupang-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
     <button class="btn" id="ord-btn-naver-sync" onclick="syncNaverOrders(this)" style="padding:5px 12px;font-size:12px;background:#ecfdf5;border-color:#a7f3d0" title="네이버 커머스 API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟩 네이버 동기화 <span id="ord-naver-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
+    <button class="btn" id="ord-btn-csv-upload" onclick="openBgCsvUpload()" style="padding:5px 12px;font-size:12px;background:#dbeafe;border-color:#93c5fd;color:#1e40af;display:none" title="바른손더기프트 스프레드시트 CSV 를 업로드하여 여러 주문을 한 번에 등록합니다 (답례품 카테고리 전용)">📤 CSV 업로드</button>
   </div>
 
   <div class="card" style="padding:0;overflow-x:auto">
@@ -2072,6 +2074,98 @@ nav.nav-loading a[href^="#"] {
   </div>
 </div>
 
+<!-- ========== 바른손더기프트 주문 관리 ========== -->
+<div id="page-bhands-gift" class="page">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <h2 style="margin:0">🎁 바른손더기프트 주문 관리</h2>
+    <div style="font-size:12px;color:var(--gray-500)">API 미연동 채널 — CSV 업로드로 수동 등록, 상태/삭제 관리</div>
+  </div>
+
+  <!-- 필터 툴바 -->
+  <div class="card" style="padding:12px;margin-bottom:12px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input type="date" id="bhg-start" style="padding:5px 8px;font-size:12px;border:1px solid var(--gray-300);border-radius:4px">
+      <span>~</span>
+      <input type="date" id="bhg-end" style="padding:5px 8px;font-size:12px;border:1px solid var(--gray-300);border-radius:4px">
+      <button class="btn btn-primary" onclick="loadBhgOrders()" style="padding:5px 12px;font-size:12px">조회</button>
+      <select id="bhg-filter-status" onchange="renderBhgOrders()" style="padding:5px 8px;font-size:12px;border:1px solid var(--gray-300);border-radius:4px">
+        <option value="">전체 상태</option>
+        <option value="4">결제확인 (4)</option>
+        <option value="3">취소 (3)</option>
+        <option value="5">환불 (5)</option>
+        <option value="15">반품완료 (15)</option>
+      </select>
+      <input type="text" id="bhg-search" placeholder="🔍 주문번호/이름/전화번호 검색" oninput="renderBhgOrders()"
+             style="flex:1;min-width:200px;padding:5px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+      <button class="btn" onclick="openBgCsvUpload()" style="padding:5px 12px;font-size:12px;background:#dbeafe;border-color:#93c5fd;color:#1e40af">📤 CSV 업로드</button>
+    </div>
+  </div>
+
+  <!-- 요약 배지 -->
+  <div id="bhg-summary" style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;margin-bottom:12px"></div>
+
+  <!-- 목록 테이블 -->
+  <div class="card" style="padding:0;overflow-x:auto">
+    <div id="bhg-loading" style="text-align:center;padding:40px;color:var(--gray-400);font-size:13px">데이터를 불러오는 중…</div>
+    <table class="data-table" id="bhg-table" style="width:100%;font-size:12px;display:none">
+      <thead>
+        <tr>
+          <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">주문번호</th>
+          <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">주문일</th>
+          <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">주문자</th>
+          <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">연락처</th>
+          <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">수령지</th>
+          <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">상품</th>
+          <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">결제금액</th>
+          <th style="text-align:center;padding:8px 12px;border-bottom:1px solid var(--gray-200)">상태</th>
+          <th style="text-align:center;padding:8px 12px;border-bottom:1px solid var(--gray-200)">액션</th>
+        </tr>
+      </thead>
+      <tbody id="bhg-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 바른손더기프트 편집 모달 -->
+<div id="bhg-edit-modal" onclick="if(event.target===this)closeBhgEdit()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;max-width:520px;width:92%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
+      <h3 id="bhg-edit-title" style="margin:0;font-size:16px">주문 편집</h3>
+      <button onclick="closeBhgEdit()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--gray-500)">&times;</button>
+    </div>
+    <div style="padding:20px;overflow-y:auto;display:flex;flex-direction:column;gap:14px">
+      <input type="hidden" id="bhg-edit-order-id">
+      <div>
+        <label style="font-size:11px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:4px">주문상태 (status_seq)</label>
+        <select id="bhg-edit-status" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+          <option value="4">4 — 결제확인</option>
+          <option value="3">3 — 취소</option>
+          <option value="5">5 — 환불</option>
+          <option value="15">15 — 반품완료</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:4px">결제금액 (settle_price)</label>
+        <input type="number" id="bhg-edit-price" min="0" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:4px">주문일 (order_date)</label>
+        <input type="datetime-local" id="bhg-edit-date" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:600;color:var(--gray-600);display:block;margin-bottom:4px">source_memo</label>
+        <textarea id="bhg-edit-memo" rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;resize:vertical"></textarea>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;padding:12px 20px;border-top:1px solid var(--gray-200);background:#fafafa">
+      <button class="btn" onclick="deleteBhgOrder()" style="color:#dc2626;border-color:#fca5a5;background:#fef2f2" title="이 주문을 완전히 삭제합니다">🗑️ 삭제</button>
+      <div style="flex:1"></div>
+      <button class="btn" onclick="closeBhgEdit()">취소</button>
+      <button class="btn btn-primary" onclick="saveBhgEdit()">💾 저장</button>
+    </div>
+  </div>
+</div>
+
 <!-- ========== 예식일 캘린더 ========== -->
 <div id="page-wedding-calendar" class="page">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
@@ -2680,7 +2774,6 @@ nav.nav-loading a[href^="#"] {
       <div style="flex:1"></div>
       <!-- 액션 버튼들 — 선택 상태에 따라 지능적으로 show/hide -->
       <button class="btn" id="uni-btn-manual-order" onclick="openBgManualOrderForm()" style="padding:6px 12px;font-size:12px;background:#fef3c7;border-color:#fbbf24;color:#92400e" title="MSSQL 동기화 사고 등으로 시스템에 안 잡힌 주문을 수동 등록합니다 (정보입력현황 + 워크플로우 통합)">➕ 수동 주문 등록</button>
-      <button class="btn" id="uni-btn-csv-upload" onclick="openBgCsvUpload()" style="padding:6px 12px;font-size:12px;background:#dbeafe;border-color:#93c5fd;color:#1e40af" title="바른손더기프트 스프레드시트 CSV 를 업로드하여 여러 주문을 한 번에 등록합니다">📤 CSV 업로드 (바른손더기프트)</button>
       <button class="btn" id="uni-btn-copy" onclick="copyBgUnified()" style="padding:6px 12px;font-size:12px;display:none">📋 수집복사</button>
       <button class="btn btn-primary" id="uni-btn-copy-all" onclick="copyBgUnifiedAll()" style="padding:6px 12px;font-size:12px;display:none" title="선택된 행 (없으면 전체) 을 선택된 컬럼 기준으로 클립보드 복사 (수집상태 영향 없음)">📋 <span id="uni-btn-copy-all-label">선택 복사</span></button>
       <button class="btn" id="uni-btn-copy-receipt" onclick="copyExpressReceiptInfo()" style="padding:6px 12px;font-size:12px;display:none;background:#fef3c7;border-color:#fbbf24;color:#92400e" title="선택된 빠른출고 주문의 현금영수증 정보만 복사 — 형식: 주문번호 / 주문자명 / 영수증정보"><span id="uni-btn-copy-receipt-label">⚡ 현금영수증 복사</span></button>
@@ -3381,6 +3474,7 @@ function showPage(name) {
   if (name === 'bg-vendor-dashboard') initBgVendorDashboard();
   if (name === 'bg-artists') initArtistsPreview();
   if (name === 'daeryepum-stock') initDaeryepumStock();
+  if (name === 'bhands-gift') initBhgOrders();
   if (name === 'wedding-calendar') initWeddingCalendar();
 }
 
@@ -3392,8 +3486,10 @@ function switchCategory(cat) {
   const showMarketplaceSync = (cat === 'daeryepum');
   const cpBtn = document.getElementById('ord-btn-coupang-sync');
   const nvBtn = document.getElementById('ord-btn-naver-sync');
+  const csvBtn = document.getElementById('ord-btn-csv-upload');
   if (cpBtn) cpBtn.style.display = showMarketplaceSync ? '' : 'none';
   if (nvBtn) nvBtn.style.display = showMarketplaceSync ? '' : 'none';
+  if (csvBtn) csvBtn.style.display = showMarketplaceSync ? '' : 'none';
   loadOrders();
 }
 
@@ -16568,6 +16664,172 @@ async function submitBgCsvUpload() {
     status.innerHTML = `<b style="color:#dc2626">등록 실패:</b> ${esc(e.message)}`;
   } finally {
     btn.disabled = false; btn.style.opacity = '1';
+  }
+}
+
+// ============================================
+// 🎁 바른손더기프트 주문 관리 페이지
+// ============================================
+let _bhgOrders = [];
+let _bhgLoaded = false;
+
+const BHG_STATUS_LABEL = { 4: '결제확인', 3: '취소', 5: '환불', 15: '반품완료' };
+const BHG_STATUS_COLOR = {
+  4: { bg: '#dcfce7', fg: '#166534' },
+  3: { bg: '#fee2e2', fg: '#991b1b' },
+  5: { bg: '#fef3c7', fg: '#92400e' },
+  15: { bg: '#e0e7ff', fg: '#4338ca' },
+};
+
+function initBhgOrders() {
+  // 기본 기간 — 최근 30일
+  const start = document.getElementById('bhg-start');
+  const end = document.getElementById('bhg-end');
+  if (start && !start.value) {
+    const today = new Date();
+    const start30 = new Date(today.getTime() - 30 * 86400000);
+    const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    start.value = fmt(start30);
+    end.value = fmt(today);
+  }
+  if (!_bhgLoaded) loadBhgOrders();
+}
+
+async function loadBhgOrders() {
+  const $loading = document.getElementById('bhg-loading');
+  const $table = document.getElementById('bhg-table');
+  if ($loading) { $loading.style.display = ''; $loading.textContent = '불러오는 중…'; }
+  if ($table) $table.style.display = 'none';
+  try {
+    const start = document.getElementById('bhg-start')?.value || '';
+    const end = document.getElementById('bhg-end')?.value || '';
+    const params = new URLSearchParams({ category: 'daeryepum' });
+    if (start) params.set('start_date', start);
+    if (end) params.set('end_date', end);
+    const r = await fetch(`${API}/api/bg/manual-orders?${params.toString()}`);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    _bhgOrders = Array.isArray(data.orders) ? data.orders : (Array.isArray(data) ? data : []);
+    _bhgLoaded = true;
+    renderBhgOrders();
+  } catch (e) {
+    if ($loading) $loading.textContent = `로드 실패: ${e.message}`;
+  }
+}
+
+function renderBhgOrders() {
+  const $tbody = document.getElementById('bhg-tbody');
+  const $loading = document.getElementById('bhg-loading');
+  const $table = document.getElementById('bhg-table');
+  const $summary = document.getElementById('bhg-summary');
+  if (!$tbody) return;
+  const q = (document.getElementById('bhg-search')?.value || '').trim().toLowerCase();
+  const statusFilter = document.getElementById('bhg-filter-status')?.value || '';
+  let items = _bhgOrders.slice();
+  if (statusFilter) items = items.filter(o => String(o.status_seq) === statusFilter);
+  if (q) items = items.filter(o =>
+    (o.order_id || '').toLowerCase().includes(q) ||
+    (o.order_name || '').toLowerCase().includes(q) ||
+    (o.order_hphone || '').toLowerCase().includes(q) ||
+    (o.recv_name || '').toLowerCase().includes(q)
+  );
+  // 요약
+  const total = _bhgOrders.length;
+  const active = _bhgOrders.filter(o => o.status_seq === 4).length;
+  const cancelled = _bhgOrders.filter(o => o.status_seq === 3 || o.status_seq === 5 || o.status_seq === 15).length;
+  const totalPrice = _bhgOrders
+    .filter(o => o.status_seq === 4)
+    .reduce((s, o) => s + (Number(o.settle_price) || 0), 0);
+  $summary.innerHTML = `
+    <span style="padding:4px 10px;background:#e0e7ff;color:#4338ca;border-radius:4px;font-weight:600">전체 ${total}건</span>
+    <span style="padding:4px 10px;background:#dcfce7;color:#166534;border-radius:4px;font-weight:600">결제확인 ${active}건</span>
+    <span style="padding:4px 10px;background:#fee2e2;color:#991b1b;border-radius:4px;font-weight:600">취소/환불 ${cancelled}건</span>
+    <span style="padding:4px 10px;background:#f1f5f9;color:#0f172a;border-radius:4px;font-weight:600">💰 결제확인 합계 ${fmtNum(totalPrice)}원</span>
+  `;
+  if (!items.length) {
+    $loading.style.display = ''; $loading.textContent = '조건에 맞는 주문이 없습니다.';
+    $table.style.display = 'none';
+    return;
+  }
+  $tbody.innerHTML = items.map(o => {
+    const st = BHG_STATUS_COLOR[o.status_seq] || { bg: '#f3f4f6', fg: '#374151' };
+    const statusLabel = BHG_STATUS_LABEL[o.status_seq] || `status ${o.status_seq}`;
+    const dt = (o.order_date || '').toString().slice(0, 16).replace('T', ' ');
+    const productSummary = Array.isArray(o.items) && o.items.length
+      ? (o.items[0].product_name || o.items[0].product_code || '') + (o.items.length > 1 ? ` 외 ${o.items.length - 1}개` : '')
+      : '-';
+    const isCancelled = o.status_seq === 3 || o.status_seq === 5 || o.status_seq === 15;
+    return `<tr style="${isCancelled ? 'background:#fef2f2;color:var(--gray-500)' : ''}">
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px">${esc(o.order_id)}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);white-space:nowrap">${esc(dt)}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);white-space:nowrap">${esc(o.order_name || '-')}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);white-space:nowrap">${esc(o.order_hphone || '-')}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(o.recv_address || '-')}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(productSummary)}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${fmtNum(o.settle_price || 0)}원</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center"><span style="padding:2px 8px;background:${st.bg};color:${st.fg};border-radius:3px;font-size:10.5px;font-weight:600">${esc(statusLabel)}</span></td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center"><button class="btn" style="padding:3px 10px;font-size:11px" onclick="openBhgEdit('${esc(o.order_id)}')">편집</button></td>
+    </tr>`;
+  }).join('');
+  $loading.style.display = 'none';
+  $table.style.display = '';
+}
+
+function openBhgEdit(orderId) {
+  const o = _bhgOrders.find(x => x.order_id === orderId);
+  if (!o) { alert('주문을 찾을 수 없습니다.'); return; }
+  document.getElementById('bhg-edit-order-id').value = o.order_id;
+  document.getElementById('bhg-edit-title').textContent = `주문 편집 — ${o.order_id}`;
+  document.getElementById('bhg-edit-status').value = String(o.status_seq || 4);
+  document.getElementById('bhg-edit-price').value = o.settle_price || 0;
+  // datetime-local 은 로컬 타임존 문자열 필요
+  const dt = o.order_date ? new Date(o.order_date) : new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const dtStr = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+  document.getElementById('bhg-edit-date').value = dtStr;
+  document.getElementById('bhg-edit-memo').value = o.source_memo || '';
+  document.getElementById('bhg-edit-modal').style.display = 'flex';
+}
+function closeBhgEdit() { document.getElementById('bhg-edit-modal').style.display = 'none'; }
+
+async function saveBhgEdit() {
+  const orderId = document.getElementById('bhg-edit-order-id').value;
+  if (!orderId) return;
+  const payload = {
+    status_seq: parseInt(document.getElementById('bhg-edit-status').value) || 4,
+    settle_price: parseInt(document.getElementById('bhg-edit-price').value) || 0,
+    order_date: (document.getElementById('bhg-edit-date').value || '') + ':00',
+    source_memo: document.getElementById('bhg-edit-memo').value || null,
+  };
+  try {
+    const r = await fetch(`${API}/api/bg/manual-orders/${encodeURIComponent(orderId)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    showToast('저장되었습니다.');
+    closeBhgEdit();
+    loadBhgOrders();
+  } catch (e) {
+    alert('저장 실패: ' + e.message);
+  }
+}
+async function deleteBhgOrder() {
+  const orderId = document.getElementById('bhg-edit-order-id').value;
+  if (!orderId) return;
+  if (!confirm(`주문 ${orderId} 를 완전히 삭제합니다. 계속하시겠습니까?`)) return;
+  try {
+    const r = await fetch(`${API}/api/bg/manual-orders/${encodeURIComponent(orderId)}`, { method: 'DELETE' });
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${r.status}`);
+    }
+    showToast('삭제되었습니다.');
+    closeBhgEdit();
+    loadBhgOrders();
+  } catch (e) {
+    alert('삭제 실패: ' + e.message);
   }
 }
 
