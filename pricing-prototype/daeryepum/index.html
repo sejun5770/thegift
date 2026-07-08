@@ -13626,13 +13626,22 @@ function renderBgUnified() {
     const logoPrefix = sel?.logo_url
       ? '<span title="이미지 첨부됨 — 문구 셀에서 다운로드" style="color:#d97706;font-weight:700;margin-right:2px">📷</span>'
       : '';
+    // 기타출고 🚨 prefix — ci.is_special_shipping 시 주문번호 좌측 표시 (사고 케이스 강조).
+    //   사유 라벨을 tooltip 에 노출 (수량부족/상품훼손/주문누락/기타).
+    const specialReasonLabel = { shortage: '수량부족', damage: '상품훼손', omission: '주문누락', other: '기타' };
+    const specialTooltip = isSpecialShipping
+      ? `기타출고 — ${specialReasonLabel[ci.special_shipping_reason] || '사유 미지정'}${ci.special_shipping_memo ? ' (' + String(ci.special_shipping_memo).slice(0, 100) + ')' : ''}`
+      : '';
+    const specialPrefix = isSpecialShipping
+      ? `<span title="${esc(specialTooltip)}" style="color:#92400e;font-weight:700;margin-right:2px">🚨</span>`
+      : '';
     const orderSeqStyle = hasRequest
       ? 'font-weight:700;white-space:nowrap;background:#fef3c7;color:#92400e;border-radius:4px;padding:2px 6px'
       : 'font-weight:600;white-space:nowrap';
     const orderSeqInner = hasRequest
       ? `<span title="${esc(String(ci.customer_request).slice(0, 200))}">📝 ${esc(order.order_seq)}</span>`
       : esc(order.order_seq);
-    const orderSeqContent = expressPrefix + logoPrefix + orderSeqInner;
+    const orderSeqContent = specialPrefix + expressPrefix + logoPrefix + orderSeqInner;
     html += `<tr class="${rowClass}" style="${borderStyle}${rowInlineStyle ? ';' + rowInlineStyle : ''};cursor:pointer" onclick="_onUniRowClick(${rowIdx}, event)">
       <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()" onclick="event.stopPropagation()"></td>
       <td style="${orderSeqStyle}">${orderSeqContent}</td>
