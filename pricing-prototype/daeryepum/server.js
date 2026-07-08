@@ -2622,6 +2622,63 @@ async function apiDashboardSummary(query) {
 
   const orderCounts = countResult.recordset.map(r => ({ ...r, site_name: formatSiteName(r.site_name) }));
 
+  // 바른손더기프트 (bg_manual_orders) UNION — API 미연동 채널.
+  //   category='daeryepum' 시에만 포함 (deco/flower 는 해당 없음).
+  //   MSSQL 결과와 동일 스키마로 정규화 후 rows / orderCounts 에 push.
+  //   실패해도 MSSQL 결과 유지 (fail-soft).
+  if (!query.category || query.category === 'daeryepum') {
+    try {
+      const bgStore = require('./barungift/store');
+      const manualOrders = await bgStore.listManualOrders({
+        category: 'daeryepum',
+        startDate,
+        endDate,
+      });
+      if (manualOrders && manualOrders.length) {
+        const SITE_LABEL = '바른손더기프트';
+        const ORDER_TYPE_LABEL = '단독주문';
+        // status_seq 필터 — MSSQL 결제완료 상태 기준 (3=취소, 5=환불, 15=반품완료 제외)
+        const isValid = mo => {
+          const st = Number(mo.status_seq) || 0;
+          return st >= 2 && ![3, 5, 15].includes(st);
+        };
+        const validOrders = manualOrders.filter(isValid);
+        // rows 상품별 flatten
+        for (const mo of validOrders) {
+          const day = (mo.order_date || '').toString().slice(0, 10);
+          const items = Array.isArray(mo.items) ? mo.items : [];
+          for (const it of items) {
+            const qty = Number(it.quantity) || 0;
+            const amt = Number(it.item_amount) || (Number(it.unit_price) || 0) * qty;
+            if (!it.product_code && !qty && !amt) continue;
+            rows.push({
+              card_name: cleanName(it.product_name || ''),
+              card_code: it.product_code || '',
+              order_day: day,
+              site_name: SITE_LABEL,
+              order_type: ORDER_TYPE_LABEL,
+              order_count: 1,
+              total_qty: qty,
+              total_amount: amt,
+            });
+          }
+        }
+        // orderCounts 일별 sum (order_id 중복 제거)
+        const dayCountMap = new Map();
+        for (const mo of validOrders) {
+          const day = (mo.order_date || '').toString().slice(0, 10);
+          if (!day) continue;
+          const key = `${day}|${SITE_LABEL}|${ORDER_TYPE_LABEL}`;
+          if (!dayCountMap.has(key)) dayCountMap.set(key, { order_day: day, site_name: SITE_LABEL, order_type: ORDER_TYPE_LABEL, distinct_order_count: 0 });
+          dayCountMap.get(key).distinct_order_count++;
+        }
+        orderCounts.push(...dayCountMap.values());
+      }
+    } catch (e) {
+      console.warn('[apiDashboardSummary] bg_manual_orders UNION 실패 (무시):', e.message);
+    }
+  }
+
   // 빠른출고 일별 매출 (정보입력 완료 + is_express=true 주문의 원금 매출).
   //   apiDashboardComparison 의 getExpressTotal 과 동일 데이터원이지만 일자 단위로 분해.
   //   실패해도 빈 배열 반환 (테이블 메인 데이터엔 영향 없음).

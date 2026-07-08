@@ -2740,6 +2740,9 @@ nav.nav-loading a[href^="#"] {
     <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
       <input type="checkbox" data-site="coupang" checked onchange="renderBgUnified()"> 쿠팡
     </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" data-site="manual" checked onchange="renderBgUnified()"> 바른손더기프트
+    </label>
     <div style="flex:1"></div>
     <button class="btn" onclick="document.querySelectorAll('#uni-site-filter input').forEach(c=>c.checked=true);renderBgUnified()" style="padding:3px 8px;font-size:11px" title="모든 사이트 체크">전체선택</button>
     <button class="btn" onclick="document.querySelectorAll('#uni-site-filter input').forEach(c=>c.checked=false);renderBgUnified()" style="padding:3px 8px;font-size:11px" title="모두 해제">해제</button>
@@ -13378,6 +13381,7 @@ function renderBgUnified() {
     { key: 'nv_card', match: o => o.order_type === 'NAVER' && /바른손/i.test(String(o.site_name || '') + '|' + String(o.naver_store_id || '')) },
     { key: 'nv_tnt',  match: o => o.order_type === 'NAVER' && /테넷텐|tenetten|tnt/i.test(String(o.site_name || '') + '|' + String(o.naver_store_id || '')) },
     { key: 'coupang', match: o => o.order_type === 'COUPANG' },
+    { key: 'manual',  match: o => o.order_type === 'MANUAL' },  // 바른손더기프트 (CSV 등록)
   ];
   // 사이트 필터는 전체 탭 전용 — 다른 탭에서는 항상 통과 (독립적 동작)
   const activeSiteKeys = new Set(
