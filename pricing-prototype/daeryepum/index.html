@@ -2868,6 +2868,7 @@ nav.nav-loading a[href^="#"] {
               <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);white-space:nowrap">박스</th>
               <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);white-space:nowrap">스티커</th>
               <th style="padding:8px 10px;text-align:right;border-bottom:1px solid var(--gray-200);white-space:nowrap">수량</th>
+              <th style="padding:8px 10px;text-align:right;border-bottom:1px solid var(--gray-200);white-space:nowrap">금액</th>
               <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);white-space:nowrap">희망출고일</th>
             </tr>
           </thead>
@@ -16348,10 +16349,12 @@ async function saveBgOrderEdit() {
 // ============================================
 
 // CSV 컬럼 인덱스 (0-based) — apps script CONFIG.RAW_COL 와 동일
+//   판매금액(Q열=16) 은 원본 스프레드시트 확장 신규. 상품별 합계 (수량 × 단가) 로 저장.
 const BG_CSV_COL = {
   판매자: 1, 주문번호: 3, 수령인: 4, 수령인휴대폰: 5,
   전체주소: 7, 상품명: 8, 바코드: 9, 추가입력옵션: 10,
   사용자메모: 11, 보낼수량: 14, 희망배송일: 15,
+  판매금액: 16,  // Q열 — 상품별 합계 (수량 × 단가). 서버에서 주문 settle_price = SUM 계산.
 };
 
 // 코드 상수
@@ -16491,6 +16494,9 @@ function _bgCsvBuildOrders(rows) {
       const itemName = (r[BG_CSV_COL.상품명] || '').toString();
       const barcode = (r[BG_CSV_COL.바코드] || '').toString().trim();
       const quantity = parseInt(r[BG_CSV_COL.보낼수량]) || 0;
+      // 판매금액 (Q열=16) — 상품별 합계. 쉼표/원 표기 허용.
+      const rawAmount = (r[BG_CSV_COL.판매금액] || '').toString().replace(/[,\s원]/g, '');
+      const itemAmount = parseInt(rawAmount) || 0;
       if (!barcode || itemName === '(상동)' || itemName === '상동') return;
       const lower = itemName.toLowerCase();
       let itemType = 'product';
@@ -16502,6 +16508,7 @@ function _bgCsvBuildOrders(rows) {
       }
       items.push({
         type: itemType, name: itemName, code: barcode, quantity,
+        itemAmount,
         inputMsg: (r[BG_CSV_COL.추가입력옵션] || '').toString(),
         originalIndex: rowIndex,
       });
@@ -16543,10 +16550,14 @@ function _bgCsvBuildOrders(rows) {
         box_code: codes.boxCode || '',
         product_name: product.name,
         quantity: product.quantity,
+        item_amount: product.itemAmount || 0,  // 상품별 합계 (Q열 판매금액)
+        unit_price: product.quantity > 0 ? Math.round((product.itemAmount || 0) / product.quantity) : 0,  // 참조용 (item_amount 우선)
         stickers: cleanedStickers,
         sticker_note: product.inputMsg || '',
       };
     });
+    // 주문 전체 결제금액 = 상품별 판매금액 SUM (스티커/박스 제외 — items 안에는 이미 product 만)
+    const orderSettlePrice = orderItems.reduce((s, it) => s + (Number(it.item_amount) || 0), 0);
     orders.push({
       order_id: baseInfo.order_id,
       order_name: baseInfo.recv_name || '이름없음',
@@ -16556,7 +16567,7 @@ function _bgCsvBuildOrders(rows) {
       recv_address: baseInfo.recv_address,
       recv_msg: baseInfo.recv_msg,
       order_date: new Date().toISOString(),
-      settle_price: 0,
+      settle_price: orderSettlePrice,
       status_seq: 4,
       items: orderItems,
       site_name: '바른손더기프트',
@@ -16610,11 +16621,13 @@ function _bgCsvRender(parsed) {
     wrap.style.display = 'none'; summary.style.display = 'none';
     return;
   }
+  const totalAmount = parsed.orders.reduce((s, o) => s + (Number(o.settle_price) || 0), 0);
   summary.style.display = 'flex';
   summary.innerHTML = `
     <span style="padding:4px 10px;background:#e0e7ff;color:#4338ca;border-radius:4px;font-weight:600">전체 ${parsed.totalCount}행</span>
     <span style="padding:4px 10px;background:#dcfce7;color:#166534;border-radius:4px;font-weight:600">본사 ${parsed.filteredCount}행</span>
     <span style="padding:4px 10px;background:#fef3c7;color:#92400e;border-radius:4px;font-weight:600">📦 주문 ${parsed.orders.length}건</span>
+    <span style="padding:4px 10px;background:#f1f5f9;color:#0f172a;border-radius:4px;font-weight:600" title="상품별 판매금액 SUM">💰 합계 ${fmtNum(totalAmount)}원</span>
   `;
   const rowsHtml = [];
   parsed.orders.forEach(o => {
@@ -16632,6 +16645,7 @@ function _bgCsvRender(parsed) {
         <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);font-family:monospace">${esc(it.box_code || '-')}</td>
         <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:10.5px">${esc(stickersLabel)}</td>
         <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);text-align:right">${it.quantity || 0}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);text-align:right;font-family:monospace">${fmtNum(it.item_amount || 0)}</td>
         <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);white-space:nowrap">${idx === 0 ? esc(o._desired_ship_date || '-') : ''}</td>
       </tr>`);
     });

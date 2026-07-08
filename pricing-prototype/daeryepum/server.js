@@ -1091,7 +1091,11 @@ async function apiOrders(query) {
           iterItems.forEach((it, idx) => {
             const qty = Number(it.quantity) || 0;
             const unitPrice = Number(it.unit_price) || 0;
-            const itemAmount = unitPrice * qty || (idx === 0 ? settlePrice : 0);
+            // 매출 우선순위:
+            //   1) items[].item_amount (CSV Q열 판매금액 합계, 신규)
+            //   2) unit_price × quantity
+            //   3) 첫 상품에만 settle_price 폴백 (매출 배분 안 됨)
+            const itemAmount = Number(it.item_amount) || unitPrice * qty || (idx === 0 ? settlePrice : 0);
             normalized.push({
               order_seq: mo.order_id,
               member_id: null,
