@@ -1192,16 +1192,28 @@ async function createManualOrder(data) {
 
 /**
  * MANUAL 주문 → bg_order_customer_info stub 생성 헬퍼.
- *   order_id 는 `MO-{manualOrderId}` 형식. 이미 있으면 skip.
+ *   order_id 는 `MO-{manualOrderId}` 형식.
+ *   기본: 이미 있으면 skip.
+ *   force=true: 기존 삭제 후 최신 items 로 재생성 (sticker_code=null 등 옛 데이터 정리).
  *   items 배열에서 sticker_selections 로 정규화.
- *   반환: 'created' | 'exists' | 'error:{msg}'
+ *   반환: 'created' | 'exists' | 'recreated' | 'error:{msg}'
  */
-async function _ensureStubForManualOrder(mo) {
+async function _ensureStubForManualOrder(mo, { force = false } = {}) {
   const orderId = (mo.order_id || '').trim();
   if (!orderId) return 'error:missing order_id';
   const stubId = `MO-${orderId}`;
   const existing = await getCustomerInfo(stubId);
-  if (existing) return 'exists';
+  if (existing && !force) return 'exists';
+  // force=true: 기존 stub 삭제 → saveCustomerInfo 의 ALREADY_SUBMITTED 방지
+  if (existing && force) {
+    if (USE_SUPABASE) {
+      try { await sbDelete('bg_order_customer_info', `order_id=eq.${encodeURIComponent(stubId)}`); }
+      catch (e) { return `error:delete failed - ${e.message}`; }
+    } else {
+      const infos = readJson(FILES.customerInfo, []);
+      writeJson(FILES.customerInfo, infos.filter(i => i.order_id !== stubId));
+    }
+  }
   const items = Array.isArray(mo.items) ? mo.items : [];
   const stickerSelections = items.map(it => ({
     product_code: it.product_code || '',
@@ -1227,7 +1239,7 @@ async function _ensureStubForManualOrder(mo) {
       receipt_number: null,
       customer_request: mo._customer_request || null,
     });
-    return 'created';
+    return force && existing ? 'recreated' : 'created';
   } catch (e) {
     if (/already/i.test(e.message || '')) return 'exists';
     return `error:${e.message}`;
@@ -1236,14 +1248,17 @@ async function _ensureStubForManualOrder(mo) {
 
 /**
  * 이미 등록된 bg_manual_orders 중 ci stub 없는 것들을 일괄 backfill.
- *   category (default 'daeryepum') 필터. 반환: {total, created, exists, failed, details}
+ *   category (default 'daeryepum') 필터.
+ *   force=true 이면 기존 stub 도 삭제 후 재생성 (sticker_code=null 등 옛 데이터 정리).
+ *   반환: {total, created, exists, recreated, failed, details}
  */
-async function backfillManualOrderStubs({ category = 'daeryepum' } = {}) {
+async function backfillManualOrderStubs({ category = 'daeryepum', force = false } = {}) {
   const orders = await listManualOrders({ category });
-  const result = { total: orders.length, created: 0, exists: 0, failed: 0, details: [] };
+  const result = { total: orders.length, created: 0, exists: 0, recreated: 0, failed: 0, details: [] };
   for (const mo of orders) {
-    const status = await _ensureStubForManualOrder(mo);
+    const status = await _ensureStubForManualOrder(mo, { force });
     if (status === 'created') { result.created++; result.details.push({ order_id: mo.order_id, status: 'created' }); }
+    else if (status === 'recreated') { result.recreated++; result.details.push({ order_id: mo.order_id, status: 'recreated' }); }
     else if (status === 'exists') { result.exists++; }
     else { result.failed++; result.details.push({ order_id: mo.order_id, status: 'failed', reason: status.replace(/^error:/, '') }); }
   }

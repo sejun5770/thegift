@@ -984,7 +984,10 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   if (pathname === '/api/bg/manual-orders/backfill-stubs' && method === 'POST') {
     try {
       const body = await parseBody(req).catch(() => ({}));
-      const result = await store.backfillManualOrderStubs({ category: body.category || 'daeryepum' });
+      const result = await store.backfillManualOrderStubs({
+        category: body.category || 'daeryepum',
+        force: !!body.force,
+      });
       return json(res, result);
     } catch (err) {
       console.error('[manual-orders backfill-stubs] error:', err.message);
