@@ -471,6 +471,8 @@ nav.nav-loading a[href^="#"] {
           <div id="wow-t-site-breakdown"></div>
         </div>
       </div>
+      <!-- 판매채널별 WoW 통합 표 (지난주 → 이번주 매출/건수/WoW%) -->
+      <div id="wow-channel-compare" style="padding:12px 16px 4px;border-top:1px solid var(--gray-200)"></div>
       <div class="feedback" id="wow-feedback"></div>
     </div>
   </div>
@@ -6126,6 +6128,97 @@ function renderKpiCardBreakdown(containerId, bySite, metric, total) {
   }
 }
 
+/**
+ * WoW 판매채널별 통합 비교 표 — 지난주 vs 이번주 매출/건수 나란히.
+ *   affiliateSites (바른손몰 계열 제휴 코드) 는 그룹 합계로 묶음. renderSiteBreakdown 과 동일 정책.
+ *   각 채널 row: [색상 dot + 채널명] [지난주 매출] [이번주 매출] [Δ% 배지]
+ *   지난주만 매출 있으면 이번주=0, 이번주만 있으면 지난주=0.
+ *   양쪽 다 0 인 채널은 제외.
+ */
+function renderWowChannelCompare(lw, tw) {
+  const container = document.getElementById('wow-channel-compare');
+  if (!container) return;
+  const lwBy = (lw && lw.by_site) || {};
+  const twBy = (tw && tw.by_site) || {};
+
+  // affiliate 그룹 합계 계산 헬퍼 — renderSiteBreakdown 과 동일 로직.
+  function groupSite(bySite) {
+    const sites = Object.keys(bySite);
+    const affiliate = sites.filter(s => isAffiliateSite(s));
+    const nonAffiliate = sites.filter(s => !isAffiliateSite(s));
+    const out = {};
+    nonAffiliate.forEach(s => { out[s] = bySite[s]; });
+    if (affiliate.length >= 2) {
+      const sum = { total_amount: 0, order_count: 0, total_qty: 0 };
+      affiliate.forEach(s => {
+        const v = bySite[s];
+        sum.total_amount += v.total_amount || 0;
+        sum.order_count += v.order_count || 0;
+        sum.total_qty += v.total_qty || 0;
+      });
+      out['바른손몰'] = sum;
+    } else if (affiliate.length === 1) {
+      out[affiliate[0]] = bySite[affiliate[0]];
+    }
+    return out;
+  }
+  const lwGrp = groupSite(lwBy);
+  const twGrp = groupSite(twBy);
+
+  // 채널 합집합 + 이번주 매출 desc 정렬 (0 이면 지난주 기준)
+  const allSites = Array.from(new Set([...Object.keys(lwGrp), ...Object.keys(twGrp)]));
+  const rows = allSites.map(s => ({
+    site: s,
+    lw: lwGrp[s] || { total_amount: 0, order_count: 0, total_qty: 0 },
+    tw: twGrp[s] || { total_amount: 0, order_count: 0, total_qty: 0 },
+  })).filter(r => (r.lw.total_amount || 0) > 0 || (r.tw.total_amount || 0) > 0);
+  rows.sort((a, b) => (b.tw.total_amount || b.lw.total_amount) - (a.tw.total_amount || a.lw.total_amount));
+
+  if (rows.length === 0) { container.innerHTML = ''; return; }
+
+  // 헤더 + row 렌더
+  const headerHtml = `
+    <div style="display:grid;grid-template-columns:1.4fr 1fr 1fr 0.7fr;gap:8px;padding:6px 4px;font-size:11px;color:var(--gray-500);border-bottom:1px solid var(--gray-200);font-weight:600">
+      <div>채널</div>
+      <div style="text-align:right">지난주 매출</div>
+      <div style="text-align:right">이번주 매출</div>
+      <div style="text-align:right">WoW</div>
+    </div>`;
+  const rowsHtml = rows.map(r => {
+    const color = SITE_COLORS[r.site] || '#a1a1aa';
+    const pct = pctChange(r.tw.total_amount || 0, r.lw.total_amount || 0);
+    let badge = '';
+    if ((r.lw.total_amount || 0) === 0 && (r.tw.total_amount || 0) > 0) {
+      badge = `<span style="font-size:11px;color:#0284c7">신규</span>`;
+    } else if ((r.tw.total_amount || 0) === 0 && (r.lw.total_amount || 0) > 0) {
+      badge = `<span style="font-size:11px;color:#dc2626">▼ 100%</span>`;
+    } else if (pct > 0) {
+      badge = `<span class="badge badge-up" style="font-size:11px;padding:1px 6px">▲ ${pct}%</span>`;
+    } else if (pct < 0) {
+      badge = `<span class="badge badge-down" style="font-size:11px;padding:1px 6px">▼ ${Math.abs(pct)}%</span>`;
+    } else {
+      badge = `<span class="badge badge-neutral" style="font-size:11px;padding:1px 6px">- 0%</span>`;
+    }
+    // 매출 아래 sub: 건수/수량 (지난주는 lw, 이번주는 tw)
+    const lwSub = `<div style="font-size:10px;color:var(--gray-400)">${fmtNum(r.lw.order_count||0)}건 · ${fmtNum(r.lw.total_qty||0)}개</div>`;
+    const twSub = `<div style="font-size:10px;color:var(--gray-400)">${fmtNum(r.tw.order_count||0)}건 · ${fmtNum(r.tw.total_qty||0)}개</div>`;
+    return `
+      <div style="display:grid;grid-template-columns:1.4fr 1fr 1fr 0.7fr;gap:8px;padding:6px 4px;align-items:center;font-size:13px;border-bottom:1px solid var(--gray-100)">
+        <div style="display:flex;align-items:center;gap:6px;min-width:0">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.site}</span>
+        </div>
+        <div style="text-align:right"><div>${fmtKRW(r.lw.total_amount||0)}</div>${lwSub}</div>
+        <div style="text-align:right;font-weight:600"><div>${fmtKRW(r.tw.total_amount||0)}</div>${twSub}</div>
+        <div style="text-align:right">${badge}</div>
+      </div>`;
+  }).join('');
+  container.innerHTML = `
+    <div style="font-size:12px;color:var(--gray-600);font-weight:600;margin-bottom:6px">📊 판매채널별 WoW</div>
+    ${headerHtml}
+    ${rowsHtml}`;
+}
+
 function renderSiteBreakdown(data, prefix) {
   const container = document.getElementById(prefix + '-site-breakdown');
   if (!container) return;
@@ -6382,6 +6475,7 @@ function renderComparison(cmp) {
   document.getElementById('wow-t-standalone-qty').textContent = fmtNum((tw.standalone||{}).qty||0);
   renderSiteBreakdown(lw, 'wow-l');
   renderSiteBreakdown(tw, 'wow-t');
+  renderWowChannelCompare(lw, tw);
 
   const wowPct = pctChange(tw.total_amount, lw.total_amount);
   const wowBadge = document.getElementById('wow-badge');
