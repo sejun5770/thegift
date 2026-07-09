@@ -16494,7 +16494,12 @@ function _bgParseCsvDate(raw) {
   }
   const d = new Date(s);
   if (isNaN(d.getTime())) return null;
-  return d.toISOString();
+  // KST 원본 시각을 그대로 저장 (timezone offset 미포함).
+  //   기존 d.toISOString() 은 로컬(KST) → UTC 변환하여 9시간 차이 발생.
+  //   Postgres TIMESTAMPTZ 컬럼은 offset 없는 문자열을 UTC 로 태깅 → 표시 시 원본 KST 시각 그대로 노출.
+  //   이 앱은 KST 사용자 전용이라 별도 timezone 관리 불필요.
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 // 주문상품상태 → status_seq 매핑 (FirstMall 코드).
