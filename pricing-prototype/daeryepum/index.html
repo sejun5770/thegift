@@ -1149,6 +1149,12 @@ nav.nav-loading a[href^="#"] {
     <span style="flex-shrink:0">선택 <strong id="order-selected-count" style="color:var(--gray-800)">0</strong>건</span>
     <span style="flex-shrink:0;color:#16a34a">수집완료 <strong id="order-collected-count">0</strong>건</span>
     <span style="flex-shrink:0;color:#dc2626">취소주의 <strong id="order-cancel-count">0</strong>건</span>
+    <!-- 매출 합계 — 답례품_더기프트 카테고리 전용. 대시보드 기준과 대조 편의성. -->
+    <span id="ord-revenue-summary" style="flex-shrink:0;display:none;padding:2px 8px;border-radius:4px;background:#f3f4f6;color:var(--gray-700)" title="현재 필터로 조회된 주문의 매출. 대시보드 (취소/환불/반품 제외 기준) 와 대조용.">
+      <span style="color:var(--gray-500)">순매출</span> <strong id="ord-revenue-net" style="color:#047857">-</strong>
+      <span style="color:var(--gray-400);margin:0 4px">/</span>
+      <span style="color:var(--gray-500)">전체</span> <strong id="ord-revenue-gross">-</strong>
+    </span>
     <div style="flex:1"></div>
     <!-- 액션 버튼 — 선택 상태에 따라 지능 표시 -->
     <button class="btn" id="ord-btn-mark" onclick="markCollected()" style="display:none;background:#dcfce7;border-color:#86efac;padding:5px 12px;font-size:12px" title="선택된 주문을 수집완료로 표시">✅ <span id="ord-btn-mark-label">수집완료</span></button>
@@ -3690,6 +3696,26 @@ function renderOrderTable() {
   });
   document.getElementById('order-collected-count').textContent = collectedCnt;
   document.getElementById('order-cancel-count').textContent = cancelCnt;
+  // 매출 합계 (답례품_더기프트 전용) — 순매출 = 대시보드 기준 (취소/환불/반품 제외), 전체 = 필터 결과 그대로.
+  //   apiOrders bhands_gift 는 상품별 flatten 이므로 item_amount SUM.
+  //   대시보드 apiDashboardSummary 는 status_seq NOT IN (3,5,15) 만 카운트 → 동일 기준.
+  const revEl = document.getElementById('ord-revenue-summary');
+  if (revEl) {
+    if (currentCategory === 'bhands_gift') {
+      let gross = 0, net = 0;
+      filtered.forEach(r => {
+        const amt = Number(r.item_amount) || 0;
+        gross += amt;
+        const st = Number(r.status_seq) || 0;
+        if (st >= 2 && ![3, 5, 15].includes(st)) net += amt;
+      });
+      document.getElementById('ord-revenue-net').textContent = fmtKRW(net);
+      document.getElementById('ord-revenue-gross').textContent = fmtKRW(gross);
+      revEl.style.display = 'inline';
+    } else {
+      revEl.style.display = 'none';
+    }
+  }
   updateSelectedCount();
 }
 
