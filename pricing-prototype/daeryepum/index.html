@@ -6340,8 +6340,8 @@ function renderComparison(cmp) {
   //   오늘 데이터는 수집 중이라 왜곡 우려 → 확정된 어제까지로 잘라서 동기간 비교.
   const lw = cmp.last_week_same_period || cmp.last_week_same_day || {};  // fallback: 구버전 응답
   const tw = cmp.this_week_to_date || t;                                  // fallback: 오늘 단일
-  const dayNames = ['일','월','화','수','목','금','토'];
-  // 어제 요일 (서버 기간 끝 = 어제 포함) — 오늘=일이면 dow='' + periodDays=0 → 빈 기간
+  // 어제 요일 (서버 기간 끝 = 어제 포함) — 오늘=일이면 dow='' + periodDays=0 → 빈 기간.
+  //   dayNames 는 위 함수 상단(6307) 에서 이미 선언됨 → 재선언 금지.
   const _todayD = new Date();
   const _yestD = new Date(_todayD); _yestD.setDate(_todayD.getDate() - 1);
   const dowIdx = _todayD.getDay();
