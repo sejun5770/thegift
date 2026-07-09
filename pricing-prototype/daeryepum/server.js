@@ -2728,11 +2728,14 @@ async function apiDashboardSummary(query) {
     if (expressInfos && expressInfos.length) {
       const cardSeqs = [];
       const etcSeqs = [];
+      const manualIds = [];
       expressInfos.forEach(ci => {
         const oid = String(ci.order_id || '');
         if (oid.startsWith('ETC-')) {
           const seq = parseInt(oid.slice(4));
           if (seq) etcSeqs.push(seq);
+        } else if (oid.startsWith('MO-')) {
+          manualIds.push(oid.slice(3));
         } else {
           const seq = parseInt(oid);
           if (seq) cardSeqs.push(seq);
@@ -2811,6 +2814,42 @@ async function apiDashboardSummary(query) {
         site_name: formatSiteName(r.site_name),
         total_amount: Math.round(r.total_amount || 0),
       }));
+      // 바른손더기프트 MANUAL 오늘출발 — bg_manual_orders 에서 개별 조회.
+      //   결제완료(status_seq>=2, NOT IN 3/5/15) + 기간 (order_date) 필터.
+      //   copurchase 개념 없음 → 항상 단독주문.
+      if (manualIds.length) try {
+        const perDay = new Map(); // day → { amount, qty, orders(Set) }
+        for (const moId of manualIds) {
+          try {
+            const mo = await _bgStore.getManualOrder(moId);
+            if (!mo) continue;
+            const st = Number(mo.status_seq) || 0;
+            if (st < 2 || [3, 5, 15].includes(st)) continue;
+            const day = String(mo.order_date || '').slice(0, 10);
+            if (!day || day < startDate || day >= endDate) continue;
+            const items = Array.isArray(mo.items) ? mo.items : [];
+            let amount = 0, qty = 0;
+            for (const it of items) {
+              const q = Number(it.quantity) || 0;
+              const a = Number(it.item_amount) || (Number(it.unit_price) || 0) * q;
+              amount += a; qty += q;
+            }
+            if (!perDay.has(day)) perDay.set(day, { amount: 0, qty: 0, orders: new Set() });
+            const b = perDay.get(day);
+            b.amount += amount; b.qty += qty; b.orders.add(moId);
+          } catch (e) { /* 개별 실패는 skip */ }
+        }
+        for (const [day, b] of perDay) {
+          expressDaily.push({
+            order_day: day,
+            site_name: '바른손더기프트',
+            is_copurchase: 0,
+            order_count: b.orders.size,
+            total_amount: Math.round(b.amount),
+            total_qty: b.qty,
+          });
+        }
+      } catch (e) { console.warn('[summary] expressDaily MANUAL UNION 실패 (무시):', e.message); }
     }
   } catch (e) {
     console.warn('[summary] expressDaily 실패 (빠른출고 행 빈값):', e.message);

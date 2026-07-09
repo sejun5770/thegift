@@ -1225,6 +1225,11 @@ async function _ensureStubForManualOrder(mo, { force = false, stickerMap = null 
     }
   }
   const items = Array.isArray(mo.items) ? mo.items : [];
+  // 상품명 prefix "오늘출발" 감지 — 하나라도 있으면 주문 전체를 빠른출고로 분류.
+  //   (CSV 업로드 시 items[i].product_name 에 "[오늘출발] ..." / "오늘출발 ..." 등으로 붙어있음.)
+  //   대시보드 (apiDashboardByShipDate) 는 ci.is_express 를 그대로 express 버킷 판정에 사용.
+  const isExpressItem = it => String(it?.product_name || '').includes('오늘출발');
+  const hasExpressItem = items.some(isExpressItem);
   const stickerSelections = items.map(it => {
     // 스티커 코드 — items[i].stickers[0].code 우선. 없으면 빈 문자열.
     const stickerCode = (Array.isArray(it.stickers) && it.stickers[0]?.code) || '';
@@ -1249,11 +1254,12 @@ async function _ensureStubForManualOrder(mo, { force = false, stickerMap = null 
       custom_values: noteText ? { text: noteText } : {},
       custom_options: customOptions,
       desired_ship_date: mo._desired_ship_date || null,
+      is_express: isExpressItem(it),  // product 단위 빠른출고 여부 (sticker_selection 우선 lookup)
     };
   });
   try {
     await saveCustomerInfo(stubId, {
-      is_express: false,
+      is_express: hasExpressItem,
       express_fee: 0,
       desired_ship_date: mo._desired_ship_date || null,
       sticker_selections: stickerSelections,
