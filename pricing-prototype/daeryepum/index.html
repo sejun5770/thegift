@@ -8207,10 +8207,45 @@ function setTableTab(tab) {
   renderDashTable();
 }
 
+/**
+ * 대시보드 상품별 매출 — canonical name 처리.
+ *   같은 base product_code (variant suffix _A/_B 제거) → 하나의 대표 상품명으로 통합.
+ *   변형 코드는 다르지만 실질적으로 같은 상품인 케이스 (예: 여러 옵션의 동일 상품)
+ *   또는 이름이 [프리픽스] 만 다른 케이스를 하나로 합침.
+ *
+ *   canonical name 선정 규칙:
+ *     1) [prefix] 없는 이름 우선 (cleanName 후 원본이 그대로면 canonical)
+ *     2) 그 중 가장 긴 이름 (fuller name — "말차 프레첼" > "프레첼")
+ *
+ *   *마지막 rule 이 재고 로직과 반대*: 스크린샷의 "말차 프레첼" 사례처럼
+ *   설명이 더 있는 이름이 canonical (사용자가 원하는 방향).
+ */
+function _dashCleanName(n) { return String(n||'').replace(/^\[.*?\]\s*/g, '').trim(); }
+function buildDashCanonicalMap(rows) {
+  const byBase = new Map(); // base_code → { canonicalName, names:Set }
+  rows.forEach(r => {
+    const base = resolveBgMappedProductCode(r.card_code || '') || `nm:${_dashCleanName(r.card_name||'')}`;
+    const cleaned = _dashCleanName(r.card_name || '') || (r.card_name || '');
+    if (!cleaned) return;
+    if (!byBase.has(base)) byBase.set(base, { canonicalName: cleaned, names: new Set() });
+    const b = byBase.get(base);
+    b.names.add(cleaned);
+    // 규칙: 더 긴 이름을 canonical 로 (더 서술적 → "말차 프레첼" > "프레첼")
+    if (cleaned.length > b.canonicalName.length) b.canonicalName = cleaned;
+  });
+  // row → canonical name resolver
+  return function resolve(r) {
+    const base = resolveBgMappedProductCode(r.card_code || '') || `nm:${_dashCleanName(r.card_name||'')}`;
+    return byBase.get(base)?.canonicalName || _dashCleanName(r.card_name || '') || (r.card_name || '');
+  };
+}
+
 function getTopProducts(data) {
+  const resolve = buildDashCanonicalMap(data);
   const prodAmtMap = {};
   data.forEach(r => {
-    const name = (r.card_name||'').replace(/^\[.*?\]\s*/g,'');
+    const name = resolve(r);
+    if (!name) return;
     if (!prodAmtMap[name]) prodAmtMap[name] = 0;
     prodAmtMap[name] += r.total_amount || 0;
   });
@@ -8285,9 +8320,11 @@ function renderDailyTable(data, topProducts) {
     }
     return dayGroupTypeMap[day][group];
   }
+  const _resolveCan = buildDashCanonicalMap(data);
   data.forEach(r => {
     const day = r.order_day;
-    const name = (r.card_name||'').replace(/^\[.*?\]\s*/g,'');
+    // canonical name — 같은 base 코드 여러 이름 케이스 (예: "말차 프레첼"/"프레첼") 하나로 통합
+    const name = _resolveCan(r);
     const sn = r.site_name || '기타';
     const group = getSiteGroup(sn);
     if (!dayMap[day]) dayMap[day] = { amount:0, qty:0, orders:0, products:{} };
@@ -8670,9 +8707,11 @@ function renderWeeklyTable(data, topProducts) {
     }
     return weekGroupTypeMap[wk][group];
   }
+  const _resolveCan = buildDashCanonicalMap(data);
   data.forEach(r => {
     const wk = getWeekStartStr(r.order_day);
-    const name = (r.card_name||'').replace(/^\[.*?\]\s*/g,'');
+    // canonical name — daily 와 동일 (같은 base 코드 → 대표 상품명 통합)
+    const name = _resolveCan(r);
     const sn = r.site_name || '기타';
     const group = getSiteGroup(sn);
     if (!weekMap[wk]) weekMap[wk] = { amount:0, qty:0, orders:0, products:{} };
