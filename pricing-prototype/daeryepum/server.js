@@ -2011,15 +2011,19 @@ async function apiDashboardComparison(query = {}) {
   const dayNames = ['일','월','화','수','목','금','토'];
   const todayDow = dayNames[todayDate.getDay()];
 
-  // WoW 동기간 비교: 이번주 일요일~오늘 vs 지난주 일요일~지난주 같은 요일
-  //   오늘=수: thisWeek = [Sun, Wed], lastWeek = [last Sun, last Wed] (각 4일)
-  //   오늘=일: thisWeek = [Sun], lastWeek = [last Sun] (각 1일, 단일일자와 동일)
+  // WoW 동기간 비교: 이번주 일요일~어제(전일 기준) vs 지난주 일요일~지난주 어제
+  //   오늘=목: thisWeek = [Sun~Wed] (4일), lastWeek = [last Sun~last Wed] (4일)
+  //   오늘=일: thisWeek = [] (0일), lastWeek = [] (0일) — 표시 시 빈 값 처리
+  //
+  // 오늘 데이터는 아직 수집 중이라 왜곡 우려 → 사용자 정책상 전일까지로 잘라서 동기간 비교.
   const dayOfWeek = todayDate.getDay();
   const thisWeekStartDate = addDays(todayDate, -dayOfWeek);
   const thisWeekStartStr = fmtDate(thisWeekStartDate);
   const lastWeekStartStr = fmtDate(addDays(thisWeekStartDate, -7));
-  // 지난주 동기간 끝(exclusive) = 이번주 동기간 끝(exclusive) - 7일 = today - 6
-  const lastWeekPeriodEndExclusiveStr = fmtDate(addDays(todayDate, -6));
+  // 이번주 동기간 끝(exclusive) = 오늘 = todayStr (어제까지 포함).
+  // 지난주 동기간 끝(exclusive) = 지난주 같은요일 = today - 7 = lastWeekSameDayStr.
+  //   기존엔 tomorrowStr / lastWeekSameDayNextStr (지난주 같은요일 다음날) 이었음 → 오늘/지난주 같은요일도 포함.
+  //   이제 오늘/지난주 같은요일 제외 (전일 기준).
 
   // 각 기간별 ETC+CARD 합산 헬퍼
   //
@@ -2504,8 +2508,8 @@ async function apiDashboardComparison(query = {}) {
     getPeriodTotal(todayStr, tomorrowStr),
     getPeriodTotal(yesterdayStr, todayStr),
     getPeriodTotal(lastWeekSameDayStr, lastWeekSameDayNextStr),
-    getPeriodTotal(thisWeekStartStr, tomorrowStr),
-    getPeriodTotal(lastWeekStartStr, lastWeekPeriodEndExclusiveStr),
+    getPeriodTotal(thisWeekStartStr, todayStr),          // 이번주 일요일 ~ 어제
+    getPeriodTotal(lastWeekStartStr, lastWeekSameDayStr), // 지난주 일요일 ~ 지난주 어제
     getExpressTotal(todayStr, tomorrowStr, expressInfos),
     getExpressTotal(yesterdayStr, todayStr, expressInfos),
     getExpressTotal(lastWeekSameDayStr, lastWeekSameDayNextStr, expressInfos),

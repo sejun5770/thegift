@@ -6335,19 +6335,33 @@ function renderComparison(cmp) {
 
   document.getElementById('cmp-feedback').innerHTML = feedback;
 
-  // --- WoW: 이번주 누적 vs 지난주 동기간 ---
-  //   동기간 비교: 이번주 일~오늘(N일) vs 지난주 일~지난주 같은요일(N일).
-  //   요일별 편차 + 단일일자 노이즈를 줄이고 주간 트렌드를 더 정확히 표현.
+  // --- WoW: 이번주 누적 vs 지난주 동기간 (전일 기준) ---
+  //   서버 기간 정책: 이번주 일~어제 (오늘 미포함), 지난주 일~지난주 어제 (지난주 같은요일 미포함).
+  //   오늘 데이터는 수집 중이라 왜곡 우려 → 확정된 어제까지로 잘라서 동기간 비교.
   const lw = cmp.last_week_same_period || cmp.last_week_same_day || {};  // fallback: 구버전 응답
   const tw = cmp.this_week_to_date || t;                                  // fallback: 오늘 단일
-  const dow = cmp.date.today_dow;
+  const dayNames = ['일','월','화','수','목','금','토'];
+  // 어제 요일 (서버 기간 끝 = 어제 포함) — 오늘=일이면 dow='' + periodDays=0 → 빈 기간
+  const _todayD = new Date();
+  const _yestD = new Date(_todayD); _yestD.setDate(_todayD.getDate() - 1);
+  const dowIdx = _todayD.getDay();
+  const dow = dowIdx === 0 ? '' : dayNames[_yestD.getDay()];
+  const periodDays = dowIdx;   // 이번주 일~어제 일수. 오늘=일 → 0, 목 → 4.
   const fmtMD = s => { const [, m, d] = (s||'').split('-'); return m && d ? `${parseInt(m)}/${parseInt(d)}` : (s || ''); };
+  // 지난주/이번주 마지막 포함 일자 = 어제 / 지난주 어제.
+  //   서버 응답 date 에는 today/last_week_same_day 만 있음 (둘 다 exclusive endDate) → -1일 해서 표기.
+  const shiftMinus1 = s => { if(!s) return ''; const d=new Date(s); d.setDate(d.getDate()-1); const pad=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
   const lwStart = fmtMD(cmp.date.last_week_start || cmp.date.last_week_same_day);
-  const lwEnd = fmtMD(cmp.date.last_week_same_day);
+  const lwEnd = fmtMD(shiftMinus1(cmp.date.last_week_same_day));
   const twStart = fmtMD(cmp.date.this_week_start || cmp.date.today);
-  const twEnd = fmtMD(cmp.date.today);
-  document.getElementById('wow-last-date').textContent = `지난주 일~${dow} (${lwStart} ~ ${lwEnd})`;
-  document.getElementById('wow-today-date').textContent = `이번주 일~${dow} 누적 (${twStart} ~ ${twEnd})`;
+  const twEnd = fmtMD(shiftMinus1(cmp.date.today));
+  if (periodDays === 0) {
+    document.getElementById('wow-last-date').textContent = '지난주 (전일 없음)';
+    document.getElementById('wow-today-date').textContent = '이번주 (전일 없음 — 일요일)';
+  } else {
+    document.getElementById('wow-last-date').textContent = `지난주 일~${dow} (${lwStart} ~ ${lwEnd})`;
+    document.getElementById('wow-today-date').textContent = `이번주 일~${dow} 누적 (${twStart} ~ ${twEnd})`;
+  }
   document.getElementById('wow-l-amount').textContent = fmtKRW(lw.total_amount);
   document.getElementById('wow-l-copurchase').textContent = fmtKRW((lw.copurchase||{}).amount||0);
   document.getElementById('wow-l-standalone').textContent = fmtKRW((lw.standalone||{}).amount||0);
@@ -6375,9 +6389,8 @@ function renderComparison(cmp) {
   else if (wowPct < 0) wowBadge.innerHTML = `<span class="badge badge-down">▼ ${Math.abs(wowPct)}%</span>`;
   else wowBadge.innerHTML = `<span class="badge badge-neutral">- 0%</span>`;
 
-  // 동기간 일수 (오늘이 일요일이면 1, 토요일이면 7)
-  const dowIdx = new Date().getDay();
-  const periodDays = dowIdx + 1;
+  // 동기간 일수 (오늘이 목요일=4 → 이번주 일~수 = 4일). 오늘 일요일=0 → 기간 0.
+  //   dowIdx/periodDays 위에서 이미 계산됨 (dow 요일 표시와 함께).
 
   let wowFeedback = '';
   if (lw.total_amount === 0 && tw.total_amount === 0) {
