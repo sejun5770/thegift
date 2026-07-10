@@ -606,16 +606,7 @@ nav.nav-loading a[href^="#"] {
       <!-- 테이블 뷰 (toggle) -->
       <div id="bsd-table-wrap" style="overflow-x:auto;display:none">
         <table id="bsd-table" style="width:100%;border-collapse:collapse;font-size:13px">
-          <thead>
-            <tr style="background:var(--gray-50)">
-              <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:110px">희망출고일</th>
-              <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:120px">매출</th>
-              <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:80px">주문</th>
-              <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:80px">수량</th>
-              <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:120px">⚡ 빠른출고</th>
-              <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:120px">일반</th>
-            </tr>
-          </thead>
+          <thead id="bsd-thead"></thead>
           <tbody id="bsd-tbody"></tbody>
         </table>
       </div>
@@ -7070,7 +7061,10 @@ function downloadBsdExcel() {
     showToast('다운로드할 데이터가 없습니다');
     return;
   }
-  const headers = ['희망출고일', '요일', '매출', '주문건수', '수량', '일반매출', '일반건수', '빠른출고매출', '빠른출고건수', '빠른출고비중(%)'];
+  // 사이트별 컬럼 — 응답 sites 순서 그대로 (전체 매출 desc)
+  const siteList = Array.isArray(data.sites) ? data.sites : [];
+  const siteHeaders = siteList.flatMap(s => [`${s.site_name} 매출`, `${s.site_name} 건수`]);
+  const headers = ['희망출고일', '요일', '매출', '주문건수', '수량', '일반매출', '일반건수', '빠른출고매출', '빠른출고건수', '빠른출고비중(%)', ...siteHeaders];
   const dowNames = ['일', '월', '화', '수', '목', '금', '토'];
   const rows = data.ship_dates.map(d => {
     const dow = dowNames[new Date(d.date + 'T00:00:00').getDay()];
@@ -7080,7 +7074,11 @@ function downloadBsdExcel() {
     const regOrd = d.regular?.orders || 0;
     const totalAmt = d.amount || 0;
     const exprPct = totalAmt > 0 ? Math.round(exprAmt / totalAmt * 100) : 0;
-    return [d.date, dow, totalAmt, d.orders || 0, d.qty || 0, regAmt, regOrd, exprAmt, exprOrd, exprPct].join('\t');
+    const siteCells = siteList.flatMap(s => {
+      const v = (d.by_site || {})[s.site_name];
+      return [v?.amount || 0, v?.orders || 0];
+    });
+    return [d.date, dow, totalAmt, d.orders || 0, d.qty || 0, regAmt, regOrd, exprAmt, exprOrd, exprPct, ...siteCells].join('\t');
   });
   // 합계 footer
   const total = data.total || { amount: 0, orders: 0, qty: 0 };
@@ -7089,7 +7087,11 @@ function downloadBsdExcel() {
   const totalRegAmt = data.ship_dates.reduce((s, d) => s + (d.regular?.amount || 0), 0);
   const totalRegOrd = data.ship_dates.reduce((s, d) => s + (d.regular?.orders || 0), 0);
   const totalExprPct = total.amount > 0 ? Math.round(totalExprAmt / total.amount * 100) : 0;
-  const footer = ['합계', '-', total.amount, total.orders, total.qty, totalRegAmt, totalRegOrd, totalExprAmt, totalExprOrd, totalExprPct].join('\t');
+  const footerSites = siteList.flatMap(s => {
+    const v = total.by_site?.[s.site_name];
+    return [v?.amount || 0, v?.orders || 0];
+  });
+  const footer = ['합계', '-', total.amount, total.orders, total.qty, totalRegAmt, totalRegOrd, totalExprAmt, totalExprOrd, totalExprPct, ...footerSites].join('\t');
   const BOM = '﻿';
   const tsv = BOM + [headers.join('\t'), ...rows, footer].join('\n');
   const blob = new Blob([tsv], { type: 'text/tab-separated-values;charset=utf-8' });
@@ -7114,9 +7116,29 @@ function renderByShipDate(data) {
   // 기간은 입력 필드(bsd-start/end)에 이미 표시되므로 별도 표시 X
 
   const tbody = document.getElementById('bsd-tbody');
+  const thead = document.getElementById('bsd-thead');
   const chartEl = document.getElementById('bsd-chart');
+  // 사이트 목록 — 전체 매출 desc 정렬 (서버 응답 그대로).
+  //   응답에 sites 없으면 빈 배열 → 기존 기본 컬럼만 렌더.
+  const siteList = Array.isArray(safe.sites) ? safe.sites : [];
+  // 기본 헤더 (6열) — 데이터 없어도 표시
+  const baseHead = `<tr style="background:var(--gray-50)">
+    <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:110px">희망출고일</th>
+    <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:120px">매출</th>
+    <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:80px">주문</th>
+    <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:80px">수량</th>
+    <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:120px">⚡ 빠른출고</th>
+    <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:120px">일반</th>
+    ${siteList.map(s => {
+      const pct = safe.total?.amount > 0 ? Math.round(s.amount / safe.total.amount * 100) : 0;
+      const label = s.site_name.length > 10 ? s.site_name.slice(0, 10) + '…' : s.site_name;
+      return `<th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:110px;border-left:1px solid var(--gray-200)" title="${esc(s.site_name)} 총 ${fmtKRW(s.amount)} (${pct}%), ${fmtNum(s.orders)}건">${esc(label)} <span style="color:var(--gray-400);font-size:10px;font-weight:400">${pct}%</span></th>`;
+    }).join('')}
+  </tr>`;
+  thead.innerHTML = baseHead;
+  const colspan = 6 + siteList.length;
   if (!dates.length) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--gray-500);font-size:12px">조회 기간 내 정보입력 완료 + 희망출고일이 지정된 주문이 없습니다.</td></tr>';
+    tbody.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center;padding:20px;color:var(--gray-500);font-size:12px">조회 기간 내 정보입력 완료 + 희망출고일이 지정된 주문이 없습니다.</td></tr>`;
     chartEl.innerHTML = '<div style="text-align:center;padding:40px;color:var(--gray-500);font-size:12px;width:100%">조회 기간 내 데이터 없음</div>';
     document.getElementById('bsd-feedback').innerHTML = '';
     return;
@@ -7188,6 +7210,14 @@ function renderByShipDate(data) {
     const exprOrd = d.express?.orders || 0;
     const regAmt = d.regular?.amount || 0;
     const regOrd = d.regular?.orders || 0;
+    // 사이트별 셀 — data.sites 순서대로. 값 없는 사이트는 '-'.
+    const siteCells = siteList.map(s => {
+      const v = (d.by_site || {})[s.site_name];
+      if (!v || !v.orders) {
+        return `<td style="padding:8px 12px;border-bottom:1px solid var(--gray-100);text-align:right;font-size:12px;border-left:1px solid var(--gray-100);color:var(--gray-300)">-</td>`;
+      }
+      return `<td style="padding:8px 12px;border-bottom:1px solid var(--gray-100);text-align:right;font-size:12px;border-left:1px solid var(--gray-100)" title="${esc(s.site_name)} ${fmtKRW(v.amount)} · ${fmtNum(v.orders)}건 · ${fmtNum(v.qty)}개">${fmtKRW(v.amount)} <span style="color:var(--gray-400);font-size:11px">(${fmtNum(v.orders)}건)</span></td>`;
+    }).join('');
     return `<tr style="${rowBg}">
       <td style="padding:8px 12px;border-bottom:1px solid var(--gray-100);white-space:nowrap">
         <strong>${d.date}</strong> <span style="color:${dowColor};font-size:11px">(${dow})</span>${isToday ? ' <span style="font-size:10px;color:#2563eb;font-weight:600">오늘</span>' : ''}
@@ -7201,9 +7231,30 @@ function renderByShipDate(data) {
       <td style="padding:8px 12px;border-bottom:1px solid var(--gray-100);text-align:right;font-size:12px">
         ${regOrd > 0 ? `${fmtKRW(regAmt)} <span style="color:var(--gray-400);font-size:11px">(${fmtNum(regOrd)}건)</span>` : '<span style="color:var(--gray-300)">-</span>'}
       </td>
+      ${siteCells}
     </tr>`;
   }).join('');
-  tbody.innerHTML = rows;
+  // 합계 footer row — 각 사이트 열의 총합 노출
+  const footerCells = siteList.map(s => {
+    const v = safe.total?.by_site?.[s.site_name];
+    if (!v || !v.orders) return `<td style="padding:8px 12px;text-align:right;font-size:12px;border-left:1px solid var(--gray-200);color:var(--gray-300)">-</td>`;
+    const pct = safe.total?.amount > 0 ? Math.round(v.amount / safe.total.amount * 100) : 0;
+    return `<td style="padding:8px 12px;text-align:right;font-size:12px;border-left:1px solid var(--gray-200);font-weight:600">${fmtKRW(v.amount)} <span style="color:var(--gray-400);font-size:11px;font-weight:400">(${pct}%)</span></td>`;
+  }).join('');
+  const totalExprAmt = dates.reduce((s, d) => s + (d.express?.amount || 0), 0);
+  const totalExprOrd = dates.reduce((s, d) => s + (d.express?.orders || 0), 0);
+  const totalRegAmt = dates.reduce((s, d) => s + (d.regular?.amount || 0), 0);
+  const totalRegOrd = dates.reduce((s, d) => s + (d.regular?.orders || 0), 0);
+  const footerRow = `<tr style="background:var(--gray-50);border-top:2px solid var(--gray-300);font-weight:600">
+    <td style="padding:10px 12px">합계</td>
+    <td style="padding:10px 12px;text-align:right">${fmtKRW(total.amount)}</td>
+    <td style="padding:10px 12px;text-align:right">${fmtNum(total.orders)}건</td>
+    <td style="padding:10px 12px;text-align:right">${fmtNum(total.qty)}</td>
+    <td style="padding:10px 12px;text-align:right;font-size:12px"><span style="color:#dc2626">${fmtKRW(totalExprAmt)}</span> <span style="color:var(--gray-500);font-size:11px;font-weight:400">(${fmtNum(totalExprOrd)}건)</span></td>
+    <td style="padding:10px 12px;text-align:right;font-size:12px">${fmtKRW(totalRegAmt)} <span style="color:var(--gray-500);font-size:11px;font-weight:400">(${fmtNum(totalRegOrd)}건)</span></td>
+    ${footerCells}
+  </tr>`;
+  tbody.innerHTML = rows + footerRow;
 
   // 피드백: 가장 부하 큰 날 + 빠른출고 비중
   const topDay = dates.reduce((max, cur) => cur.amount > (max?.amount || 0) ? cur : max, null);

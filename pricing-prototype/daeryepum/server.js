@@ -3616,16 +3616,19 @@ async function apiDashboardByShipDate(query) {
       )
       SELECT
         co.order_seq,
+        ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
         CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
         ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)), 0) AS amount,
         ISNULL(SUM(coi.item_count), 0) AS qty
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
       LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
       WHERE ${D01_FILTER} AND co.order_seq IN (${inList})
         AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5, 9)
-      GROUP BY co.order_seq, CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
+      GROUP BY co.order_seq, ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
+               CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
     `).then(r => r.recordset.map(row => ({ ...row, _src: 'CARD' }))));
   }
   if (ciByEtcSeq.size) {
@@ -3639,6 +3642,7 @@ async function apiDashboardByShipDate(query) {
       )
       SELECT
         o.order_seq,
+        ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
         CASE WHEN ecp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
         ISNULL(SUM(${ETC_AMOUNT_EXPR}), 0) AS amount,
         ISNULL(SUM(oi.order_count), 0) AS qty
@@ -3650,7 +3654,8 @@ async function apiDashboardByShipDate(query) {
       ${ETC_COUPON_DIVISOR_JOIN_D01}
       WHERE ${D01_FILTER} AND o.order_seq IN (${inList})
         AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5, 15)
-      GROUP BY o.order_seq, CASE WHEN ecp.order_seq IS NOT NULL THEN 1 ELSE 0 END
+      GROUP BY o.order_seq, ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)),
+               CASE WHEN ecp.order_seq IS NOT NULL THEN 1 ELSE 0 END
     `).then(r => r.recordset.map(row => ({ ...row, _src: 'ETC' }))));
   }
   let salesRows = [];
@@ -3680,14 +3685,14 @@ async function apiDashboardByShipDate(query) {
             amount += a;
             qty += q;
           }
-          salesRows.push({ order_seq: moId, is_copurchase: 0, amount, qty, _src: 'MANUAL' });
+          salesRows.push({ order_seq: moId, is_copurchase: 0, amount, qty, site_name: mo.site_name || '바른손더기프트', _src: 'MANUAL' });
         } catch (e) { console.warn(`[by-ship-date] MANUAL ${moId} 실패 (무시):`, e.message); }
       }
     } catch (e) { console.warn('[by-ship-date] MANUAL lookup 실패:', e.message); }
   }
 
-  // 출고일별 그룹핑
-  const buckets = {}; // date → { amount, orders, qty, express, regular, copurchase, standalone }
+  // 출고일별 그룹핑 (by_site 추가 — 채널별 매출 breakdown)
+  const buckets = {}; // date → { amount, orders, qty, express, regular, copurchase, standalone, by_site }
   function ensureBucket(date) {
     if (!buckets[date]) {
       buckets[date] = {
@@ -3696,11 +3701,17 @@ async function apiDashboardByShipDate(query) {
         regular: { amount: 0, orders: 0, qty: 0 },
         copurchase: { amount: 0, orders: 0, qty: 0 },
         standalone: { amount: 0, orders: 0, qty: 0 },
+        by_site: {},  // site_name → { amount, orders, qty }
       };
     }
     return buckets[date];
   }
+  function ensureSite(b, siteName) {
+    if (!b.by_site[siteName]) b.by_site[siteName] = { amount: 0, orders: 0, qty: 0 };
+    return b.by_site[siteName];
+  }
   let totalAmount = 0, totalOrders = 0, totalQty = 0;
+  const totalBySite = {}; // site_name → { amount, orders, qty }
   salesRows.forEach(r => {
     const ci = r._src === 'ETC' ? ciByEtcSeq.get(r.order_seq)
              : r._src === 'MANUAL' ? ciByManualId.get(r.order_seq)
@@ -3715,14 +3726,27 @@ async function apiDashboardByShipDate(query) {
     expressBucket.amount += amount; expressBucket.qty += qty; expressBucket.orders += 1;
     const cpBucket = r.is_copurchase ? b.copurchase : b.standalone;
     cpBucket.amount += amount; cpBucket.qty += qty; cpBucket.orders += 1;
+    // 사이트별 breakdown — formatSiteName 은 SiteInfo 매핑 이름 정규화 (CARD/ETC 공통)
+    const siteName = formatSiteName(r.site_name || '기타');
+    const sb = ensureSite(b, siteName);
+    sb.amount += amount; sb.orders += 1; sb.qty += qty;
+    if (!totalBySite[siteName]) totalBySite[siteName] = { amount: 0, orders: 0, qty: 0 };
+    totalBySite[siteName].amount += amount;
+    totalBySite[siteName].orders += 1;
+    totalBySite[siteName].qty += qty;
     totalAmount += amount; totalOrders += 1; totalQty += qty;
   });
 
   const ship_dates = Object.values(buckets).sort((a, b) => a.date.localeCompare(b.date));
+  // 사이트 목록 — 전체 매출 desc 정렬 (UI 컬럼 순서용)
+  const sites = Object.entries(totalBySite)
+    .sort((a, b) => b[1].amount - a[1].amount)
+    .map(([name, v]) => ({ site_name: name, ...v }));
   return {
     period: { start: startDate, end: endDate },
     ship_dates,
-    total: { amount: totalAmount, orders: totalOrders, qty: totalQty },
+    sites,
+    total: { amount: totalAmount, orders: totalOrders, qty: totalQty, by_site: totalBySite },
     diag: {
       customer_info_total: cInfos.length,
       customer_info_in_window: inWindow.length,
