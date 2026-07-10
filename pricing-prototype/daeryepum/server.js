@@ -3726,8 +3726,12 @@ async function apiDashboardByShipDate(query) {
     expressBucket.amount += amount; expressBucket.qty += qty; expressBucket.orders += 1;
     const cpBucket = r.is_copurchase ? b.copurchase : b.standalone;
     cpBucket.amount += amount; cpBucket.qty += qty; cpBucket.orders += 1;
-    // 사이트별 breakdown — formatSiteName 은 SiteInfo 매핑 이름 정규화 (CARD/ETC 공통)
-    const siteName = formatSiteName(r.site_name || '기타');
+    // 사이트별 breakdown — formatSiteName 은 SiteInfo 매핑 이름 정규화 (CARD/ETC 공통).
+    //   그 후 제휴몰 (4자리 코드 or `이름(XXXX)` 형태) 은 모두 '바른손몰' 로 통합.
+    //   isAffiliateSite 는 클라이언트 (renderSiteBreakdown) 정책과 동일 — dashboard 사이트별 매출과 일관.
+    const rawSiteName = formatSiteName(r.site_name || '기타');
+    const isAffiliate = /\(\d{4}\)$/.test(rawSiteName) || /^\d{4}$/.test(rawSiteName);
+    const siteName = isAffiliate ? '바른손몰' : rawSiteName;
     const sb = ensureSite(b, siteName);
     sb.amount += amount; sb.orders += 1; sb.qty += qty;
     if (!totalBySite[siteName]) totalBySite[siteName] = { amount: 0, orders: 0, qty: 0 };
