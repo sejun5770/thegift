@@ -271,6 +271,7 @@ async function upsertProductSettings(productId, data) {
     canonical_group_key: data.canonical_group_key ?? null,       // 대시보드 상품별 매출 통합 집계용 (migration 033)
     canonical_display_name: data.canonical_display_name ?? null, // NULL 이면 product_name 사용
     custom_guide_text: data.custom_guide_text ?? null,           // 고객 order-info STEP1 안내 (migration 034)
+    custom_guide_title: data.custom_guide_title ?? null,         // 안내 박스 타이틀 (migration 035)
   };
 
   if (USE_SUPABASE) return sbInsert('bg_product_settings', newSetting);

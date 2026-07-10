@@ -307,6 +307,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const shippingGroupByProduct = {};
       const allowLogoUploadByProduct = {}; // migration 026 — 로고 첨부 허용 게이트
       const customGuideByProduct = {};     // migration 034 — 관리자 자유 안내 텍스트
+      const customGuideTitleByProduct = {}; // migration 035 — 안내 박스 타이틀
       const stickerById = new Map(allActiveStickers.map(s => [s.id, s]));
       for (const p of products) {
         if (!p.product_code) continue;
@@ -329,6 +330,9 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         // 커스텀 안내 텍스트 (migration 034) — 관리자 입력. 빈 문자열은 null 로 정규화.
         const guideText = (ps?.custom_guide_text || '').trim();
         customGuideByProduct[p.product_code] = guideText || null;
+        // 커스텀 안내 타이틀 (migration 035) — 관리자 입력. 빈 문자열은 null.
+        const guideTitle = (ps?.custom_guide_title || '').trim();
+        customGuideTitleByProduct[p.product_code] = guideTitle || null;
         // 자유 옵션 그룹 매핑 — legacy array 형식 (값이 array) 도 호환
         //   normalize: { groupName: {use_images:bool, options:[...]} } 형태로 통일
         const rawCustom = (ps?.custom_options && typeof ps.custom_options === 'object' && !Array.isArray(ps.custom_options))
@@ -488,6 +492,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         decoration_label_by_product: decorationLabelByProduct, // { product_code: '스티커' | '띠지' | ... | null }
         allow_logo_upload_by_product: allowLogoUploadByProduct, // { product_code: bool } — migration 026
         custom_guide_by_product: customGuideByProduct,          // { product_code: string|null } — migration 034
+        custom_guide_title_by_product: customGuideTitleByProduct, // { product_code: string|null } — migration 035
         existing_info: existingInfo,
         deliveries,  // 배송지별 답례품 수량 (나눔배송 안내용, 입력엔 영향 없음)
         virtual_account: virtualAccount,  // 주문 결제용 가상계좌 (결제대기 상태일 때만)
