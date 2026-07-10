@@ -1206,8 +1206,22 @@ async function _ensureStubForManualOrder(mo, { force = false, stickerMap = null 
   const stubId = `MO-${orderId}`;
   const existing = await getCustomerInfo(stubId);
   if (existing && !force) return 'exists';
-  // force=true: 기존 stub 삭제 → saveCustomerInfo 의 ALREADY_SUBMITTED 방지
+  // force=true 재생성 시 preserve — bg_manual_orders 자체에 desired_ship_date 컬럼이 없어
+  //   mo._desired_ship_date 는 CSV 업로드 시점 payload 에만 존재. backfill 은 그 값을 못 가짐 →
+  //   기존 stub 삭제 전에 desired_ship_date / sticker_selections[i].desired_ship_date 를 뽑아둠.
+  //   운영자가 정보입력현황에서 수정한 값도 그대로 유지됨.
+  let preservedTopShipDate = null;
+  const preservedSelShipByIdx = new Map();      // idx → date
+  const preservedSelShipByCode = new Map();     // product_code → date (idx 재정렬 대비 fallback)
   if (existing && force) {
+    preservedTopShipDate = existing.desired_ship_date || null;
+    const sels = Array.isArray(existing.sticker_selections) ? existing.sticker_selections : [];
+    sels.forEach((sel, i) => {
+      if (sel?.desired_ship_date) {
+        preservedSelShipByIdx.set(i, sel.desired_ship_date);
+        if (sel.product_code) preservedSelShipByCode.set(String(sel.product_code), sel.desired_ship_date);
+      }
+    });
     if (USE_SUPABASE) {
       try { await sbDelete('bg_order_customer_info', `order_id=eq.${encodeURIComponent(stubId)}`); }
       catch (e) { return `error:delete failed - ${e.message}`; }
@@ -1238,7 +1252,7 @@ async function _ensureStubForManualOrder(mo, { force = false, stickerMap = null 
     return true;
   };
   const hasExpressItem = items.some(isExpressItem);
-  const stickerSelections = items.map(it => {
+  const stickerSelections = items.map((it, idx) => {
     // 스티커 코드 — items[i].stickers[0].code 우선. 없으면 빈 문자열.
     const stickerCode = (Array.isArray(it.stickers) && it.stickers[0]?.code) || '';
     const codeKey = String(stickerCode).trim().toUpperCase();
@@ -1250,6 +1264,16 @@ async function _ensureStubForManualOrder(mo, { force = false, stickerMap = null 
     const customOptions = {};
     if (it.product_code) customOptions['품목1'] = { code: it.product_code, name: it.product_name || it.product_code };
     if (it.product_code_2) customOptions['품목2'] = { code: it.product_code_2, name: '' };
+    // desired_ship_date preserve 우선순위:
+    //   1) 이전 stub 의 같은 idx sel 값 (force 재생성 시)
+    //   2) 이전 stub 의 같은 product_code sel 값 (items 순서 바뀐 케이스 fallback)
+    //   3) mo._desired_ship_date (CSV payload — backfill 시엔 없음)
+    //   4) preservedTopShipDate (전체 stub 값, 균일 그룹인 경우 안전 fallback)
+    const preservedShip = preservedSelShipByIdx.get(idx)
+      || (it.product_code && preservedSelShipByCode.get(String(it.product_code)))
+      || mo._desired_ship_date
+      || preservedTopShipDate
+      || null;
     return {
       product_code: it.product_code || '',
       product_code_2: it.product_code_2 || '',
@@ -1261,7 +1285,7 @@ async function _ensureStubForManualOrder(mo, { force = false, stickerMap = null 
       sticker_name: stickerInfo?.name || '',
       custom_values: noteText ? { text: noteText } : {},
       custom_options: customOptions,
-      desired_ship_date: mo._desired_ship_date || null,
+      desired_ship_date: preservedShip,
       is_express: isExpressItem(it),  // product 단위 빠른출고 여부 (sticker_selection 우선 lookup)
     };
   });
@@ -1269,12 +1293,14 @@ async function _ensureStubForManualOrder(mo, { force = false, stickerMap = null 
     await saveCustomerInfo(stubId, {
       is_express: hasExpressItem,
       express_fee: 0,
-      desired_ship_date: mo._desired_ship_date || null,
+      // desired_ship_date: 기존 stub 값 preserve > CSV payload > null.
+      //   backfill 재생성 시 정보입력현황에서 이미 지정된 출고일 유지.
+      desired_ship_date: preservedTopShipDate || mo._desired_ship_date || null,
       sticker_selections: stickerSelections,
       cash_receipt_yn: false,
       receipt_type: null,
       receipt_number: null,
-      customer_request: mo._customer_request || null,
+      customer_request: mo._customer_request || existing?.customer_request || null,
     });
     return force && existing ? 'recreated' : 'created';
   } catch (e) {
