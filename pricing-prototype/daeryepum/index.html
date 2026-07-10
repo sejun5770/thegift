@@ -17217,25 +17217,49 @@ async function backfillBhgStubs() {
   const force = confirm(forceMsg);
   const btn = document.getElementById('ord-btn-bhg-backfill');
   const prev = btn ? btn.textContent : '';
-  if (btn) { btn.disabled = true; btn.textContent = force ? '⏳ 강제 재생성 중…' : '⏳ 처리 중…'; }
+  // 청크 크기 — force=true 는 delete+recreate 로 처리 시간 3~5배 → 청크 더 작게.
+  //   프록시 60초 timeout 안에 완료되도록 크기 조정 (CSV 업로드 패턴과 동일).
+  const CHUNK_SIZE = force ? 15 : 30;
+  const totals = { created: 0, recreated: 0, exists: 0, failed: 0, total: 0 };
+  const failedDetails = [];
   try {
-    const r = await fetch(`${API}/api/bg/manual-orders/backfill-stubs`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ category: 'daeryepum', force }),
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    if (btn) btn.disabled = true;
+    let offset = 0, chunkIdx = 0, total = null;
+    while (true) {
+      if (btn) {
+        const pctStr = total ? ` (${offset}/${total})` : ` (청크 ${chunkIdx + 1})`;
+        btn.textContent = (force ? '⏳ 강제 재생성 중' : '⏳ 보완 중') + pctStr;
+      }
+      const r = await fetch(`${API}/api/bg/manual-orders/backfill-stubs`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category: 'daeryepum', force, offset, limit: CHUNK_SIZE }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status} (청크 ${chunkIdx + 1})`);
+      total = data.total ?? total;
+      totals.total = total || totals.total;
+      totals.created += data.created || 0;
+      totals.recreated += data.recreated || 0;
+      totals.exists += data.exists || 0;
+      totals.failed += data.failed || 0;
+      (data.details || []).filter(d => d.status === 'failed').forEach(d => failedDetails.push(d));
+      offset = data.offset_next;
+      chunkIdx++;
+      // remaining=0 이거나 offset 진행 없으면 종료 (안전장치)
+      if (!data.remaining || data.processed === 0) break;
+    }
     const parts = [
-      `신규 ${data.created || 0}`,
-      data.recreated ? `재생성 ${data.recreated}` : null,
-      `기존 ${data.exists || 0}`,
-      `실패 ${data.failed || 0}`,
+      `신규 ${totals.created}`,
+      totals.recreated ? `재생성 ${totals.recreated}` : null,
+      `기존 ${totals.exists}`,
+      totals.failed ? `실패 ${totals.failed}` : null,
     ].filter(Boolean).join(' · ');
-    showToast(`stub ${force ? '강제 재생성' : '보완'} 완료 — ${parts}`);
+    showToast(`stub ${force ? '강제 재생성' : '보완'} 완료 (${chunkIdx}청크) — 총 ${totals.total}건 · ${parts}`);
+    if (totals.failed > 0) console.warn('[backfill] 실패 상세:', failedDetails);
     if (typeof loadOrders === 'function') loadOrders();
     if (typeof loadBgUnified === 'function') loadBgUnified();
   } catch (e) {
-    alert('stub 재생성 실패: ' + e.message);
+    alert('stub 재생성 실패: ' + e.message + `\n\n지금까지 처리: 신규 ${totals.created} · 재생성 ${totals.recreated} · 기존 ${totals.exists} · 실패 ${totals.failed}`);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = prev || '🔧 stub 재생성'; }
   }

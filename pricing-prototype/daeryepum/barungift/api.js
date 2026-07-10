@@ -979,14 +979,17 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
   }
   // POST /api/bg/manual-orders/backfill-stubs — 기존 MANUAL 주문에 ci stub 일괄 생성.
-  //   body: { category?: 'daeryepum' }  (default daeryepum)
-  //   response: { total, created, exists, failed, details }
+  //   body: { category?: 'daeryepum', force?: bool, offset?: number, limit?: number }
+  //     offset/limit — 청크 처리용. 대량 (~1000건) backfill 시 프록시 60초 timeout 회피.
+  //   response: { total, processed, offset_next, remaining, created, exists, recreated, failed, details }
   if (pathname === '/api/bg/manual-orders/backfill-stubs' && method === 'POST') {
     try {
       const body = await parseBody(req).catch(() => ({}));
       const result = await store.backfillManualOrderStubs({
         category: body.category || 'daeryepum',
         force: !!body.force,
+        offset: Number(body.offset) || 0,
+        limit: body.limit != null ? Number(body.limit) : null,
       });
       return json(res, result);
     } catch (err) {

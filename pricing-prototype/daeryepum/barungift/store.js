@@ -1287,17 +1287,26 @@ async function _ensureStubForManualOrder(mo, { force = false, stickerMap = null 
  * 이미 등록된 bg_manual_orders 중 ci stub 없는 것들을 일괄 backfill.
  *   category (default 'daeryepum') 필터.
  *   force=true 이면 기존 stub 도 삭제 후 재생성 (sticker_code=null 등 옛 데이터 정리).
- *   반환: {total, created, exists, recreated, failed, details}
+ *   offset/limit — 청크 처리용. 클라이언트가 여러 번 나눠 호출해 프록시 timeout 회피.
+ *   반환: {total, processed, remaining, offset_next, created, exists, recreated, failed, details}
  */
-async function backfillManualOrderStubs({ category = 'daeryepum', force = false } = {}) {
-  const orders = await listManualOrders({ category });
+async function backfillManualOrderStubs({ category = 'daeryepum', force = false, offset = 0, limit = null } = {}) {
+  const all = await listManualOrders({ category });
+  const total = all.length;
+  const startIdx = Math.max(0, Number(offset) || 0);
+  const endIdx = limit ? Math.min(total, startIdx + Number(limit)) : total;
+  const orders = all.slice(startIdx, endIdx);
   // stickerMap 사전 로드 — 반복 호출 방지 (수백 건도 1회만 조회)
   let stickerMap = new Map();
   try {
-    const all = await getAllStickers();
-    stickerMap = new Map((all || []).map(s => [String(s.sticker_code || '').trim().toUpperCase(), { id: s.id, name: s.name }]));
+    const allSt = await getAllStickers();
+    stickerMap = new Map((allSt || []).map(s => [String(s.sticker_code || '').trim().toUpperCase(), { id: s.id, name: s.name }]));
   } catch (e) { console.warn('[backfill] stickerMap 로드 실패:', e.message); }
-  const result = { total: orders.length, created: 0, exists: 0, recreated: 0, failed: 0, details: [] };
+  const result = {
+    total, processed: orders.length,
+    offset_next: endIdx, remaining: Math.max(0, total - endIdx),
+    created: 0, exists: 0, recreated: 0, failed: 0, details: [],
+  };
   for (const mo of orders) {
     const status = await _ensureStubForManualOrder(mo, { force, stickerMap });
     if (status === 'created') { result.created++; result.details.push({ order_id: mo.order_id, status: 'created' }); }
