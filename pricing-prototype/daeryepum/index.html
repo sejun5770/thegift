@@ -1101,6 +1101,34 @@ nav.nav-loading a[href^="#"] {
         <span id="ans-status" style="margin-left:8px;font-size:12px;color:var(--gray-500)"></span>
       </div>
     </div>
+
+    <!-- 공통 안내 편집 (migration 036) — 모든 상품에 적용될 사이트 공통 안내 -->
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <div style="font-weight:700;font-size:16px">📝 고객 페이지 공통 안내</div>
+      </div>
+      <div style="font-size:13px;color:var(--gray-500);margin-bottom:14px">
+        고객 order-info 페이지 <b>STEP 1 (상품정보입력)</b> 상단 안내 박스에 표시됩니다.
+        상품마다 별도로 지정한 안내가 있으면 그것이 우선, 없으면 이 공통 값이 노출됩니다.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div>
+          <label style="display:block;font-size:12px;color:var(--gray-600);margin-bottom:4px;font-weight:600">📌 안내 타이틀</label>
+          <input type="text" id="site-guide-title" placeholder="비워두면 '커스텀 안내' 노출" maxlength="60" style="width:100%;max-width:420px;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px;font-family:inherit">
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;color:var(--gray-600);margin-bottom:4px;font-weight:600">📌 안내 본문</label>
+          <textarea id="site-guide-text" rows="12" placeholder="비워두면 기본 FAQ 노출" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:12px;resize:vertical;font-family:inherit;line-height:1.6"></textarea>
+          <p style="font-size:11px;color:var(--gray-500);margin-top:4px;line-height:1.4">개행/공백 그대로 노출. Q. 로 시작하는 줄은 강조 표시.</p>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px;align-items:center">
+        <button class="btn btn-primary" onclick="saveSiteGuideSettings()">💾 공통 안내 저장</button>
+        <button class="btn" onclick="loadSiteGuideSettings()">🔄 다시 불러오기</button>
+        <button class="btn" onclick="fillSiteGuideDefaults()" title="비어있는 필드에 기본값(제목=커스텀 안내 / 본문=기본 FAQ) 채우기">↺ 기본값 채우기</button>
+        <span id="site-guide-status" style="margin-left:8px;font-size:12px;color:var(--gray-500)"></span>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -2353,14 +2381,23 @@ nav.nav-loading a[href^="#"] {
         </label>
       </div>
 
-      <!-- 커스텀 안내 — 타이틀 + 본문 (migration 034/035) -->
-      <div style="background:#fef9c3;padding:10px;border-radius:8px;border:1px dashed #facc15">
-        <label style="display:block;font-size:11px;color:#854d0e;margin-bottom:4px;font-weight:600" title="고객 order-info STEP 1 상단 안내 박스의 제목. 비워두면 '스티커 안내' 노출.">📝 고객 안내 타이틀 (STEP 1)</label>
-        <input type="text" id="bg-p-meta-custom-guide-title" placeholder="예: 미니카드 안내 (비워두면 '스티커 안내')" maxlength="60" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:12px;margin-bottom:8px;font-family:inherit">
-        <label style="display:block;font-size:11px;color:#854d0e;margin-bottom:4px;font-weight:600" title="STEP 1 안내 박스 본문. 처음 열면 기본 FAQ 텍스트가 들어있으니 원하는 대로 수정 후 저장.">📝 고객 안내 본문</label>
-        <textarea id="bg-p-meta-custom-guide" rows="10" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:12px;resize:vertical;font-family:inherit;line-height:1.5"></textarea>
-        <p style="font-size:10px;color:#854d0e;margin-top:4px;line-height:1.4">개행 · 공백 그대로 노출. Q. 로 시작하는 줄은 강조 표시됩니다. 비워두면 기본 FAQ 로 폴백.</p>
-      </div>
+      <!-- 상품별 안내 override (migration 034/035) — 이 상품만 다른 안내를 노출하고 싶을 때만 사용 -->
+      <details style="background:#fef9c3;padding:10px;border-radius:8px;border:1px dashed #facc15">
+        <summary style="cursor:pointer;font-size:11px;color:#854d0e;font-weight:600;list-style:none;display:flex;align-items:center;gap:6px">
+          <span>📝 이 상품만 다른 안내 사용 (선택)</span>
+          <span style="font-weight:400;color:#a16207">▸ 접힘 시 GNB 설정 → 공통 안내 사용</span>
+        </summary>
+        <div style="margin-top:10px">
+          <p style="font-size:11px;color:#854d0e;margin-bottom:8px;line-height:1.4">
+            <b>공통 안내는 GNB 설정 페이지에서 관리합니다.</b> 이 상품에만 별도 안내가 필요한 경우에만 아래를 채우세요.
+          </p>
+          <label style="display:block;font-size:11px;color:#854d0e;margin-bottom:4px;font-weight:600">📌 안내 타이틀 (override)</label>
+          <input type="text" id="bg-p-meta-custom-guide-title" placeholder="예: 미니카드 안내 (비워두면 공통 사용)" maxlength="60" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:12px;margin-bottom:8px;font-family:inherit">
+          <label style="display:block;font-size:11px;color:#854d0e;margin-bottom:4px;font-weight:600">📌 안내 본문 (override)</label>
+          <textarea id="bg-p-meta-custom-guide" rows="8" placeholder="비워두면 공통 안내(GNB 설정) 사용" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:12px;resize:vertical;font-family:inherit;line-height:1.5"></textarea>
+          <p style="font-size:10px;color:#854d0e;margin-top:4px;line-height:1.4">개행 · 공백 그대로 노출. Q. 로 시작하는 줄은 강조 표시.</p>
+        </div>
+      </details>
 
       <script>
         // 관리자 편집 편의 — 기본 FAQ 텍스트. openBgProductForm 에서 custom_guide_text 없으면 이 값으로 채움.
@@ -5505,10 +5542,80 @@ async function loadAdminNavSettings() {
     _navEditDraft = _buildEditDraft(_navConfigCache);
     _renderNavEditList();
     document.getElementById('ans-status').textContent = '';
+    // 공통 안내 로드 (migration 036) — 실패해도 admin nav 페이지 로드는 계속.
+    loadSiteGuideSettings().catch(e => console.warn('site-guide 로드 실패:', e.message));
   } catch (e) {
     tag.textContent = '조회 실패';
     document.getElementById('ans-status').textContent = '에러: ' + e.message;
   }
+}
+
+/**
+ * 사이트 공통 안내 (bg_site_settings) 로드 — migration 036.
+ *   GET /api/bg/site-settings → 두 textarea 채움.
+ */
+async function loadSiteGuideSettings() {
+  const status = document.getElementById('site-guide-status');
+  try {
+    const r = await fetch(`${API}/api/bg/site-settings`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const s = await r.json();
+    document.getElementById('site-guide-title').value = s?.custom_guide_title || '';
+    document.getElementById('site-guide-text').value = s?.custom_guide_text || '';
+    if (status) {
+      const stamp = s?.updated_at ? new Date(s.updated_at).toLocaleString('ko-KR') : '';
+      const who = s?.updated_by ? ` (${s.updated_by})` : '';
+      status.textContent = stamp ? `마지막 저장 ${stamp}${who}` : '';
+      status.style.color = 'var(--gray-500)';
+    }
+  } catch (e) {
+    if (status) { status.textContent = '로드 실패: ' + e.message; status.style.color = '#dc2626'; }
+    throw e;
+  }
+}
+
+/**
+ * 공통 안내 저장 — PUT /api/bg/site-settings. super admin 만.
+ *   비어있는 필드는 NULL 로 저장 → order-info 는 기본 폴백 사용.
+ */
+async function saveSiteGuideSettings() {
+  const status = document.getElementById('site-guide-status');
+  const title = (document.getElementById('site-guide-title')?.value || '').trim().slice(0, 60);
+  const text = (document.getElementById('site-guide-text')?.value || '').trim().slice(0, 3000);
+  try {
+    const r = await fetch(`${API}/api/bg/site-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ custom_guide_title: title || null, custom_guide_text: text || null }),
+    });
+    if (!r.ok) {
+      const errJ = await r.json().catch(() => ({}));
+      throw new Error(errJ.error || `HTTP ${r.status}`);
+    }
+    const saved = await r.json();
+    if (status) {
+      status.textContent = '✅ 저장 완료 — 즉시 반영 (고객 페이지 다음 요청부터)';
+      status.style.color = '#16a34a';
+    }
+    // reload 하여 updated_at/updated_by 반영
+    setTimeout(() => loadSiteGuideSettings().catch(() => {}), 1200);
+  } catch (e) {
+    if (status) { status.textContent = '저장 실패: ' + e.message; status.style.color = '#dc2626'; }
+    alert('공통 안내 저장 실패: ' + e.message);
+  }
+}
+
+/**
+ * 기본값 채우기 — 비어있는 필드에만 채움 (덮어쓰지 않음).
+ *   상품설정 모달과 동일한 window._BG_DEFAULT_GUIDE_TEXT / TITLE 사용.
+ */
+function fillSiteGuideDefaults() {
+  const titleEl = document.getElementById('site-guide-title');
+  const textEl = document.getElementById('site-guide-text');
+  if (titleEl && !titleEl.value.trim()) titleEl.value = window._BG_DEFAULT_GUIDE_TITLE || '커스텀 안내';
+  if (textEl && !textEl.value.trim()) textEl.value = window._BG_DEFAULT_GUIDE_TEXT || '';
+  const status = document.getElementById('site-guide-status');
+  if (status) { status.textContent = '기본값 채움 — 저장 버튼을 눌러 반영하세요.'; status.style.color = 'var(--gray-500)'; }
 }
 
 function _buildEditDraft(config) {
@@ -10047,13 +10154,13 @@ async function openBgProductForm(productId) {
     if (canonKeyInput) canonKeyInput.value = s?.canonical_group_key || '';
     const canonNameInput = document.getElementById('bg-p-meta-canon-name');
     if (canonNameInput) canonNameInput.value = s?.canonical_display_name || '';
-    // 커스텀 안내 (migration 034/035) — 고객 order-info STEP 1 상단 안내.
-    //   신규 진입 편의: 저장된 값 없으면 기본 FAQ 텍스트를 그대로 채움 → 관리자가 원하는 부분만
-    //   수정 후 저장. (이렇게 저장된 값은 이후 그 상품 전용 안내가 됨.)
+    // 상품별 안내 override (migration 034/035) — 이 상품만 다른 안내를 노출하고 싶을 때만.
+    //   공통 안내는 GNB 설정 → 사이트 공통 안내 (migration 036) 에서 관리.
+    //   저장값 없으면 빈 상태 유지 → 저장 시 NULL → order-info 는 공통 안내 사용.
     const guideInput = document.getElementById('bg-p-meta-custom-guide');
-    if (guideInput) guideInput.value = s?.custom_guide_text || (window._BG_DEFAULT_GUIDE_TEXT || '');
+    if (guideInput) guideInput.value = s?.custom_guide_text || '';
     const guideTitleInput = document.getElementById('bg-p-meta-custom-guide-title');
-    if (guideTitleInput) guideTitleInput.value = s?.custom_guide_title || (window._BG_DEFAULT_GUIDE_TITLE || '');
+    if (guideTitleInput) guideTitleInput.value = s?.custom_guide_title || '';
     // datalist 에 기존 그룹 키 옵션 주입 (같은 카테고리 다른 상품과 통일하기 쉽게)
     try {
       const groups = Array.from(new Set((bgProductSettings || [])

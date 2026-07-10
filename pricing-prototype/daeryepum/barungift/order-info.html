@@ -1610,15 +1610,17 @@
   }
 
   /**
-   * 주문 단위 대표 커스텀 안내 — 상품마다 다르면 상품별 헤더로 병합 (multi).
+   * 주문 단위 대표 커스텀 안내 — 상품별 (migration 034/035) 우선, 없으면 사이트 공통 (migration 036) 폴백.
    *   반환:
-   *     · null                              모든 상품 안내 없음 → 기본 FAQ 로 fallback
-   *     · { mode:'single', title, text }    상품이 하나 or 여러 상품 안내가 완전 동일
-   *     · { mode:'multi', title, sections } 상품마다 안내가 다름 (전체 대표 타이틀 하나 + 섹션별 상품명 헤더)
-   *   title 우선순위: 상품 title (같으면 그것), 다르면 첫 상품 title, 없으면 '커스텀 안내' 기본.
+   *     · null                              어디에도 안내 없음 → 기본 FAQ 로 fallback
+   *     · { mode:'single', title, text }    단일 텍스트 (site 폴백 / 상품 1개 / 여러 상품 동일)
+   *     · { mode:'multi', title, sections } 상품마다 안내가 다름
+   *     · { mode:'fallback', title }        텍스트 없이 title 만 지정
+   *   title 우선순위: 상품 title 통일 > 첫 상품 title > 사이트 title > '커스텀 안내' 기본.
    */
   function getOrderCustomGuide() {
     const products = orderData?.products || [];
+    const site = orderData?.site_guide || { title: null, text: null };
     const pairs = products.map(p => {
       const name = p.product_name || p.product_code || '상품';
       return {
@@ -1628,26 +1630,36 @@
       };
     });
     const withText = pairs.filter(r => r.text);
-    // title 결정 — 모든 title 이 같으면 그것, 다르면 첫 title, 전부 null 이면 '커스텀 안내'
+    // title 결정 — 상품 title 통일 > 첫 상품 title > 사이트 title > '커스텀 안내'
     const titles = pairs.map(r => r.title).filter(Boolean);
     const uniqTitles = [...new Set(titles)];
-    const resolvedTitle = uniqTitles.length === 1 ? uniqTitles[0] : (titles[0] || '커스텀 안내');
-    if (!withText.length) {
-      // 텍스트는 없지만 title 은 있을 수 있음 (예: 기본 FAQ 폴백 시 title 만 커스텀)
-      return uniqTitles.length ? { mode: 'fallback', title: resolvedTitle } : null;
-    }
+    const resolvedTitle = (uniqTitles.length === 1 ? uniqTitles[0] : titles[0])
+      || site.title || '커스텀 안내';
+
+    // 상품별 텍스트 있으면 그것 사용 (기존 정책 유지)
     if (withText.length === 1) {
       return { mode: 'single', title: withText[0].title || resolvedTitle, text: withText[0].text };
     }
-    const uniqTexts = [...new Set(withText.map(r => r.text))];
-    if (uniqTexts.length === 1) {
-      return { mode: 'single', title: resolvedTitle, text: uniqTexts[0] };
+    if (withText.length > 1) {
+      const uniqTexts = [...new Set(withText.map(r => r.text))];
+      if (uniqTexts.length === 1) {
+        return { mode: 'single', title: resolvedTitle, text: uniqTexts[0] };
+      }
+      return {
+        mode: 'multi',
+        title: resolvedTitle,
+        sections: withText.map(r => ({ name: r.name, text: r.text })),
+      };
     }
-    return {
-      mode: 'multi',
-      title: resolvedTitle,
-      sections: withText.map(r => ({ name: r.name, text: r.text })),
-    };
+    // 상품별 없음 → 사이트 공통 사용 (신규 정책)
+    if (site.text) {
+      return { mode: 'single', title: resolvedTitle, text: site.text };
+    }
+    // 텍스트 없음, title 만 있을 수 있음
+    if (uniqTitles.length || site.title) {
+      return { mode: 'fallback', title: resolvedTitle };
+    }
+    return null;
   }
 
   /**

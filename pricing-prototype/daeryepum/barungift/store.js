@@ -1470,6 +1470,39 @@ async function deleteManualOrder(orderId) {
   return { ok: true };
 }
 
+// ============================================
+// bg_site_settings — 사이트 공통 설정 (id=1 singleton). Migration 036.
+// ============================================
+async function getSiteSettings() {
+  if (!USE_SUPABASE) {
+    // 로컬 파일 폴백 — 개발 편의성만, 프로덕션은 Supabase 사용.
+    return { id: 1, custom_guide_title: null, custom_guide_text: null };
+  }
+  try {
+    const rows = await sbGet('bg_site_settings', 'id=eq.1&limit=1');
+    if (rows.length) return rows[0];
+    // migration 036 INSERT 가 누락된 경우 — 즉시 삽입 시도
+    await sbInsert('bg_site_settings', { id: 1 });
+    return { id: 1, custom_guide_title: null, custom_guide_text: null };
+  } catch (e) {
+    console.warn('[getSiteSettings] 실패 (기본값 반환):', e.message);
+    return { id: 1, custom_guide_title: null, custom_guide_text: null };
+  }
+}
+
+async function updateSiteSettings(patch, updatedBy = null) {
+  if (!USE_SUPABASE) throw new Error('Supabase 미설정 — 사이트 설정 저장 불가');
+  const allowed = ['custom_guide_title', 'custom_guide_text'];
+  const clean = {};
+  for (const k of allowed) if (k in patch) clean[k] = patch[k] == null ? null : String(patch[k]);
+  clean.updated_at = new Date().toISOString();
+  if (updatedBy) clean.updated_by = updatedBy;
+  const updated = await sbUpdate('bg_site_settings', 'id=eq.1', clean);
+  if (updated) return updated;
+  // row 없으면 INSERT
+  return sbInsert('bg_site_settings', { id: 1, ...clean });
+}
+
 module.exports = {
   getAllStickers,
   getStickerById,
@@ -1520,4 +1553,7 @@ module.exports = {
   backfillManualOrderStubs,
   updateManualOrder,
   deleteManualOrder,
+  // 사이트 공통 설정 (migration 036)
+  getSiteSettings,
+  updateSiteSettings,
 };

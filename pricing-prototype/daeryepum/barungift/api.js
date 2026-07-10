@@ -71,7 +71,7 @@ function json(res, data, status = 200) {
  * 바른기프트 API 핸들러 (barunson DB pool도 받음)
  * @returns {boolean} 처리 여부 (true면 다른 라우터로 넘기지 않음)
  */
-async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, session }) {
+async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, session, isSuperAdmin }) {
   const method = req.method;
 
   // ============================================
@@ -493,6 +493,17 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         allow_logo_upload_by_product: allowLogoUploadByProduct, // { product_code: bool } — migration 026
         custom_guide_by_product: customGuideByProduct,          // { product_code: string|null } — migration 034
         custom_guide_title_by_product: customGuideTitleByProduct, // { product_code: string|null } — migration 035
+        // 사이트 공통 안내 (migration 036) — 상품별 커스텀 없을 때 폴백.
+        //   실패해도 order-info 는 기본 FAQ 로 fallback → try/catch 안전.
+        site_guide: await (async () => {
+          try {
+            const s = await store.getSiteSettings();
+            return {
+              title: s?.custom_guide_title || null,
+              text: s?.custom_guide_text || null,
+            };
+          } catch (e) { return { title: null, text: null }; }
+        })(),
         existing_info: existingInfo,
         deliveries,  // 배송지별 답례품 수량 (나눔배송 안내용, 입력엔 영향 없음)
         virtual_account: virtualAccount,  // 주문 결제용 가상계좌 (결제대기 상태일 때만)
@@ -988,6 +999,35 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       return json(res, { error: err.message }, 400);
     }
   }
+  // ============================================
+  // 사이트 공통 설정 (migration 036)
+  // ============================================
+  // GET /api/bg/site-settings — 공통 안내 등 조회. 인증 필요 없음? 상품설정 관리자만.
+  //   /api/bg/* 는 이미 세션 인증 gate 통과 후라 별도 권한 체크 X (super admin 은 UI 에서 제어).
+  if (pathname === '/api/bg/site-settings' && method === 'GET') {
+    try {
+      const s = await store.getSiteSettings();
+      return json(res, s);
+    } catch (err) {
+      console.error('[site-settings GET] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+  // PUT /api/bg/site-settings — 공통 안내 저장 (super admin 만).
+  if (pathname === '/api/bg/site-settings' && method === 'PUT') {
+    try {
+      if (!isSuperAdmin(session)) {
+        return json(res, { error: '권한이 없습니다 (super admin 전용)' }, 403);
+      }
+      const body = await parseBody(req).catch(() => ({}));
+      const updated = await store.updateSiteSettings(body, session?.email);
+      return json(res, updated);
+    } catch (err) {
+      console.error('[site-settings PUT] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
   // POST /api/bg/manual-orders/backfill-stubs — 기존 MANUAL 주문에 ci stub 일괄 생성.
   //   body: { category?: 'daeryepum', force?: bool, offset?: number, limit?: number }
   //     offset/limit — 청크 처리용. 대량 (~1000건) backfill 시 프록시 60초 timeout 회피.

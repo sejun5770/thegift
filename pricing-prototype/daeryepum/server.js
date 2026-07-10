@@ -6503,7 +6503,7 @@ const server = http.createServer(async (req, res) => {
   }
   // API 라우트
   if (pathname.startsWith('/api/bg/')) {
-    const handled = await handleBarungiftApi(pathname, req, res, parsed.query, { getPool, sql, session });
+    const handled = await handleBarungiftApi(pathname, req, res, parsed.query, { getPool, sql, session, isSuperAdmin });
     if (handled !== false) return;
   }
 
