@@ -1230,7 +1230,13 @@ async function _ensureStubForManualOrder(mo, { force = false, stickerMap = null 
   // 상품명 prefix "오늘출발" 감지 — 하나라도 있으면 주문 전체를 빠른출고로 분류.
   //   (CSV 업로드 시 items[i].product_name 에 "[오늘출발] ..." / "오늘출발 ..." 등으로 붙어있음.)
   //   대시보드 (apiDashboardByShipDate) 는 ci.is_express 를 그대로 express 버킷 판정에 사용.
-  const isExpressItem = it => String(it?.product_name || '').includes('오늘출발');
+  //   단, "[오늘출발무료]" 프리픽스는 배송비 무료 이벤트 표기일 뿐 실제 빠른출고 아님 → 제외.
+  const isExpressItem = it => {
+    const name = String(it?.product_name || '');
+    if (!name.includes('오늘출발')) return false;
+    if (name.includes('오늘출발무료')) return false;   // 배송비 무료 이벤트 표기 → 일반주문 처리
+    return true;
+  };
   const hasExpressItem = items.some(isExpressItem);
   const stickerSelections = items.map(it => {
     // 스티커 코드 — items[i].stickers[0].code 우선. 없으면 빈 문자열.
