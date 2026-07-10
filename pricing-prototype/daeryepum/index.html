@@ -2353,6 +2353,19 @@ nav.nav-loading a[href^="#"] {
         </label>
       </div>
 
+      <!-- 커스텀 안내 텍스트 — 고객 order-info STEP 1 안내 박스 (migration 034) -->
+      <div style="background:#fef9c3;padding:10px;border-radius:8px;border:1px dashed #facc15">
+        <label style="display:block;font-size:11px;color:#854d0e;margin-bottom:4px;font-weight:600" title="고객 order-info 페이지 STEP 1 (미니카드/스티커 선택) 상단 안내 박스에 표시됩니다. 비워두면 기본 FAQ (Q&A 4개) 가 노출됩니다.">📝 고객 안내 텍스트 (STEP 1 상단)</label>
+        <textarea id="bg-p-meta-custom-guide" rows="6" placeholder="비워두면 기본 FAQ 노출. 개행 유지 · 상품별 커스텀 안내 문구 자유 입력.
+
+예)
+Q. 미니카드는 부착되나요?
+A. 맞아요, 주문 수량만큼 미니카드를 부착해 보내드립니다.
+
+Q. 원하는 문구가 있으신가요?
+A. 아래 '문구 입력' 에 자유롭게 남겨주세요." style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:12px;resize:vertical;font-family:inherit;line-height:1.5"></textarea>
+      </div>
+
       <!-- 대시보드 canonical 그룹 — 상품별 매출 통합 집계 (migration 033) -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;background:#eff6ff;padding:10px;border-radius:8px;border:1px dashed #93c5fd">
         <div>
@@ -10019,6 +10032,9 @@ async function openBgProductForm(productId) {
     if (canonKeyInput) canonKeyInput.value = s?.canonical_group_key || '';
     const canonNameInput = document.getElementById('bg-p-meta-canon-name');
     if (canonNameInput) canonNameInput.value = s?.canonical_display_name || '';
+    // 커스텀 안내 텍스트 (migration 034) — 고객 order-info STEP 1 상단 안내
+    const guideInput = document.getElementById('bg-p-meta-custom-guide');
+    if (guideInput) guideInput.value = s?.custom_guide_text || '';
     // datalist 에 기존 그룹 키 옵션 주입 (같은 카테고리 다른 상품과 통일하기 쉽게)
     try {
       const groups = Array.from(new Set((bgProductSettings || [])
@@ -10578,6 +10594,10 @@ async function saveBgProduct() {
   const canonKey = (document.getElementById('bg-p-meta-canon-key')?.value || '').trim().slice(0, 100) || null;
   const canonDisplayName = (document.getElementById('bg-p-meta-canon-name')?.value || '').trim().slice(0, 200) || null;
 
+  // 커스텀 안내 텍스트 (migration 034) — 고객 order-info STEP 1 상단. 빈 값이면 NULL → 기본 FAQ.
+  //   길이 상한 3000자 (Q&A 여러 개 포함해도 여유).
+  const customGuide = (document.getElementById('bg-p-meta-custom-guide')?.value || '').trim().slice(0, 3000) || null;
+
   const body = {
     brand: brand || null,
     product_name: productName || null,
@@ -10591,6 +10611,7 @@ async function saveBgProduct() {
     allow_logo_upload: allowLogoUpload,
     canonical_group_key: canonKey,
     canonical_display_name: canonDisplayName,
+    custom_guide_text: customGuide,
   };
 
   try {
