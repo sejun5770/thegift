@@ -3762,6 +3762,202 @@ async function apiDashboardByShipDate(query) {
 }
 
 /**
+ * 리드타임 분석 (진단 endpoint) — min_select_days=2 조정 효과 측정용.
+ *
+ * 응답:
+ *   period: { start, end }
+ *   summary: { total_orders_in_period, express_orders, express_pct, avg_gap_days }
+ *   express_daily: [{ order_day, orders, amount, qty }]         — order_date 별 오늘출발 시계열
+ *   gap_analysis: {
+ *     distribution: { 0:n, 1:n, 2:n, 3:n, 4:n, '5+':n },
+ *     total: N, orders_gap_le_4: N, pct_gap_le_4: %,
+ *     samples: [{order_id, order_date, ship_date, gap, is_express, is_manual}]  최대 30개
+ *   }
+ *   ship_date_counts: [{ ship_date, orders, express_orders, regular_orders, sites: {...} }]
+ *
+ * 기간 필터: order_date 기준 (조정 이후 등록된 주문의 트렌드).
+ */
+async function apiLeadtimeAnalysis(query) {
+  const p = await getPool();
+  const startDate = query.start_date || fmtDate(addDays(today(), -28));
+  const endDate = query.end_date || fmtDate(addDays(today(), 1));
+  const empty = {
+    period: { start: startDate, end: endDate },
+    summary: { total_orders_in_period: 0, express_orders: 0, express_pct: 0, avg_gap_days: null },
+    express_daily: [],
+    gap_analysis: { distribution: {}, total: 0, orders_gap_le_4: 0, pct_gap_le_4: 0, samples: [] },
+    ship_date_counts: [],
+  };
+
+  // 1) 정보입력 완료된 ci 전체 조회 (기간 무관, order_date 로 나중에 필터)
+  let cInfos = [];
+  try {
+    const _bgStore = require('./barungift/store');
+    cInfos = await _bgStore.getCustomerInfosWithShipDate();
+  } catch (e) {
+    console.warn('[leadtime-analysis] customer-infos fetch 실패:', e.message);
+    return { ...empty, error: 'customer_info: ' + e.message };
+  }
+  if (!cInfos.length) return empty;
+
+  // 2) ci → order_id 분리 (CARD/ETC/MANUAL)
+  const ciByCardSeq = new Map();
+  const ciByEtcSeq = new Map();
+  const ciByManualId = new Map();
+  cInfos.forEach(ci => {
+    const oid = String(ci.order_id || '');
+    if (oid.startsWith('ETC-')) {
+      const seq = parseInt(oid.slice(4));
+      if (seq) ciByEtcSeq.set(seq, ci);
+    } else if (oid.startsWith('MO-')) {
+      ciByManualId.set(oid.slice(3), ci);
+    } else {
+      const seq = parseInt(oid);
+      if (seq) ciByCardSeq.set(seq, ci);
+    }
+  });
+
+  // 3) MSSQL 에서 order_date + site 조회 (기간 무관 전체 IN 절)
+  const queries = [];
+  if (ciByCardSeq.size) {
+    const inList = [...ciByCardSeq.keys()].join(',');
+    queries.push(p.request().query(`
+      SELECT DISTINCT co.order_seq,
+        CONVERT(varchar(10), co.order_date, 120) AS order_day,
+        ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name
+      FROM custom_order co WITH (NOLOCK)
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+      WHERE co.order_seq IN (${inList})
+        AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5, 9)
+    `).then(r => r.recordset.map(row => ({ ...row, _src: 'CARD' }))));
+  }
+  if (ciByEtcSeq.size) {
+    const inList = [...ciByEtcSeq.keys()].join(',');
+    queries.push(p.request().query(`
+      SELECT DISTINCT o.order_seq,
+        CONVERT(varchar(10), o.order_date, 120) AS order_day,
+        ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+      WHERE o.order_seq IN (${inList})
+        AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5, 15)
+    `).then(r => r.recordset.map(row => ({ ...row, _src: 'ETC' }))));
+  }
+  let mssqlRows = [];
+  try { mssqlRows = (await Promise.all(queries)).flat(); }
+  catch (e) { console.warn('[leadtime-analysis] MSSQL 실패:', e.message); }
+
+  // 4) MANUAL — bg_manual_orders 개별 조회 (status_seq 유효한 것만)
+  const manualRows = [];
+  if (ciByManualId.size) {
+    try {
+      const bgStore = require('./barungift/store');
+      for (const [moId, _ci] of ciByManualId) {
+        try {
+          const mo = await bgStore.getManualOrder(moId);
+          if (!mo) continue;
+          const st = Number(mo.status_seq) || 0;
+          if (st < 1 || [3, 5, 15].includes(st)) continue;
+          manualRows.push({
+            order_seq: moId, _src: 'MANUAL',
+            order_day: String(mo.order_date || '').slice(0, 10),
+            site_name: mo.site_name || '바른손더기프트',
+          });
+        } catch (e) { /* skip */ }
+      }
+    } catch (e) { console.warn('[leadtime-analysis] MANUAL 실패:', e.message); }
+  }
+  const allRows = [...mssqlRows, ...manualRows];
+
+  // 5) 기간 필터 (order_date 기준) + ci lookup
+  //    endDate exclusive.
+  const inPeriod = allRows.filter(r => r.order_day && r.order_day >= startDate && r.order_day < endDate);
+  const enriched = inPeriod.map(r => {
+    const ci = r._src === 'ETC' ? ciByEtcSeq.get(r.order_seq)
+             : r._src === 'MANUAL' ? ciByManualId.get(r.order_seq)
+             : ciByCardSeq.get(r.order_seq);
+    if (!ci) return null;
+    const shipDate = String(ci.desired_ship_date || '').slice(0, 10);
+    if (!shipDate) return null;
+    // gap = ship_date - order_date (일 단위)
+    const gapMs = new Date(shipDate + 'T00:00:00Z').getTime() - new Date(r.order_day + 'T00:00:00Z').getTime();
+    const gap = Math.round(gapMs / 86400000);
+    // affiliate 통합
+    const rawSite = formatSiteName(r.site_name || '기타');
+    const isAffiliate = /\(\d{4}\)$/.test(rawSite) || /^\d{4}$/.test(rawSite);
+    const site = isAffiliate ? '바른손몰' : rawSite;
+    return {
+      order_id: r.order_seq, order_day: r.order_day, ship_date: shipDate,
+      gap, is_express: !!ci.is_express, is_manual: r._src === 'MANUAL', site,
+    };
+  }).filter(Boolean);
+
+  // 6) 지표 계산
+  // 6a) express_daily
+  const expressDailyMap = new Map();
+  enriched.forEach(r => {
+    if (!r.is_express) return;
+    if (!expressDailyMap.has(r.order_day)) expressDailyMap.set(r.order_day, { order_day: r.order_day, orders: 0 });
+    expressDailyMap.get(r.order_day).orders += 1;
+  });
+  const express_daily = [...expressDailyMap.values()].sort((a, b) => a.order_day.localeCompare(b.order_day));
+
+  // 6b) gap distribution + samples
+  const gapDist = {};
+  const samples = [];
+  let ordersGapLe4 = 0;
+  enriched.forEach(r => {
+    const key = r.gap < 0 ? String(r.gap) : (r.gap >= 5 ? '5+' : String(r.gap));
+    gapDist[key] = (gapDist[key] || 0) + 1;
+    if (r.gap >= 0 && r.gap <= 4) {
+      ordersGapLe4 += 1;
+      if (samples.length < 30) samples.push({
+        order_id: r.order_id, order_date: r.order_day, ship_date: r.ship_date,
+        gap: r.gap, is_express: r.is_express, is_manual: r.is_manual, site: r.site,
+      });
+    }
+  });
+  const total = enriched.length;
+  const pctGapLe4 = total > 0 ? Math.round(ordersGapLe4 / total * 1000) / 10 : 0;
+  const avgGap = total > 0 ? Math.round(enriched.reduce((s, r) => s + r.gap, 0) / total * 10) / 10 : null;
+
+  // 6c) ship_date_counts (사이트별 breakdown 포함)
+  const shipCountMap = new Map();
+  enriched.forEach(r => {
+    if (!shipCountMap.has(r.ship_date)) {
+      shipCountMap.set(r.ship_date, { ship_date: r.ship_date, orders: 0, express_orders: 0, regular_orders: 0, sites: {} });
+    }
+    const b = shipCountMap.get(r.ship_date);
+    b.orders += 1;
+    if (r.is_express) b.express_orders += 1; else b.regular_orders += 1;
+    b.sites[r.site] = (b.sites[r.site] || 0) + 1;
+  });
+  const ship_date_counts = [...shipCountMap.values()].sort((a, b) => a.ship_date.localeCompare(b.ship_date));
+
+  const express_orders = enriched.filter(r => r.is_express).length;
+  const expressPct = total > 0 ? Math.round(express_orders / total * 1000) / 10 : 0;
+
+  return {
+    period: { start: startDate, end: endDate },
+    summary: {
+      total_orders_in_period: total,
+      express_orders,
+      express_pct: expressPct,
+      avg_gap_days: avgGap,
+    },
+    express_daily,
+    gap_analysis: {
+      distribution: gapDist,
+      total,
+      orders_gap_le_4: ordersGapLe4,
+      pct_gap_le_4: pctGapLe4,
+      samples,
+    },
+    ship_date_counts,
+  };
+}
+
+/**
  * 빠른출고 추가 분석 — 채택율(전환율) + 시간대/요일 분포 + 누적 추가비용.
  *
  * 데이터원: Supabase bg_order_customer_info (정보입력 완료 데이터)
@@ -7683,6 +7879,8 @@ const server = http.createServer(async (req, res) => {
         data = await apiExpressAnalysis(parsed.query);
       } else if (pathname === '/api/dashboard/by-ship-date') {
         data = await apiDashboardByShipDate(parsed.query);
+      } else if (pathname === '/api/dashboard/leadtime-analysis') {
+        data = await apiLeadtimeAnalysis(parsed.query);
       } else if (pathname === '/api/dashboard/forecast') {
         data = await apiForecast(parsed.query);
       } else if (pathname === '/api/dashboard/leadtime') {
