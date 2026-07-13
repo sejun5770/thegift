@@ -3817,30 +3817,48 @@ async function apiLeadtimeAnalysis(query) {
     }
   });
 
-  // 3) MSSQL 에서 order_date + site 조회 (기간 무관 전체 IN 절)
+  // 3) MSSQL 에서 order_date + site + 매출 조회 (기간 무관 전체 IN 절).
+  //    답례품 카테고리 필터 (D01_FILTER) 적용 — 청첩장 등 다른 카테고리 매출 제외.
+  const D01_FILTER = CATEGORY_FILTERS.daeryepum.filter;
+  const ETC_AMOUNT_EXPR = etcAmountExpr({});
+  const _cpdFilter = CATEGORY_FILTERS.daeryepum.filter.replace(/\bc\./g, 'c_cpd.');
+  const ETC_COUPON_DIVISOR_JOIN_D01 = etcCouponDivisorJoin(_cpdFilter);
   const queries = [];
   if (ciByCardSeq.size) {
     const inList = [...ciByCardSeq.keys()].join(',');
     queries.push(p.request().query(`
-      SELECT DISTINCT co.order_seq,
+      SELECT co.order_seq,
         CONVERT(varchar(10), co.order_date, 120) AS order_day,
-        ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name
+        ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
+        ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)), 0) AS amount,
+        ISNULL(SUM(coi.item_count), 0) AS qty
       FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
-      WHERE co.order_seq IN (${inList})
+      WHERE ${D01_FILTER} AND co.order_seq IN (${inList})
         AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5, 9)
+      GROUP BY co.order_seq, CONVERT(varchar(10), co.order_date, 120),
+        ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR))
     `).then(r => r.recordset.map(row => ({ ...row, _src: 'CARD' }))));
   }
   if (ciByEtcSeq.size) {
     const inList = [...ciByEtcSeq.keys()].join(',');
     queries.push(p.request().query(`
-      SELECT DISTINCT o.order_seq,
+      SELECT o.order_seq,
         CONVERT(varchar(10), o.order_date, 120) AS order_day,
-        ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name
+        ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
+        ISNULL(SUM(${ETC_AMOUNT_EXPR}), 0) AS amount,
+        ISNULL(SUM(oi.order_count), 0) AS qty
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
-      WHERE o.order_seq IN (${inList})
+      ${ETC_COUPON_DIVISOR_JOIN_D01}
+      WHERE ${D01_FILTER} AND o.order_seq IN (${inList})
         AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5, 15)
+      GROUP BY o.order_seq, CONVERT(varchar(10), o.order_date, 120),
+        ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
     `).then(r => r.recordset.map(row => ({ ...row, _src: 'ETC' }))));
   }
   let mssqlRows = [];
@@ -3858,10 +3876,18 @@ async function apiLeadtimeAnalysis(query) {
           if (!mo) continue;
           const st = Number(mo.status_seq) || 0;
           if (st < 1 || [3, 5, 15].includes(st)) continue;
+          const items = Array.isArray(mo.items) ? mo.items : [];
+          let amount = 0, qty = 0;
+          for (const it of items) {
+            const q = Number(it.quantity) || 0;
+            const a = Number(it.item_amount) || (Number(it.unit_price) || 0) * q;
+            amount += a; qty += q;
+          }
           manualRows.push({
             order_seq: moId, _src: 'MANUAL',
             order_day: String(mo.order_date || '').slice(0, 10),
             site_name: mo.site_name || '바른손더기프트',
+            amount, qty,
           });
         } catch (e) { /* skip */ }
       }
@@ -3889,6 +3915,8 @@ async function apiLeadtimeAnalysis(query) {
     return {
       order_id: r.order_seq, order_day: r.order_day, ship_date: shipDate,
       gap, is_express: !!ci.is_express, is_manual: r._src === 'MANUAL', site,
+      amount: Math.round(Number(r.amount) || 0),
+      qty: Number(r.qty) || 0,
     };
   }).filter(Boolean);
 
@@ -3897,40 +3925,55 @@ async function apiLeadtimeAnalysis(query) {
   const expressDailyMap = new Map();
   enriched.forEach(r => {
     if (!r.is_express) return;
-    if (!expressDailyMap.has(r.order_day)) expressDailyMap.set(r.order_day, { order_day: r.order_day, orders: 0 });
-    expressDailyMap.get(r.order_day).orders += 1;
+    if (!expressDailyMap.has(r.order_day)) expressDailyMap.set(r.order_day, { order_day: r.order_day, orders: 0, amount: 0 });
+    const b = expressDailyMap.get(r.order_day);
+    b.orders += 1; b.amount += r.amount;
   });
   const express_daily = [...expressDailyMap.values()].sort((a, b) => a.order_day.localeCompare(b.order_day));
 
-  // 6b) gap distribution + samples
-  const gapDist = {};
+  // 6b) gap distribution + samples — orders/amount 병기
+  const gapDist = {}; // { [gap]: { orders, amount } }
   const samples = [];
-  let ordersGapLe4 = 0;
+  let ordersGapLe4 = 0, amountGapLe4 = 0;
   enriched.forEach(r => {
     const key = r.gap < 0 ? String(r.gap) : (r.gap >= 5 ? '5+' : String(r.gap));
-    gapDist[key] = (gapDist[key] || 0) + 1;
+    if (!gapDist[key]) gapDist[key] = { orders: 0, amount: 0 };
+    gapDist[key].orders += 1;
+    gapDist[key].amount += r.amount;
     if (r.gap >= 0 && r.gap <= 4) {
       ordersGapLe4 += 1;
+      amountGapLe4 += r.amount;
       if (samples.length < 30) samples.push({
         order_id: r.order_id, order_date: r.order_day, ship_date: r.ship_date,
         gap: r.gap, is_express: r.is_express, is_manual: r.is_manual, site: r.site,
+        amount: r.amount,
       });
     }
   });
   const total = enriched.length;
+  const totalAmount = enriched.reduce((s, r) => s + r.amount, 0);
+  const expressAmount = enriched.reduce((s, r) => s + (r.is_express ? r.amount : 0), 0);
   const pctGapLe4 = total > 0 ? Math.round(ordersGapLe4 / total * 1000) / 10 : 0;
+  const pctAmountGapLe4 = totalAmount > 0 ? Math.round(amountGapLe4 / totalAmount * 1000) / 10 : 0;
   const avgGap = total > 0 ? Math.round(enriched.reduce((s, r) => s + r.gap, 0) / total * 10) / 10 : null;
 
-  // 6c) ship_date_counts (사이트별 breakdown 포함)
+  // 6c) ship_date_counts (사이트별 breakdown + 매출)
   const shipCountMap = new Map();
   enriched.forEach(r => {
     if (!shipCountMap.has(r.ship_date)) {
-      shipCountMap.set(r.ship_date, { ship_date: r.ship_date, orders: 0, express_orders: 0, regular_orders: 0, sites: {} });
+      shipCountMap.set(r.ship_date, {
+        ship_date: r.ship_date, orders: 0, express_orders: 0, regular_orders: 0,
+        amount: 0, express_amount: 0, regular_amount: 0,
+        sites: {}, // site → { orders, amount }
+      });
     }
     const b = shipCountMap.get(r.ship_date);
-    b.orders += 1;
-    if (r.is_express) b.express_orders += 1; else b.regular_orders += 1;
-    b.sites[r.site] = (b.sites[r.site] || 0) + 1;
+    b.orders += 1; b.amount += r.amount;
+    if (r.is_express) { b.express_orders += 1; b.express_amount += r.amount; }
+    else { b.regular_orders += 1; b.regular_amount += r.amount; }
+    if (!b.sites[r.site]) b.sites[r.site] = { orders: 0, amount: 0 };
+    b.sites[r.site].orders += 1;
+    b.sites[r.site].amount += r.amount;
   });
   const ship_date_counts = [...shipCountMap.values()].sort((a, b) => a.ship_date.localeCompare(b.ship_date));
 
@@ -3941,16 +3984,21 @@ async function apiLeadtimeAnalysis(query) {
     period: { start: startDate, end: endDate },
     summary: {
       total_orders_in_period: total,
+      total_amount: Math.round(totalAmount),
       express_orders,
+      express_amount: Math.round(expressAmount),
       express_pct: expressPct,
       avg_gap_days: avgGap,
     },
     express_daily,
     gap_analysis: {
-      distribution: gapDist,
+      distribution: gapDist,  // { [gap]: { orders, amount } }
       total,
+      total_amount: Math.round(totalAmount),
       orders_gap_le_4: ordersGapLe4,
+      amount_gap_le_4: Math.round(amountGapLe4),
       pct_gap_le_4: pctGapLe4,
+      pct_amount_gap_le_4: pctAmountGapLe4,
       samples,
     },
     ship_date_counts,

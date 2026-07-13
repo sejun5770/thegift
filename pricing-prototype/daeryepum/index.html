@@ -5991,6 +5991,12 @@ function renderLeadtimeCompare(a, b, dates) {
   const bDist = b?.gap_analysis?.distribution || {};
   const aTotal = a?.gap_analysis?.total || 0;
   const bTotal = b?.gap_analysis?.total || 0;
+  const aTotalAmt = a?.gap_analysis?.total_amount || aSum.total_amount || 0;
+  const bTotalAmt = b?.gap_analysis?.total_amount || bSum.total_amount || 0;
+
+  // dist 값 접근 헬퍼 — 서버 응답이 { orders, amount } 객체 or (구버전) number
+  const distOrders = (dist, k) => typeof dist[k] === 'object' ? (dist[k]?.orders || 0) : (dist[k] || 0);
+  const distAmount = (dist, k) => typeof dist[k] === 'object' ? (dist[k]?.amount || 0) : 0;
 
   // 일수 계산 (기간 길이 다른 경우 일평균 병기용)
   const daysBetween = (s, e) => Math.round((new Date(e).getTime() - new Date(s).getTime()) / 86400000) + 1;
@@ -6012,12 +6018,16 @@ function renderLeadtimeCompare(a, b, dates) {
       ${aSub || bSub ? `<div style="font-size:10px;color:var(--gray-500);margin-top:4px">${aSub || ''} / ${bSub || ''}</div>` : ''}
     </div>`;
 
-  // gap 분포 비교 표
+  // gap 분포 비교 표 — 건수 + 매출 병기
   const gapRows = gapKeys.map(k => {
-    const aN = aDist[k] || 0;
-    const bN = bDist[k] || 0;
+    const aN = distOrders(aDist, k);
+    const bN = distOrders(bDist, k);
+    const aAmt = distAmount(aDist, k);
+    const bAmt = distAmount(bDist, k);
     const aPct = pct(aN, aTotal);
     const bPct = pct(bN, bTotal);
+    const aAmtPct = pct(aAmt, aTotalAmt);
+    const bAmtPct = pct(bAmt, bTotalAmt);
     const isNew = (k === '2' || k === '3');
     const delta = parseFloat(bPct) - parseFloat(aPct);
     const deltaStr = delta > 0 ? `+${delta.toFixed(1)}p` : delta < 0 ? `${delta.toFixed(1)}p` : '±0';
@@ -6028,10 +6038,12 @@ function renderLeadtimeCompare(a, b, dates) {
           ${k}일 ${isNew ? '<span style="font-size:9px;color:#b45309;background:#fef9c3;padding:1px 5px;border-radius:6px;margin-left:4px">신규</span>' : ''}
         </td>
         <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);text-align:right;color:#3b82f6">
-          ${aN}건 <span style="font-size:10px;color:var(--gray-500)">(${aPct}%)</span>
+          <div>${aN}건 <span style="font-size:10px;color:var(--gray-500)">(${aPct}%)</span></div>
+          <div style="font-size:11px;color:var(--gray-600)">${fmtKRW(aAmt)} <span style="font-size:10px;color:var(--gray-400)">(${aAmtPct}%)</span></div>
         </td>
         <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);text-align:right;color:#dc2626">
-          ${bN}건 <span style="font-size:10px;color:var(--gray-500)">(${bPct}%)</span>
+          <div>${bN}건 <span style="font-size:10px;color:var(--gray-500)">(${bPct}%)</span></div>
+          <div style="font-size:11px;color:var(--gray-600)">${fmtKRW(bAmt)} <span style="font-size:10px;color:var(--gray-400)">(${bAmtPct}%)</span></div>
         </td>
         <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);text-align:right;color:${deltaColor};font-weight:600">
           ${deltaStr}
@@ -6039,11 +6051,11 @@ function renderLeadtimeCompare(a, b, dates) {
       </tr>`;
   }).join('');
 
-  // gap 분포 bar chart (side-by-side)
-  const maxCount = Math.max(1, ...gapKeys.map(k => Math.max(aDist[k] || 0, bDist[k] || 0)));
+  // gap 분포 bar chart (side-by-side) — 건수 기준
+  const maxCount = Math.max(1, ...gapKeys.map(k => Math.max(distOrders(aDist, k), distOrders(bDist, k))));
   const gapBars = gapKeys.map(k => {
-    const aN = aDist[k] || 0;
-    const bN = bDist[k] || 0;
+    const aN = distOrders(aDist, k);
+    const bN = distOrders(bDist, k);
     const aW = Math.round(aN / maxCount * 100);
     const bW = Math.round(bN / maxCount * 100);
     const isNew = (k === '2' || k === '3');
@@ -6070,19 +6082,27 @@ function renderLeadtimeCompare(a, b, dates) {
   // 인사이트 텍스트
   const aPctLe4 = a?.gap_analysis?.pct_gap_le_4 || 0;
   const bPctLe4 = b?.gap_analysis?.pct_gap_le_4 || 0;
+  const aPctAmtLe4 = a?.gap_analysis?.pct_amount_gap_le_4 || 0;
+  const bPctAmtLe4 = b?.gap_analysis?.pct_amount_gap_le_4 || 0;
   const deltaPctLe4 = (bPctLe4 - aPctLe4).toFixed(1);
+  const deltaPctAmtLe4 = (bPctAmtLe4 - aPctAmtLe4).toFixed(1);
   const aAvg = aSum.avg_gap_days;
   const bAvg = bSum.avg_gap_days;
   const avgDelta = (aAvg != null && bAvg != null) ? (bAvg - aAvg).toFixed(1) : null;
   const insights = [];
   insights.push(`<b>일평균 주문</b>: A=${(aTotal / aDays).toFixed(1)}건/일, B=${(bTotal / bDays).toFixed(1)}건/일 → ${(bTotal / bDays >= aTotal / aDays ? '증가' : '감소')}`);
+  insights.push(`<b>일평균 매출</b>: A=${fmtKRW(aTotalAmt / aDays)}/일, B=${fmtKRW(bTotalAmt / bDays)}/일`);
   insights.push(`<b>평균 리드타임</b>: A=${aAvg ?? '-'}일, B=${bAvg ?? '-'}일${avgDelta != null ? ` (${avgDelta > 0 ? '+' : ''}${avgDelta}일)` : ''}`);
-  insights.push(`<b>gap ≤ 4일 비중</b>: A=${aPctLe4}% → B=${bPctLe4}% (<span style="color:${deltaPctLe4 > 0 ? '#dc2626' : '#2563eb'}">${deltaPctLe4 > 0 ? '+' : ''}${deltaPctLe4}p</span>)`);
-  const new2A = aDist['2'] || 0, new3A = aDist['3'] || 0;
-  const new2B = bDist['2'] || 0, new3B = bDist['3'] || 0;
-  const newPctA = pct(new2A + new3A, aTotal);
-  const newPctB = pct(new2B + new3B, bTotal);
-  insights.push(`<b>2~3일 (신규 열린 범위) 비중</b>: A=${newPctA}% → B=${newPctB}% <span style="color:var(--gray-500)">(min_select_days=2 효과 측정)</span>`);
+  insights.push(`<b>gap ≤ 4일 비중</b>: 건수 A=${aPctLe4}% → B=${bPctLe4}% (<span style="color:${deltaPctLe4 > 0 ? '#dc2626' : '#2563eb'}">${deltaPctLe4 > 0 ? '+' : ''}${deltaPctLe4}p</span>) · 매출 A=${aPctAmtLe4}% → B=${bPctAmtLe4}% (<span style="color:${deltaPctAmtLe4 > 0 ? '#dc2626' : '#2563eb'}">${deltaPctAmtLe4 > 0 ? '+' : ''}${deltaPctAmtLe4}p</span>)`);
+  const new2A = distOrders(aDist, '2') + distOrders(aDist, '3');
+  const new2B = distOrders(bDist, '2') + distOrders(bDist, '3');
+  const newAmtA = distAmount(aDist, '2') + distAmount(aDist, '3');
+  const newAmtB = distAmount(bDist, '2') + distAmount(bDist, '3');
+  const newPctA = pct(new2A, aTotal);
+  const newPctB = pct(new2B, bTotal);
+  const newAmtPctA = pct(newAmtA, aTotalAmt);
+  const newAmtPctB = pct(newAmtB, bTotalAmt);
+  insights.push(`<b>2~3일 (신규 열린 범위)</b>: 건수 ${newPctA}% → ${newPctB}% · 매출 ${newAmtPctA}% → ${newAmtPctB}% <span style="color:var(--gray-500)">(min_select_days=2 효과 측정)</span>`);
 
   body.innerHTML = `
     <!-- A/B 기간 라벨 -->
@@ -6096,15 +6116,19 @@ function renderLeadtimeCompare(a, b, dates) {
     </div>
 
     <!-- 요약 카드 -->
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:16px">
       ${summaryCard('총 주문 (건)', aTotal.toLocaleString(), bTotal.toLocaleString(),
         `일평균 ${(aTotal/aDays).toFixed(1)}건`, `일평균 ${(bTotal/bDays).toFixed(1)}건`, 'var(--gray-50)')}
-      ${summaryCard('오늘출발 (건)', (aSum.express_orders || 0), (bSum.express_orders || 0),
-        `${aSum.express_pct || 0}%`, `${bSum.express_pct || 0}%`, '#fef2f2')}
-      ${summaryCard('gap ≤ 4일 (건)',
-        (a?.gap_analysis?.orders_gap_le_4 || 0), (b?.gap_analysis?.orders_gap_le_4 || 0),
-        `${aPctLe4}%`, `${bPctLe4}%`, '#fef3c7')}
-      ${summaryCard('평균 gap (일)',
+      ${summaryCard('총 매출', fmtKRW(aTotalAmt), fmtKRW(bTotalAmt),
+        `일평균 ${fmtKRW(aTotalAmt/aDays)}`, `일평균 ${fmtKRW(bTotalAmt/bDays)}`, '#f0fdf4')}
+      ${summaryCard('오늘출발', (aSum.express_orders || 0) + '건', (bSum.express_orders || 0) + '건',
+        `${fmtKRW(aSum.express_amount||0)} · ${aSum.express_pct || 0}%`,
+        `${fmtKRW(bSum.express_amount||0)} · ${bSum.express_pct || 0}%`, '#fef2f2')}
+      ${summaryCard('gap ≤ 4일',
+        (a?.gap_analysis?.orders_gap_le_4 || 0) + '건', (b?.gap_analysis?.orders_gap_le_4 || 0) + '건',
+        `${fmtKRW(a?.gap_analysis?.amount_gap_le_4||0)} · ${aPctLe4}%`,
+        `${fmtKRW(b?.gap_analysis?.amount_gap_le_4||0)} · ${bPctLe4}%`, '#fef3c7')}
+      ${summaryCard('평균 gap',
         aAvg != null ? aAvg + '일' : '-', bAvg != null ? bAvg + '일' : '-',
         '', avgDelta != null ? `Δ ${avgDelta > 0 ? '+' : ''}${avgDelta}일` : '', '#eff6ff')}
     </div>
@@ -6112,22 +6136,28 @@ function renderLeadtimeCompare(a, b, dates) {
     <!-- gap 분포 표 + 시각화 -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
       <div>
-        <div style="font-size:12px;font-weight:700;color:var(--gray-700);margin-bottom:6px">📊 gap 분포 표 (건수 + %)</div>
+        <div style="font-size:12px;font-weight:700;color:var(--gray-700);margin-bottom:6px">📊 gap 분포 표 (건수 · %  /  매출 · %)</div>
         <table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--gray-200);border-radius:6px;overflow:hidden">
           <thead style="background:var(--gray-50)">
             <tr>
               <th style="padding:6px 10px;text-align:left;font-size:11px">gap</th>
               <th style="padding:6px 10px;text-align:right;font-size:11px;color:#3b82f6">A</th>
               <th style="padding:6px 10px;text-align:right;font-size:11px;color:#dc2626">B</th>
-              <th style="padding:6px 10px;text-align:right;font-size:11px">Δ%p</th>
+              <th style="padding:6px 10px;text-align:right;font-size:11px">Δ%p (건수)</th>
             </tr>
           </thead>
           <tbody>${gapRows}</tbody>
           <tfoot style="background:var(--gray-50);font-weight:600">
             <tr>
               <td style="padding:6px 10px">합계</td>
-              <td style="padding:6px 10px;text-align:right;color:#3b82f6">${aTotal.toLocaleString()}건</td>
-              <td style="padding:6px 10px;text-align:right;color:#dc2626">${bTotal.toLocaleString()}건</td>
+              <td style="padding:6px 10px;text-align:right;color:#3b82f6">
+                <div>${aTotal.toLocaleString()}건</div>
+                <div style="font-size:11px">${fmtKRW(aTotalAmt)}</div>
+              </td>
+              <td style="padding:6px 10px;text-align:right;color:#dc2626">
+                <div>${bTotal.toLocaleString()}건</div>
+                <div style="font-size:11px">${fmtKRW(bTotalAmt)}</div>
+              </td>
               <td style="padding:6px 10px;text-align:right">-</td>
             </tr>
           </tfoot>
