@@ -6004,7 +6004,7 @@ function renderLeadtimeCompare(a, b, dates) {
   const bDays = daysBetween(dates.bStart, dates.bEnd);
 
   const pct = (n, total) => total > 0 ? (n / total * 100).toFixed(1) : '0.0';
-  const gapKeys = ['0', '1', '2', '3', '4', '5+'];
+  const gapKeys = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10+'];
 
   // 요약 카드 (A vs B)
   const summaryCard = (label, aVal, bVal, aSub, bSub, color) => `

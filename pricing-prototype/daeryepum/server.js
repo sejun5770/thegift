@@ -3932,11 +3932,12 @@ async function apiLeadtimeAnalysis(query) {
   const express_daily = [...expressDailyMap.values()].sort((a, b) => a.order_day.localeCompare(b.order_day));
 
   // 6b) gap distribution + samples — orders/amount 병기
+  //     세부 확장: 0/1/2/3/4/5/6/7/8/9/10+ (기존 5+ 통합 → 개별 분리, 10일 이상은 통합)
   const gapDist = {}; // { [gap]: { orders, amount } }
   const samples = [];
   let ordersGapLe4 = 0, amountGapLe4 = 0;
   enriched.forEach(r => {
-    const key = r.gap < 0 ? String(r.gap) : (r.gap >= 5 ? '5+' : String(r.gap));
+    const key = r.gap < 0 ? String(r.gap) : (r.gap >= 10 ? '10+' : String(r.gap));
     if (!gapDist[key]) gapDist[key] = { orders: 0, amount: 0 };
     gapDist[key].orders += 1;
     gapDist[key].amount += r.amount;
