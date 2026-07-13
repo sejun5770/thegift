@@ -438,6 +438,22 @@ nav.nav-loading a[href^="#"] {
     </div>
   </div>
 
+  <!-- 리드타임 진단 (임시) — min_select_days 완화 이후 트렌드 -->
+  <div class="section" id="lta-section" data-dash-only="daeryepum">
+    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span>🔍 리드타임 진단 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(오늘출발 · gap ≤ 4일 · 출고일별 주문수)</span></span>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px">
+        <input type="date" id="lta-start" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:11px">
+        <span style="font-size:11px">~</span>
+        <input type="date" id="lta-end" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:11px">
+        <button class="btn btn-sm btn-primary" onclick="loadLeadtimeAnalysis()">🔍 조회</button>
+      </div>
+    </div>
+    <div class="card" id="lta-body" style="padding:16px;font-size:13px">
+      <div style="color:var(--gray-400);text-align:center;padding:20px">조회 버튼을 눌러주세요</div>
+    </div>
+  </div>
+
   <!-- WoW: 이번주 누적 vs 지난주 동기간 -->
   <div class="section">
     <div class="section-title">📅 이번주 누적 vs 지난주 동기간 (WoW)</div>
@@ -5795,7 +5811,163 @@ async function loadDashboard() {
     setBsdPreset('next-30');
     // 위탁상품 요약 단락 — 답례품 탭에서만
     if (dashCategory === 'daeryepum') loadDashVendorSummary();
+    // 리드타임 진단 (임시) — 기본 최근 4주 기간 세팅 후 자동 조회. 실패해도 대시보드 진행.
+    if (dashCategory === 'daeryepum') {
+      try {
+        const ltaEnd = new Date();
+        const ltaStart = new Date(); ltaStart.setDate(ltaStart.getDate() - 28);
+        const ymd = d => d.toISOString().slice(0, 10);
+        const ltaStartEl = document.getElementById('lta-start');
+        const ltaEndEl = document.getElementById('lta-end');
+        if (ltaStartEl && !ltaStartEl.value) ltaStartEl.value = ymd(ltaStart);
+        if (ltaEndEl && !ltaEndEl.value) ltaEndEl.value = ymd(ltaEnd);
+        loadLeadtimeAnalysis();
+      } catch (e) { console.warn('리드타임 진단 자동 로드 실패:', e.message); }
+    }
   } catch(e) { console.error(e); showToast('대시보드 로딩 실패: ' + e.message); }
+}
+
+/**
+ * 리드타임 진단 — /api/dashboard/leadtime-analysis 호출 결과를 요약/표로 표시.
+ *   min_select_days 완화 이후 오늘출발 트렌드 / gap ≤ 4일 분포 / 출고일별 주문수 확인.
+ *   기간은 lta-start/lta-end input 사용 (대시보드 로드 시 기본 4주 자동 세팅).
+ */
+async function loadLeadtimeAnalysis() {
+  const body = document.getElementById('lta-body');
+  const start = document.getElementById('lta-start')?.value;
+  const end = document.getElementById('lta-end')?.value;
+  if (!start || !end) { body.innerHTML = '<div style="color:#dc2626">기간을 선택해주세요</div>'; return; }
+  const endExclusive = (function () { const d = new Date(end); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); })();
+  body.innerHTML = '<div style="color:var(--gray-400);text-align:center;padding:20px">📊 조회 중… (5~10초 소요)</div>';
+  try {
+    const r = await fetch(`${API}/api/dashboard/leadtime-analysis?start_date=${encodeURIComponent(start)}&end_date=${encodeURIComponent(endExclusive)}`);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    window.__lta = j;
+    renderLeadtimeAnalysis(j);
+  } catch (e) {
+    body.innerHTML = `<div style="color:#dc2626;padding:20px;text-align:center">조회 실패: ${e.message}<br><span style="font-size:11px;color:var(--gray-500)">endpoint 배포 확인 (커밋 a780074 이상)</span></div>`;
+  }
+}
+
+function renderLeadtimeAnalysis(j) {
+  const body = document.getElementById('lta-body');
+  if (!j || j.error) {
+    body.innerHTML = `<div style="color:#dc2626;padding:20px">${j?.error || '데이터 없음'}</div>`;
+    return;
+  }
+  const s = j.summary || {};
+  const gap = j.gap_analysis || {};
+  const dist = gap.distribution || {};
+  const dailyMap = new Map((j.express_daily || []).map(d => [d.order_day, d.orders]));
+  // 날짜 축 — 기간 내 전체 일자 (0 인 날도 표시)
+  const startD = new Date(j.period.start);
+  const endD = new Date(j.period.end); endD.setDate(endD.getDate() - 1);
+  const days = [];
+  for (let d = new Date(startD); d <= endD; d.setDate(d.getDate() + 1)) days.push(d.toISOString().slice(0, 10));
+  const maxExpr = Math.max(1, ...(j.express_daily || []).map(d => d.orders));
+  const exprBars = days.map(day => {
+    const n = dailyMap.get(day) || 0;
+    const h = Math.round(n / maxExpr * 40);
+    const dow = ['일','월','화','수','목','금','토'][new Date(day + 'T00:00:00').getDay()];
+    const col = dow === '일' ? '#dc2626' : (dow === '토' ? '#2563eb' : 'var(--gray-500)');
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:2px;min-width:24px">
+      <div style="font-size:9px;color:${n ? '#dc2626' : 'var(--gray-300)'};font-weight:600">${n || ''}</div>
+      <div style="width:14px;height:${Math.max(2, h)}px;background:${n ? '#dc2626' : 'var(--gray-200)'};border-radius:2px 2px 0 0"></div>
+      <div style="font-size:9px;color:var(--gray-500);white-space:nowrap">${day.slice(5)}</div>
+      <div style="font-size:9px;color:${col}">${dow}</div>
+    </div>`;
+  }).join('');
+
+  // gap 분포 bar
+  const gapKeys = ['0','1','2','3','4','5+'];
+  const maxGap = Math.max(1, ...gapKeys.map(k => dist[k] || 0));
+  const gapBars = gapKeys.map(k => {
+    const n = dist[k] || 0;
+    const w = Math.round(n / maxGap * 100);
+    const isNewRange = (k === '2' || k === '3'); // min_select_days=2 로 새로 열린 범위
+    const bg = isNewRange ? '#f59e0b' : '#3b82f6';
+    return `<div style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:4px">
+      <div style="min-width:30px;text-align:right;font-weight:600">${k}일</div>
+      <div style="flex:1;background:var(--gray-100);border-radius:4px;overflow:hidden;height:18px;position:relative">
+        <div style="width:${w}%;height:100%;background:${bg}"></div>
+        <span style="position:absolute;left:6px;top:1px;font-size:11px;color:${w > 20 ? '#fff' : 'var(--gray-700)'};font-weight:600">${n}건</span>
+      </div>
+      ${isNewRange ? '<span style="font-size:10px;color:#b45309;background:#fef3c7;padding:1px 6px;border-radius:8px">신규</span>' : ''}
+    </div>`;
+  }).join('');
+
+  // 출고일별 주문수 표 (상위 30일)
+  const shipRows = (j.ship_date_counts || []).slice(0, 30).map(d => {
+    const dow = ['일','월','화','수','목','금','토'][new Date(d.ship_date + 'T00:00:00').getDay()];
+    const sitesStr = Object.entries(d.sites || {}).map(([s, n]) => `${s}:${n}`).join(', ');
+    return `<tr>
+      <td style="padding:4px 8px;border-bottom:1px solid var(--gray-100);font-size:11px">${d.ship_date} (${dow})</td>
+      <td style="padding:4px 8px;border-bottom:1px solid var(--gray-100);text-align:right;font-weight:600">${d.orders}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid var(--gray-100);text-align:right;color:#dc2626">${d.express_orders}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid var(--gray-100);text-align:right;color:var(--gray-500)">${d.regular_orders}</td>
+      <td style="padding:4px 8px;border-bottom:1px solid var(--gray-100);font-size:10px;color:var(--gray-500)">${sitesStr}</td>
+    </tr>`;
+  }).join('');
+
+  body.innerHTML = `
+    <!-- 요약 -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">
+      <div style="background:var(--gray-50);padding:10px;border-radius:8px">
+        <div style="font-size:10px;color:var(--gray-500)">기간 총 주문</div>
+        <div style="font-size:18px;font-weight:700">${(s.total_orders_in_period || 0).toLocaleString()}건</div>
+      </div>
+      <div style="background:#fef2f2;padding:10px;border-radius:8px">
+        <div style="font-size:10px;color:#dc2626">오늘출발 채택</div>
+        <div style="font-size:18px;font-weight:700;color:#dc2626">${s.express_orders || 0}건 <span style="font-size:12px">(${s.express_pct || 0}%)</span></div>
+      </div>
+      <div style="background:#fef3c7;padding:10px;border-radius:8px">
+        <div style="font-size:10px;color:#b45309">gap ≤ 4일</div>
+        <div style="font-size:18px;font-weight:700;color:#b45309">${gap.orders_gap_le_4 || 0}건 <span style="font-size:12px">(${gap.pct_gap_le_4 || 0}%)</span></div>
+      </div>
+      <div style="background:#eff6ff;padding:10px;border-radius:8px">
+        <div style="font-size:10px;color:#1d4ed8">평균 gap</div>
+        <div style="font-size:18px;font-weight:700;color:#1d4ed8">${s.avg_gap_days != null ? s.avg_gap_days + '일' : '-'}</div>
+      </div>
+    </div>
+
+    <!-- 오늘출발 일별 -->
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;font-weight:700;color:var(--gray-700);margin-bottom:6px">🔥 오늘출발 주문 (order_date 기준 일별)</div>
+      <div style="display:flex;gap:2px;overflow-x:auto;padding:8px 0;background:var(--gray-50);border-radius:6px;padding-left:8px;padding-right:8px">
+        ${exprBars}
+      </div>
+    </div>
+
+    <!-- gap 분포 -->
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;font-weight:700;color:var(--gray-700);margin-bottom:6px">⏱️ 주문일 → 출고일 gap 분포 (신규=주황: min_select_days=2 로 새로 열린 2~3일)</div>
+      ${gapBars}
+    </div>
+
+    <!-- 출고일별 주문 -->
+    <div>
+      <div style="font-size:12px;font-weight:700;color:var(--gray-700);margin-bottom:6px">📅 희망출고일별 주문수 (${(j.ship_date_counts||[]).length}일)</div>
+      <div style="max-height:400px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:6px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead style="background:var(--gray-50);position:sticky;top:0">
+            <tr>
+              <th style="padding:6px 8px;text-align:left;font-size:11px;border-bottom:1px solid var(--gray-200)">출고일 (요일)</th>
+              <th style="padding:6px 8px;text-align:right;font-size:11px;border-bottom:1px solid var(--gray-200)">주문</th>
+              <th style="padding:6px 8px;text-align:right;font-size:11px;border-bottom:1px solid var(--gray-200);color:#dc2626">오늘출발</th>
+              <th style="padding:6px 8px;text-align:right;font-size:11px;border-bottom:1px solid var(--gray-200)">일반</th>
+              <th style="padding:6px 8px;text-align:left;font-size:11px;border-bottom:1px solid var(--gray-200)">사이트별</th>
+            </tr>
+          </thead>
+          <tbody>${shipRows || '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--gray-400)">데이터 없음</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div style="margin-top:10px;font-size:10px;color:var(--gray-400);text-align:right">
+      raw JSON: <code>window.__lta</code> (F12 콘솔에서 접근 가능)
+    </div>
+  `;
 }
 
 /** 대시보드 위탁상품 단락 — 위탁 대시보드 API 호출해 4 카드 채움. 기간 = 대시보드 기간 그대로. */
