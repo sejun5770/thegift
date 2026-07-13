@@ -438,22 +438,6 @@ nav.nav-loading a[href^="#"] {
     </div>
   </div>
 
-  <!-- 리드타임 진단 (임시) — min_select_days 완화 이후 트렌드 -->
-  <div class="section" id="lta-section" data-dash-only="daeryepum">
-    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-      <span>🔍 리드타임 진단 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(오늘출발 · gap ≤ 4일 · 출고일별 주문수)</span></span>
-      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px">
-        <input type="date" id="lta-start" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:11px">
-        <span style="font-size:11px">~</span>
-        <input type="date" id="lta-end" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:11px">
-        <button class="btn btn-sm btn-primary" onclick="loadLeadtimeAnalysis()">🔍 조회</button>
-      </div>
-    </div>
-    <div class="card" id="lta-body" style="padding:16px;font-size:13px">
-      <div style="color:var(--gray-400);text-align:center;padding:20px">조회 버튼을 눌러주세요</div>
-    </div>
-  </div>
-
   <!-- 리드타임 두 기간 비교 -->
   <div class="section" id="ltc-section" data-dash-only="daeryepum">
     <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -591,16 +575,7 @@ nav.nav-loading a[href^="#"] {
     </div>
   </div>
 
-  <!-- 💬 메시지 분석 — CI 입력완료~출고완료 모든 stage 의 sticker_selections JSONB 분석 -->
-  <div class="section" data-dash-only="daeryepum">
-    <div class="section-title">💬 메시지 분석 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(정보입력 이후 모든 stage 포함 · 스티커작업/인쇄/제본/포장/출고)</span></div>
-    <div class="card">
-      <h3 style="margin:0 0 8px;font-size:14px">메시지 분석 <span style="font-size:11px;color:var(--gray-500);font-weight:400">(custom_fields 입력값 통계)</span></h3>
-      <div id="sa-messages"><div style="color:var(--gray-400);text-align:center;padding:20px;font-size:12px">로딩 중...</div></div>
-    </div>
-  </div>
-
-  <!-- 희망출고일별 매출 (정보입력 완료 기준) — 매출 데이터와 기간 차원이 다름 (order_date vs desired_ship_date) -->
+<!-- 희망출고일별 매출 (정보입력 완료 기준) — 매출 데이터와 기간 차원이 다름 (order_date vs desired_ship_date) -->
   <div class="section" data-dash-only="daeryepum">
     <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <span>📅 희망출고일별 매출 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(고객 정보입력 완료된 주문 기준)</span></span>
@@ -5833,19 +5808,6 @@ async function loadDashboard() {
     setBsdPreset('next-30');
     // 위탁상품 요약 단락 — 답례품 탭에서만
     if (dashCategory === 'daeryepum') loadDashVendorSummary();
-    // 리드타임 진단 (임시) — 기본 최근 4주 기간 세팅 후 자동 조회. 실패해도 대시보드 진행.
-    if (dashCategory === 'daeryepum') {
-      try {
-        const ltaEnd = new Date();
-        const ltaStart = new Date(); ltaStart.setDate(ltaStart.getDate() - 28);
-        const ymd = d => d.toISOString().slice(0, 10);
-        const ltaStartEl = document.getElementById('lta-start');
-        const ltaEndEl = document.getElementById('lta-end');
-        if (ltaStartEl && !ltaStartEl.value) ltaStartEl.value = ymd(ltaStart);
-        if (ltaEndEl && !ltaEndEl.value) ltaEndEl.value = ymd(ltaEnd);
-        loadLeadtimeAnalysis();
-      } catch (e) { console.warn('리드타임 진단 자동 로드 실패:', e.message); }
-    }
   } catch(e) { console.error(e); showToast('대시보드 로딩 실패: ' + e.message); }
 }
 
