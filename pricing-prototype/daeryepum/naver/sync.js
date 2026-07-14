@@ -93,6 +93,12 @@ function normalizeOrder(item, storeConfig = null, filters = null) {
 
   const orderedAt = order.orderDate ? new Date(order.orderDate).toISOString() : (po.orderDate ? new Date(po.orderDate).toISOString() : null);
   const paidAt = order.paymentDate ? new Date(order.paymentDate).toISOString() : (po.paymentDate ? new Date(po.paymentDate).toISOString() : null);
+  // 구매확정 시점 (migration 037) — 네이버 응답의 필드명이 문서/버전에 따라 다를 수 있어 후보 4개 우선 매핑.
+  //   confirmedAt 없으면 null 저장 → 다음 sync 때 채워질 여지 유지.
+  const _confirmRaw = po.decisionDate || po.purchaseDecidedDate || po.completedDate || po.confirmDate
+    || order.decisionDate || order.purchaseDecidedDate || order.completedDate || order.confirmDate
+    || null;
+  const confirmedAt = _confirmRaw ? new Date(_confirmRaw).toISOString() : null;
 
   const status = po.productOrderStatus || 'UNKNOWN';
   const statusLabel = STATUS_LABEL[status] || status;
@@ -129,6 +135,7 @@ function normalizeOrder(item, storeConfig = null, filters = null) {
     settle_method: order.paymentMeans || po.paymentMeans || null,
     status,
     status_label: statusLabel,
+    confirmed_at: confirmedAt,  // migration 037 — 네이버 구매확정 시점
     raw_payload: {
       // 진단/재처리용 — 주요 필드만 보존
       productClass: po.productClass,
@@ -138,6 +145,14 @@ function normalizeOrder(item, storeConfig = null, filters = null) {
       inflowPath: po.inflowPath,
       // sticker_selections enrichment 입력 (sync 단계에서 사용)
       productOption: po.productOption,
+      // 확정일 후보 필드 dump (migration 037) — 실제 네이버 응답의 필드명 확인용.
+      //   normalize 후에도 raw_payload 로 원본 값 보존 → 어느 필드가 사용됐는지 진단 가능.
+      po_decisionDate: po.decisionDate,
+      po_purchaseDecidedDate: po.purchaseDecidedDate,
+      po_completedDate: po.completedDate,
+      po_confirmDate: po.confirmDate,
+      order_decisionDate: order.decisionDate,
+      order_purchaseDecidedDate: order.purchaseDecidedDate,
     },
     synced_at: new Date().toISOString(),
   };

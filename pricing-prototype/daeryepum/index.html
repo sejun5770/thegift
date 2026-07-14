@@ -3318,6 +3318,7 @@ const ALL_COLS = [
   {key:'file_count_fmt',label:'첨부파일',default:true},
   {key:'order_type_label',label:'주문유형',default:false},
   {key:'status_label',label:'주문상태',default:false},
+  {key:'confirmed_at_fmt',label:'구매확정일',default:false},   // 바른손카드 src_confirm_date / 네이버 confirmed_at (migration 037)
 ];
 
 let ordersData = [];
@@ -3657,6 +3658,8 @@ async function loadOrders() {
       //   쿠팡/네이버: ISO with 'Z' (UTC) → +9h
       //   CARD/ETC:  '+09:00' 또는 TZ 없음 → 그대로 (이미 KST)
       r.order_date_fmt = fmtKstDate(r.order_date);
+      // 구매확정일 (migration 037) — CARD(src_confirm_date) / 네이버(confirmed_at). NULL 이면 미확정.
+      r.confirmed_at_fmt = r.confirmed_at ? fmtKstDate(r.confirmed_at) : '';
       r.item_amount_fmt = fmtKRW(r.item_amount);
       // 상품 결제액 = 주문총액 - 쿠폰할인 (행 단위 실 결제). 음수 방지(쿠폰이 정가 초과하는 비정상 케이스).
       r.item_paid = Math.max(0, (Number(r.item_amount) || 0) - (Number(r.coupon_price) || 0));

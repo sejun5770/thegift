@@ -807,7 +807,9 @@ async function apiOrders(query) {
         cw.event_year + '-' + RIGHT('0'+cw.event_month,2) + '-' + RIGHT('0'+cw.event_Day,2) AS wedding_date,
         ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
         0 AS file_count,
-        1 AS delivery_seq  -- ETC 주문은 단일 배송지
+        1 AS delivery_seq,  -- ETC 주문은 단일 배송지
+        -- 구매확정일 — CUSTOM_ETC_ORDER.confirm_date. 실제로는 2010년 이후 신규 값 없음 (미사용) 이나 스키마 통일 위해 SELECT.
+        CONVERT(varchar(19), o.confirm_date, 120) AS confirmed_at
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
@@ -888,7 +890,9 @@ async function apiOrders(query) {
         w.event_year + '-' + RIGHT('0'+w.event_month,2) + '-' + RIGHT('0'+w.event_Day,2) AS wedding_date,
         ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
         ISNULL((SELECT COUNT(*) FROM custom_order_plist p WITH (NOLOCK) INNER JOIN custom_order_plist_files f WITH (NOLOCK) ON p.id = f.pid WHERE p.order_seq = co.order_seq), 0) AS file_count,
-        ISNULL(di.DELIVERY_SEQ, 1) AS delivery_seq  -- 배송지별 행 구분 (나눔배송 대응)
+        ISNULL(di.DELIVERY_SEQ, 1) AS delivery_seq,  -- 배송지별 행 구분 (나눔배송 대응)
+        -- 구매확정일 — custom_order.src_confirm_date. 바른손카드에서 고객이 구매확정한 시점.
+        CONVERT(varchar(19), co.src_confirm_date, 120) AS confirmed_at
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
@@ -1060,6 +1064,8 @@ async function apiOrders(query) {
           naver_status: r.status,
           naver_order_id: r.order_id,
           display_name: r.recv_name || '',
+          // 구매확정일 (migration 037) — sync 시 저장된 값 노출. NULL 이면 아직 미확정.
+          confirmed_at: r.confirmed_at || null,
         }));
         rows.push(...normalized);
         rows.sort((a, b) => String(b.order_date || '').localeCompare(String(a.order_date || '')));
