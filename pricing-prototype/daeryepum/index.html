@@ -8889,20 +8889,20 @@ function setTableTab(tab) {
 function _dashCleanName(n) { return String(n||'').replace(/^\[.*?\]\s*/g, '').trim(); }
 
 /**
- * 대시보드 canonical 그룹핑용 code base — ERP 코드 마지막 2자를 상품 옵션 코드로 판정 후 제거.
- *   예: TGJSD01O4 → TGJSD01, TGBR01D1 → TGBR01
- *   단, 코드 자체가 짧으면 (7자 이하) 그대로 유지.
- *   예: TGJSD01 (7자) → TGJSD01, TGIKX01 (7자) → TGIKX01
+ * 대시보드 canonical 그룹핑용 code base — 언더스코어 variant suffix (`_A/_B/_C`) 만 제거.
+ *   예: TGJSD04D4_A / TGJSD04D4_B / TGJSD04D4_C → TGJSD04D4 (ERP 코드)
+ *   TGJSD04D3_A → TGJSD04D3 (다른 ERP 상품이라 별개 유지)
  *
- *   임계값 = 8자 (>= 8 이면 뒤 2자 제거).
- *   먼저 resolveBgMappedProductCode 로 `_A`/`_B` 변형 suffix 제거 후 적용 →
- *   재고/위탁 로직과 base 코드 동일 인식.
+ *   운영 정책: 상품설정에 파생 코드 (`TGJSD04D4_A` 등) 로 등록 → 출고일/스티커는
+ *   파생별 분리. 대시보드 매출은 ERP 코드 (`TGJSD04D4`) 로 자동 통합 → canonical_group_key
+ *   명시 지정 없이도 그룹핑.
+ *
+ *   기존 뒤 2자 제거 rule (TGJSD04D4 → TGJSD04) 은 색상별 ERP 상품까지 통합해버려
+ *   운영팀 의도 (색상별 별개 상품) 와 어긋남 → 제거.
  */
 function _dashCanonicalCodeBase(rawCode) {
   if (!rawCode) return '';
-  const noVar = resolveBgMappedProductCode(String(rawCode).trim());
-  if (noVar.length >= 8) return noVar.slice(0, -2);
-  return noVar;
+  return resolveBgMappedProductCode(String(rawCode).trim());
 }
 /**
  * 대시보드 상품별 매출 canonical resolver.
