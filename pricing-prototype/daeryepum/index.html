@@ -17630,7 +17630,10 @@ function _bgCsvBuildOrders(rows) {
       category: 'daeryepum',
       source_memo: 'CSV 업로드 (바른손더기프트)',
       _desired_ship_date: baseInfo._shipDate,
-      _customer_request: baseInfo._inputMsg,
+      // 고객 요청사항은 CS/관리자 전용 영역 — CSV 의 추가입력옵션(K열, 스티커 문구)은
+      //   items[i].sticker_note → sticker_selections[i].custom_values.text 로만 저장하고
+      //   customer_request 에는 넣지 않음. (기존 매핑 제거 — 이중 노출 방지)
+      _customer_request: null,
     });
   }
   return { orders, filteredCount: filtered.length, totalCount: dataRows.length };
