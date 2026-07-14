@@ -1175,6 +1175,33 @@ nav.nav-loading a[href^="#"] {
       </label>
     </div>
   </div>
+  <!-- 주문사이트 필터 (체크박스 그룹) — 답례품 카테고리 전용. 데코/꽃다발/더기프트 탭에서는 숨김.
+       초기값 flex (default currentCategory='daeryepum'). switchCategory 가 카테고리에 따라 조정. -->
+  <div id="ord-site-filter" style="display:flex;gap:14px;align-items:center;padding:9px 12px;background:#f8fafc;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:10px;font-size:13px;flex-wrap:wrap">
+    <span style="color:var(--gray-600);font-weight:500">주문사이트:</span>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" data-ord-site="card" checked onchange="renderOrderTable()"> 바른손카드
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="모든 제휴사 통합">
+      <input type="checkbox" data-ord-site="etc" checked onchange="renderOrderTable()"> 바른손몰
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" data-ord-site="nv_card" checked onchange="renderOrderTable()"> 네이버_바른손카드
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" data-ord-site="nv_tnt" checked onchange="renderOrderTable()"> 네이버_테넷텐
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" data-ord-site="coupang" checked onchange="renderOrderTable()"> 쿠팡
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" data-ord-site="manual" checked onchange="renderOrderTable()"> 바른손더기프트
+    </label>
+    <div style="flex:1"></div>
+    <button class="btn" onclick="document.querySelectorAll('#ord-site-filter input').forEach(c=>c.checked=true);renderOrderTable()" style="padding:3px 8px;font-size:11px" title="모든 사이트 체크">전체선택</button>
+    <button class="btn" onclick="document.querySelectorAll('#ord-site-filter input').forEach(c=>c.checked=false);renderOrderTable()" style="padding:3px 8px;font-size:11px" title="모두 해제">해제</button>
+  </div>
+
   <div class="col-selector" id="col-selector"></div>
 
   <!-- 통합 액션바: 카운트 + 지능적 액션 버튼 -->
@@ -3599,6 +3626,10 @@ function switchCategory(cat) {
   if (nvBtn) nvBtn.style.display = showMarketplaceSync ? '' : 'none';
   if (csvBtn) csvBtn.style.display = showCsvUpload ? '' : 'none';
   if (bhgBackfillBtn) bhgBackfillBtn.style.display = showCsvUpload ? '' : 'none';
+  // 주문사이트 필터 — 답례품 카테고리 (여러 채널 UNION) 에서만 노출.
+  //   데코/꽃다발은 채널 단일이라 불필요, 더기프트는 MANUAL 만이라 불필요.
+  const siteFilter = document.getElementById('ord-site-filter');
+  if (siteFilter) siteFilter.style.display = showMarketplaceSync ? 'flex' : 'none';
   loadOrders();
 }
 
@@ -3714,12 +3745,28 @@ function getFilteredOrders() {
   const excludePending = isExcludePending();
   // 취소 상태 식별 — CARD/ETC (status_seq) + 마켓플레이스 (네이버: CANCELED/RETURNED/EXCHANGED, 쿠팡: CANCEL/RETURNS)
   const MK_CANCELED = ['CANCELED','RETURNED','EXCHANGED','CANCEL','RETURNS'];
+  // 주문사이트 필터 — 답례품 카테고리 전용. 정보입력현황 SITE_CATS 와 동일 매칭 규칙.
+  //   UI 미노출 (dashCategory !== 'daeryepum') 이면 모든 주문 통과.
+  const ORD_SITE_CATS = [
+    { key: 'card',    match: o => o.order_type === 'CARD' },
+    { key: 'etc',     match: o => o.order_type === 'ETC' },
+    { key: 'nv_card', match: o => o.order_type === 'NAVER' && /바른손/i.test(String(o.site_name || '') + '|' + String(o.naver_store_id || '')) },
+    { key: 'nv_tnt',  match: o => o.order_type === 'NAVER' && /테넷텐|tenetten|tnt/i.test(String(o.site_name || '') + '|' + String(o.naver_store_id || '')) },
+    { key: 'coupang', match: o => o.order_type === 'COUPANG' },
+    { key: 'manual',  match: o => o.order_type === 'MANUAL' },
+  ];
+  const siteFilterVisible = document.getElementById('ord-site-filter')?.style.display !== 'none';
+  const activeOrdSiteKeys = siteFilterVisible
+    ? new Set([...document.querySelectorAll('#ord-site-filter input:checked')].map(cb => cb.dataset.ordSite))
+    : null;
   return ordersData.filter(r => {
     // 취소주문 제외 (CARD/ETC: status_seq 3/5, 마켓플레이스: status 문자열)
     if (excludeCancel && (r.status_seq === 3 || r.status_seq === 5 || MK_CANCELED.includes(r.status))) return false;
     // 결제대기 제외 — settle_date 가 없는 '실제 미결제' 주문 기준
     //   status_seq=1 (결제대기) 또는 9 (초안컨펌완료/결제대기) + settle_date 없음.
     if (excludePending && (r.status_seq === 1 || r.status_seq === 9) && !r.settle_date) return false;
+    // 주문사이트 필터 (답례품 카테고리 활성 시만)
+    if (activeOrdSiteKeys && !ORD_SITE_CATS.some(c => activeOrdSiteKeys.has(c.key) && c.match(r))) return false;
     // 상품코드/명 검색
     if (q) {
       const code = (r.card_code || '').toLowerCase();
