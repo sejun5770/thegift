@@ -4235,7 +4235,10 @@ async function loadPsProductList() {
   try {
     const cat = (typeof dashCategory !== 'undefined' && dashCategory) ? dashCategory : 'daeryepum';
     const res = await fetch(`${API}/api/bg/products/sales-list?days=180&category=${encodeURIComponent(cat)}`);
-    _psAllProducts = await res.json();
+    const j = await res.json();
+    // 서버 500 or 인증 실패 시 응답이 { error: ... } 로 옴 → Array 아니면 안전하게 빈배열.
+    _psAllProducts = Array.isArray(j) ? j : [];
+    if (!Array.isArray(j)) console.warn('[loadPsProductList] 응답이 배열 아님:', j?.error || j);
   } catch (e) {
     console.error('[loadPsProductList]', e);
     _psAllProducts = [];
@@ -6277,8 +6280,14 @@ function analyzeDailyVolatility(summary) {
 }
 
 function renderSummary(summary, lt, orderCounts) {
+  // apiDashboardSummary 500 → summary 가 배열 아닌 { error: ... } 로 옴 →
+  //   forEach 크래시로 대시보드 렌더 전체 중단. Array 로 정규화 후 진행.
+  if (!Array.isArray(summary)) {
+    console.warn('[renderSummary] 응답이 배열 아님 (skip):', summary?.error || summary);
+    summary = [];
+  }
   dashboardSummaryData = summary;
-  dashboardOrderCounts = orderCounts || [];
+  dashboardOrderCounts = Array.isArray(orderCounts) ? orderCounts : [];
   let totalAmt=0, totalQty=0;
   summary.forEach(r => { totalAmt += r.total_amount||0; totalQty += r.total_qty||0; });
   const uniqueDays = [...new Set(summary.map(r=>r.order_day))].length;
