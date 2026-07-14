@@ -7978,6 +7978,73 @@ const server = http.createServer(async (req, res) => {
           let raw = ''; req.on('data', c => raw += c); req.on('end', () => { try { resolve(JSON.parse(raw||'{}')); } catch (e) { reject(e); } });
         });
         data = await apiVendorSettlementUnmark(body, session);
+      } else if (pathname === '/api/debug/purchase-decide-columns') {
+        // 구매확정일 관련 컬럼 조사 — custom_order / CUSTOM_ETC_ORDER 스키마 검색
+        //   컬럼명에 decide/confirm/purchase/finish/complete/end 포함된 것 반환.
+        //   각 컬럼마다 최근 1건 샘플 값도 함께 (NOT NULL 우선).
+        logAdminAccess(session, req, 'debug-purchase-columns', {});
+        const pp = await getPool();
+        const colsRes = await pp.request().query(`
+          SELECT TABLE_NAME AS table_name, COLUMN_NAME AS column_name, DATA_TYPE AS data_type
+          FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_NAME IN ('custom_order','CUSTOM_ETC_ORDER')
+            AND (LOWER(COLUMN_NAME) LIKE '%confirm%'
+              OR LOWER(COLUMN_NAME) LIKE '%decide%'
+              OR LOWER(COLUMN_NAME) LIKE '%purchase%'
+              OR LOWER(COLUMN_NAME) LIKE '%finish%'
+              OR LOWER(COLUMN_NAME) LIKE '%complete%'
+              OR LOWER(COLUMN_NAME) LIKE '%end%'
+              OR LOWER(COLUMN_NAME) LIKE '%deliver%'
+              OR LOWER(COLUMN_NAME) LIKE '%receipt%'
+              OR LOWER(COLUMN_NAME) LIKE '%decid%')
+          ORDER BY TABLE_NAME, ORDINAL_POSITION
+        `);
+        const columns = colsRes.recordset || [];
+        // 각 컬럼마다 최근 NOT NULL 샘플 하나
+        const samples = {};
+        for (const c of columns) {
+          const key = `${c.table_name}.${c.column_name}`;
+          try {
+            const rs = await pp.request().query(`
+              SELECT TOP 1 [${c.column_name}] AS v, order_seq
+              FROM [${c.table_name}] WITH (NOLOCK)
+              WHERE [${c.column_name}] IS NOT NULL
+              ORDER BY order_seq DESC
+            `);
+            samples[key] = rs.recordset[0] ? { value: rs.recordset[0].v, order_seq: rs.recordset[0].order_seq } : null;
+          } catch (e) { samples[key] = { error: e.message }; }
+        }
+        // 전체 컬럼 목록도 참고용 (첫 페이지만)
+        const allColsRes = await pp.request().query(`
+          SELECT TABLE_NAME AS table_name, COUNT(*) AS total_columns
+          FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_NAME IN ('custom_order','CUSTOM_ETC_ORDER')
+          GROUP BY TABLE_NAME
+        `);
+        data = {
+          matched_columns: columns,
+          samples,
+          table_summary: allColsRes.recordset,
+          hint: 'matched_columns 에 나온 것들이 구매확정 후보. samples 값 (날짜/상태) 확인해서 어느 컬럼이 진짜 구매확정일인지 판단.',
+        };
+      } else if (pathname === '/api/debug/naver-purchase-decided') {
+        // 네이버 구매확정 (PURCHASE_DECIDED) 주문의 raw_payload 조회 — 어떤 필드에 확정 시점이 있는지 진단.
+        logAdminAccess(session, req, 'debug-naver-purchase', {});
+        try {
+          const bgStore = require('./barungift/store');
+          if (!bgStore.USE_SUPABASE && !process.env.SUPABASE_URL) {
+            data = { error: 'Supabase 미설정' };
+          } else {
+            const REST = `${process.env.SUPABASE_URL}/rest/v1`;
+            const hdr = { apikey: process.env.SUPABASE_ANON_KEY, Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}` };
+            const r = await fetch(`${REST}/naver_orders?select=product_order_id,order_id,status,status_label,ordered_at,paid_at,raw_payload,synced_at&status=eq.PURCHASE_DECIDED&order=synced_at.desc&limit=5`, { headers: hdr });
+            if (!r.ok) { data = { error: `Supabase [${r.status}]: ${(await r.text()).slice(0,200)}` }; }
+            else {
+              const rows = await r.json();
+              data = { count: rows.length, samples: rows, hint: 'raw_payload 안 decisionDate / purchaseConfirmedDate / completedDate 등 확정 시점 필드 확인' };
+            }
+          }
+        } catch (e) { data = { error: e.message }; }
       } else if (pathname === '/api/debug-order') {
         // 주문 원시 데이터 확인용 (order_seq 파라미터)
         const seq = parseInt(parsed.query.order_seq);
