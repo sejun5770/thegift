@@ -8389,6 +8389,8 @@ const server = http.createServer(async (req, res) => {
         data = await naverSync.backfillConfirmedAt({
           offset: parseInt(body.offset) || 0,
           limit: parseInt(body.limit) || 100,
+          includeAllStatus: !!body.include_all_status,   // true 이면 취소 제외 전체 대상
+          alsoUpdateStatus: !!body.also_update_status,   // true 이면 detail 응답 status 로 우리 DB 도 정정
         });
       } else if (pathname === '/api/naver/sync-state') {
         // ?store=<id> 로 특정 스토어 조회. 미지정 시 모든 스토어 sync state 반환.

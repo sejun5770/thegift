@@ -415,14 +415,21 @@ async function syncRecent({ daysBack = 7 } = {}) {
  * 반환:
  *   { total, processed, offset_next, remaining, updated, no_change, failed, details }
  */
-async function backfillConfirmedAt({ offset = 0, limit = 100 } = {}) {
+async function backfillConfirmedAt({ offset = 0, limit = 100, includeAllStatus = false, alsoUpdateStatus = false } = {}) {
   if (!store.USE_SUPABASE) return { error: 'Supabase 미설정' };
   if (!api.isConfigured()) return { error: 'Naver API 키 미설정' };
 
-  // 1) 대상 fetch — status=PURCHASE_DECIDED AND confirmed_at IS NULL
+  // 1) 대상 fetch
+  //    · includeAllStatus=false (기본): status=PURCHASE_DECIDED 만 (정확)
+  //    · includeAllStatus=true         : 취소 제외 전체 (우리 DB 상태가 stale 한 케이스 커버)
+  //      네이버 실제 상태와 우리 DB 상태가 어긋난 케이스 (예: 실제 확정됐는데 DB 는
+  //      DELIVERED 로 남아있음) 를 잡기 위해 사용.
   const REST = `${process.env.SUPABASE_URL}/rest/v1`;
   const hdr = { apikey: process.env.SUPABASE_ANON_KEY, Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}` };
-  const url = `${REST}/naver_orders?select=product_order_id,order_id,store_id,confirmed_at,status&status=eq.PURCHASE_DECIDED&confirmed_at=is.null&order=synced_at.asc&limit=${limit}&offset=${offset}`;
+  const statusFilter = includeAllStatus
+    ? '&status=not.in.(CANCELED,RETURNED,EXCHANGED)'
+    : '&status=eq.PURCHASE_DECIDED';
+  const url = `${REST}/naver_orders?select=product_order_id,order_id,store_id,confirmed_at,status${statusFilter}&confirmed_at=is.null&order=synced_at.asc&limit=${limit}&offset=${offset}`;
   const listRes = await fetch(url, { headers: hdr });
   if (!listRes.ok) return { error: `Supabase list [${listRes.status}]: ${(await listRes.text()).slice(0, 200)}` };
   const targets = await listRes.json();
@@ -477,11 +484,18 @@ async function backfillConfirmedAt({ offset = 0, limit = 100 } = {}) {
           continue;
         }
         const confirmedAt = new Date(raw).toISOString();
+        // alsoUpdateStatus=true 이면 detail 응답의 productOrderStatus 로 status 도 갱신.
+        //   우리 DB status 가 stale (예: DELIVERED) 인데 실제로는 PURCHASE_DECIDED 인 케이스 정정.
+        const patchBody = { confirmed_at: confirmedAt };
+        if (alsoUpdateStatus) {
+          const realStatus = po.productOrderStatus || null;
+          if (realStatus) patchBody.status = realStatus;
+        }
         const patchUrl = `${REST}/naver_orders?product_order_id=eq.${encodeURIComponent(pid)}&store_id=eq.${encodeURIComponent(sid)}`;
         const patchRes = await fetch(patchUrl, {
           method: 'PATCH',
           headers: { ...hdr, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
-          body: JSON.stringify({ confirmed_at: confirmedAt }),
+          body: JSON.stringify(patchBody),
         });
         if (!patchRes.ok) {
           result.details.push({ product_order_id: pid, status: 'failed', reason: `PATCH ${patchRes.status}` });
