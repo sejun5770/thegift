@@ -8373,6 +8373,23 @@ const server = http.createServer(async (req, res) => {
         data = await naverSync.syncRecent({
           daysBack: parseInt(body.days_back) || 7,
         });
+      } else if (pathname === '/api/naver/backfill-confirmed-at' && req.method === 'POST') {
+        // 오래된 PURCHASE_DECIDED 주문의 confirmed_at 채우기 — sync 로 안 잡히는
+        // 이전 주문들을 productOrderId 로 직접 detail 조회하여 채움.
+        //   body: { offset?: number, limit?: number (default 100) }
+        //   response: { total, processed, offset_next, remaining, updated, no_change, failed, details }
+        logAdminAccess(session, req, 'naver-backfill-confirmed', {});
+        const body = await new Promise((resolve) => {
+          let raw = ''; req.on('data', c => raw += c);
+          req.on('end', () => {
+            try { resolve(raw ? JSON.parse(raw) : {}); } catch { resolve({}); }
+          });
+        });
+        const naverSync = require('./naver/sync');
+        data = await naverSync.backfillConfirmedAt({
+          offset: parseInt(body.offset) || 0,
+          limit: parseInt(body.limit) || 100,
+        });
       } else if (pathname === '/api/naver/sync-state') {
         // ?store=<id> 로 특정 스토어 조회. 미지정 시 모든 스토어 sync state 반환.
         const naverStore = require('./naver/store');

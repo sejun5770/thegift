@@ -398,4 +398,106 @@ async function syncRecent({ daysBack = 7 } = {}) {
   return { stores: results, total };
 }
 
-module.exports = { syncRecent, syncOneStore, normalizeOrder, STATUS_LABEL };
+/**
+ * confirmed_at backfill — 이미 저장된 PURCHASE_DECIDED 주문의 confirmed_at NULL 인 것들만
+ *   네이버 detail API 로 재조회 → productOrder.decisionDate 를 저장.
+ *
+ *   기존 syncRecent 는 최근 변경된 주문만 fetch. 오래 전 확정된 주문은 status
+ *   변화 없어 재fetch 안 됨 → 이 endpoint 로 개별 productOrderId 조회.
+ *
+ *   청크 처리: chunk 당 100건 (네이버 spec 상 productOrderIds 최대 300). 프록시
+ *   60초 timeout 안전.
+ *
+ * 파라미터:
+ *   offset  대상 rows 중 skip 개수 (반복 호출용)
+ *   limit   이번 호출에서 처리할 개수 (default 100)
+ *
+ * 반환:
+ *   { total, processed, offset_next, remaining, updated, no_change, failed, details }
+ */
+async function backfillConfirmedAt({ offset = 0, limit = 100 } = {}) {
+  if (!store.USE_SUPABASE) return { error: 'Supabase 미설정' };
+  if (!api.isConfigured()) return { error: 'Naver API 키 미설정' };
+
+  // 1) 대상 fetch — status=PURCHASE_DECIDED AND confirmed_at IS NULL
+  const REST = `${process.env.SUPABASE_URL}/rest/v1`;
+  const hdr = { apikey: process.env.SUPABASE_ANON_KEY, Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}` };
+  const url = `${REST}/naver_orders?select=product_order_id,order_id,store_id,confirmed_at,status&status=eq.PURCHASE_DECIDED&confirmed_at=is.null&order=synced_at.asc&limit=${limit}&offset=${offset}`;
+  const listRes = await fetch(url, { headers: hdr });
+  if (!listRes.ok) return { error: `Supabase list [${listRes.status}]: ${(await listRes.text()).slice(0, 200)}` };
+  const targets = await listRes.json();
+  const total = targets.length;
+  if (!total) return { total: 0, processed: 0, offset_next: offset, remaining: 0, updated: 0, no_change: 0, failed: 0, details: [] };
+
+  // 2) 스토어별 productOrderId 그룹핑
+  const stores = api.getStores();
+  const storeMap = new Map(stores.map(s => [s.id, s]));
+  const byStore = new Map();
+  for (const t of targets) {
+    const sid = t.store_id || 'main';
+    if (!byStore.has(sid)) byStore.set(sid, []);
+    byStore.get(sid).push(String(t.product_order_id));
+  }
+
+  const result = { total, processed: 0, offset_next: offset + total, remaining: 0, updated: 0, no_change: 0, failed: 0, details: [] };
+
+  // 3) 스토어별로 detail 조회 + confirmed_at 저장
+  for (const [sid, pids] of byStore) {
+    const sc = storeMap.get(sid);
+    if (!sc) {
+      pids.forEach(pid => result.details.push({ product_order_id: pid, status: 'skipped', reason: 'store not configured' }));
+      result.failed += pids.length;
+      continue;
+    }
+    // 네이버 spec 상 100~300 개 배치 가능. 여기선 이미 상위 limit 제어라 통째로.
+    try {
+      const detailRes = await api.queryProductOrders(sc, pids);
+      const arr = detailRes?.data?.contents || detailRes?.data?.productOrders || detailRes?.data || [];
+      const detailByPid = new Map();
+      for (const item of (Array.isArray(arr) ? arr : [])) {
+        const po = item.productOrder || item;
+        const pid = String(po.productOrderId || '');
+        if (pid) detailByPid.set(pid, item);
+      }
+      for (const pid of pids) {
+        const item = detailByPid.get(pid);
+        if (!item) {
+          result.details.push({ product_order_id: pid, status: 'failed', reason: 'detail not returned' });
+          result.failed += 1;
+          continue;
+        }
+        const po = item.productOrder || item;
+        const order = item.order || {};
+        const raw = po.decisionDate || po.purchaseDecidedDate || po.completedDate || po.confirmDate
+          || order.decisionDate || order.purchaseDecidedDate || order.completedDate || order.confirmDate
+          || null;
+        if (!raw) {
+          result.details.push({ product_order_id: pid, status: 'no_change', reason: 'no confirm date in response' });
+          result.no_change += 1;
+          continue;
+        }
+        const confirmedAt = new Date(raw).toISOString();
+        const patchUrl = `${REST}/naver_orders?product_order_id=eq.${encodeURIComponent(pid)}&store_id=eq.${encodeURIComponent(sid)}`;
+        const patchRes = await fetch(patchUrl, {
+          method: 'PATCH',
+          headers: { ...hdr, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+          body: JSON.stringify({ confirmed_at: confirmedAt }),
+        });
+        if (!patchRes.ok) {
+          result.details.push({ product_order_id: pid, status: 'failed', reason: `PATCH ${patchRes.status}` });
+          result.failed += 1;
+        } else {
+          result.updated += 1;
+        }
+      }
+    } catch (e) {
+      pids.forEach(pid => result.details.push({ product_order_id: pid, status: 'failed', reason: e.message }));
+      result.failed += pids.length;
+    }
+  }
+
+  result.processed = result.updated + result.no_change + result.failed;
+  return result;
+}
+
+module.exports = { syncRecent, syncOneStore, normalizeOrder, STATUS_LABEL, backfillConfirmedAt };
