@@ -7842,6 +7842,12 @@ function renderMarketing(mk) {
   });
   const reorderTableEl = document.getElementById('reorder-table-view');
   if (reorderTableEl) reorderTableEl.innerHTML = '';
+  // 마케팅 endpoint 가 500 등으로 실패 or 빈 응답이면 여기서 안전 skip.
+  //   (예: { error: '...' } 응답 → conversion undefined → 이하 접근 시 TypeError.)
+  if (!mk || typeof mk !== 'object' || !mk.conversion) {
+    console.warn('[marketing] 응답 스키마 이상 (skip):', mk?.error || mk);
+    return;
+  }
   const c = mk.conversion;
   document.getElementById('mk-card-members').textContent = fmtNum(c.card_members) + '명';
   document.getElementById('mk-cross').textContent = fmtNum(c.cross_buy) + '명';
