@@ -8033,6 +8033,40 @@ const server = http.createServer(async (req, res) => {
           table_summary: allColsRes.recordset,
           hint: 'matched_columns 에 나온 것들이 구매확정 후보. samples 값 (날짜/상태) 확인해서 어느 컬럼이 진짜 구매확정일인지 판단.',
         };
+      } else if (pathname === '/api/debug/naver-order-raw') {
+        // 네이버 detail API 직접 호출 — productOrderId 로 실제 응답 원본 반환.
+        //   확정일 필드명 진단용. 저장된 raw_payload 대신 실시간 fetch.
+        logAdminAccess(session, req, 'debug-naver-raw', { pid: parsed.query.product_order_id });
+        try {
+          const pid = String(parsed.query.product_order_id || '').trim();
+          if (!pid) { data = { error: 'product_order_id 파라미터 필요' }; }
+          else {
+            const naverApi = require('./naver/api');
+            const stores = naverApi.getStores();
+            // 스토어별 시도 — 첫 성공 응답 반환
+            for (const st of stores) {
+              try {
+                const res = await naverApi.queryProductOrders(st, [pid]);
+                const arr = res?.data?.contents || res?.data?.productOrders || res?.data || [];
+                if (Array.isArray(arr) && arr.length) {
+                  const item = arr[0];
+                  data = {
+                    store_id: st.id,
+                    product_order_id: pid,
+                    po_keys: Object.keys(item.productOrder || item || {}),
+                    order_keys: Object.keys(item.order || {}),
+                    productOrder: item.productOrder || item,
+                    order: item.order,
+                    status: (item.productOrder || item).productOrderStatus,
+                    hint: 'productOrder 안 date/Date 로 끝나는 필드 확인 → 어느 게 구매확정일인지 판정.',
+                  };
+                  break;
+                }
+              } catch (e) { /* try next store */ }
+            }
+            if (!data) data = { error: 'productOrderId 로 데이터 없음 (모든 스토어)' };
+          }
+        } catch (e) { data = { error: e.message }; }
       } else if (pathname === '/api/debug/naver-purchase-decided') {
         // 네이버 구매확정 (PURCHASE_DECIDED) 주문의 raw_payload 조회 — 어떤 필드에 확정 시점이 있는지 진단.
         logAdminAccess(session, req, 'debug-naver-purchase', {});
