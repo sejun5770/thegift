@@ -9255,7 +9255,18 @@ function renderDailyTable(data, topProducts) {
     });
     const order = [...set];
     order.sort((a, b) => {
-      const score = g => g === '바른손몰' ? 1 : (g === '쿠팡' ? 2 : (g === '쿠팡 로켓그로스' ? 2.5 : (g === '네이버' ? 3 : (g === '기타' ? 4 : 0))));
+      const score = g => {
+        if (g === '바른손몰') return 1;
+        if (g === '바른손카드' || g === '바른손M카드') return 2;
+        if (g === '바른손더기프트') return 3;
+        if (g === '쿠팡') return 4;
+        if (g === '쿠팡 로켓그로스') return 5;
+        if (g.startsWith('네이버(바른손')) return 6;   // 네이버(바른손카드) 등
+        if (g.startsWith('네이버(테넷')) return 7;      // 네이버(테넷텐) 등
+        if (g.startsWith('네이버')) return 8;           // 기타 네이버 스토어
+        if (g === '기타') return 99;
+        return 50;   // 신규 그룹은 뒤쪽
+      };
       return score(a) - score(b);
     });
     return order;
@@ -9615,7 +9626,18 @@ function renderWeeklyTable(data, topProducts) {
     });
     const order = [...set];
     order.sort((a, b) => {
-      const score = g => g === '바른손몰' ? 1 : (g === '쿠팡' ? 2 : (g === '쿠팡 로켓그로스' ? 2.5 : (g === '네이버' ? 3 : (g === '기타' ? 4 : 0))));
+      const score = g => {
+        if (g === '바른손몰') return 1;
+        if (g === '바른손카드' || g === '바른손M카드') return 2;
+        if (g === '바른손더기프트') return 3;
+        if (g === '쿠팡') return 4;
+        if (g === '쿠팡 로켓그로스') return 5;
+        if (g.startsWith('네이버(바른손')) return 6;   // 네이버(바른손카드) 등
+        if (g.startsWith('네이버(테넷')) return 7;      // 네이버(테넷텐) 등
+        if (g.startsWith('네이버')) return 8;           // 기타 네이버 스토어
+        if (g === '기타') return 99;
+        return 50;   // 신규 그룹은 뒤쪽
+      };
       return score(a) - score(b);
     });
     return order;
