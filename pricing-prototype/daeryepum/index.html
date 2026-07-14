@@ -2458,16 +2458,23 @@ nav.nav-loading a[href^="#"] {
         window._BG_DEFAULT_GUIDE_TITLE = '커스텀 안내';
       </script>
 
-      <!-- 대시보드 canonical 그룹 — 상품별 매출 통합 집계 (migration 033) -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;background:#eff6ff;padding:10px;border-radius:8px;border:1px dashed #93c5fd">
-        <div>
-          <label style="display:block;font-size:11px;color:#1e40af;margin-bottom:4px" title="같은 상품인데 코드/이름이 다른 여러 상품을 하나로 묶어 대시보드 상품별 매출에서 통합 집계. 관리자 자유 입력 (예: '메이플_호두정과'). 같은 값을 입력한 상품끼리 같은 그룹.">🔗 canonical 그룹 키</label>
-          <input type="text" id="bg-p-meta-canon-key" list="bg-canonical-groups" placeholder="예: 메이플_호두정과 (비워두면 자동)" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
-          <datalist id="bg-canonical-groups"><!-- 동적 주입 (기존 canonical_group_key 목록) --></datalist>
-        </div>
-        <div>
-          <label style="display:block;font-size:11px;color:#1e40af;margin-bottom:4px" title="대시보드 상품별 매출에 표시될 대표 이름. 비워두면 제품명 사용.">대시보드 표시명</label>
-          <input type="text" id="bg-p-meta-canon-name" placeholder="비워두면 제품명 사용" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
+      <!-- 대시보드 ERP 코드 매핑 — 상품별 매출 통합 집계 (migration 033 재사용) -->
+      <div style="background:#eff6ff;padding:10px;border-radius:8px;border:1px dashed #93c5fd">
+        <p style="font-size:11px;color:#1e40af;margin-bottom:8px;line-height:1.5">
+          <b>📊 대시보드 매출 통합 (ERP 코드 매핑)</b><br>
+          · <b>일반 상품</b> (호두정과 등): 상품코드 <code>TGJSD04D4_A/B/C</code> → 자동으로 <code>TGJSD04D4</code> 로 통합. <b>비워두면 됩니다.</b><br>
+          · <b>수건류 등 예외</b>: 상품코드 (<code>TGJBK09O6_A</code>) 와 ERP코드 (<code>TGJBK09D3</code>) 가 완전 다르면 아래에 ERP 코드 직접 입력.
+        </p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div>
+            <label style="display:block;font-size:11px;color:#1e40af;margin-bottom:4px" title="상품코드와 ERP코드가 완전 다른 예외 케이스에만 입력. 같은 ERP 코드로 묶인 상품들의 매출이 통합됨.">🏷️ ERP 코드 (예외 매핑)</label>
+            <input type="text" id="bg-p-meta-canon-key" list="bg-canonical-groups" placeholder="예: TGJBK09D3 (비워두면 자동 규칙)" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
+            <datalist id="bg-canonical-groups"><!-- 동적 주입 (기존 ERP 코드 목록) --></datalist>
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;color:#1e40af;margin-bottom:4px" title="대시보드 상품별 매출에 표시될 대표 이름. 비워두면 제품명 사용.">대시보드 표시명</label>
+            <input type="text" id="bg-p-meta-canon-name" placeholder="비워두면 제품명 사용" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
+          </div>
         </div>
       </div>
 
