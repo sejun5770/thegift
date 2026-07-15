@@ -1558,6 +1558,10 @@ async function apiArtistSettlements(query = {}) {
           SELECT
             UPPER(RTRIM(LTRIM(c.Card_Code))) AS product_code,
             c.Card_Name AS product_name,
+            -- 사이트 분리 (커밋: 청첩장 제휴사 판매도 custom_order 에 저장, company_Seq 로 구분)
+            --   raw SiteName 그대로 (자사몰='바른손카드'/'바른손M카드', 제휴사=숫자 or NULL)
+            --   JS merge 에서 숫자/NULL 이면 etc, 실 이름이면 card 로 분류.
+            ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
             ISNULL(SUM(coi.item_count), 0) AS total_qty,
             ISNULL(SUM(
               CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)
@@ -1568,6 +1572,7 @@ async function apiArtistSettlements(query = {}) {
           FROM custom_order co WITH (NOLOCK)
           INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
           INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+          LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
           LEFT JOIN (
             SELECT coi_cpd.order_seq,
               SUM(CAST(coi_cpd.item_sale_price AS float) * coi_cpd.item_count
@@ -1586,7 +1591,8 @@ async function apiArtistSettlements(query = {}) {
             AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
             ${cardNullClause}
             AND ${cardDate} >= @s AND ${cardDate} < @e
-          GROUP BY UPPER(RTRIM(LTRIM(c.Card_Code))), c.Card_Name
+          GROUP BY UPPER(RTRIM(LTRIM(c.Card_Code))), c.Card_Name,
+            ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR))
         `),
       // ETC — 금액 비례 분배 (CARD 와 동일 패턴):
       //   · o.coupon_price 를 각 작가 아이템 gross 비율대로 배분 차감.
@@ -1641,6 +1647,10 @@ async function apiArtistSettlements(query = {}) {
     //   Supabase 쪽 원본 code 와 매칭하려면 동일하게 normalize 해서 lookup.
     const codeNormMap = new Map(); // normalized → original Supabase code
     for (const c of productCodes) codeNormMap.set(String(c).trim().toUpperCase(), c);
+    // site_name 이 순수 숫자 (제휴사 raw code) or NULL 이면 제휴사, 그 외 실 이름이면 자사몰.
+    //   custom_order 테이블에 저장된 제휴사 청첩장 판매 (예: company_Seq=7179) 를 etc_amount 로 분류.
+    //   ETC 테이블 결과는 무조건 etc 로 (기존 동작 유지).
+    const isAffiliateSiteRaw = s => !s || /^\d+$/.test(String(s).trim());
     const merge = (rows, channel) => {
       for (const r of rows) {
         const originalCode = codeNormMap.get(r.product_code) || r.product_code;
@@ -1654,9 +1664,16 @@ async function apiArtistSettlements(query = {}) {
         }
         const s = sales.get(originalCode);
         if (channel === 'card') {
-          s.card_qty += Number(r.total_qty) || 0;
-          s.card_amount += Number(r.total_amount) || 0;
+          // custom_order 결과라도 site_name 이 숫자면 제휴사 판매 → etc 로 재분류.
+          if (isAffiliateSiteRaw(r.site_name)) {
+            s.etc_qty += Number(r.total_qty) || 0;
+            s.etc_amount += Number(r.total_amount) || 0;
+          } else {
+            s.card_qty += Number(r.total_qty) || 0;
+            s.card_amount += Number(r.total_amount) || 0;
+          }
         } else {
+          // ETC 테이블 (CUSTOM_ETC_ORDER) 결과는 전량 etc 로.
           s.etc_qty += Number(r.total_qty) || 0;
           s.etc_amount += Number(r.total_amount) || 0;
         }
