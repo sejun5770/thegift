@@ -8064,6 +8064,18 @@ const server = http.createServer(async (req, res) => {
           const basis = (parsed.query.basis || 'settle').toLowerCase();
           const dateCol = basis === 'order' ? 'order_date' : 'settle_date';
           const nullClause = basis === 'order' ? '' : ` AND {ALIAS}.${dateCol} IS NOT NULL`;
+          // codes 파라미터 — 특정 상품 코드만 필터 (barshop1 리포트 1:1 대조용)
+          //   미지정 시 div 전체.
+          const codesParam = parsed.query.codes ? String(parsed.query.codes).split(',').map(s => s.trim()).filter(Boolean) : [];
+          const codesFilter = codesParam.length
+            ? ` AND UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesParam.map(c => `'${c.toUpperCase().replace(/'/g, "''")}'`).join(',')})`
+            : '';
+          const codesFilterX = codesParam.length
+            ? ` AND UPPER(RTRIM(LTRIM(c_x.Card_Code))) IN (${codesParam.map(c => `'${c.toUpperCase().replace(/'/g, "''")}'`).join(',')})`
+            : '';
+          const codesFilterY = codesParam.length
+            ? ` AND UPPER(RTRIM(LTRIM(c_y.Card_Code))) IN (${codesParam.map(c => `'${c.toUpperCase().replace(/'/g, "''")}'`).join(',')})`
+            : '';
           const pp = await getPool();
           // 1) custom_order (CARD 테이블) — SiteInfo 로 자사몰/제휴사 분리 + point/coupon 별도 SUM
           //    같은 주문 (order_seq) 이 여러 아이템 가지면 point/coupon 중복 SUM 방지 위해
@@ -8087,6 +8099,7 @@ const server = http.createServer(async (req, res) => {
                   FROM CUSTOM_ORDER_COUPON WITH (NOLOCK) GROUP BY ORDER_SEQ
                 ) coc ON co.order_seq = coc.ORDER_SEQ
                 WHERE c_x.Card_Div = '${div}'
+                  ${codesFilterX}
                   AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
                   ${nullClause.replace('{ALIAS}', 'co')}
                   AND co.${dateCol} >= @s AND co.${dateCol} < @e
@@ -8112,6 +8125,7 @@ const server = http.createServer(async (req, res) => {
               LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
               INNER JOIN order_level ol ON co.order_seq = ol.order_seq
               WHERE c.Card_Div = '${div}'
+                ${codesFilter}
                 AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
                 ${nullClause.replace('{ALIAS}', 'co')}
                 AND co.${dateCol} >= @s AND co.${dateCol} < @e
@@ -8142,6 +8156,7 @@ const server = http.createServer(async (req, res) => {
                 INNER JOIN custom_order_item coi_y WITH (NOLOCK) ON co_inner.order_seq = coi_y.order_seq
                 INNER JOIN S2_Card c_y WITH (NOLOCK) ON coi_y.card_seq = c_y.Card_Seq
                 WHERE c_y.Card_Div = '${div}'
+                  ${codesFilterY}
                   AND co_inner.status_seq >= 2 AND co_inner.status_seq NOT IN (3, 5, 9)
                   ${nullClause.replace('{ALIAS}', 'co_inner')}
                   AND co_inner.${dateCol} >= @s AND co_inner.${dateCol} < @e
@@ -8171,6 +8186,7 @@ const server = http.createServer(async (req, res) => {
               INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
               INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
               WHERE c.Card_Div = '${div}'
+                ${codesFilter}
                 AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
                 ${nullClause.replace('{ALIAS}', 'o')}
                 AND o.${dateCol} >= @s AND o.${dateCol} < @e
