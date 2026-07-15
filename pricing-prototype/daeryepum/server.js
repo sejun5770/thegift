@@ -8065,29 +8065,92 @@ const server = http.createServer(async (req, res) => {
           const dateCol = basis === 'order' ? 'order_date' : 'settle_date';
           const nullClause = basis === 'order' ? '' : ` AND {ALIAS}.${dateCol} IS NOT NULL`;
           const pp = await getPool();
-          // 1) custom_order (CARD 테이블) — SiteInfo 로 자사몰/제휴사 분리
+          // 1) custom_order (CARD 테이블) — SiteInfo 로 자사몰/제휴사 분리 + point/coupon 별도 SUM
+          //    같은 주문 (order_seq) 이 여러 아이템 가지면 point/coupon 중복 SUM 방지 위해
+          //    order-level 소계는 별도 서브쿼리로 계산.
           const cardRs = await pp.request()
+            .input('s', sql.VarChar, start)
+            .input('e', sql.VarChar, end)
+            .query(`
+              -- A01 주문의 order-level 정보 (order_seq 단위, point/coupon 중복 방지)
+              WITH order_level AS (
+                SELECT DISTINCT
+                  co.order_seq,
+                  co.company_Seq,
+                  ISNULL(co.point_price, 0) AS point_price,
+                  ISNULL(coc.coupon_amt, 0) AS coupon_amt
+                FROM custom_order co WITH (NOLOCK)
+                INNER JOIN custom_order_item coi_x WITH (NOLOCK) ON co.order_seq = coi_x.order_seq
+                INNER JOIN S2_Card c_x WITH (NOLOCK) ON coi_x.card_seq = c_x.Card_Seq
+                LEFT JOIN (
+                  SELECT ORDER_SEQ, SUM(ISNULL(COUPON_AMT, 0)) AS coupon_amt
+                  FROM CUSTOM_ORDER_COUPON WITH (NOLOCK) GROUP BY ORDER_SEQ
+                ) coc ON co.order_seq = coc.ORDER_SEQ
+                WHERE c_x.Card_Div = '${div}'
+                  AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+                  ${nullClause.replace('{ALIAS}', 'co')}
+                  AND co.${dateCol} >= @s AND co.${dateCol} < @e
+              )
+              SELECT
+                CASE
+                  WHEN si.SiteName IS NULL THEN 'affiliate_raw_null'
+                  WHEN si.SiteName LIKE '%[^0-9]%' THEN 'card_named'
+                  ELSE 'affiliate_numeric'
+                END AS bucket,
+                COUNT(DISTINCT co.order_seq) AS order_count,
+                ISNULL(SUM(coi.item_count), 0) AS total_qty,
+                ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count
+                       / ISNULL(NULLIF(c.Unit_Value, 0), 1)), 0) AS gross_amount,
+                -- point/coupon 은 order-level (중복 방지 위해 서브쿼리 조인, item 조인 X)
+                ISNULL(SUM(ol.point_price) / NULLIF(COUNT(*), 0)
+                       * COUNT(DISTINCT co.order_seq), 0) AS point_sum_approx,
+                ISNULL(SUM(ol.coupon_amt) / NULLIF(COUNT(*), 0)
+                       * COUNT(DISTINCT co.order_seq), 0) AS coupon_sum_approx
+              FROM custom_order co WITH (NOLOCK)
+              INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+              INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+              LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+              INNER JOIN order_level ol ON co.order_seq = ol.order_seq
+              WHERE c.Card_Div = '${div}'
+                AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+                ${nullClause.replace('{ALIAS}', 'co')}
+                AND co.${dateCol} >= @s AND co.${dateCol} < @e
+              GROUP BY CASE
+                WHEN si.SiteName IS NULL THEN 'affiliate_raw_null'
+                WHEN si.SiteName LIKE '%[^0-9]%' THEN 'card_named'
+                ELSE 'affiliate_numeric'
+              END
+            `);
+          // 2b) point/coupon 정확 집계 — order-level distinct SUM (item 조인 없이)
+          const orderLevelRs = await pp.request()
             .input('s', sql.VarChar, start)
             .input('e', sql.VarChar, end)
             .query(`
               SELECT
                 CASE
                   WHEN si.SiteName IS NULL THEN 'affiliate_raw_null'
-                  WHEN si.SiteName LIKE '%[^0-9]%' THEN 'card_named'   -- 실 이름 (문자 포함)
-                  ELSE 'affiliate_numeric'                              -- 숫자만
+                  WHEN si.SiteName LIKE '%[^0-9]%' THEN 'card_named'
+                  ELSE 'affiliate_numeric'
                 END AS bucket,
-                COUNT(DISTINCT co.order_seq) AS order_count,
-                ISNULL(SUM(coi.item_count), 0) AS total_qty,
-                ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count
-                       / ISNULL(NULLIF(c.Unit_Value, 0), 1)), 0) AS gross_amount
-              FROM custom_order co WITH (NOLOCK)
-              INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
-              INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                COUNT(*) AS order_count_distinct,
+                ISNULL(SUM(ISNULL(co.point_price, 0)), 0) AS point_sum,
+                ISNULL(SUM(ISNULL(coc.coupon_amt, 0)), 0) AS coupon_sum
+              FROM (
+                SELECT DISTINCT co_inner.order_seq, co_inner.company_Seq,
+                       co_inner.point_price, co_inner.settle_date, co_inner.order_date
+                FROM custom_order co_inner WITH (NOLOCK)
+                INNER JOIN custom_order_item coi_y WITH (NOLOCK) ON co_inner.order_seq = coi_y.order_seq
+                INNER JOIN S2_Card c_y WITH (NOLOCK) ON coi_y.card_seq = c_y.Card_Seq
+                WHERE c_y.Card_Div = '${div}'
+                  AND co_inner.status_seq >= 2 AND co_inner.status_seq NOT IN (3, 5, 9)
+                  ${nullClause.replace('{ALIAS}', 'co_inner')}
+                  AND co_inner.${dateCol} >= @s AND co_inner.${dateCol} < @e
+              ) co
               LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
-              WHERE c.Card_Div = '${div}'
-                AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
-                ${nullClause.replace('{ALIAS}', 'co')}
-                AND co.${dateCol} >= @s AND co.${dateCol} < @e
+              LEFT JOIN (
+                SELECT ORDER_SEQ, SUM(ISNULL(COUPON_AMT, 0)) AS coupon_amt
+                FROM CUSTOM_ORDER_COUPON WITH (NOLOCK) GROUP BY ORDER_SEQ
+              ) coc ON co.order_seq = coc.ORDER_SEQ
               GROUP BY CASE
                 WHEN si.SiteName IS NULL THEN 'affiliate_raw_null'
                 WHEN si.SiteName LIKE '%[^0-9]%' THEN 'card_named'
@@ -8119,7 +8182,7 @@ const server = http.createServer(async (req, res) => {
           const setTotal = settlement?.totals?.total_amount || 0;
           const setCard = (settlement?.by_product || []).reduce((s, p) => s + (p.card_amount || 0), 0);
           const setEtc  = (settlement?.by_product || []).reduce((s, p) => s + (p.etc_amount  || 0), 0);
-          // raw 집계
+          // raw 집계 — gross (item 조인 합) + point/coupon (order-level distinct 합)
           const rawBuckets = { card_named: 0, affiliate_numeric: 0, affiliate_raw_null: 0 };
           let rawOrders = 0, rawQty = 0;
           for (const r of cardRs.recordset) {
@@ -8127,8 +8190,21 @@ const server = http.createServer(async (req, res) => {
             rawOrders += r.order_count;
             rawQty += r.total_qty;
           }
+          // point/coupon 은 order-level SUM (item 조인 없이) — 정확 값
+          const pointBuckets = { card_named: 0, affiliate_numeric: 0, affiliate_raw_null: 0 };
+          const couponBuckets = { card_named: 0, affiliate_numeric: 0, affiliate_raw_null: 0 };
+          for (const r of orderLevelRs.recordset) {
+            pointBuckets[r.bucket] = Math.round(r.point_sum);
+            couponBuckets[r.bucket] = Math.round(r.coupon_sum);
+          }
           const rawCard = rawBuckets.card_named;
           const rawEtc  = rawBuckets.affiliate_numeric + rawBuckets.affiliate_raw_null;
+          const cardPoint = pointBuckets.card_named;
+          const cardCoupon = couponBuckets.card_named;
+          const etcPoint = pointBuckets.affiliate_numeric + pointBuckets.affiliate_raw_null;
+          const etcCoupon = couponBuckets.affiliate_numeric + couponBuckets.affiliate_raw_null;
+          const cardNet = rawCard - cardPoint - cardCoupon;
+          const etcNet  = rawEtc  - etcPoint  - etcCoupon;
           const etcTable = etcRs.recordset[0] || { order_count: 0, total_qty: 0, gross_amount: 0 };
           const rawEtcTable = Math.round(etcTable.gross_amount);
           const grandRaw = rawCard + rawEtc + rawEtcTable;
@@ -8136,12 +8212,17 @@ const server = http.createServer(async (req, res) => {
             period: { start, end, basis, div },
             raw_from_barshop1: {
               custom_order: {
-                card_named: rawCard,
-                affiliate_numeric: rawBuckets.affiliate_numeric,
-                affiliate_raw_null: rawBuckets.affiliate_raw_null,
+                card_named:         { gross: rawCard, point: cardPoint, coupon: cardCoupon, net: cardNet },
+                affiliate_numeric:  { gross: rawBuckets.affiliate_numeric, point: pointBuckets.affiliate_numeric, coupon: couponBuckets.affiliate_numeric,
+                                      net: rawBuckets.affiliate_numeric - pointBuckets.affiliate_numeric - couponBuckets.affiliate_numeric },
+                affiliate_raw_null: { gross: rawBuckets.affiliate_raw_null, point: pointBuckets.affiliate_raw_null, coupon: couponBuckets.affiliate_raw_null,
+                                      net: rawBuckets.affiliate_raw_null - pointBuckets.affiliate_raw_null - couponBuckets.affiliate_raw_null },
                 orders: rawOrders,
                 qty: rawQty,
-                subtotal: rawCard + rawEtc,
+                subtotal_gross: rawCard + rawEtc,
+                subtotal_point: cardPoint + etcPoint,
+                subtotal_coupon: cardCoupon + etcCoupon,
+                subtotal_net: cardNet + etcNet,
               },
               custom_etc_order: {
                 gross: rawEtcTable,
@@ -8149,6 +8230,7 @@ const server = http.createServer(async (req, res) => {
                 qty: etcTable.total_qty,
               },
               grand_total_gross: grandRaw,
+              grand_total_net: cardNet + etcNet + rawEtcTable,
             },
             settlement_api: {
               total_amount: setTotal,
@@ -8157,11 +8239,14 @@ const server = http.createServer(async (req, res) => {
               product_count_with_sales: (settlement?.by_product || []).filter(p => p.total_amount > 0).length,
             },
             diff: {
-              // 정산은 bg_artist_products 등록 상품만 → raw 는 A01 전체이므로 raw > settlement 예상
-              raw_minus_settlement_total: grandRaw - setTotal,
-              raw_card_vs_settlement_card: rawCard - Math.round(setCard),
-              raw_etc_vs_settlement_etc: (rawEtc + rawEtcTable) - Math.round(setEtc),
-              hint: '정산은 bg_artist_products 활성 상품만 집계 → raw 는 A01 전체이므로 raw 가 더 큼 = 미등록 상품. 등록된 상품끼리는 card/etc 각각 일치해야 함.',
+              // 정산은 bg_artist_products 등록 상품만 → raw 는 A01 전체이므로 raw > settlement 예상.
+              // 정산 net = gross - point - coupon 이 정확하면 raw_card_net_vs_settlement 가 0 근처여야 함.
+              raw_gross_minus_settlement_total: grandRaw - setTotal,
+              raw_card_gross_vs_settlement_card: rawCard - Math.round(setCard),
+              raw_card_net_vs_settlement_card:   cardNet - Math.round(setCard),
+              raw_etc_gross_vs_settlement_etc: (rawEtc + rawEtcTable) - Math.round(setEtc),
+              raw_etc_net_vs_settlement_etc:   (etcNet + rawEtcTable) - Math.round(setEtc),
+              hint: 'net (gross - point - coupon) vs settlement 이 일치해야 정상. gross 차이만 크면 쿠폰/포인트 차감이 원인.',
             },
           };
         } catch (e) { data = { error: e.message, stack: e.stack?.slice(0, 500) }; }
