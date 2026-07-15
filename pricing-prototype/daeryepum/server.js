@@ -8050,6 +8050,121 @@ const server = http.createServer(async (req, res) => {
           table_summary: allColsRes.recordset,
           hint: 'matched_columns 에 나온 것들이 구매확정 후보. samples 값 (날짜/상태) 확인해서 어느 컬럼이 진짜 구매확정일인지 판단.',
         };
+      } else if (pathname === '/api/debug/artist-revenue-verify') {
+        // barshop1 raw 매출 vs 정산 API 결과 대조.
+        //   기간 + 카드 divisor (default A01=청첩장) 로 raw 매출 집계 후
+        //   apiArtistSettlements 결과와 비교.
+        //   응답: raw / settlement / diff (raw - settlement).
+        //   diff 0 = 완벽 일치. > 0 이면 정산이 매출 누락. < 0 이면 초과 계산.
+        logAdminAccess(session, req, 'artist-revenue-verify', {});
+        try {
+          const div = (parsed.query.div || 'A01').replace(/[^A-Za-z0-9_]/g, '').slice(0, 10);
+          const start = parsed.query.start || fmtDate(addDays(today(), -30));
+          const end = parsed.query.end || fmtDate(addDays(today(), 1));
+          const basis = (parsed.query.basis || 'settle').toLowerCase();
+          const dateCol = basis === 'order' ? 'order_date' : 'settle_date';
+          const nullClause = basis === 'order' ? '' : ` AND {ALIAS}.${dateCol} IS NOT NULL`;
+          const pp = await getPool();
+          // 1) custom_order (CARD 테이블) — SiteInfo 로 자사몰/제휴사 분리
+          const cardRs = await pp.request()
+            .input('s', sql.VarChar, start)
+            .input('e', sql.VarChar, end)
+            .query(`
+              SELECT
+                CASE
+                  WHEN si.SiteName IS NULL THEN 'affiliate_raw_null'
+                  WHEN si.SiteName LIKE '%[^0-9]%' THEN 'card_named'   -- 실 이름 (문자 포함)
+                  ELSE 'affiliate_numeric'                              -- 숫자만
+                END AS bucket,
+                COUNT(DISTINCT co.order_seq) AS order_count,
+                ISNULL(SUM(coi.item_count), 0) AS total_qty,
+                ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count
+                       / ISNULL(NULLIF(c.Unit_Value, 0), 1)), 0) AS gross_amount
+              FROM custom_order co WITH (NOLOCK)
+              INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+              INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+              LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+              WHERE c.Card_Div = '${div}'
+                AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+                ${nullClause.replace('{ALIAS}', 'co')}
+                AND co.${dateCol} >= @s AND co.${dateCol} < @e
+              GROUP BY CASE
+                WHEN si.SiteName IS NULL THEN 'affiliate_raw_null'
+                WHEN si.SiteName LIKE '%[^0-9]%' THEN 'card_named'
+                ELSE 'affiliate_numeric'
+              END
+            `);
+          // 2) CUSTOM_ETC_ORDER (ETC 테이블) — 참고
+          const etcRs = await pp.request()
+            .input('s', sql.VarChar, start)
+            .input('e', sql.VarChar, end)
+            .query(`
+              SELECT
+                COUNT(DISTINCT o.order_seq) AS order_count,
+                ISNULL(SUM(oi.order_count), 0) AS total_qty,
+                ISNULL(SUM(CAST(oi.card_sale_price AS float) * oi.order_count
+                       / ISNULL(NULLIF(c.Unit_Value, 0), 1)), 0) AS gross_amount
+              FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+              INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+              INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+              WHERE c.Card_Div = '${div}'
+                AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+                ${nullClause.replace('{ALIAS}', 'o')}
+                AND o.${dateCol} >= @s AND o.${dateCol} < @e
+            `);
+          // 3) 정산 API 결과 조회 (bg_artist_products 등록 청첩장만 대상이라 raw 와 다를 수 있음)
+          const settlement = await apiArtistSettlements({
+            start_date: start, end_date: end, basis: basis === 'order' ? 'order' : 'settle',
+          });
+          const setTotal = settlement?.totals?.total_amount || 0;
+          const setCard = (settlement?.by_product || []).reduce((s, p) => s + (p.card_amount || 0), 0);
+          const setEtc  = (settlement?.by_product || []).reduce((s, p) => s + (p.etc_amount  || 0), 0);
+          // raw 집계
+          const rawBuckets = { card_named: 0, affiliate_numeric: 0, affiliate_raw_null: 0 };
+          let rawOrders = 0, rawQty = 0;
+          for (const r of cardRs.recordset) {
+            rawBuckets[r.bucket] = Math.round(r.gross_amount);
+            rawOrders += r.order_count;
+            rawQty += r.total_qty;
+          }
+          const rawCard = rawBuckets.card_named;
+          const rawEtc  = rawBuckets.affiliate_numeric + rawBuckets.affiliate_raw_null;
+          const etcTable = etcRs.recordset[0] || { order_count: 0, total_qty: 0, gross_amount: 0 };
+          const rawEtcTable = Math.round(etcTable.gross_amount);
+          const grandRaw = rawCard + rawEtc + rawEtcTable;
+          data = {
+            period: { start, end, basis, div },
+            raw_from_barshop1: {
+              custom_order: {
+                card_named: rawCard,
+                affiliate_numeric: rawBuckets.affiliate_numeric,
+                affiliate_raw_null: rawBuckets.affiliate_raw_null,
+                orders: rawOrders,
+                qty: rawQty,
+                subtotal: rawCard + rawEtc,
+              },
+              custom_etc_order: {
+                gross: rawEtcTable,
+                orders: etcTable.order_count,
+                qty: etcTable.total_qty,
+              },
+              grand_total_gross: grandRaw,
+            },
+            settlement_api: {
+              total_amount: setTotal,
+              card_amount_sum: Math.round(setCard),
+              etc_amount_sum: Math.round(setEtc),
+              product_count_with_sales: (settlement?.by_product || []).filter(p => p.total_amount > 0).length,
+            },
+            diff: {
+              // 정산은 bg_artist_products 등록 상품만 → raw 는 A01 전체이므로 raw > settlement 예상
+              raw_minus_settlement_total: grandRaw - setTotal,
+              raw_card_vs_settlement_card: rawCard - Math.round(setCard),
+              raw_etc_vs_settlement_etc: (rawEtc + rawEtcTable) - Math.round(setEtc),
+              hint: '정산은 bg_artist_products 활성 상품만 집계 → raw 는 A01 전체이므로 raw 가 더 큼 = 미등록 상품. 등록된 상품끼리는 card/etc 각각 일치해야 함.',
+            },
+          };
+        } catch (e) { data = { error: e.message, stack: e.stack?.slice(0, 500) }; }
       } else if (pathname === '/api/debug/etc-by-card-div') {
         // CUSTOM_ETC_ORDER 에서 특정 Card_Div (기본 A01=청첩장) 로 판매된 실제 Card_Code 목록.
         //   query: div (default 'A01'), start (default 30일전), end (default 오늘+1), limit (default 100)
