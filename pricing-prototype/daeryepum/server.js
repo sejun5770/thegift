@@ -8033,6 +8033,45 @@ const server = http.createServer(async (req, res) => {
           table_summary: allColsRes.recordset,
           hint: 'matched_columns 에 나온 것들이 구매확정 후보. samples 값 (날짜/상태) 확인해서 어느 컬럼이 진짜 구매확정일인지 판단.',
         };
+      } else if (pathname === '/api/debug/etc-by-card-div') {
+        // CUSTOM_ETC_ORDER 에서 특정 Card_Div (기본 A01=청첩장) 로 판매된 실제 Card_Code 목록.
+        //   query: div (default 'A01'), start (default 30일전), end (default 오늘+1), limit (default 100)
+        //   response: {rows: [{card_code, card_name, order_count, total_qty, first_date, last_date}]}
+        logAdminAccess(session, req, 'etc-by-card-div', {});
+        try {
+          const div = (parsed.query.div || 'A01').replace(/[^A-Za-z0-9_]/g, '').slice(0, 10);
+          const start = parsed.query.start || fmtDate(addDays(today(), -30));
+          const end = parsed.query.end || fmtDate(addDays(today(), 1));
+          const limit = Math.min(500, parseInt(parsed.query.limit) || 100);
+          const pp = await getPool();
+          const rs = await pp.request()
+            .input('s', sql.VarChar, start)
+            .input('e', sql.VarChar, end)
+            .query(`
+              SELECT TOP ${limit}
+                UPPER(RTRIM(LTRIM(c.Card_Code))) AS card_code,
+                MAX(c.Card_Name) AS card_name,
+                c.Card_Div AS card_div,
+                COUNT(DISTINCT o.order_seq) AS order_count,
+                ISNULL(SUM(oi.order_count), 0) AS total_qty,
+                MIN(o.order_date) AS first_date,
+                MAX(o.order_date) AS last_date
+              FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+              INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+              INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+              WHERE c.Card_Div = '${div}'
+                AND o.status_seq >= 1
+                AND o.order_date >= @s AND o.order_date < @e
+              GROUP BY UPPER(RTRIM(LTRIM(c.Card_Code))), c.Card_Div
+              ORDER BY order_count DESC
+            `);
+          data = {
+            filter: { card_div: div, start, end, limit },
+            rows_returned: rs.recordset.length,
+            rows: rs.recordset,
+            hint: '이 결과가 0 이면 해당 Card_Div 는 CUSTOM_ETC_ORDER 에서 판매 안 됨 = 자사몰 전용 카테고리. 결과가 있으면 어떤 Card_Code 로 판매되는지 목록 확인.',
+          };
+        } catch (e) { data = { error: e.message }; }
       } else if (pathname === '/api/debug/artist-etc-check') {
         // 청첩장 (or 임의) 코드가 CUSTOM_ETC_ORDER (바른손몰) 에서 실제 판매되는지 진단.
         //   정산 SQL 의 status/settle_date/coupon 계산 문제 배제하고 raw 매출 확인.
