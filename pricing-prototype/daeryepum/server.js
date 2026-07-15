@@ -8059,11 +8059,14 @@ const server = http.createServer(async (req, res) => {
           if (!codes.length) { data = { error: 'codes 파라미터 또는 활성 청첩장 상품 없음' }; }
           else {
             const codesUpperEscaped = codes.map(c => `'${String(c).trim().toUpperCase().replace(/'/g, "''")}'`).join(',');
-            const statusClause = relax
-              ? `AND o.status_seq >= 1`
+            // no_filter 모드 — status/settle/date 필터 완전 제거. Card_Code IN 만 → 진짜 판매 이력 있는지 확인.
+            const noFilter = parsed.query.no_filter === '1';
+            const statusClause = noFilter ? ''
+              : relax ? `AND o.status_seq >= 1`
               : `AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)`;
-            const settleClause = relax ? '' : `AND o.settle_date IS NOT NULL`;
+            const settleClause = (noFilter || relax) ? '' : `AND o.settle_date IS NOT NULL`;
             const dateCol = relax ? 'o.order_date' : 'o.settle_date';
+            const dateClause = noFilter ? '' : `AND ${dateCol} >= @s AND ${dateCol} < @e`;
             const pp = await getPool();
             const rs = await pp.request()
               .input('s', sql.VarChar, start)
@@ -8088,16 +8091,41 @@ const server = http.createServer(async (req, res) => {
                 WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesUpperEscaped})
                   ${statusClause}
                   ${settleClause}
-                  AND ${dateCol} >= @s AND ${dateCol} < @e
+                  ${dateClause}
                 GROUP BY UPPER(RTRIM(LTRIM(c.Card_Code))), c.Card_Name, c.Card_Div
                 ORDER BY order_count DESC
               `);
+            // status 분포도 함께 조회 (모든 status_seq, 필터 무관)
+            let statusDistribution = [];
+            if (noFilter || relax) {
+              try {
+                const sd = await pp.request().query(`
+                  SELECT
+                    UPPER(RTRIM(LTRIM(c.Card_Code))) AS product_code,
+                    o.status_seq,
+                    COUNT(DISTINCT o.order_seq) AS order_count,
+                    ISNULL(SUM(oi.order_count), 0) AS total_qty,
+                    MIN(o.order_date) AS first_order_date,
+                    MAX(o.order_date) AS last_order_date
+                  FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                  INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                  WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesUpperEscaped})
+                  GROUP BY UPPER(RTRIM(LTRIM(c.Card_Code))), o.status_seq
+                  ORDER BY UPPER(RTRIM(LTRIM(c.Card_Code))), o.status_seq
+                `);
+                statusDistribution = sd.recordset;
+              } catch (e) { /* skip */ }
+            }
             data = {
-              period: { start, end, dateCol: dateCol.replace('o.', ''), relax },
+              period: { start, end, dateCol: dateCol.replace('o.', ''), relax, no_filter: noFilter },
               codes_checked: codes.length,
               rows_returned: rs.recordset.length,
               rows: rs.recordset,
-              hint: relax
+              status_distribution: statusDistribution,   // 전 기간 status_seq 별 분포
+              hint: noFilter
+                ? '필터 완전 제거 — 전체 기간, 취소 포함. Card_Code 매칭만 확인.'
+                : relax
                 ? '완화 모드 — status_seq>=1, settle_date NULL 포함, 기준일=order_date'
                 : '정산 SQL 과 동일 조건 — status_seq 2 이상 정상, settle_date NOT NULL, 기준일=settle_date',
             };
