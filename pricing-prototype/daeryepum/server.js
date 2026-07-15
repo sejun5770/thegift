@@ -7297,6 +7297,153 @@ const server = http.createServer(async (req, res) => {
         //   반환:
         //     { period: {start, end}, by_artist: [...], by_product: [...] }
         data = await apiArtistSettlements(parsed.query);
+      } else if (pathname === '/api/artists/settlements/site-breakdown' && req.method === 'GET') {
+        // 특정 product_code 의 매출을 site_name 별로 breakdown.
+        //   barshop1 판매종합실적 등 외부 리포트와 대조하기 위한 debug endpoint.
+        //   ?product_code=BH5066&start_date=2026-04-01&end_date=2026-07-01&basis=ship
+        const code = String(parsed.query.product_code || '').trim();
+        if (!code) { data = { error: 'product_code 필수' }; }
+        else {
+          const startDate = parsed.query.start_date || '';
+          const endDate = parsed.query.end_date || '';
+          const basis = (parsed.query.basis || 'settle').toLowerCase();
+          let cardDateCol, etcDateCol;
+          if (basis === 'ship') { cardDateCol = 'src_send_date'; etcDateCol = 'delivery_date'; }
+          else if (basis === 'order') { cardDateCol = 'order_date'; etcDateCol = 'order_date'; }
+          else { cardDateCol = 'settle_date'; etcDateCol = 'settle_date'; }
+          const cardNullClause = basis === 'order' ? '' : `AND co.${cardDateCol} IS NOT NULL`;
+          const etcNullClause  = basis === 'order' ? '' : `AND o.${etcDateCol} IS NOT NULL`;
+          const codeUp = code.toUpperCase().replace(/'/g, "''");
+          try {
+            const p = await getPool();
+            const [cardRes, etcRes] = await Promise.all([
+              p.request()
+                .input('s', sql.VarChar, startDate)
+                .input('e', sql.VarChar, endDate)
+                .query(`
+                  SELECT
+                    ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
+                    co.company_Seq AS company_seq,
+                    COUNT(DISTINCT co.order_seq) AS order_count,
+                    ISNULL(SUM(coi.item_count), 0) AS qty,
+                    ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)), 0) AS gross,
+                    ISNULL(SUM(
+                      CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                      - (ISNULL(co.point_price, 0) + ISNULL(coc.coupon_amt, 0))
+                        * (CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1))
+                        / NULLIF(ot_card.order_total_gross, 0)
+                    ), 0) AS net
+                  FROM custom_order co WITH (NOLOCK)
+                  INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                  LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+                  LEFT JOIN (
+                    SELECT coi_all.order_seq,
+                      SUM(CAST(coi_all.item_sale_price AS float) * coi_all.item_count
+                          / ISNULL(NULLIF(c_all.Unit_Value, 0), 1)) AS order_total_gross
+                    FROM custom_order_item coi_all WITH (NOLOCK)
+                    INNER JOIN S2_Card c_all WITH (NOLOCK) ON coi_all.card_seq = c_all.Card_Seq
+                    INNER JOIN custom_order co_all WITH (NOLOCK) ON coi_all.order_seq = co_all.order_seq
+                    WHERE co_all.status_seq >= 2 AND co_all.status_seq NOT IN (3, 5, 9)
+                      ${cardNullClause.replace('co.', 'co_all.')}
+                      AND co_all.${cardDateCol} >= @s AND co_all.${cardDateCol} < @e
+                    GROUP BY coi_all.order_seq
+                  ) ot_card ON co.order_seq = ot_card.order_seq
+                  LEFT JOIN (
+                    SELECT ORDER_SEQ, SUM(ISNULL(COUPON_AMT, 0)) AS coupon_amt
+                    FROM CUSTOM_ORDER_COUPON WITH (NOLOCK)
+                    GROUP BY ORDER_SEQ
+                  ) coc ON co.order_seq = coc.ORDER_SEQ
+                  WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) = '${codeUp}'
+                    AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+                    ${cardNullClause}
+                    AND co.${cardDateCol} >= @s AND co.${cardDateCol} < @e
+                  GROUP BY ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)), co.company_Seq
+                  ORDER BY net DESC
+                `),
+              p.request()
+                .input('s', sql.VarChar, startDate)
+                .input('e', sql.VarChar, endDate)
+                .query(`
+                  SELECT
+                    ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
+                    o.company_Seq AS company_seq,
+                    COUNT(DISTINCT o.order_seq) AS order_count,
+                    ISNULL(SUM(oi.order_count), 0) AS qty,
+                    ISNULL(SUM(
+                      CASE WHEN si.SiteName IS NULL
+                           THEN CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                           ELSE CAST(oi.card_sale_price AS float)
+                      END
+                    ), 0) AS gross,
+                    ISNULL(SUM(
+                      CASE
+                        WHEN si.SiteName IS NULL
+                        THEN CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                             - ISNULL(o.coupon_price, 0)
+                               * (CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1))
+                               / NULLIF(ot_etc.order_total_gross, 0)
+                        ELSE CAST(oi.card_sale_price AS float)
+                             - ISNULL(o.coupon_price, 0)
+                               * CAST(oi.card_sale_price AS float)
+                               / NULLIF(ot_etc.order_total_gross, 0)
+                      END
+                    ), 0) AS net
+                  FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                  INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                  LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+                  LEFT JOIN (
+                    SELECT oi_all.order_seq,
+                      SUM(CASE WHEN si_all.SiteName IS NULL
+                               THEN CAST(oi_all.card_sale_price AS float) * oi_all.order_count
+                                    / ISNULL(NULLIF(c_all.Unit_Value, 0), 1)
+                               ELSE CAST(oi_all.card_sale_price AS float)
+                          END) AS order_total_gross
+                    FROM CUSTOM_ETC_ORDER_ITEM oi_all WITH (NOLOCK)
+                    INNER JOIN S2_Card c_all WITH (NOLOCK) ON oi_all.card_seq = c_all.Card_Seq
+                    INNER JOIN CUSTOM_ETC_ORDER o_all WITH (NOLOCK) ON oi_all.order_seq = o_all.order_seq
+                    LEFT JOIN SiteInfo si_all WITH (NOLOCK) ON o_all.company_Seq = si_all.CompayCode
+                    WHERE o_all.status_seq >= 2 AND o_all.status_seq NOT IN (3, 5, 15)
+                      ${etcNullClause.replace('o.', 'o_all.')}
+                      AND o_all.${etcDateCol} >= @s AND o_all.${etcDateCol} < @e
+                    GROUP BY oi_all.order_seq
+                  ) ot_etc ON o.order_seq = ot_etc.order_seq
+                  WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) = '${codeUp}'
+                    AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+                    ${etcNullClause}
+                    AND o.${etcDateCol} >= @s AND o.${etcDateCol} < @e
+                  GROUP BY ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)), o.company_Seq
+                  ORDER BY net DESC
+                `),
+            ]);
+            const round = v => Math.round(Number(v) || 0);
+            const norm = (rows, table) => (rows || []).map(r => ({
+              table,
+              site_name: r.site_name,
+              company_seq: r.company_seq,
+              is_affiliate: !r.site_name || /^\d+$/.test(String(r.site_name).trim()),
+              order_count: Number(r.order_count) || 0,
+              qty: Number(r.qty) || 0,
+              gross: round(r.gross),
+              net: round(r.net),
+            }));
+            const cardRows = norm(cardRes.recordset, 'custom_order');
+            const etcRows = norm(etcRes.recordset, 'CUSTOM_ETC_ORDER');
+            const sum = (arr, f) => arr.reduce((a, r) => a + (r[f] || 0), 0);
+            data = {
+              product_code: code,
+              period: { start: startDate, end: endDate },
+              basis,
+              card_by_site: cardRows,
+              etc_by_site: etcRows,
+              totals: {
+                card: { qty: sum(cardRows, 'qty'), gross: sum(cardRows, 'gross'), net: sum(cardRows, 'net'), order_count: sum(cardRows, 'order_count') },
+                etc:  { qty: sum(etcRows, 'qty'),  gross: sum(etcRows, 'gross'),  net: sum(etcRows, 'net'),  order_count: sum(etcRows, 'order_count') },
+              },
+            };
+          } catch (e) { data = { error: 'MSSQL 조회 실패: ' + e.message }; }
+        }
       } else if (pathname === '/api/artists/diagnose' && req.method === 'GET') {
         // 매출 0 이슈 진단 — 시드 코드가 MSSQL Card_Code 와 매칭되는지 + 이번 달 매출.
         data = await apiArtistDiagnose();
