@@ -8033,6 +8033,76 @@ const server = http.createServer(async (req, res) => {
           table_summary: allColsRes.recordset,
           hint: 'matched_columns 에 나온 것들이 구매확정 후보. samples 값 (날짜/상태) 확인해서 어느 컬럼이 진짜 구매확정일인지 판단.',
         };
+      } else if (pathname === '/api/debug/artist-etc-check') {
+        // 청첩장 (or 임의) 코드가 CUSTOM_ETC_ORDER (바른손몰) 에서 실제 판매되는지 진단.
+        //   정산 SQL 의 status/settle_date/coupon 계산 문제 배제하고 raw 매출 확인.
+        //   query:
+        //     codes    쉼표 구분 코드 목록 (없으면 bg_artist_products.is_active=true 전체)
+        //     start    YYYY-MM-DD (default 30일 전)
+        //     end      YYYY-MM-DD (default 오늘+1일 exclusive)
+        //     relax    '1' 이면 status 필터 완화 (>=1 만), settle_date NULL 도 포함
+        logAdminAccess(session, req, 'artist-etc-check', {});
+        try {
+          const start = parsed.query.start || fmtDate(addDays(today(), -30));
+          const end = parsed.query.end || fmtDate(addDays(today(), 1));
+          const relax = parsed.query.relax === '1';
+          let codes = [];
+          if (parsed.query.codes) {
+            codes = String(parsed.query.codes).split(',').map(s => s.trim()).filter(Boolean);
+          } else {
+            // Supabase 에서 활성 청첩장 코드 fetch
+            const r = await fetch(`${SUPABASE_URL}/rest/v1/bg_artist_products?select=product_code&is_active=eq.true`,
+              { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } });
+            const arr = await r.json();
+            codes = (Array.isArray(arr) ? arr : []).map(p => p.product_code).filter(Boolean);
+          }
+          if (!codes.length) { data = { error: 'codes 파라미터 또는 활성 청첩장 상품 없음' }; }
+          else {
+            const codesUpperEscaped = codes.map(c => `'${String(c).trim().toUpperCase().replace(/'/g, "''")}'`).join(',');
+            const statusClause = relax
+              ? `AND o.status_seq >= 1`
+              : `AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)`;
+            const settleClause = relax ? '' : `AND o.settle_date IS NOT NULL`;
+            const dateCol = relax ? 'o.order_date' : 'o.settle_date';
+            const pp = await getPool();
+            const rs = await pp.request()
+              .input('s', sql.VarChar, start)
+              .input('e', sql.VarChar, end)
+              .query(`
+                SELECT
+                  UPPER(RTRIM(LTRIM(c.Card_Code))) AS product_code,
+                  c.Card_Name AS product_name,
+                  c.Card_Div AS card_div,
+                  COUNT(DISTINCT o.order_seq) AS order_count,
+                  ISNULL(SUM(oi.order_count), 0) AS total_qty,
+                  ISNULL(SUM(CAST(oi.card_sale_price AS float) * oi.order_count), 0) AS gross_raw,
+                  MIN(${dateCol}) AS first_date,
+                  MAX(${dateCol}) AS last_date,
+                  SUM(CASE WHEN o.settle_date IS NULL THEN 1 ELSE 0 END) AS null_settle_count,
+                  SUM(CASE WHEN si.SiteName IS NULL THEN 1 ELSE 0 END) AS site_null_count,
+                  SUM(CASE WHEN si.SiteName IS NOT NULL THEN 1 ELSE 0 END) AS site_present_count
+                FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+                WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesUpperEscaped})
+                  ${statusClause}
+                  ${settleClause}
+                  AND ${dateCol} >= @s AND ${dateCol} < @e
+                GROUP BY UPPER(RTRIM(LTRIM(c.Card_Code))), c.Card_Name, c.Card_Div
+                ORDER BY order_count DESC
+              `);
+            data = {
+              period: { start, end, dateCol: dateCol.replace('o.', ''), relax },
+              codes_checked: codes.length,
+              rows_returned: rs.recordset.length,
+              rows: rs.recordset,
+              hint: relax
+                ? '완화 모드 — status_seq>=1, settle_date NULL 포함, 기준일=order_date'
+                : '정산 SQL 과 동일 조건 — status_seq 2 이상 정상, settle_date NOT NULL, 기준일=settle_date',
+            };
+          }
+        } catch (e) { data = { error: e.message }; }
       } else if (pathname === '/api/debug/naver-order-raw') {
         // 네이버 detail API 직접 호출 — productOrderId 로 실제 응답 원본 반환.
         //   확정일 필드명 진단용. 저장된 raw_payload 대신 실시간 fetch.
