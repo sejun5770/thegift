@@ -7444,6 +7444,145 @@ const server = http.createServer(async (req, res) => {
             };
           } catch (e) { data = { error: 'MSSQL 조회 실패: ' + e.message }; }
         }
+      } else if (pathname === '/api/artists/settlements/daily-breakdown' && req.method === 'GET') {
+        // 카테고리 or 특정 product_codes 의 일자별 판매수량/매출 breakdown.
+        //   ?category=수건&start_date=2026-05-01&end_date=2026-07-17&basis=ship
+        //   ?product_codes=BH5066,BC6951&start_date=...
+        const startDate = parsed.query.start_date || '';
+        const endDate = parsed.query.end_date || '';
+        const basis = (parsed.query.basis || 'settle').toLowerCase();
+        const category = String(parsed.query.category || '').trim();
+        const codesParam = String(parsed.query.product_codes || '').trim();
+        if (!startDate || !endDate) { data = { error: 'start_date, end_date 필수' }; }
+        else {
+          try {
+            // 1) 조회 대상 product_codes 결정
+            let productCodes = [];
+            if (codesParam) {
+              productCodes = codesParam.split(',').map(s => s.trim()).filter(Boolean);
+            } else {
+              // Supabase 에서 활성 상품 조회 후 category 로 필터 (부분 일치)
+              const r = await fetch(
+                `${SUPABASE_URL}/rest/v1/bg_artist_products?select=product_code,category,is_active&is_active=eq.true`,
+                { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+              );
+              const arr = await r.json();
+              if (!r.ok) { data = { error: 'Supabase 조회 실패: ' + (arr?.message || r.status) }; break; }
+              const filtered = category
+                ? (arr || []).filter(p => String(p.category || '').includes(category))
+                : (arr || []);
+              productCodes = filtered.map(p => p.product_code).filter(Boolean);
+            }
+            if (!productCodes.length) {
+              data = { period: {start:startDate,end:endDate}, basis, category, product_codes: [], by_date: [], message: '대상 상품 없음' };
+            } else {
+              let cardDateCol, etcDateCol;
+              if (basis === 'ship') { cardDateCol = 'src_send_date'; etcDateCol = 'delivery_date'; }
+              else if (basis === 'order') { cardDateCol = 'order_date'; etcDateCol = 'order_date'; }
+              else { cardDateCol = 'settle_date'; etcDateCol = 'settle_date'; }
+              const cardNullClause = basis === 'order' ? '' : `AND co.${cardDateCol} IS NOT NULL`;
+              const etcNullClause  = basis === 'order' ? '' : `AND o.${etcDateCol} IS NOT NULL`;
+              const codesUp = productCodes.map(c => `'${String(c).trim().toUpperCase().replace(/'/g, "''")}'`).join(',');
+              const p = await getPool();
+              const [cardRes, etcRes] = await Promise.all([
+                p.request()
+                  .input('s', sql.VarChar, startDate)
+                  .input('e', sql.VarChar, endDate)
+                  .query(`
+                    SELECT
+                      CAST(co.${cardDateCol} AS DATE) AS d,
+                      UPPER(RTRIM(LTRIM(c.Card_Code))) AS product_code,
+                      c.Card_Name AS product_name,
+                      ISNULL(SUM(coi.item_count), 0) AS qty,
+                      ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)), 0) AS gross
+                    FROM custom_order co WITH (NOLOCK)
+                    INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+                    INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                    WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesUp})
+                      AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+                      ${cardNullClause}
+                      AND co.${cardDateCol} >= @s AND co.${cardDateCol} < @e
+                    GROUP BY CAST(co.${cardDateCol} AS DATE), UPPER(RTRIM(LTRIM(c.Card_Code))), c.Card_Name
+                    ORDER BY d ASC
+                  `),
+                p.request()
+                  .input('s', sql.VarChar, startDate)
+                  .input('e', sql.VarChar, endDate)
+                  .query(`
+                    SELECT
+                      CAST(o.${etcDateCol} AS DATE) AS d,
+                      UPPER(RTRIM(LTRIM(c.Card_Code))) AS product_code,
+                      c.Card_Name AS product_name,
+                      ISNULL(SUM(oi.order_count), 0) AS qty,
+                      ISNULL(SUM(
+                        CASE WHEN si.SiteName IS NULL
+                             THEN CAST(oi.card_sale_price AS float) * oi.order_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                             ELSE CAST(oi.card_sale_price AS float)
+                        END
+                      ), 0) AS gross
+                    FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                    INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                    INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                    LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+                    WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesUp})
+                      AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+                      ${etcNullClause}
+                      AND o.${etcDateCol} >= @s AND o.${etcDateCol} < @e
+                    GROUP BY CAST(o.${etcDateCol} AS DATE), UPPER(RTRIM(LTRIM(c.Card_Code))), c.Card_Name
+                    ORDER BY d ASC
+                  `),
+              ]);
+              // 날짜별 집계 (card + etc 합산)
+              const byDateMap = new Map(); // 'YYYY-MM-DD' → { date, card_qty, etc_qty, total_qty, card_gross, etc_gross, total_gross }
+              const fmtD = d => {
+                if (!d) return '';
+                const dt = new Date(d);
+                return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+              };
+              const addRow = (row, channel) => {
+                const dateKey = fmtD(row.d);
+                if (!byDateMap.has(dateKey)) {
+                  byDateMap.set(dateKey, { date: dateKey, card_qty: 0, etc_qty: 0, total_qty: 0, card_gross: 0, etc_gross: 0, total_gross: 0 });
+                }
+                const b = byDateMap.get(dateKey);
+                if (channel === 'card') { b.card_qty += Number(row.qty) || 0; b.card_gross += Number(row.gross) || 0; }
+                else { b.etc_qty += Number(row.qty) || 0; b.etc_gross += Number(row.gross) || 0; }
+                b.total_qty = b.card_qty + b.etc_qty;
+                b.total_gross = Math.round(b.card_gross + b.etc_gross);
+              };
+              (cardRes.recordset || []).forEach(r => addRow(r, 'card'));
+              (etcRes.recordset || []).forEach(r => addRow(r, 'etc'));
+              const byDate = [...byDateMap.values()].sort((a, b) => a.date.localeCompare(b.date));
+              // 상품별 breakdown (전체 기간 합계)
+              const byProductMap = new Map();
+              const addProductRow = (row, channel) => {
+                const k = row.product_code;
+                if (!byProductMap.has(k)) {
+                  byProductMap.set(k, { product_code: k, product_name: row.product_name || '', card_qty: 0, etc_qty: 0, total_qty: 0, card_gross: 0, etc_gross: 0, total_gross: 0 });
+                }
+                const p = byProductMap.get(k);
+                if (channel === 'card') { p.card_qty += Number(row.qty) || 0; p.card_gross += Number(row.gross) || 0; }
+                else { p.etc_qty += Number(row.qty) || 0; p.etc_gross += Number(row.gross) || 0; }
+                p.total_qty = p.card_qty + p.etc_qty;
+                p.total_gross = Math.round(p.card_gross + p.etc_gross);
+              };
+              (cardRes.recordset || []).forEach(r => addProductRow(r, 'card'));
+              (etcRes.recordset || []).forEach(r => addProductRow(r, 'etc'));
+              const byProduct = [...byProductMap.values()].sort((a, b) => b.total_qty - a.total_qty);
+              const totalQty = byDate.reduce((a, r) => a + r.total_qty, 0);
+              const totalGross = byDate.reduce((a, r) => a + r.total_gross, 0);
+              data = {
+                period: { start: startDate, end: endDate },
+                basis,
+                category: category || null,
+                product_codes: productCodes,
+                totals: { total_qty: totalQty, total_gross: totalGross, days: byDate.length },
+                by_date: byDate,
+                by_product: byProduct,
+              };
+            }
+          } catch (e) { data = { error: 'MSSQL 조회 실패: ' + e.message }; }
+        }
       } else if (pathname === '/api/artists/diagnose' && req.method === 'GET') {
         // 매출 0 이슈 진단 — 시드 코드가 MSSQL Card_Code 와 매칭되는지 + 이번 달 매출.
         data = await apiArtistDiagnose();
