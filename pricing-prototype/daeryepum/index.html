@@ -12668,25 +12668,57 @@ function renderSettlements() {
                 <th style="text-align:left;padding:6px 8px">분류</th>
                 <th style="text-align:left;padding:6px 8px">품목코드</th>
                 <th style="text-align:left;padding:6px 8px">상품명</th>
+                <th style="text-align:left;padding:6px 8px">판매채널</th>
                 <th style="text-align:right;padding:6px 8px">수량</th>
-                <th style="text-align:right;padding:6px 8px">바른손카드</th>
-                <th style="text-align:right;padding:6px 8px">바른손몰</th>
-                <th style="text-align:right;padding:6px 8px">매출합</th>
+                <th style="text-align:right;padding:6px 8px">매출액</th>
                 <th style="text-align:right;padding:6px 8px">정산금액</th>
               </tr></thead>
               <tbody>
-                ${items.map(p => `
-                  <tr ${p.total_amount === 0 ? 'style="opacity:0.5"' : ''}>
-                    <td style="padding:4px 8px">${esc(p.category)}</td>
-                    <td style="padding:4px 8px;font-family:monospace">${esc(p.product_code)}</td>
-                    <td style="padding:4px 8px;color:var(--gray-600)">${esc(p.product_name || '-')}</td>
-                    <td style="padding:4px 8px;text-align:right">${fmtNum(p.total_qty)}</td>
-                    <td style="padding:4px 8px;text-align:right">${fmtKRW(p.card_amount)}</td>
-                    <td style="padding:4px 8px;text-align:right">${fmtKRW(p.etc_amount)}</td>
-                    <td style="padding:4px 8px;text-align:right;font-weight:600">${fmtKRW(p.total_amount)}</td>
-                    <td style="padding:4px 8px;text-align:right;color:#7c3aed">${fmtKRW(p.settlement_amount)}</td>
-                  </tr>
-                `).join('')}
+                ${items.map(p => {
+                  // 채널별 행 분리 — 바른손카드 / 바른손몰(제휴사) 각각 수량+매출, 마지막에 합계.
+                  //   card_qty/etc_qty 없는 옛 응답(캐시)이면 채널 수량은 '-' 표시.
+                  const hasQtySplit = p.card_qty != null || p.etc_qty != null;
+                  const rate = Number(p.commission_rate) || 0;
+                  const chs = [
+                    { label: '바른손카드', qty: p.card_qty, amt: p.card_amount || 0 },
+                    { label: '바른손몰(제휴사)', qty: p.etc_qty, amt: p.etc_amount || 0 },
+                  ].filter(c => (c.qty || 0) > 0 || c.amt !== 0);
+                  const dimCss = p.total_amount === 0 ? 'opacity:0.5;' : '';
+                  const dim = dimCss ? `style="${dimCss}"` : '';
+                  const span = chs.length + 1;
+                  if (!chs.length) {
+                    return `
+                      <tr style="opacity:0.5">
+                        <td style="padding:4px 8px">${esc(p.category)}</td>
+                        <td style="padding:4px 8px;font-family:monospace">${esc(p.product_code)}</td>
+                        <td style="padding:4px 8px;color:var(--gray-600)">${esc(p.product_name || '-')}</td>
+                        <td style="padding:4px 8px;color:var(--gray-400)">-</td>
+                        <td style="padding:4px 8px;text-align:right">0</td>
+                        <td style="padding:4px 8px;text-align:right">${fmtKRW(0)}</td>
+                        <td style="padding:4px 8px;text-align:right;color:#7c3aed">${fmtKRW(0)}</td>
+                      </tr>`;
+                  }
+                  const chRows = chs.map((c, i) => `
+                    <tr ${dim}>
+                      ${i === 0 ? `
+                        <td rowspan="${span}" style="padding:4px 8px;vertical-align:top">${esc(p.category)}</td>
+                        <td rowspan="${span}" style="padding:4px 8px;font-family:monospace;vertical-align:top">${esc(p.product_code)}</td>
+                        <td rowspan="${span}" style="padding:4px 8px;color:var(--gray-600);vertical-align:top">${esc(p.product_name || '-')}</td>
+                      ` : ''}
+                      <td style="padding:4px 8px">${c.label}</td>
+                      <td style="padding:4px 8px;text-align:right">${hasQtySplit ? fmtNum(c.qty || 0) : '-'}</td>
+                      <td style="padding:4px 8px;text-align:right">${fmtKRW(c.amt)}</td>
+                      <td style="padding:4px 8px;text-align:right;color:#7c3aed">${fmtKRW(Math.round(c.amt * rate / 100))}</td>
+                    </tr>`).join('');
+                  const totalRow = `
+                    <tr style="${dimCss}border-top:1px solid var(--gray-200)">
+                      <td style="padding:4px 8px;font-weight:600">합계</td>
+                      <td style="padding:4px 8px;text-align:right;font-weight:600">${fmtNum(p.total_qty)}</td>
+                      <td style="padding:4px 8px;text-align:right;font-weight:600">${fmtKRW(p.total_amount)}</td>
+                      <td style="padding:4px 8px;text-align:right;color:#7c3aed;font-weight:600">${fmtKRW(p.settlement_amount)}</td>
+                    </tr>`;
+                  return chRows + totalRow;
+                }).join('')}
               </tbody>
             </table>
           </td>

@@ -1714,6 +1714,8 @@ async function apiArtistSettlements(query = {}) {
       artist_name: info.artist_name,
       commission_rate: info.commission_rate,
       total_qty: totalQty,
+      card_qty: sale?.card_qty || 0,
+      etc_qty: sale?.etc_qty || 0,
       card_amount: sale?.card_amount ? Math.round(sale.card_amount) : 0,
       etc_amount: sale?.etc_amount ? Math.round(sale.etc_amount) : 0,
       total_amount: totalAmount,
