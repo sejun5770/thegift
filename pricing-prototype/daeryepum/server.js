@@ -7460,6 +7460,7 @@ const server = http.createServer(async (req, res) => {
           try {
             // 1) 조회 대상 product_codes 결정
             let productCodes = [];
+            let supabaseError = null;
             if (codesParam) {
               productCodes = codesParam.split(',').map(s => s.trim()).filter(Boolean);
             } else {
@@ -7469,13 +7470,18 @@ const server = http.createServer(async (req, res) => {
                 { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
               );
               const arr = await r.json();
-              if (!r.ok) { data = { error: 'Supabase 조회 실패: ' + (arr?.message || r.status) }; break; }
-              const filtered = category
-                ? (arr || []).filter(p => String(p.category || '').includes(category))
-                : (arr || []);
-              productCodes = filtered.map(p => p.product_code).filter(Boolean);
+              if (!r.ok) {
+                supabaseError = 'Supabase 조회 실패: ' + (arr?.message || r.status);
+              } else {
+                const filtered = category
+                  ? (arr || []).filter(p => String(p.category || '').includes(category))
+                  : (arr || []);
+                productCodes = filtered.map(p => p.product_code).filter(Boolean);
+              }
             }
-            if (!productCodes.length) {
+            if (supabaseError) {
+              data = { error: supabaseError };
+            } else if (!productCodes.length) {
               data = { period: {start:startDate,end:endDate}, basis, category, product_codes: [], by_date: [], message: '대상 상품 없음' };
             } else {
               let cardDateCol, etcDateCol;
