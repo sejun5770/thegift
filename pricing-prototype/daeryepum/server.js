@@ -7570,6 +7570,76 @@ const server = http.createServer(async (req, res) => {
             }
           } catch (e) { data = { error: 'MSSQL 조회 실패: ' + e.message }; }
         }
+      } else if (pathname === '/api/debug/signup-count' && req.method === 'GET') {
+        // 사이트별 회원가입 건수 (기간 필터).
+        //   S2_UserInfo 의 가입일 컬럼명이 코드베이스 어디에도 안 쓰여 확정 불가 →
+        //   date/datetime 형 컬럼을 자동 탐지해 후보별 건수 + MAX값을 함께 반환.
+        //   MAX 가 현재 시각에 가까운 컬럼이 실제 가입일.
+        //   ?since=2026-07-17T16:00:00&site=바른손카드
+        //   가입사이트 = REFERER_SALES_GUBUN → SiteInfo.SiteCode (server.js:4589, 5217 정책)
+        //   site_div='SB' 로 통합회원 중복 제거 (한 uid 당 SB/SS/BM 3행).
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const sinceRaw = String(parsed.query.since || '').trim().replace('T', ' ');
+        // 'YYYY-MM-DD' 또는 'YYYY-MM-DD HH:MM(:SS)' 만 허용 — 컬럼명은 INFORMATION_SCHEMA
+        //   출처 + [A-Za-z0-9_] 검증으로 injection 차단.
+        if (!/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?$/.test(sinceRaw)) {
+          data = { error: 'since 형식 오류 — YYYY-MM-DD 또는 YYYY-MM-DD HH:MM:SS' };
+        } else {
+          const site = String(parsed.query.site || '바른손카드').trim();
+          try {
+            const p = await getPool();
+            const colsRes = await p.request().query(`
+              SELECT COLUMN_NAME
+              FROM INFORMATION_SCHEMA.COLUMNS
+              WHERE TABLE_NAME = 'S2_UserInfo'
+                AND DATA_TYPE IN ('date', 'datetime', 'datetime2', 'smalldatetime')
+              ORDER BY ORDINAL_POSITION
+            `);
+            const dateCols = (colsRes.recordset || [])
+              .map(r => r.COLUMN_NAME)
+              .filter(n => /^[A-Za-z0-9_]+$/.test(n))
+              .slice(0, 12);
+            if (!dateCols.length) {
+              data = { error: 'S2_UserInfo 에 date/datetime 형 컬럼이 없습니다 (가입일이 varchar 일 수 있음).' };
+            } else {
+              // 단일 스캔으로 모든 후보 컬럼 집계 (컬럼별 개별 쿼리는 스캔 N회 → 타임아웃 위험).
+              const selectList = dateCols.map(c => `
+                SUM(CASE WHEN u.[${c}] >= @since AND u.USE_YORN = 'Y' THEN 1 ELSE 0 END) AS c_${c},
+                SUM(CASE WHEN u.[${c}] >= @since THEN 1 ELSE 0 END) AS a_${c},
+                MAX(u.[${c}]) AS m_${c}`).join(',');
+              const r = await p.request()
+                .input('site', sql.NVarChar, site)
+                .input('since', sql.VarChar, sinceRaw)
+                .query(`
+                  SELECT
+                    COUNT(*) AS total_all,
+                    SUM(CASE WHEN u.USE_YORN = 'Y' THEN 1 ELSE 0 END) AS total_active,
+                    ${selectList}
+                  FROM S2_UserInfo u WITH (NOLOCK)
+                  LEFT JOIN SiteInfo si WITH (NOLOCK) ON u.REFERER_SALES_GUBUN = si.SiteCode
+                  WHERE u.site_div = 'SB'
+                    AND ISNULL(si.SiteName, '기타') = @site
+                `);
+              const row = r.recordset[0] || {};
+              const candidates = dateCols.map(c => ({
+                column: c,
+                count_active: Number(row[`c_${c}`]) || 0,   // USE_YORN='Y' (탈퇴 제외)
+                count_all: Number(row[`a_${c}`]) || 0,      // 탈퇴 포함
+                max_value: row[`m_${c}`] || null,
+              })).sort((a, b) => (b.max_value ? new Date(b.max_value) : 0) - (a.max_value ? new Date(a.max_value) : 0));
+              data = {
+                site,
+                since: sinceRaw,
+                total_members_active: Number(row.total_active) || 0,
+                total_members_all: Number(row.total_all) || 0,
+                note: 'max_value 가 현재 시각에 가까운 컬럼이 실제 가입일. count_active=탈퇴 제외, count_all=탈퇴 포함. site_div=SB 중복 제거 기준.',
+                candidates,
+              };
+            }
+          } catch (e) { data = { error: 'MSSQL 조회 실패: ' + e.message }; }
+        }
       } else if (pathname === '/api/artists/diagnose' && req.method === 'GET') {
         // 매출 0 이슈 진단 — 시드 코드가 MSSQL Card_Code 와 매칭되는지 + 이번 달 매출.
         data = await apiArtistDiagnose();
