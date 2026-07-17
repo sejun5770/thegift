@@ -7570,6 +7570,35 @@ const server = http.createServer(async (req, res) => {
             }
           } catch (e) { data = { error: 'MSSQL 조회 실패: ' + e.message }; }
         }
+      } else if (pathname === '/api/debug/find-columns' && req.method === 'GET') {
+        // DB 전체에서 컬럼명 패턴 검색 — UTM/유입경로 추적 컬럼이 존재하는지 확인용.
+        //   ?pattern=utm,refer,inflow,campaign  (콤마 구분, 영숫자/_ 만 허용 → LIKE injection 차단)
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const rawPat = String(parsed.query.pattern || 'utm').trim();
+        const patterns = rawPat.split(',').map(s => s.trim())
+          .filter(s => /^[A-Za-z0-9_]{2,30}$/.test(s)).slice(0, 10);
+        if (!patterns.length) {
+          data = { error: 'pattern 형식 오류 — 영문/숫자/언더스코어 2~30자, 콤마 구분 (예: utm,refer,inflow)' };
+        } else {
+          try {
+            const p = await getPool();
+            const whereCols = patterns.map(pt => `COLUMN_NAME LIKE '%${pt}%'`).join(' OR ');
+            const r = await p.request().query(`
+              SELECT TOP 300 TABLE_NAME, COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH
+              FROM INFORMATION_SCHEMA.COLUMNS
+              WHERE ${whereCols}
+              ORDER BY TABLE_NAME, ORDINAL_POSITION
+            `);
+            const cols = (r.recordset || []).map(x => ({
+              table: x.TABLE_NAME,
+              column: x.COLUMN_NAME,
+              type: x.DATA_TYPE + (x.CHARACTER_MAXIMUM_LENGTH ? `(${x.CHARACTER_MAXIMUM_LENGTH})` : ''),
+            }));
+            data = { patterns, match_count: cols.length, columns: cols };
+          } catch (e) { data = { error: 'MSSQL 조회 실패: ' + e.message }; }
+        }
       } else if (pathname === '/api/debug/signup-count' && req.method === 'GET') {
         // 사이트별 회원가입 건수 (기간 필터).
         //   S2_UserInfo 의 가입일 컬럼명이 코드베이스 어디에도 안 쓰여 확정 불가 →
