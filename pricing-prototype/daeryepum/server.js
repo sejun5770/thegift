@@ -7599,6 +7599,58 @@ const server = http.createServer(async (req, res) => {
             data = { patterns, match_count: cols.length, columns: cols };
           } catch (e) { data = { error: 'MSSQL 조회 실패: ' + e.message }; }
         }
+      } else if (pathname === '/api/debug/signup-route' && req.method === 'GET') {
+        // 사이트별 회원가입을 유입경로(inflow_route 등) 코드별로 집계.
+        //   S2_UserInfo.inflow_route (varchar10) 등 코드 컬럼의 실제 값 분포 확인.
+        //   ?since=2026-07-17T16:00:00&site=바른손카드&column=inflow_route
+        //   column 은 화이트리스트만 허용 (injection 차단).
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const COL_WHITELIST = ['inflow_route', 'smembership_inflow_route', 'REFERER_SALES_GUBUN'];
+        const col = String(parsed.query.column || 'inflow_route').trim();
+        if (!COL_WHITELIST.includes(col)) {
+          data = { error: `column 은 다음만 허용: ${COL_WHITELIST.join(', ')}` };
+        } else {
+          const sinceRaw = String(parsed.query.since || '').trim().replace('T', ' ');
+          const hasSince = sinceRaw.length > 0;
+          if (hasSince && !/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?$/.test(sinceRaw)) {
+            data = { error: 'since 형식 오류 — YYYY-MM-DD 또는 YYYY-MM-DD HH:MM:SS' };
+          } else {
+            const site = String(parsed.query.site || '바른손카드').trim();
+            try {
+              const p = await getPool();
+              const sinceClause = hasSince ? 'AND u.reg_date >= @since' : '';
+              const reqq = p.request().input('site', sql.NVarChar, site);
+              if (hasSince) reqq.input('since', sql.VarChar, sinceRaw);
+              const r = await reqq.query(`
+                SELECT
+                  ISNULL(NULLIF(LTRIM(RTRIM(CAST(u.[${col}] AS NVARCHAR(50)))), ''), '(빈값)') AS route_code,
+                  SUM(CASE WHEN u.USE_YORN = 'Y' THEN 1 ELSE 0 END) AS count_active,
+                  COUNT(*) AS count_all
+                FROM S2_UserInfo u WITH (NOLOCK)
+                LEFT JOIN SiteInfo si WITH (NOLOCK) ON u.REFERER_SALES_GUBUN = si.SiteCode
+                WHERE u.site_div = 'SB'
+                  AND ISNULL(si.SiteName, '기타') = @site
+                  ${sinceClause}
+                GROUP BY ISNULL(NULLIF(LTRIM(RTRIM(CAST(u.[${col}] AS NVARCHAR(50)))), ''), '(빈값)')
+                ORDER BY count_active DESC
+              `);
+              const rows = (r.recordset || []).map(x => ({
+                route_code: x.route_code,
+                count_active: Number(x.count_active) || 0,
+                count_all: Number(x.count_all) || 0,
+              }));
+              data = {
+                site,
+                since: hasSince ? sinceRaw : '(전체 기간)',
+                column: col,
+                total_active: rows.reduce((a, r) => a + r.count_active, 0),
+                routes: rows,
+              };
+            } catch (e) { data = { error: 'MSSQL 조회 실패: ' + e.message }; }
+          }
+        }
       } else if (pathname === '/api/debug/signup-count' && req.method === 'GET') {
         // 사이트별 회원가입 건수 (기간 필터).
         //   S2_UserInfo 의 가입일 컬럼명이 코드베이스 어디에도 안 쓰여 확정 불가 →
