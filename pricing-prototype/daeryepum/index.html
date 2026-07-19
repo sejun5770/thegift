@@ -14460,13 +14460,17 @@ function renderBgUnified() {
       // 주문의 각 상품에 대해 1행씩 + sticker_index 명시 추적 (워크플로우 PATCH 용)
       //   MANUAL 주문은 CSV 파싱 후 product_code 가 파생 코드 (예: TGJBK09O10) 라서
       //   sel.product_code 와 정확 매치 안 되는 케이스 → 남은 sel 을 순서대로 fallback.
+      // 위치 기반 fallback 은 MANUAL(CSV 파생 코드) 에만 적용. 실주문(CARD/ETC)은 product_code
+      //   가 정확히 일치하므로, fallback 을 켜면 sel 이 엉뚱한 상품에 붙어 상품명·스티커가 뒤섞임
+      //   → 정보입력현황에 실제와 다른 상품이 표시돼 출고누락/오출고 유발 (주문 4760779 사례).
+      const isManualOrder = order.order_type === 'MANUAL';
       const usedSelIdx = new Set();
       let fallbackIter = 0;
       for (const [productCode, productInfo] of pm) {
         // 1) product_code 정확 매칭
         let selIdx = sels.findIndex((s, i) => !usedSelIdx.has(i) && s.product_code === productCode);
-        // 2) fallback — 남은 sel 을 순서대로 (MANUAL 등 CSV 파생 케이스)
-        if (selIdx < 0 && sels.length) {
+        // 2) fallback — 남은 sel 을 순서대로 (MANUAL CSV 파생 코드 전용)
+        if (selIdx < 0 && sels.length && isManualOrder) {
           while (fallbackIter < sels.length && usedSelIdx.has(fallbackIter)) fallbackIter++;
           if (fallbackIter < sels.length) selIdx = fallbackIter++;
         }
@@ -14824,9 +14828,13 @@ function renderBgUnified() {
     const receiptText = ci ? (ci.cash_receipt_yn
       ? esc((receiptLabel[ci.receipt_type] || '') + ' ' + (ci.receipt_number || ''))
       : '미신청') : '<span style="color:var(--gray-300)">-</span>';
-    // 상품명: 행 단위로 이미 product_name 제공. sel.product_name이 있으면 우선 사용 (사용자 저장값).
+    // 상품명: 실제 주문 상품(product_name)을 진실 소스로 우선 사용.
+    //   sel.product_name 은 MANUAL(CSV 파생 코드) 에서만 우선 — 실주문에서 sel 우선 시
+    //   sel-상품 매칭이 어긋나면 상품명이 뒤섞여 출고누락/오출고 발생 (주문 4760779 사례).
     // XSS: 상품명은 MSSQL S2_Card 에서 옴 → escape 적용
-    const productName = esc(sel?.product_name || product_name || '-');
+    const productName = esc((order.order_type === 'MANUAL'
+      ? (sel?.product_name || product_name)
+      : (product_name || sel?.product_name)) || '-');
     // 수정/추가 버튼 — 같은 위치에 노출
     //  · ci 있음 → '수정' (마켓플레이스 포함 — 운영팀이 스티커코드 매핑 등 후처리 가능)
     //  · ci 없고 취소 아님 → '추가' (관리자가 고객 대신 수동 입력)
