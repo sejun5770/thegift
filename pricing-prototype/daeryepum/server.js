@@ -7599,6 +7599,139 @@ const server = http.createServer(async (req, res) => {
             data = { patterns, match_count: cols.length, columns: cols };
           } catch (e) { data = { error: 'MSSQL 조회 실패: ' + e.message }; }
         }
+      } else if (pathname === '/api/debug/scan-missing-items' && req.method === 'GET') {
+        // 출고누락 전수 점검 — 정보입력현황(category=daeryepum)에서 상품이 누락될 수
+        //   있는 주문을 기간 단위로 스캔.
+        //   ?start_date=2026-04-01&end_date=2026-07-20
+        //   원인 무관 전수: (A) 카테고리 필터 제외 아이템 (B) card_name 빈값 답례품 아이템.
+        //   has_daeryepum_sibling=1 → 주문은 정보입력현황에 뜨지만 이 아이템만 누락 (핵심 증상).
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const s = String(parsed.query.start_date || '').trim();
+        const e = String(parsed.query.end_date || '').trim();
+        const dateOk = v => /^\d{4}-\d{2}-\d{2}$/.test(v);
+        if (!dateOk(s) || !dateOk(e)) {
+          data = { error: 'start_date, end_date 필수 (YYYY-MM-DD)' };
+        } else {
+          try {
+            const p = await getPool();
+            // (A) 카테고리 필터 제외 아이템 — Card_Div 가 알려진 카테고리(D01 답례품/A01 청첩장/
+            //   C29 데코/D02 꽃)도 아니고 COM_ 위탁도 아닌 "알 수 없는 div" 아이템.
+            //   has_daeryepum_sibling: 같은 주문에 D01/COM_ 답례품이 있으면 주문은 화면에 뜸 → 이 아이템만 누락.
+            const scanA = await p.request()
+              .input('s', sql.VarChar, s).input('e', sql.VarChar, e)
+              .query(`
+                SELECT TOP 500 src, order_seq, card_div, card_code, card_name, qty, has_dsib
+                FROM (
+                  SELECT 'CARD' AS src, co.order_seq,
+                    c.Card_Div AS card_div, c.Card_Code AS card_code, c.Card_Name AS card_name,
+                    coi.item_count AS qty,
+                    CASE WHEN EXISTS (
+                      SELECT 1 FROM custom_order_item ci2 WITH (NOLOCK)
+                      INNER JOIN S2_Card c2 WITH (NOLOCK) ON ci2.card_seq = c2.Card_Seq
+                      WHERE ci2.order_seq = co.order_seq
+                        AND (c2.Card_Div = 'D01' OR c2.Card_Code LIKE 'COM[_]%')
+                    ) THEN 1 ELSE 0 END AS has_dsib
+                  FROM custom_order co WITH (NOLOCK)
+                  INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                  WHERE co.order_date >= @s AND co.order_date < DATEADD(day, 1, CAST(@e AS date))
+                    AND co.status_seq >= 1
+                    AND c.Card_Div NOT IN ('D01','A01','C29','D02')
+                    AND c.Card_Code NOT LIKE 'COM[_]%'
+                  UNION ALL
+                  SELECT 'ETC' AS src, o.order_seq,
+                    c.Card_Div, c.Card_Code, c.Card_Name, oi.order_count,
+                    CASE WHEN EXISTS (
+                      SELECT 1 FROM CUSTOM_ETC_ORDER_ITEM oi2 WITH (NOLOCK)
+                      INNER JOIN S2_Card c2 WITH (NOLOCK) ON oi2.card_seq = c2.Card_Seq
+                      WHERE oi2.order_seq = o.order_seq
+                        AND (c2.Card_Div = 'D01' OR c2.Card_Code LIKE 'COM[_]%')
+                    ) THEN 1 ELSE 0 END
+                  FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                  INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                  WHERE o.order_date >= @s AND o.order_date < DATEADD(day, 1, CAST(@e AS date))
+                    AND o.status_seq >= 1
+                    AND c.Card_Div NOT IN ('D01','A01','C29','D02')
+                    AND c.Card_Code NOT LIKE 'COM[_]%'
+                ) t
+                ORDER BY has_dsib DESC, order_seq DESC
+              `);
+            // (A) 요약 — div/code/name 별 집계 (패턴 파악)
+            const scanASummary = await p.request()
+              .input('s', sql.VarChar, s).input('e', sql.VarChar, e)
+              .query(`
+                SELECT card_div, card_code, card_name, COUNT(DISTINCT order_seq) AS order_count
+                FROM (
+                  SELECT co.order_seq, c.Card_Div AS card_div, c.Card_Code AS card_code, c.Card_Name AS card_name
+                  FROM custom_order co WITH (NOLOCK)
+                  INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                  WHERE co.order_date >= @s AND co.order_date < DATEADD(day, 1, CAST(@e AS date))
+                    AND co.status_seq >= 1
+                    AND c.Card_Div NOT IN ('D01','A01','C29','D02') AND c.Card_Code NOT LIKE 'COM[_]%'
+                  UNION ALL
+                  SELECT o.order_seq, c.Card_Div, c.Card_Code, c.Card_Name
+                  FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                  INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                  WHERE o.order_date >= @s AND o.order_date < DATEADD(day, 1, CAST(@e AS date))
+                    AND o.status_seq >= 1
+                    AND c.Card_Div NOT IN ('D01','A01','C29','D02') AND c.Card_Code NOT LIKE 'COM[_]%'
+                ) t
+                GROUP BY card_div, card_code, card_name
+                ORDER BY order_count DESC
+              `);
+            // (B) card_name 빈값인 답례품(D01/COM_) 아이템 — productMap 이 card_name 없으면 스킵.
+            const scanB = await p.request()
+              .input('s', sql.VarChar, s).input('e', sql.VarChar, e)
+              .query(`
+                SELECT TOP 300 src, order_seq, card_code, card_div, qty FROM (
+                  SELECT 'CARD' AS src, co.order_seq, c.Card_Code AS card_code, c.Card_Div AS card_div, coi.item_count AS qty
+                  FROM custom_order co WITH (NOLOCK)
+                  INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                  WHERE co.order_date >= @s AND co.order_date < DATEADD(day, 1, CAST(@e AS date))
+                    AND co.status_seq >= 1
+                    AND (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')
+                    AND LTRIM(RTRIM(ISNULL(c.Card_Name, ''))) = ''
+                  UNION ALL
+                  SELECT 'ETC' AS src, o.order_seq, c.Card_Code, c.Card_Div, oi.order_count
+                  FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                  INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON oi.order_seq = o.order_seq
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                  WHERE o.order_date >= @s AND o.order_date < DATEADD(day, 1, CAST(@e AS date))
+                    AND o.status_seq >= 1
+                    AND (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')
+                    AND LTRIM(RTRIM(ISNULL(c.Card_Name, ''))) = ''
+                ) t
+                ORDER BY order_seq DESC
+              `);
+            const aRows = (scanA.recordset || []).map(r => ({
+              src: r.src, order_seq: r.order_seq, card_div: r.card_div,
+              card_code: r.card_code, card_name: r.card_name, qty: Number(r.qty) || 0,
+              order_shows_but_item_missing: r.has_dsib === 1,
+            }));
+            data = {
+              period: { start: s, end: e },
+              scan_a_category_excluded: {
+                desc: '알 수 없는 Card_Div (D01/A01/C29/D02/COM_ 외) 아이템 — 카테고리 필터로 정보입력현황에서 제외됨',
+                summary_by_product: scanASummary.recordset || [],
+                orders: aRows,
+                symptom_match_count: aRows.filter(r => r.order_shows_but_item_missing).length,
+                orders_capped: (scanA.recordset || []).length >= 500,
+              },
+              scan_b_empty_name: {
+                desc: '답례품(D01/COM_) 아이템인데 Card_Name 빈값 — productMap 이 card_name 없으면 스킵',
+                orders: (scanB.recordset || []).map(r => ({ src: r.src, order_seq: r.order_seq, card_code: r.card_code, card_div: r.card_div, qty: Number(r.qty) || 0 })),
+                orders_capped: (scanB.recordset || []).length >= 300,
+              },
+              note: 'scan_a 의 order_shows_but_item_missing=true 가 4760779 와 동일 증상. summary_by_product 에서 어떤 상품/div 가 답례품인지 확인 후 필터 보정 필요.',
+            };
+          } catch (e2) { data = { error: 'MSSQL 조회 실패: ' + e2.message }; }
+        }
       } else if (pathname === '/api/debug/order-items' && req.method === 'GET') {
         // 특정 주문의 전 아이템을 카테고리 필터 없이 덤프 — 정보입력현황 누락 진단용.
         //   ?order_seq=4760779
