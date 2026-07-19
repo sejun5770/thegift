@@ -7599,6 +7599,76 @@ const server = http.createServer(async (req, res) => {
             data = { patterns, match_count: cols.length, columns: cols };
           } catch (e) { data = { error: 'MSSQL 조회 실패: ' + e.message }; }
         }
+      } else if (pathname === '/api/debug/order-items' && req.method === 'GET') {
+        // 특정 주문의 전 아이템을 카테고리 필터 없이 덤프 — 정보입력현황 누락 진단용.
+        //   ?order_seq=4760779
+        //   각 아이템의 Card_Div/Card_Code/Card_Name + daeryepum 필터(D01 OR COM_) 통과 여부.
+        //   CARD(custom_order) + ETC(CUSTOM_ETC_ORDER) 양쪽 조회.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const seq = parseInt(String(parsed.query.order_seq || '').trim(), 10);
+        if (!seq || seq <= 0) { data = { error: 'order_seq (양의 정수) 필수' }; }
+        else {
+          try {
+            const p = await getPool();
+            const [cardRes, etcRes] = await Promise.all([
+              p.request().input('seq', sql.Int, seq).query(`
+                SELECT 'CARD' AS src, co.order_seq, co.status_seq,
+                  c.Card_Code AS card_code, c.Card_Name AS card_name, c.Card_Div AS card_div,
+                  coi.item_count AS qty,
+                  CASE WHEN c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%' THEN 1 ELSE 0 END AS passes_daeryepum,
+                  CASE WHEN LTRIM(RTRIM(ISNULL(c.Card_Name, ''))) = '' THEN 1 ELSE 0 END AS card_name_empty
+                FROM custom_order co WITH (NOLOCK)
+                INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+                INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                WHERE co.order_seq = @seq
+              `),
+              p.request().input('seq', sql.Int, seq).query(`
+                SELECT 'ETC' AS src, o.order_seq, o.status_seq,
+                  c.Card_Code AS card_code, c.Card_Name AS card_name, c.Card_Div AS card_div,
+                  oi.order_count AS qty,
+                  CASE WHEN c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%' THEN 1 ELSE 0 END AS passes_daeryepum,
+                  CASE WHEN LTRIM(RTRIM(ISNULL(c.Card_Name, ''))) = '' THEN 1 ELSE 0 END AS card_name_empty
+                FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                WHERE o.order_seq = @seq
+              `),
+            ]);
+            // 답례품 배송 상세(DELIVERY_INFO_DETAIL) 존재 여부 — CARD 주문 누락 원인 진단.
+            //   정보입력현황 CARD 쿼리는 DELIVERY_INFO_DETAIL item_title='답례품' INNER JOIN 이라
+            //   답례품 배송 상세가 없으면 주문 자체가 빠질 수 있음.
+            let deliveryDetail = [];
+            try {
+              const dd = await p.request().input('seq', sql.Int, seq).query(`
+                SELECT di.DELIVERY_SEQ, di.NAME, dd.item_title, dd.item_count
+                FROM DELIVERY_INFO di WITH (NOLOCK)
+                LEFT JOIN DELIVERY_INFO_DETAIL dd WITH (NOLOCK) ON dd.delivery_id = di.ID
+                WHERE di.ORDER_SEQ = @seq
+                ORDER BY di.DELIVERY_SEQ
+              `);
+              deliveryDetail = dd.recordset || [];
+            } catch (e) { deliveryDetail = [{ error: e.message }]; }
+            const norm = rows => (rows || []).map(r => ({
+              src: r.src, status_seq: r.status_seq,
+              card_code: r.card_code, card_name: r.card_name, card_div: r.card_div,
+              qty: Number(r.qty) || 0,
+              passes_daeryepum_filter: r.passes_daeryepum === 1,
+              card_name_empty: r.card_name_empty === 1,
+            }));
+            const items = [...norm(cardRes.recordset), ...norm(etcRes.recordset)];
+            data = {
+              order_seq: seq,
+              found_in: cardRes.recordset.length ? 'CARD (custom_order)' : (etcRes.recordset.length ? 'ETC (CUSTOM_ETC_ORDER)' : '없음'),
+              item_count: items.length,
+              items,
+              excluded_from_daeryepum: items.filter(i => !i.passes_daeryepum_filter),
+              delivery_detail: deliveryDetail,
+              note: 'passes_daeryepum_filter=false 인 아이템은 정보입력현황(category=daeryepum)에서 제외됨. delivery_detail 에 item_title=답례품 row 가 없으면 CARD 주문이 통째로 빠질 수 있음.',
+            };
+          } catch (e) { data = { error: 'MSSQL 조회 실패: ' + e.message }; }
+        }
       } else if (pathname === '/api/debug/signup-route' && req.method === 'GET') {
         // 사이트별 회원가입을 유입경로(inflow_route 등) 코드별로 집계.
         //   S2_UserInfo.inflow_route (varchar10) 등 코드 컬럼의 실제 값 분포 확인.
