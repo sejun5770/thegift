@@ -7599,6 +7599,101 @@ const server = http.createServer(async (req, res) => {
             data = { patterns, match_count: cols.length, columns: cols };
           } catch (e) { data = { error: 'MSSQL 조회 실패: ' + e.message }; }
         }
+      } else if (pathname === '/api/debug/audit-sticker-mismatch' && req.method === 'GET') {
+        // 과거 오출고 소급 점검 — 정보입력현황 상품명 뒤섞임 버그(커밋 bc8f873 수정 전)로
+        //   잘못 표시됐을 주문 탐지. 실주문 product_code(MSSQL) ↔ 저장된 sticker_selections
+        //   product_code(Supabase) 를 주문별로 대조. 실제 상품 중 매칭 sel 이 없는 주문 = 화면에서
+        //   위치 fallback 으로 엉뚱한 상품명 표시됐던 케이스.
+        //   ?start_date=2026-04-01&end_date=2026-07-20  (submitted_at 기준)
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const s = String(parsed.query.start_date || '').trim();
+        const e = String(parsed.query.end_date || '').trim();
+        const dateOk = v => /^\d{4}-\d{2}-\d{2}$/.test(v);
+        if (!dateOk(s) || !dateOk(e)) {
+          data = { error: 'start_date, end_date 필수 (YYYY-MM-DD)' };
+        } else {
+          try {
+            // 1) Supabase CI (submitted_at 기간 내, sticker_selections 있는 것만)
+            const ciRes = await fetch(
+              `${SUPABASE_URL}/rest/v1/bg_order_customer_info?select=order_id,sticker_selections,submitted_at&submitted_at=gte.${s}T00:00:00&submitted_at=lt.${e}T23:59:59&order=submitted_at.desc&limit=5000`,
+              { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+            );
+            const cis = await ciRes.json();
+            if (!ciRes.ok) {
+              data = { error: 'Supabase 조회 실패: ' + (cis?.message || ciRes.status) };
+            } else {
+              // 2) order_id → order_seq. CARD=numeric, ETC=ETC-. MANUAL(MO-)/마켓(CP-/NV-) 제외
+              //    (fallback 이 MANUAL 전용이라 정상, 마켓은 스티커 입력 없음).
+              const cardSeqs = new Set(), etcSeqs = new Set();
+              const targets = [];
+              for (const ci of (Array.isArray(cis) ? cis : [])) {
+                const id = String(ci.order_id || '');
+                let seq = null, table = null;
+                if (/^\d+$/.test(id)) { seq = parseInt(id, 10); table = 'CARD'; }
+                else if (id.startsWith('ETC-')) { seq = parseInt(id.slice(4), 10); table = 'ETC'; }
+                else continue;
+                if (!seq) continue;
+                const sels = Array.isArray(ci.sticker_selections) ? ci.sticker_selections : [];
+                if (!sels.length) continue; // sels 없으면 fallback 미발생 → 버그 없음
+                const selCodes = new Set(sels.map(x => String(x.product_code || '').trim().toUpperCase()).filter(Boolean));
+                (table === 'CARD' ? cardSeqs : etcSeqs).add(seq);
+                targets.push({ order_id: id, seq, table, selCodes, sel_count: sels.length });
+              }
+              // 3) MSSQL 실제 답례품(D01/COM_) product_code — chunk IN 조회
+              const p = await getPool();
+              const realCodes = new Map(); // `${table}:${seq}` → Set(codes)
+              const chunk = (arr, n) => { const o = []; for (let i = 0; i < arr.length; i += n) o.push(arr.slice(i, i + n)); return o; };
+              const loadCodes = async (seqs, table) => {
+                const tbl = table === 'CARD' ? 'custom_order' : 'CUSTOM_ETC_ORDER';
+                const itemTbl = table === 'CARD' ? 'custom_order_item' : 'CUSTOM_ETC_ORDER_ITEM';
+                for (const c of chunk(seqs, 500)) {
+                  if (!c.length) continue;
+                  const r = await p.request().query(`
+                    SELECT o.order_seq, UPPER(RTRIM(LTRIM(sc.Card_Code))) AS code
+                    FROM ${tbl} o WITH (NOLOCK)
+                    INNER JOIN ${itemTbl} oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                    INNER JOIN S2_Card sc WITH (NOLOCK) ON oi.card_seq = sc.Card_Seq
+                    WHERE o.order_seq IN (${c.join(',')})
+                      AND (sc.Card_Div = 'D01' OR sc.Card_Code LIKE 'COM[_]%')
+                  `);
+                  for (const row of r.recordset) {
+                    const k = `${table}:${row.order_seq}`;
+                    if (!realCodes.has(k)) realCodes.set(k, new Set());
+                    realCodes.get(k).add(String(row.code).trim().toUpperCase());
+                  }
+                }
+              };
+              await loadCodes([...cardSeqs], 'CARD');
+              await loadCodes([...etcSeqs], 'ETC');
+              // 4) 비교 — 실제 상품 중 매칭 sel 없는 코드 = 화면에서 오표시된 상품
+              const mismatches = [];
+              for (const t of targets) {
+                const real = realCodes.get(`${t.table}:${t.seq}`);
+                if (!real || !real.size) continue; // 답례품 상품 없음 (취소/마켓 등) → skip
+                const unmatched = [...real].filter(code => !t.selCodes.has(code));
+                if (unmatched.length) {
+                  mismatches.push({
+                    order_id: t.order_id, table: t.table,
+                    real_product_count: real.size, sel_count: t.sel_count,
+                    unmatched_real_codes: unmatched,
+                    real_codes: [...real], sel_codes: [...t.selCodes],
+                  });
+                }
+              }
+              data = {
+                period: { start: s, end: e },
+                ci_scanned: targets.length,
+                ci_truncated: Array.isArray(cis) && cis.length >= 5000,
+                mismatch_count: mismatches.length,
+                note: '수정(bc8f873) 이전 이 주문들의 정보입력현황이 실제와 다른 상품명으로 표시됐을 수 있음 (오출고/누락 후보). unmatched_real_codes 가 sel 매칭 실패한 실제 상품. 수정 후 화면은 정상 표시됨.',
+                mismatches: mismatches.slice(0, 500),
+                mismatches_truncated: mismatches.length > 500,
+              };
+            }
+          } catch (e2) { data = { error: '조회 실패: ' + e2.message }; }
+        }
       } else if (pathname === '/api/debug/scan-missing-items' && req.method === 'GET') {
         // 출고누락 전수 점검 — 정보입력현황(category=daeryepum)에서 상품이 누락될 수
         //   있는 주문을 기간 단위로 스캔.
