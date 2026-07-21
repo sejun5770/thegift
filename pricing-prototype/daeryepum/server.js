@@ -6387,6 +6387,82 @@ function _validateMkPeriod(query) {
   return { mkStart, mkEnd, MK_FROM: `'${mkStart}'`, MK_TO: `'${mkEnd}'` };
 }
 
+/** GET /api/dashboard/conversion-window — 청첩장→답례품 전환율 (예식 윈도우 -14~+7일 기준).
+ *   기간내 청첩장(A01) 구매 회원 중, 본인 예식일 [-14, +7]일 사이에 답례품(D01) 을 구매한 회원 비율.
+ *   apiMarketing.conversion(기간내 단순 교차)과 달리 답례품 타이밍을 예식 윈도우로 포착.
+ *   분모 = 예식일(S2_UserInfo) 등록된 청첩장 구매 회원. 별도 endpoint — apiMarketing 부하 회피.
+ */
+async function apiConversionWindow(query = {}) {
+  const p = await getPool();
+  const { mkStart, mkEnd, MK_FROM, MK_TO } = _validateMkPeriod(query);
+  const categoryCfg = CATEGORY_FILTERS[query.category] || CATEGORY_FILTERS.daeryepum;
+  const D01_FILTER = categoryCfg.filter;
+  const BEFORE = 14, AFTER = 7;
+  const r = await p.request().query(`
+    WITH card_all AS (
+      SELECT DISTINCT co.member_id
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      WHERE c.Card_Div = 'A01' AND co.status_seq >= 2 AND co.status_seq NOT IN (3,5,9)
+        AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
+        AND co.member_id IS NOT NULL AND co.member_id != ''
+    ),
+    card_buyers AS (
+      SELECT DISTINCT co.member_id,
+        TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) AS wedding_date
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      INNER JOIN S2_UserInfo u WITH (NOLOCK) ON co.member_id = u.uid AND u.site_div = 'SB'
+      WHERE c.Card_Div = 'A01' AND co.status_seq >= 2 AND co.status_seq NOT IN (3,5,9)
+        AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
+        AND co.member_id IS NOT NULL AND co.member_id != ''
+        AND u.wedd_year IS NOT NULL AND LEN(u.wedd_year) = 4
+        AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) IS NOT NULL
+    ),
+    gift_orders AS (
+      SELECT o.member_id, o.order_date
+      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3,5,15)
+        AND o.member_id IS NOT NULL AND o.member_id != ''
+        AND o.order_date >= DATEADD(day, -30, ${MK_FROM}) AND o.order_date < DATEADD(day, 2, GETDATE())
+      UNION ALL
+      SELECT co.member_id, co.order_date
+      FROM custom_order co WITH (NOLOCK)
+      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3,5,9)
+        AND co.member_id IS NOT NULL AND co.member_id != ''
+        AND co.order_date >= DATEADD(day, -30, ${MK_FROM}) AND co.order_date < DATEADD(day, 2, GETDATE())
+    )
+    SELECT
+      (SELECT COUNT(*) FROM card_all) AS card_members_total,
+      (SELECT COUNT(*) FROM card_buyers) AS card_members_dated,
+      COUNT(DISTINCT g.member_id) AS cross_buy
+    FROM card_buyers cb
+    INNER JOIN gift_orders g
+      ON g.member_id = cb.member_id
+      AND g.order_date >= DATEADD(day, -${BEFORE}, cb.wedding_date)
+      AND g.order_date < DATEADD(day, ${AFTER + 1}, cb.wedding_date)
+  `);
+  const row = r.recordset[0] || {};
+  const total = Number(row.card_members_total) || 0;
+  const dated = Number(row.card_members_dated) || 0;
+  const cross = Number(row.cross_buy) || 0;
+  return {
+    period: `${mkStart} ~ ${mkEnd}`,
+    mkStart, mkEnd,
+    window_days: { before: BEFORE, after: AFTER },
+    card_members_total: total,   // 기간내 청첩장 주문 회원 (전체)
+    card_members_dated: dated,   // 그 중 예식일 등록 회원 (전환율 분모)
+    cross_buy: cross,            // 예식 윈도우(-14~+7) 내 답례품 구매 회원
+    conversion_pct: dated ? +(cross / dated * 100).toFixed(1) : 0,
+  };
+}
+
 /** GET /api/dashboard/marketing/sites — 주문 사이트 / 가입 사이트 / 크로스탭 */
 async function apiMarketingSites(query = {}) {
   const p = await getPool();
@@ -8783,6 +8859,14 @@ const server = http.createServer(async (req, res) => {
         data = await apiMarketingChannel(parsed.query);
       } else if (pathname === '/api/dashboard/conversion') {
         data = await apiConversion(parsed.query);
+      } else if (pathname === '/api/dashboard/conversion-window') {
+        // 청첩장→답례품 전환율 (예식 윈도우 -14~+7일). 별도 heavy 쿼리라 방어 처리.
+        try {
+          data = await apiConversionWindow(parsed.query);
+        } catch (cwErr) {
+          console.error('[apiConversionWindow] 실패:', cwErr);
+          data = { error: 'conversion-window 실패: ' + (cwErr?.message || cwErr), _failed: true };
+        }
       } else if (pathname === '/api/dashboard/samples') {
         data = await apiSamples(parsed.query);
       } else if (pathname === '/api/dashboard/sticker-analytics') {
