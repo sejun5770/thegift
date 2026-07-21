@@ -14756,34 +14756,49 @@ function renderBgUnified() {
     //   canonical 순서 (product settings 정의 순서) 로 표시 → TSV K/L/O 매핑 순서와 일관.
     //   1번째 → 'K↗' 뱃지 (품목코드1 매핑), 2번째 → 'L↗' (품목코드2 매핑) 힌트.
     const customOptsCell = (() => {
-      const co = sel?.custom_options;
-      if (!co || typeof co !== 'object') return '<span style="color:var(--gray-300)">-</span>';
-      const rawCodeForCellLookup = sel?.product_code || product_code || '';
-      const baseCodeForCellLookup = resolveBgMappedProductCode(rawCodeForCellLookup);
-      const psEntryForCell = (bgProductSettings || []).find(p => p.product_id === baseCodeForCellLookup || p.product_id === rawCodeForCellLookup);
-      const psCustomKeysForCell = (psEntryForCell && psEntryForCell.custom_options && typeof psEntryForCell.custom_options === 'object' && !Array.isArray(psEntryForCell.custom_options))
-        ? Object.keys(psEntryForCell.custom_options) : [];
-      const selKeysForCell = Object.keys(co);
-      const orderedKeysForCell = [
-        ...psCustomKeysForCell.filter(k => co[k] != null),
-        ...selKeysForCell.filter(k => !psCustomKeysForCell.includes(k)),
-      ];
-      const entries = orderedKeysForCell.map((gName, i) => {
-        const val = co[gName];
-        if (!val) return null;
-        const name = (typeof val === 'string') ? val : (val.name || val.code || '');
-        const code = (typeof val === 'string') ? val : (val.code || '');
-        if (!name && !code) return null;
-        const codePart = (code && code !== name)
-          ? ` <span style="color:var(--gray-400);font-family:monospace;font-size:10.5px">[${esc(code)}]</span>`
+      // (1) 프론트 신규 옵션 — 비용변동 옵션(수건/주방세제 등). 백엔드가 부모 row 에 첨부한
+      //   _options = 실제 주문된 옵션 상품 (config 기본값 아님). 세트/부모 행에 표시.
+      const frontOpts = Array.isArray(order?._options) ? order._options : [];
+      const frontEntries = frontOpts.map(o => {
+        const nm = o?.name || o?.code || '';
+        if (!nm) return null;
+        const codePart = (o?.code && o.code !== o.name)
+          ? ` <span style="color:var(--gray-400);font-family:monospace;font-size:10.5px">[${esc(o.code)}]</span>`
           : '';
-        // K/L 매핑 힌트 뱃지 (3번째 이상은 O열로)
-        let targetBadge = '';
-        if (i === 0) targetBadge = '<span style="background:#dbeafe;color:#1e40af;font-size:9px;font-weight:600;padding:1px 4px;border-radius:3px;margin-right:4px" title="수집복사 K열(품목코드1) 매핑">K↗</span>';
-        else if (i === 1) targetBadge = '<span style="background:#fce7f3;color:#9d174d;font-size:9px;font-weight:600;padding:1px 4px;border-radius:3px;margin-right:4px" title="수집복사 L열(품목코드2) 매핑">L↗</span>';
-        return `<div>${targetBadge}<span style="color:var(--gray-500)">${esc(gName)}:</span> ${esc(name)}${codePart}</div>`;
+        return `<div><span style="color:var(--gray-500)">옵션:</span> ${esc(nm)}${codePart}</div>`;
       }).filter(Boolean);
-      return entries.length ? entries.join('') : '<span style="color:var(--gray-300)">-</span>';
+      // (2) 기존 config 기반 custom_options (구 방식 주문 — 고객이 order-info 에서 선택)
+      const co = sel?.custom_options;
+      let configEntries = [];
+      if (co && typeof co === 'object') {
+        const rawCodeForCellLookup = sel?.product_code || product_code || '';
+        const baseCodeForCellLookup = resolveBgMappedProductCode(rawCodeForCellLookup);
+        const psEntryForCell = (bgProductSettings || []).find(p => p.product_id === baseCodeForCellLookup || p.product_id === rawCodeForCellLookup);
+        const psCustomKeysForCell = (psEntryForCell && psEntryForCell.custom_options && typeof psEntryForCell.custom_options === 'object' && !Array.isArray(psEntryForCell.custom_options))
+          ? Object.keys(psEntryForCell.custom_options) : [];
+        const selKeysForCell = Object.keys(co);
+        const orderedKeysForCell = [
+          ...psCustomKeysForCell.filter(k => co[k] != null),
+          ...selKeysForCell.filter(k => !psCustomKeysForCell.includes(k)),
+        ];
+        configEntries = orderedKeysForCell.map((gName, i) => {
+          const val = co[gName];
+          if (!val) return null;
+          const name = (typeof val === 'string') ? val : (val.name || val.code || '');
+          const code = (typeof val === 'string') ? val : (val.code || '');
+          if (!name && !code) return null;
+          const codePart = (code && code !== name)
+            ? ` <span style="color:var(--gray-400);font-family:monospace;font-size:10.5px">[${esc(code)}]</span>`
+            : '';
+          // K/L 매핑 힌트 뱃지 (3번째 이상은 O열로)
+          let targetBadge = '';
+          if (i === 0) targetBadge = '<span style="background:#dbeafe;color:#1e40af;font-size:9px;font-weight:600;padding:1px 4px;border-radius:3px;margin-right:4px" title="수집복사 K열(품목코드1) 매핑">K↗</span>';
+          else if (i === 1) targetBadge = '<span style="background:#fce7f3;color:#9d174d;font-size:9px;font-weight:600;padding:1px 4px;border-radius:3px;margin-right:4px" title="수집복사 L열(품목코드2) 매핑">L↗</span>';
+          return `<div>${targetBadge}<span style="color:var(--gray-500)">${esc(gName)}:</span> ${esc(name)}${codePart}</div>`;
+        }).filter(Boolean);
+      }
+      const all = [...frontEntries, ...configEntries];
+      return all.length ? all.join('') : '<span style="color:var(--gray-300)">-</span>';
     })();
     const stickerCode = sel?.sticker_code
       ? `<span style="font-family:monospace;font-size:12px">${esc(sel.sticker_code)}</span>`
