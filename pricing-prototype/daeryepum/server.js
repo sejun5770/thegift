@@ -8689,7 +8689,15 @@ const server = http.createServer(async (req, res) => {
       } else if (pathname === '/api/dashboard/leadtime') {
         data = await apiLeadtime(parsed.query);
       } else if (pathname === '/api/dashboard/marketing') {
-        data = await apiMarketing(parsed.query);
+        // 방어: apiMarketing 내부 쿼리 하나가 실패해도 전체 500 대신 에러 메시지를 200 으로
+        //   반환 (프록시가 500 본문을 "unknown error" 로 마스킹해 원인 파악 불가했음).
+        //   프론트는 스키마 불일치 시 이미 graceful skip. 원인 규명 + 콘솔 500 소음 제거 겸용.
+        try {
+          data = await apiMarketing(parsed.query);
+        } catch (mkErr) {
+          console.error('[apiMarketing] 실패:', mkErr);
+          data = { error: 'marketing 조회 실패: ' + (mkErr && mkErr.message || mkErr), _marketing_failed: true };
+        }
       } else if (pathname === '/api/dashboard/marketing/sites') {
         data = await apiMarketingSites(parsed.query);
       } else if (pathname === '/api/dashboard/marketing/reorder') {
