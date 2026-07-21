@@ -16535,50 +16535,46 @@ function copyBgUnified() {
     //   admin 모달 '+추가' 시 클릭 순서대로 키가 추가될 수 있어 selection 객체의 순서는
     //   product 정의 순서와 다를 수 있음. 따라서 product settings 의 canonical 그룹 순서를 우선 적용.
     //   product settings 없거나 매핑 안 되는 그룹은 selection 순서 그대로 뒤에 append.
+    // 옵션 소스 통일 — 신규 옵션(_options: 프론트 card_opt 라인, 백엔드가 부모에 seq 순 정렬) 우선,
+    //   없으면 기존 custom_options 그룹. optList = [{code, name, label}]:
+    //   K=optList[0].code, L=optList[1].code, P(3번째+)=optList.slice(2).
     const customOpts = (sel?.custom_options && typeof sel.custom_options === 'object') ? sel.custom_options : {};
-    const selKeys = Object.keys(customOpts);
-    // product settings 의 그룹 키 순서 lookup
     const rawCodeForLookup = sel?.product_code || product_code || '';
     const baseCode = resolveBgMappedProductCode(rawCodeForLookup);
-    const psEntry = bgProductSettings.find(p => p.product_id === baseCode || p.product_id === rawCodeForLookup);
-    const psCustomKeys = (psEntry && psEntry.custom_options && typeof psEntry.custom_options === 'object' && !Array.isArray(psEntry.custom_options))
-      ? Object.keys(psEntry.custom_options)
-      : [];
-    // canonical 순서 = product settings 순서 우선 + sel 에만 있는 (정의 후 삭제된) 그룹은 뒤에 append
-    const orderedGroupNames = [
-      ...psCustomKeys.filter(k => customOpts[k] != null),
-      ...selKeys.filter(k => !psCustomKeys.includes(k)),
-    ];
-    // 각 그룹 → {code, name} 정규화
-    const getOpt = (gName) => {
-      const val = customOpts[gName];
-      if (!val) return null;
-      if (typeof val === 'string') return { code: val, name: val };
-      return { code: val.code || '', name: val.name || val.code || '' };
-    };
-    const firstGroupOpt = orderedGroupNames[0] ? getOpt(orderedGroupNames[0]) : null;
-    const secondGroupOpt = orderedGroupNames[1] ? getOpt(orderedGroupNames[1]) : null;
-
-    // K열(index 10) = 품목코드1 — 자유옵션 1번째 그룹 있으면 그 code, 없으면 baseCode
-    cells[10] = (firstGroupOpt && firstGroupOpt.code) ? firstGroupOpt.code : baseCode;
-
-    // L열(index 11) = 품목코드2 — 자유옵션 2번째 그룹 있으면 그 code, 없으면 빈 값
-    if (secondGroupOpt && secondGroupOpt.code) {
-      cells[11] = secondGroupOpt.code;
+    const _frontOpts = Array.isArray(order?._options) ? order._options : [];
+    let optList;      // [{code, name, label}] — label 은 P열 '라벨: 이름' 표기용 (custom_options 그룹명)
+    let optBoxTokens; // M열(박스컬러) 판정용 토큰 (custom_options 그룹명 or 옵션 상품명)
+    if (_frontOpts.length) {
+      optList = _frontOpts.map(o => ({ code: o.code || '', name: o.name || o.code || '', label: '' }));
+      optBoxTokens = _frontOpts.map(o => String(o.name || '').toLowerCase());
+    } else {
+      const selKeys = Object.keys(customOpts);
+      const psEntry = bgProductSettings.find(p => p.product_id === baseCode || p.product_id === rawCodeForLookup);
+      const psCustomKeys = (psEntry && psEntry.custom_options && typeof psEntry.custom_options === 'object' && !Array.isArray(psEntry.custom_options))
+        ? Object.keys(psEntry.custom_options) : [];
+      const orderedGroupNames = [
+        ...psCustomKeys.filter(k => customOpts[k] != null),
+        ...selKeys.filter(k => !psCustomKeys.includes(k)),
+      ];
+      const getOpt = (gName) => {
+        const val = customOpts[gName];
+        if (!val) return null;
+        if (typeof val === 'string') return { code: val, name: val };
+        return { code: val.code || '', name: val.name || val.code || '' };
+      };
+      optList = orderedGroupNames.map(g => { const o = getOpt(g); return o ? { ...o, label: g } : null; }).filter(Boolean);
+      optBoxTokens = orderedGroupNames.map(g => String(g).toLowerCase());
     }
 
-    // M열(index 12) = 박스컬러
-    //   - TGJBK09O_ 수건 답례품 세트: 자유옵션 그룹명 기준 조합 판정 코드
-    //     핸드워시 그룹 존재 → TGJBK09D1
-    //     주방세제 그룹 존재 → TGJBK09D2
-    //     그 외 (수건+수건 조합) → TGJBK09D3
-    //   - 그 외 상품: sel.box_code
+    // K열(index 10) = 품목코드1 — 옵션1 code, 없으면 baseCode
+    cells[10] = (optList[0] && optList[0].code) ? optList[0].code : baseCode;
+    // L열(index 11) = 품목코드2 — 옵션2 code (없으면 빈 값)
+    if (optList[1] && optList[1].code) cells[11] = optList[1].code;
+
+    // M열(index 12) = 박스컬러 — TGJBK09O_ 세트: 옵션(그룹명/상품명) 기준 조합 판정.
     if (/^TGJBK09O\d+/i.test(baseCode)) {
-      const gLower = orderedGroupNames.map(g => String(g).toLowerCase());
-      const hasHandwash = gLower.some(g => g.includes('핸드워시'));
-      const hasDishwash = gLower.some(g => g.includes('주방세제'));
-      if (hasHandwash) cells[12] = 'TGJBK09D1';
-      else if (hasDishwash) cells[12] = 'TGJBK09D2';
+      if (optBoxTokens.some(t => t.includes('핸드워시'))) cells[12] = 'TGJBK09D1';
+      else if (optBoxTokens.some(t => t.includes('주방세제'))) cells[12] = 'TGJBK09D2';
       else cells[12] = 'TGJBK09D3';
     } else if (sel?.box_code) {
       cells[12] = sel.box_code;
@@ -16593,12 +16589,11 @@ function copyBgUnified() {
 
     // P열(index 15) = K/L 로 매핑되지 않은 3번째+ 그룹들만 '그룹명: 이름' 형태로 노출 (canonical 순서).
     //   TSV 안전: 탭/개행 → 공백 치환. 매핑할 그룹 없으면 셀 빈 채로 유지.
-    if (orderedGroupNames.length > 2) {
+    if (optList.length > 2) {
       const safeStr = v => String(v).replace(/[\t\r\n]+/g, ' ').trim();
-      const parts = orderedGroupNames.slice(2).map(gName => {
-        const opt = getOpt(gName);
-        if (!opt || !opt.name) return '';
-        return `${safeStr(gName)}: ${safeStr(opt.name)}`;
+      const parts = optList.slice(2).map(o => {
+        if (!o || !o.name) return '';
+        return o.label ? `${safeStr(o.label)}: ${safeStr(o.name)}` : safeStr(o.name);
       }).filter(Boolean);
       if (parts.length) cells[15] = parts.join(' / ');
     }

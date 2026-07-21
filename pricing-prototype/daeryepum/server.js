@@ -812,7 +812,7 @@ async function apiOrders(query) {
         CONVERT(varchar(19), o.confirm_date, 120) AS confirmed_at,
         -- 옵션(비용변동) 라인 식별: card_opt = 부모 아이템 card_seq. NULL=부모(세트/메인).
         --   백엔드에서 옵션을 부모로 합산 + 옵션 행 제거 (아래 JS). item_card_seq 로 매칭.
-        oi.card_seq AS item_card_seq, oi.card_opt AS card_opt
+        oi.card_seq AS item_card_seq, oi.card_opt AS card_opt, oi.seq AS item_seq
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
@@ -897,7 +897,7 @@ async function apiOrders(query) {
         -- 구매확정일 — custom_order.src_confirm_date. 바른손카드에서 고객이 구매확정한 시점.
         CONVERT(varchar(19), co.src_confirm_date, 120) AS confirmed_at,
         -- 옵션 라인 식별 (ETC 파트와 컬럼 통일). custom_order_item 엔 card_opt 없음 → NULL.
-        coi.card_seq AS item_card_seq, NULL AS card_opt
+        coi.card_seq AS item_card_seq, NULL AS card_opt, NULL AS item_seq
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
@@ -989,6 +989,7 @@ async function apiOrders(query) {
           (parent._options = parent._options || []).push({
             code: r.card_code, name: r.card_name,
             amount: Number(r.item_amount) || 0, qty: r.item_count,
+            seq: Number(r.item_seq) || 0, // 옵션 순서(옵션1/2 = 아이템 seq) — 수집복사 K/L 매핑용
           });
           continue; // 옵션 행 제거
         }
@@ -996,6 +997,8 @@ async function apiOrders(query) {
       }
       kept.push(r);
     }
+    // 옵션 순서 고정 — 아이템 seq 오름차순 (옵션1=주방세제, 옵션2=수건 …). 수집복사 K/L 순서 일관.
+    for (const r of kept) { if (Array.isArray(r._options)) r._options.sort((a, b) => (a.seq || 0) - (b.seq || 0)); }
     rows.splice(0, rows.length, ...kept);
   }
 
