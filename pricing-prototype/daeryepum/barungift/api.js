@@ -234,6 +234,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
               co.order_seq, co.order_date, co.settle_price AS order_total_price, co.settle_price AS last_total_price,
               co.order_name, co.order_hphone, co.status_seq, co.settle_date,
               ei.seq AS item_id, ei.order_count AS item_count, ei.card_price AS item_price, ei.card_sale_price AS item_sale_price,
+              ei.card_opt AS card_opt, -- 옵션 라인(비용변동 옵션): 부모 아이템 card_seq 참조. NULL=부모(세트/메인)
               c.Card_Code, c.Card_Name, c.Card_Price,
               co.recv_name AS delivery_name, co.recv_hphone AS delivery_hphone, co.recv_address AS delivery_addr
             FROM CUSTOM_ETC_ORDER co WITH (NOLOCK)
@@ -278,6 +279,10 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const seenItems = new Set();
       const products = [];
       for (const r of result.recordset) {
+        // 옵션 라인(card_opt≠null: 비용변동 옵션, 예 주방세제/수건) 은 프론트에서 이미 선택됨 →
+        //   order-info 에선 스티커/출고일 대상에서 제외. 부모(세트/메인, card_opt=null) 만 노출.
+        //   card_opt 은 ETC 전용 컬럼 (CARD 주문은 SELECT 에 없어 undefined → 제외 안 됨, 정상).
+        if (r.card_opt != null) continue;
         const itemId = String(r.item_id || r.order_seq);
         if (seenItems.has(itemId)) continue;
         seenItems.add(itemId);
