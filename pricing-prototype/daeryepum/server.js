@@ -809,7 +809,10 @@ async function apiOrders(query) {
         0 AS file_count,
         1 AS delivery_seq,  -- ETC 주문은 단일 배송지
         -- 구매확정일 — CUSTOM_ETC_ORDER.confirm_date. 실제로는 2010년 이후 신규 값 없음 (미사용) 이나 스키마 통일 위해 SELECT.
-        CONVERT(varchar(19), o.confirm_date, 120) AS confirmed_at
+        CONVERT(varchar(19), o.confirm_date, 120) AS confirmed_at,
+        -- 옵션(비용변동) 라인 식별: card_opt = 부모 아이템 card_seq. NULL=부모(세트/메인).
+        --   백엔드에서 옵션을 부모로 합산 + 옵션 행 제거 (아래 JS). item_card_seq 로 매칭.
+        oi.card_seq AS item_card_seq, oi.card_opt AS card_opt
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
@@ -892,7 +895,9 @@ async function apiOrders(query) {
         ISNULL((SELECT COUNT(*) FROM custom_order_plist p WITH (NOLOCK) INNER JOIN custom_order_plist_files f WITH (NOLOCK) ON p.id = f.pid WHERE p.order_seq = co.order_seq), 0) AS file_count,
         ISNULL(di.DELIVERY_SEQ, 1) AS delivery_seq,  -- 배송지별 행 구분 (나눔배송 대응)
         -- 구매확정일 — custom_order.src_confirm_date. 바른손카드에서 고객이 구매확정한 시점.
-        CONVERT(varchar(19), co.src_confirm_date, 120) AS confirmed_at
+        CONVERT(varchar(19), co.src_confirm_date, 120) AS confirmed_at,
+        -- 옵션 라인 식별 (ETC 파트와 컬럼 통일). custom_order_item 엔 card_opt 없음 → NULL.
+        coi.card_seq AS item_card_seq, NULL AS card_opt
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
@@ -963,6 +968,36 @@ async function apiOrders(query) {
     // 주문자명/받는사람 합치기
     display_name: mergeNames(r.recv_name, r.order_name),
   }));
+
+  // 옵션(비용변동) 라인 합산 — 프론트 신규 옵션 기능 (수건/주방세제 등).
+  //   옵션 행(card_opt = 부모 아이템 card_seq)의 금액을 부모(item_card_seq = card_opt)에 합산하고
+  //   옵션 행은 제거 → 주문조회·정보입력현황에 부모(세트)만, 결제금액은 옵션 합으로 표시.
+  //   ETC 전용 (CARD 는 card_opt 항상 NULL → 영향 없음). 부모에 _options 첨부 (옵션선택 표시용).
+  if (rows.some(r => r.card_opt != null)) {
+    const parentByKey = new Map(); // `${order_seq}::${item_card_seq}` → 부모 row
+    for (const r of rows) {
+      if (r.card_opt == null && r.item_card_seq != null) {
+        parentByKey.set(`${r.order_seq}::${r.item_card_seq}`, r);
+      }
+    }
+    const kept = [];
+    for (const r of rows) {
+      if (r.card_opt != null) {
+        const parent = parentByKey.get(`${r.order_seq}::${r.card_opt}`);
+        if (parent) {
+          parent.item_amount = (Number(parent.item_amount) || 0) + (Number(r.item_amount) || 0);
+          (parent._options = parent._options || []).push({
+            code: r.card_code, name: r.card_name,
+            amount: Number(r.item_amount) || 0, qty: r.item_count,
+          });
+          continue; // 옵션 행 제거
+        }
+        // 부모 못 찾은 옵션은 (비정상) 누락 방지 위해 유지
+      }
+      kept.push(r);
+    }
+    rows.splice(0, rows.length, ...kept);
+  }
 
   // 쿠팡 주문 UNION — Supabase coupang_orders 에서 같은 기간 조회 후 MSSQL row 와 동일 schema 로 정규화.
   //   카테고리가 'daeryepum' 일 때만 포함 (deco/flower 는 쿠팡 미운영 가정).
