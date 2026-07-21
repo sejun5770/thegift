@@ -16805,7 +16805,10 @@ function openBgOrderEditByIdx(idx) {
 
   if (ci) {
     // 기존: 수정
-    openBgOrderEdit({ ...ci, _order_seq: order.order_seq, _productNames });
+    //   비용변동 옵션 라인 코드(부모 row 에 백엔드가 첨부한 _options) 를 넘겨, 모달이 옛 CI 에
+    //   남아있는 옵션 sel 을 제외하도록 함 (옵션은 세트/부모에 합산되어 별도 스티커 대상 아님).
+    const _optionCodes = (order._options || []).map(o => o.code).filter(Boolean);
+    openBgOrderEdit({ ...ci, _order_seq: order.order_seq, _productNames, _optionCodes });
     return;
   }
 
@@ -17011,8 +17014,13 @@ async function openBgOrderEdit(info) {
       }
     }
     // 2순위: existingSels 중 주문 상품과 매칭 안 된 row 도 보존 (데이터 안전성)
+    //   단, 비용변동 옵션 라인 코드(_optionCodes) 는 제외 — 옵션은 부모(세트)에 합산되어
+    //   별도 스티커/편집 대상이 아님 (옛 CI 에 남은 옵션 sel 이 모달에 딸려 나오던 이슈).
+    const _optCodeSet = new Set(info._optionCodes || []);
     existingSels.forEach((s, i) => {
-      if (!usedExisting.has(i)) merged.push(s);
+      if (usedExisting.has(i)) return;
+      if (s.product_code && _optCodeSet.has(s.product_code)) return; // 옵션 sel 제외
+      merged.push(s);
     });
     return merged;
   })();
