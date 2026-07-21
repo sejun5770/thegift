@@ -7878,6 +7878,26 @@ const server = http.createServer(async (req, res) => {
               `);
               deliveryDetail = dd.recordset || [];
             } catch (e) { deliveryDetail = [{ error: e.message }]; }
+            // 아이템 테이블 전체 컬럼 덤프 — 옵션(별도 상품코드) 이 메인 아이템과 어떻게 연결되는지
+            //   (부모 참조 seq / 옵션 플래그 컬럼 유무) 확인용. 옵션 검수 (order 3248035 케이스).
+            let rawItems = { card: [], etc: [] };
+            try {
+              const [rc, re] = await Promise.all([
+                p.request().input('seq', sql.Int, seq).query(`
+                  SELECT coi.*, c.Card_Code AS _card_code, c.Card_Name AS _card_name, c.Card_Div AS _card_div
+                  FROM custom_order_item coi WITH (NOLOCK)
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                  WHERE coi.order_seq = @seq
+                `),
+                p.request().input('seq', sql.Int, seq).query(`
+                  SELECT oi.*, c.Card_Code AS _card_code, c.Card_Name AS _card_name, c.Card_Div AS _card_div
+                  FROM CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK)
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                  WHERE oi.order_seq = @seq
+                `),
+              ]);
+              rawItems = { card: rc.recordset || [], etc: re.recordset || [] };
+            } catch (e) { rawItems = { error: e.message }; }
             const norm = rows => (rows || []).map(r => ({
               src: r.src, status_seq: r.status_seq,
               card_code: r.card_code, card_name: r.card_name, card_div: r.card_div,
@@ -7893,7 +7913,8 @@ const server = http.createServer(async (req, res) => {
               items,
               excluded_from_daeryepum: items.filter(i => !i.passes_daeryepum_filter),
               delivery_detail: deliveryDetail,
-              note: 'passes_daeryepum_filter=false 인 아이템은 정보입력현황(category=daeryepum)에서 제외됨. delivery_detail 에 item_title=답례품 row 가 없으면 CARD 주문이 통째로 빠질 수 있음.',
+              raw_items: rawItems,
+              note: 'passes_daeryepum_filter=false 인 아이템은 정보입력현황(category=daeryepum)에서 제외됨. raw_items 에서 옵션-메인 연결 컬럼(부모 seq/옵션 플래그) 확인.',
             };
           } catch (e) { data = { error: 'MSSQL 조회 실패: ' + e.message }; }
         }
