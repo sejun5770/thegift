@@ -8706,7 +8706,19 @@ const server = http.createServer(async (req, res) => {
           data = await apiMarketingReorder(parsed.query);
         } catch (roErr) {
           console.error('[apiMarketingReorder] 실패:', roErr);
-          data = { error: 'reorder 조회 실패: ' + (roErr && roErr.message || roErr), _reorder_failed: true };
+          data = {
+            error: 'reorder 조회 실패',
+            _reorder_failed: true,
+            message: roErr?.message,
+            name: roErr?.name,
+            code: roErr?.code,
+            number: roErr?.number,
+            line: roErr?.lineNumber,
+            original: roErr?.originalError?.message
+              || roErr?.originalError?.info?.message
+              || roErr?.precedingErrors?.[0]?.message
+              || null,
+          };
         }
       } else if (pathname === '/api/dashboard/marketing/channel') {
         data = await apiMarketingChannel(parsed.query);
