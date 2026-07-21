@@ -8701,7 +8701,13 @@ const server = http.createServer(async (req, res) => {
       } else if (pathname === '/api/dashboard/marketing/sites') {
         data = await apiMarketingSites(parsed.query);
       } else if (pathname === '/api/dashboard/marketing/reorder') {
-        data = await apiMarketingReorder(parsed.query);
+        // 방어: 무거운 self-join timeout 등 실패 시 에러 메시지를 200 으로 노출 (프록시 500 마스킹 우회).
+        try {
+          data = await apiMarketingReorder(parsed.query);
+        } catch (roErr) {
+          console.error('[apiMarketingReorder] 실패:', roErr);
+          data = { error: 'reorder 조회 실패: ' + (roErr && roErr.message || roErr), _reorder_failed: true };
+        }
       } else if (pathname === '/api/dashboard/marketing/channel') {
         data = await apiMarketingChannel(parsed.query);
       } else if (pathname === '/api/dashboard/conversion') {
