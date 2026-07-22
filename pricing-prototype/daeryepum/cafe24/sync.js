@@ -130,12 +130,14 @@ function parseStickerMessage(it) {
 
 /**
  * 한 카페24 order → 정규화된 row 배열 (orderItems 펼침).
- *   결제완료(paid='T') & 미취소만 통과 (호출측에서 이미 필터하지만 방어적으로 재확인).
+ *   결제완료(paid='T') 또는 취소(canceled='T') 주문 통과 — 미결제 & 미취소만 제외.
+ *   ※ 취소 주문도 포함해야 재sync 시 기존 활성 row 를 CANCELED 로 갱신 → 매출/주문조회에서
+ *     정확히 제외됨 (coupang: CANCEL/RETURNS sync, naver: 취소변경 fetch 와 동일 정책).
  */
 function normalizeOrder(o) {
   if (!o || !o.order_id) return [];
-  if (o.paid !== 'T') return [];
-  if (o.canceled === 'T') return [];
+  const isCanceled = o.canceled === 'T';
+  if (o.paid !== 'T' && !isCanceled) return [];
 
   const orderedAt = parseCafe24Date(o.order_date);
   const paidAt = o.paid === 'T' ? (parseCafe24Date(o.paid_date) || orderedAt) : null;
@@ -165,7 +167,7 @@ function normalizeOrder(o) {
   return rawItems.map((it, idx) => {
     const qty = toInt(it.quantity, 1);
     const unit = toInt(it.product_price, 0);
-    const itStatus = it.order_status || orderFallbackStatus;
+    const itStatus = isCanceled ? 'CANCELED' : (it.order_status || orderFallbackStatus);
     const lineKey = (it.order_item_code != null && String(it.order_item_code).trim())
       ? String(it.order_item_code).trim()
       : `${it.product_no != null ? it.product_no : 'p'}:${idx}`;
@@ -256,21 +258,40 @@ async function syncCafe24Orders({ since } = {}) {
         const itemsBefore = Array.isArray(o.items) ? o.items.length : 0;
         const normalized = normalizeOrder(o);
         rows.push(...normalized);
-        if (normalized.length) validOrders.push(o);
+        // stub(정보입력현황 입력완료)은 미취소 주문만 — 취소건은 status 갱신만 하고 입력완료 생성 안 함.
+        if (normalized.length && o.canceled !== 'T') validOrders.push(o);
         // 결제완료·미취소 필터 또는 품목 0 개로 빠진 수
         filteredOut += Math.max(0, itemsBefore - normalized.length);
       }
+    }
+    // 취소 반영 보강 — cancel_date 기준으로 기간 내 취소 발생 주문 추가 fetch.
+    //   order_date 가 sync 창 밖인 옛날 주문의 뒤늦은 취소도 CANCELED 로 갱신 (기존 활성 row 덮어씀).
+    //   실패해도 주 수집은 유지 (무시). (naver 취소변경 fetch 와 동일 취지)
+    try {
+      for (const w of windows) {
+        const canceledOrders = await client.fetchOrders(w.start, w.end, 'cancel_date');
+        for (const o of canceledOrders) {
+          rows.push(...normalizeOrder(o)); // 취소면 CANCELED row → 매출/주문조회에서 제외
+        }
+      }
+    } catch (e) {
+      console.warn('[cafe24 sync] 취소(cancel_date) 보강 fetch 실패 (무시):', e.message);
     }
   } catch (e) {
     await store.updateSyncState({ last_error: e.message, last_synced_at: new Date().toISOString() }).catch(() => {});
     return { fetched, upserted: 0, filtered_out: filteredOut, error: e.message, windows };
   }
 
+  // (cafe24_order_id, line_key) 중복 제거 — order_date/cancel_date 두 pass 겹침 대비 (나중 값 우선).
+  const dedup = new Map();
+  for (const r of rows) dedup.set(`${r.cafe24_order_id}::${r.line_key}`, r);
+  const uniqueRows = [...dedup.values()];
+
   let upserted = 0;
-  if (rows.length) {
+  if (uniqueRows.length) {
     try {
-      const r = await store.upsertCafe24Orders(rows);
-      upserted = r.upserted || rows.length;
+      const r = await store.upsertCafe24Orders(uniqueRows);
+      upserted = r.upserted || uniqueRows.length;
     } catch (e) {
       await store.updateSyncState({ last_error: e.message, last_synced_at: new Date().toISOString() }).catch(() => {});
       return { fetched, upserted: 0, filtered_out: filteredOut, error: e.message, windows };
@@ -359,7 +380,7 @@ async function syncCafe24Orders({ since } = {}) {
     stub_ci_upserted: stubUpserted,
     enriched: enrichedCount,
     filtered_out: filteredOut,
-    items: rows.length,
+    items: uniqueRows.length,
     windows,
     since_kst: fmtKstDate(sinceMs),
     end_kst: fmtKstDate(endMs),

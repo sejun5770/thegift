@@ -53,7 +53,7 @@ async function cafe24Get(path, params = {}) {
  *   embed=items,receivers,buyer 로 품목/수령자/주문자 포함.
  *   startDate/endDate: 'YYYY-MM-DD'
  */
-async function fetchOrders(startDate, endDate) {
+async function fetchOrders(startDate, endDate, dateType = 'order_date') {
   const all = [];
   const limit = 500;
   let offset = 0;
@@ -62,7 +62,7 @@ async function fetchOrders(startDate, endDate) {
     const data = await cafe24Get('/orders', {
       start_date: startDate,
       end_date: endDate,
-      date_type: 'order_date',
+      date_type: dateType,
       embed: 'items,receivers,buyer',
       limit: String(limit),
       offset: String(offset),
