@@ -6476,23 +6476,28 @@ async function apiConversionWindow(query = {}) {
     }
   }
 
-  // 4) JS 윈도우 판정 — 회원 예식일 [-14, +7일] 사이 답례품 주문 존재 여부
-  let cross = 0;
+  // 4) JS 윈도우 판정 — (B) 예식 윈도우가 이미 종료된(전환 기회가 있던) 회원만 분모.
+  //    미래/진행중 예식(오늘 <= 예식일+7일)은 아직 전환 기회 전이라 분모에서 제외 → 지표 왜곡 방지.
+  const now = Date.now();
+  let cross = 0, eligible = 0;
   for (const cb of cardBuyers) {
-    const lo = cb.wd.getTime() - BEFORE * DAY;
-    const hi = cb.wd.getTime() + (AFTER + 1) * DAY; // +7일 포함 → exclusive +8
+    const wt = cb.wd.getTime();
+    if (wt + AFTER * DAY >= now) continue; // 예식일+7일이 아직 안 지남 → 전환 기회 전 → 제외
+    eligible++;
+    const lo = wt - BEFORE * DAY;
+    const hi = wt + (AFTER + 1) * DAY; // +7일 포함 → exclusive +8
     const gifts = giftByMember.get(cb.member_id);
     if (gifts && gifts.some(d => { const t = d.getTime(); return t >= lo && t < hi; })) cross++;
   }
-  const dated = cardBuyers.length;
   return {
     period: `${mkStart} ~ ${mkEnd}`,
     mkStart, mkEnd,
     window_days: { before: BEFORE, after: AFTER },
-    card_members_total: cardMembersTotal, // 기간내 청첩장 주문 회원 (전체)
-    card_members_dated: dated,            // 그 중 예식일 등록 회원 (전환율 분모)
-    cross_buy: cross,                     // 예식 윈도우(-14~+7) 내 답례품 구매 회원
-    conversion_pct: dated ? +(cross / dated * 100).toFixed(1) : 0,
+    card_members_total: cardMembersTotal,   // 기간내 청첩장 주문 회원 (전체)
+    card_members_dated: cardBuyers.length,  // 예식일 등록 회원 (참고)
+    card_members_eligible: eligible,        // 예식 윈도우 종료 = 전환율 분모 (전환 기회 있던 회원)
+    cross_buy: cross,                       // 그 중 예식 윈도우(-14~+7) 내 답례품 구매 회원
+    conversion_pct: eligible ? +(cross / eligible * 100).toFixed(1) : 0,
   };
 }
 

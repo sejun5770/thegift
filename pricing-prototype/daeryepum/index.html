@@ -734,7 +734,7 @@ nav.nav-loading a[href^="#"] {
         <h3 style="margin-bottom:12px">🔄 청첩장→답례품 전환율</h3>
         <div id="mk-conv-chart">
           <div class="resp-grid-3" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center;margin-bottom:12px">
-            <div><div style="font-size:24px;font-weight:700;color:var(--primary)" id="mk-card-members">-</div><div style="font-size:11px;color:#666">청첩장 주문자</div></div>
+            <div><div style="font-size:24px;font-weight:700;color:var(--primary)" id="mk-card-members">-</div><div style="font-size:11px;color:#666">청첩장 주문자(예식완료)</div></div>
             <div><div style="font-size:24px;font-weight:700;color:#f59e0b" id="mk-cross">-</div><div style="font-size:11px;color:#666">답례품도 구매</div></div>
             <div><div style="font-size:24px;font-weight:700;color:#10b981" id="mk-conv-pct">-</div><div style="font-size:11px;color:#666">전환율</div></div>
           </div>
@@ -5892,7 +5892,8 @@ async function _loadDashSection(n) {
       setBsdPreset('next-30');
     } else if (n === 2) {
       // 보조지표1: 마케팅 / 주차별 전환율 / 샘플
-      loadMarketing();
+      //   전환율 카드는 마케팅 렌더 후 예식 윈도우 기반(conversion-window)으로 덮어씀.
+      loadMarketing().then(() => _loadConversionWindowCard()).catch(e=>console.warn('Marketing load failed:', e));
       fetch(`${API}/api/dashboard/conversion?${catParam}`).then(r=>r.json()).then(renderConversion).catch(e=>console.warn('Conversion load failed:', e));
       fetch(`${API}/api/dashboard/samples?${catParam}`).then(r=>r.json()).then(renderSamples).catch(e=>console.warn('Samples load failed:', e));
     } else if (n === 3) {
@@ -5918,6 +5919,25 @@ async function _loadDashSection(n) {
       }
     }
   } catch(e) { console.error(e); showToast('대시보드 로딩 실패: ' + e.message); }
+}
+
+// 전환율 카드(#mk-conv-*)를 예식 윈도우(-14~+7일) 기반으로 덮어씀 (마케팅 렌더 후 호출).
+//   B 방식: 예식 종료(전환 기회 있던) 회원만 분모. 마케팅 카드 기간(mk-start/mk-end) 사용.
+//   실패 시 마케팅 기본값 유지 (silent).
+async function _loadConversionWindowCard() {
+  const s = document.getElementById('mk-start')?.value;
+  const e = document.getElementById('mk-end')?.value;
+  if (!s || !e) return;
+  try {
+    const cw = await fetch(`${API}/api/dashboard/conversion-window?category=${encodeURIComponent(dashCategory)}&start_date=${s}&end_date=${e}`).then(r => r.json());
+    if (!cw || cw._failed) return;
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set('mk-card-members', fmtNum(cw.card_members_eligible));
+    set('mk-cross', fmtNum(cw.cross_buy));
+    set('mk-conv-pct', (cw.conversion_pct != null ? cw.conversion_pct : 0) + '%');
+    const fb = document.getElementById('mk-conv-feedback');
+    if (fb) fb.innerHTML = `예식일 <b>−${cw.window_days.before}~+${cw.window_days.after}일</b> 윈도우 기준 · 예식 종료 회원 <b>${fmtNum(cw.card_members_eligible)}</b>명 중 <b>${fmtNum(cw.cross_buy)}</b>명 답례품 전환 (<b>${cw.conversion_pct}%</b>). 미래/진행중 예식은 분모 제외.`;
+  } catch (err) { console.warn('conversion-window card load failed:', err); }
 }
 
 function setDashCategory(cat) {
