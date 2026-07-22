@@ -4850,7 +4850,7 @@ async function scanAndCleanupOrphanCi({ execute }) {
     const oid = String(ci.order_id || '');
     if (/^\d+$/.test(oid)) {
       orphans.push({ order_id: oid, submitted_at: ci.submitted_at, updated_at: ci.updated_at });
-    } else if (oid.startsWith('ETC-') || oid.startsWith('CP-') || oid.startsWith('NV-')) {
+    } else if (oid.startsWith('ETC-') || oid.startsWith('CP-') || oid.startsWith('NV-') || oid.startsWith('CF-')) {
       canonicalSet.add(oid);
     }
   }

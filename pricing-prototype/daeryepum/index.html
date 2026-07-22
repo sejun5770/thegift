@@ -13934,6 +13934,8 @@ const UNI_ALL_COLS = [
   { key: 'desired_ship_date', label: '희망출고일', default: true, valueFn: r => r.sel?.desired_ship_date || r.ci?.desired_ship_date || '' },
   { key: 'submitted_at',  label: '입력일시',      default: false, valueFn: r => r.ci?.updated_at || r.ci?.submitted_at || '' },
   { key: 'sticker_code',  label: '스티커코드',    default: false, valueFn: r => r.sel?.sticker_code || '' },
+  { key: 'sticker_type',  label: '스티커타입',    default: false, valueFn: r => r.sel?.sticker_name || '' },
+  { key: 'sticker_msg',   label: '스티커문구',    default: false, valueFn: r => r.sel?.custom_values?.text || '' },
 ];
 
 function buildUniAllColSelector() {
@@ -14311,6 +14313,7 @@ async function loadBgUnified() {
     const missingSeqs = [];
     const missingCoupang = [];
     const missingNaver = [];
+    const missingCafe24 = [];
     ciList.forEach(ci => {
       const id = String(ci.order_id);
       if (id.startsWith('CP-')) {
@@ -14319,6 +14322,9 @@ async function loadBgUnified() {
       } else if (id.startsWith('NV-')) {
         const seq = id.slice(3);
         if (!seenSeqs.has(seq)) missingNaver.push(seq);
+      } else if (id.startsWith('CF-')) {
+        const seq = id.slice(3);
+        if (!seenSeqs.has(seq)) missingCafe24.push(seq);
       } else if (id.startsWith('ETC-')) {
         const seq = id.slice(4);
         if (!seenSeqs.has(seq)) missingSeqs.push(seq);
@@ -14327,9 +14333,9 @@ async function loadBgUnified() {
       }
     });
     // 누락 주문이 있으면 by-IDs 추가 fetch (날짜 무관)
-    const hasMissing = missingSeqs.length || missingCoupang.length || missingNaver.length;
+    const hasMissing = missingSeqs.length || missingCoupang.length || missingNaver.length || missingCafe24.length;
     if (hasMissing) {
-      setBgUnifiedProgress(`주문일 범위 외 CI 매칭 주문 ${missingSeqs.length + missingCoupang.length + missingNaver.length}건 추가 조회 중...`);
+      setBgUnifiedProgress(`주문일 범위 외 CI 매칭 주문 ${missingSeqs.length + missingCoupang.length + missingNaver.length + missingCafe24.length}건 추가 조회 중...`);
       // 2차 호출은 "ID 매칭만" 모드 — date range 를 빈 range (1900-01-01 ~ 1900-01-01) 로
       //   설정해서 backend 의 (date OR ids) WHERE 절 중 date 쪽은 false 가 되도록 함.
       //   안 그러면 1차와 동일한 date range 데이터를 또 반환 → productMap item_count 누적 2배.
@@ -14338,6 +14344,7 @@ async function loadBgUnified() {
       if (missingSeqs.length) params.set('order_seqs', missingSeqs.join(','));
       if (missingCoupang.length) params.set('coupang_ids', missingCoupang.join(','));
       if (missingNaver.length) params.set('naver_ids', missingNaver.join(','));
+      if (missingCafe24.length) params.set('cafe24_ids', missingCafe24.join(','));
       try {
         const extraRes = await fetch(`${API}/api/orders?${params.toString()}`, { signal });
         if (extraRes.ok) {
@@ -14477,6 +14484,7 @@ function bgCiKey(order) {
   if (order.order_type === 'ETC') return `ETC-${order.order_seq}`;
   if (order.order_type === 'COUPANG') return `CP-${order.order_seq}`;
   if (order.order_type === 'NAVER') return `NV-${order.order_seq}`;
+  if (order.order_type === 'CAFE24') return `CF-${order.order_seq}`;  // 정수당 (카페24 stub ci)
   if (order.order_type === 'MANUAL') return `MO-${order.order_seq}`;  // 바른손더기프트 CSV 등록
   return String(order.order_seq);
 }

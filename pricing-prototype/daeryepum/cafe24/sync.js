@@ -14,6 +14,8 @@
 
 const client = require('./client');
 const store = require('./store');
+const bgStore = require('../barungift/store');
+const { enrichCafe24Item } = require('./option-parser');
 
 // 카페24 order_status 대표 코드 → 한글 (없으면 raw 표시)
 const STATUS_LABEL = {
@@ -245,6 +247,7 @@ async function syncCafe24Orders({ since } = {}) {
   let fetched = 0;
   let filteredOut = 0;
   const rows = [];
+  const validOrders = []; // stub(정보입력현황) 생성용 원본 주문 (옵션값 접근 필요)
   try {
     for (const w of windows) {
       const orders = await client.fetchOrders(w.start, w.end);
@@ -253,6 +256,7 @@ async function syncCafe24Orders({ since } = {}) {
         const itemsBefore = Array.isArray(o.items) ? o.items.length : 0;
         const normalized = normalizeOrder(o);
         rows.push(...normalized);
+        if (normalized.length) validOrders.push(o);
         // 결제완료·미취소 필터 또는 품목 0 개로 빠진 수
         filteredOut += Math.max(0, itemsBefore - normalized.length);
       }
@@ -273,6 +277,76 @@ async function syncCafe24Orders({ since } = {}) {
     }
   }
 
+  // 정보입력현황 자동 '입력완료' 처리 — CF-{order_id} stub + sticker_selections enrichment.
+  //   스티커 타입(option_value) / 스티커 문구(additional_option_values) / 상품코드 → sticker_selections.
+  //   ignore-duplicates: 이미 있으면 skip(운영자 상태 보존), enrichment 는 PATCH 로 갱신. (coupang/naver 미러)
+  let stubUpserted = 0, enrichedCount = 0;
+  if (validOrders.length) {
+    try {
+      let stickers = [], productSettings = [];
+      try {
+        [stickers, productSettings] = await Promise.all([
+          bgStore.getAllStickers(true).catch(() => []),
+          bgStore.getAllProductSettings().catch(() => []),
+        ]);
+      } catch (e) {
+        console.warn('[cafe24 sync] 스티커/상품설정 로드 실패 (enrichment 스킵):', e.message);
+      }
+
+      const stubs = [];
+      for (const o of validOrders) {
+        const items = Array.isArray(o.items) ? o.items : [];
+        const selections = items.map(it => {
+          const sel = enrichCafe24Item({
+            productCode: it.product_code,
+            productName: it.product_name,
+            quantity: it.quantity,
+            optionValue: it.option_value,
+            message: parseStickerMessage(it),
+            stickers, productSettings,
+          });
+          if (sel.sticker_code || sel.box_code) enrichedCount++;
+          return sel;
+        });
+        const shipDate = validDateStr(o.wished_delivery_date)
+          || parseDesiredShippingDate(items) || addBusinessDays(o.order_date, 3);
+        stubs.push({
+          order_id: `CF-${o.order_id}`,
+          is_express: false,
+          express_fee: 0,
+          desired_ship_date: shipDate,
+          sticker_selections: selections,
+          cash_receipt_yn: false,
+          receipt_type: null,
+          receipt_number: null,
+          customer_request: null,
+          submitted_at: parseCafe24Date(o.order_date) || new Date().toISOString(),
+        });
+      }
+      const r2 = await store.upsertCafe24StubCustomerInfos(stubs);
+      stubUpserted = r2.upserted || 0;
+
+      // enrichment PATCH — 기존 stub 도 스티커/문구/출고일 갱신 (스티커 미매칭이어도 문구/타입 보존).
+      for (const stub of stubs) {
+        const sels = stub.sticker_selections;
+        const hasEnrich = stub.desired_ship_date
+          || (Array.isArray(sels) && sels.some(s =>
+            s.sticker_code || s.box_code || s.sticker_name || (s.custom_values && s.custom_values.text)));
+        if (!hasEnrich) continue;
+        try {
+          await store.patchCafe24StubEnrichment(stub.order_id, {
+            sticker_selections: sels,
+            desired_ship_date: stub.desired_ship_date,
+          });
+        } catch (e) {
+          console.warn(`[cafe24 sync] enrichment patch 실패 ${stub.order_id}: ${e.message}`);
+        }
+      }
+    } catch (e) {
+      console.warn('[cafe24 sync] customer_info stub 실패 (입력완료 자동처리 안 될 수 있음):', e.message);
+    }
+  }
+
   await store.updateSyncState({
     last_synced_at: new Date().toISOString(),
     last_synced_order_count: upserted,
@@ -282,6 +356,8 @@ async function syncCafe24Orders({ since } = {}) {
   return {
     fetched,
     upserted,
+    stub_ci_upserted: stubUpserted,
+    enriched: enrichedCount,
     filtered_out: filteredOut,
     items: rows.length,
     windows,

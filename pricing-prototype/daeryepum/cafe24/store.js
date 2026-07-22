@@ -116,10 +116,57 @@ async function updateSyncState(patch) {
   return rows[0] || null;
 }
 
+/**
+ * 카페24 주문용 stub customer_info 일괄 upsert — 정보입력현황 자동 입력완료 처리용.
+ *   order_id 'CF-{cafe24_order_id}' 로 bg_order_customer_info 에 row 생성.
+ *   이미 있으면 skip (processed_at 등 운영자 설정 상태 보존).
+ *   → 수집처리 버튼 / 처리완료 추적이 기존 ci 로직 그대로 작동. (coupang/store.js 미러)
+ */
+async function upsertCafe24StubCustomerInfos(stubs) {
+  if (!USE_SUPABASE || !stubs.length) return { upserted: 0 };
+  const url = `${REST_BASE}/bg_order_customer_info?on_conflict=order_id`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { ...HEADERS, Prefer: 'resolution=ignore-duplicates,return=minimal' },
+    body: JSON.stringify(stubs),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase upsert bg_order_customer_info stub [${res.status}]: ${text.slice(0, 300)}`);
+  }
+  return { upserted: stubs.length };
+}
+
+/**
+ * 카페24 stub 의 enrichment 필드(sticker_selections, desired_ship_date) PATCH.
+ *   운영자 변경 가능 필드(processed_at/customer_request 등)는 미터치.
+ *   ignore-duplicates upsert 로 안 채워진 기존 stub 도 새 enrichment 로 갱신.
+ */
+async function patchCafe24StubEnrichment(orderId, { sticker_selections, desired_ship_date }) {
+  if (!USE_SUPABASE) return { patched: 0 };
+  const url = `${REST_BASE}/bg_order_customer_info?order_id=eq.${encodeURIComponent(orderId)}`;
+  const body = {};
+  if (sticker_selections !== undefined) body.sticker_selections = sticker_selections;
+  if (desired_ship_date !== undefined) body.desired_ship_date = desired_ship_date;
+  if (!Object.keys(body).length) return { patched: 0 };
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { ...HEADERS, Prefer: 'return=minimal' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Supabase patch bg_order_customer_info [${res.status}]: ${text.slice(0, 300)}`);
+  }
+  return { patched: 1 };
+}
+
 module.exports = {
   USE_SUPABASE,
   upsertCafe24Orders,
   listCafe24Orders,
   getSyncState,
   updateSyncState,
+  upsertCafe24StubCustomerInfos,
+  patchCafe24StubEnrichment,
 };
