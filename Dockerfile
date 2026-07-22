@@ -13,6 +13,7 @@ COPY pricing-prototype/daeryepum/index.html ./
 COPY pricing-prototype/daeryepum/barungift/ ./barungift/
 COPY pricing-prototype/daeryepum/coupang/ ./coupang/
 COPY pricing-prototype/daeryepum/naver/ ./naver/
+COPY pricing-prototype/daeryepum/cafe24/ ./cafe24/
 
 RUN mkdir -p /app/data
 
