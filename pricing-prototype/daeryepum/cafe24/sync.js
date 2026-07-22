@@ -47,6 +47,16 @@ function toInt(v, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/** 상품코드 — 판매자 지정코드(custom_product_code) 우선, 없으면 cafe24 내부코드(product_code).
+ *   ※ 운영 시스템(bg_stickers/bg_product_settings)은 판매자 지정코드(예: TGJSD04D1) 기준이므로
+ *     P00000XX 형태의 cafe24 내부코드가 아니라 custom_product_code 를 써야 매칭/표시가 맞음. */
+function pickProductCode(it) {
+  const custom = it && it.custom_product_code != null ? String(it.custom_product_code).trim() : '';
+  if (custom) return custom;
+  const pc = it && it.product_code != null ? String(it.product_code).trim() : '';
+  return pc || null;
+}
+
 /**
  * 카페24 일시 파싱 — 명시적 KST 처리 (coupang parseCoupangDate 와 동일 원리).
  *   카페24는 보통 TZ 포함("2026-07-22T10:30:00+09:00") 반환. 없으면 +09:00 부여.
@@ -178,7 +188,7 @@ function normalizeOrder(o) {
       ordered_at: orderedAt,
       paid_at: paidAt,
       product_name: (String(it.product_name == null ? '' : it.product_name).trim()) || '(상품명 없음)',
-      product_code: it.product_code != null ? String(it.product_code).trim() : null,
+      product_code: pickProductCode(it),
       item_count: qty,
       item_sale_price: unit,
       item_total_price: unit * qty,
@@ -319,7 +329,7 @@ async function syncCafe24Orders({ since } = {}) {
         const items = Array.isArray(o.items) ? o.items : [];
         const selections = items.map(it => {
           const sel = enrichCafe24Item({
-            productCode: it.product_code,
+            productCode: pickProductCode(it),
             productName: it.product_name,
             quantity: it.quantity,
             optionValue: it.option_value,
