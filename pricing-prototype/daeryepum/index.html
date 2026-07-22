@@ -3458,8 +3458,10 @@ function isCancelled(r) {
   // 마켓플레이스 — status 문자열 기반
   //   네이버: CANCELED / RETURNED / EXCHANGED
   //   쿠팡:   CANCEL / RETURNS
+  //   카페24: C00/C10/C11(취소) R00/R10(반품) E00/E10(교환)
   if (r.status === 'CANCELED' || r.status === 'RETURNED' || r.status === 'EXCHANGED') return true;
   if (r.status === 'CANCEL' || r.status === 'RETURNS') return true;
+  if (['C00','C10','C11','R00','R10','E00','E10'].includes(r.status)) return true;
   return false;
 }
 
@@ -3827,7 +3829,7 @@ function renderOrderTable() {
     const isCollected = collected.has(key);
     // CARD/ETC: status_seq / 마켓플레이스: status 문자열
     const isCancelStatus = r.status_seq === 3 || r.status_seq === 5
-      || ['CANCELED','RETURNED','EXCHANGED','CANCEL','RETURNS'].includes(r.status);
+      || ['CANCELED','RETURNED','EXCHANGED','CANCEL','RETURNS','C00','C10','C11','R00','R10','E00','E10'].includes(r.status);
     // 결제대기 하이라이트 — status_seq=1 (결제대기) 또는 9 (초안컨펌완료/결제대기) + settle_date 없음
     //   CARD/ETC 모두 settle_date 채워지면 결제 완료된 것으로 판정
     const isPendingStatus = (r.status_seq === 1 || r.status_seq === 9) && !r.settle_date;
@@ -4950,7 +4952,7 @@ function aggregateMonthly(data, orders) {
       //      현재는 보수적으로 제외 유지 (ETC 환불완료 케이스가 다수).
       // 마켓플레이스 (네이버/쿠팡): status 문자열 기반 매칭
       if (o.status_seq === 3 || o.status_seq === 5 || o.status_seq === 15) continue;
-      if (['CANCELED','RETURNED','EXCHANGED','CANCEL','RETURNS'].includes(o.status)) continue;
+      if (['CANCELED','RETURNED','EXCHANGED','CANCEL','RETURNS','C00','C10','C11','R00','R10','E00','E10'].includes(o.status)) continue;
       if (o.status_seq != null && o.status_seq < 2) continue;
       const key = o.member_id || ('guest|' + (o.recv_hphone || o.order_name || o.order_seq || ''));
       if (key) cset.add(key);
