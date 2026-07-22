@@ -314,6 +314,16 @@ nav.nav-loading a[href^="#"] {
     <button class="btn btn-primary" onclick="loadDashboard()">조회</button>
   </div>
 
+  <!-- 대시보드 하위 탭 (활성 탭만 lazy-load) -->
+  <div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--gray-200)">
+    <button class="btn" id="dash-subtab-1" onclick="setDashSubTab(1)" style="border:0;border-bottom:2px solid var(--primary);border-radius:0;color:var(--primary);font-weight:600;padding:8px 14px;background:transparent">📋 매출현황</button>
+    <button class="btn" id="dash-subtab-2" onclick="setDashSubTab(2)" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">📊 보조지표1</button>
+    <button class="btn" id="dash-subtab-3" onclick="setDashSubTab(3)" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">🔮 보조지표2</button>
+    <button class="btn" id="dash-subtab-4" onclick="setDashSubTab(4)" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">📦 상품별 판매통계</button>
+  </div>
+
+  <!-- 기간 매출 현황 블록 (.section 래퍼 없음 → lazy-load 태깅용 wrap) -->
+  <div data-dash-section-wrap="1">
   <!-- Sales Data Toggle -->
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
     <span style="font-size:15px;font-weight:700">📋 기간 매출 현황</span>
@@ -350,9 +360,11 @@ nav.nav-loading a[href^="#"] {
       <table class="data-table" id="sales-table"></table>
     </div>
   </div>
+  </div><!-- end data-dash-section-wrap="1" (기간 매출 현황) -->
 
   <!-- 위탁상품 단락 (Phase 3) — 위탁 대시보드 핵심 KPI 요약 + 풀 페이지 링크 -->
-  <div class="section">
+  <!-- data-dash-only: 위탁 정산은 답례품 한정 운영 정책 → _applyDashVisibility 단일 경로로 토글 -->
+  <div class="section" data-dash-only="daeryepum">
     <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
       <span>🤝 위탁상품 요약</span>
       <a href="#bg-vendor-dashboard" onclick="showPage('bg-vendor-dashboard')" style="font-size:12px;color:var(--primary);text-decoration:none;font-weight:500">전체 보기 →</a>
@@ -5786,6 +5798,111 @@ function dashCategoryLabel() {
 }
 function dashIsDaeryepum() { return dashCategory === 'daeryepum'; }
 
+// ── 대시보드 하위 탭 (활성 탭만 lazy-load) ──────────────────────────
+//   #page-dashboard 를 4개 하위 탭으로 분할해, 활성 탭 섹션만 fetch → 기존
+//   loadDashboard 가 모든 카드를 한 번에 부르던 무게를 탭별로 분산.
+//   탭1 매출현황 / 탭2 보조지표1 / 탭3 보조지표2 / 탭4 상품별 판매통계.
+let dashSubTab = 1;
+let _dashSectionLoaded = new Set();
+
+// #page-dashboard 내 각 섹션에 dataset.dashSection(1..4) 태깅.
+//   - 기간 매출 현황 wrap: .section-title 이 없어 명시적 data-dash-section-wrap 속성 사용.
+//   - ltc-section(리드타임 두기간): id 기반으로 탭3 고정.
+//   - 그 외 .section: 첫 .section-title(없으면 첫 h3) 텍스트 부분문자열로 매핑.
+//   - 매칭 안 되는 .section 은 dataset 미지정 → 항상 표시 유지.
+function _tagDashSections() {
+  const page = document.getElementById('page-dashboard');
+  if (!page) return;
+  page.querySelectorAll('[data-dash-section-wrap]').forEach(el => {
+    el.dataset.dashSection = el.getAttribute('data-dash-section-wrap');
+  });
+  page.querySelectorAll('.section').forEach(sec => {
+    if (sec.id === 'ltc-section') { sec.dataset.dashSection = '3'; return; }
+    const titleEl = sec.querySelector('.section-title') || sec.querySelector('h3');
+    const t = titleEl ? titleEl.textContent : '';
+    let n = 0;
+    if (t.includes('위탁상품 요약') || t.includes('어제 vs 오늘') || t.includes('지난주 동기간') || t.includes('희망출고일별 매출')) n = 1;
+    else if (t.includes('마케팅 분석') || t.includes('주차별 전환율')) n = 2;
+    else if (t.includes('빠른출고 분석') || t.includes('매출 예측') || t.includes('리드타임 분포') || t.includes('3-way 리드타임')) n = 3;
+    else if (t.includes('상품별 판매 통계')) n = 4;
+    if (n) sec.dataset.dashSection = String(n);
+  });
+}
+
+// [data-dash-section] 요소 표시 여부 = (dataset.dashSection === dashSubTab).
+//   단 data-dash-only="daeryepum" 인데 dashCategory!=='daeryepum' 이면 무조건 숨김.
+//   data-dash-only 섹션의 display 를 이 단일 경로에서만 조작 (중복 토글 제거).
+function _applyDashVisibility() {
+  document.querySelectorAll('#page-dashboard [data-dash-section]').forEach(el => {
+    let visible = (Number(el.dataset.dashSection) === dashSubTab);
+    if (el.getAttribute('data-dash-only') === 'daeryepum' && dashCategory !== 'daeryepum') visible = false;
+    el.style.display = visible ? '' : 'none';
+  });
+}
+
+// 하위 탭 전환 — 스타일 갱신 + 표시 갱신 + (아직 안 불린 탭이면) 로드.
+function setDashSubTab(n) {
+  dashSubTab = n;
+  for (let i = 1; i <= 4; i++) {
+    const btn = document.getElementById('dash-subtab-' + i);
+    if (!btn) continue;
+    const active = (i === n);
+    btn.style.borderBottom = active ? '2px solid var(--primary)' : '2px solid transparent';
+    btn.style.color = active ? 'var(--primary)' : 'var(--gray-500)';
+    btn.style.fontWeight = active ? '600' : '500';
+  }
+  _applyDashVisibility();
+  _loadDashSection(n);
+}
+
+// 탭별 fetch/렌더 — 최초 1회만 로드 (재진입 시 skip). 기간/카테고리 파라미터는
+//   기존 loadDashboard 와 동일 규칙 (dash-start / dash-end / dashCategory).
+async function _loadDashSection(n) {
+  if (_dashSectionLoaded.has(n)) return;
+  _dashSectionLoaded.add(n);
+  const catParam = `category=${encodeURIComponent(dashCategory)}`;
+  const dashStart = document.getElementById('dash-start').value;
+  const dashEndVal = document.getElementById('dash-end').value;
+  const dashEndPlus = fmt(new Date(new Date(dashEndVal).getTime() + 86400000));
+  try {
+    if (n === 1) {
+      // 매출현황: 요약(+리드타임 인자) / 어제vs오늘·WoW(renderComparison 내부에서 renderWowChannelCompare 호출)
+      //   / 희망출고일별(next-30) / 위탁요약
+      const [cmp, leadtime, summary] = await Promise.all([
+        fetch(`${API}/api/dashboard/comparison?${catParam}`).then(r=>r.json()),
+        fetch(`${API}/api/dashboard/leadtime?${catParam}`).then(r=>r.json()),
+        fetch(`${API}/api/dashboard/summary?${catParam}&start_date=${dashStart}&end_date=${dashEndPlus}`).then(r=>r.json()),
+      ]);
+      const summaryRows = summary.summary || summary;
+      const orderCounts = summary.order_counts || [];
+      dashboardExpressDaily = summary.express_daily || [];
+      renderSummary(summaryRows, leadtime, orderCounts);
+      try { renderComparison(cmp); } catch(e) { console.warn('Comparison render failed:', e); }
+      setBsdPreset('next-30');
+      if (dashCategory === 'daeryepum') loadDashVendorSummary();
+    } else if (n === 2) {
+      // 보조지표1: 마케팅 / 주차별 전환율 / 샘플
+      loadMarketing();
+      fetch(`${API}/api/dashboard/conversion?${catParam}`).then(r=>r.json()).then(renderConversion).catch(e=>console.warn('Conversion load failed:', e));
+      fetch(`${API}/api/dashboard/samples?${catParam}`).then(r=>r.json()).then(renderSamples).catch(e=>console.warn('Samples load failed:', e));
+    } else if (n === 3) {
+      // 보조지표2: 예측 / 리드타임 분포 / 빠른출고 분석 / 3-way 리드타임
+      const [forecast, leadtime, expressAnalysis] = await Promise.all([
+        fetch(`${API}/api/dashboard/forecast?${catParam}`).then(r=>r.json()),
+        fetch(`${API}/api/dashboard/leadtime?${catParam}`).then(r=>r.json()),
+        fetch(`${API}/api/dashboard/express-analysis?${catParam}&start_date=${dashStart}&end_date=${dashEndVal}`).then(r=>r.json()),
+      ]);
+      renderForecast(forecast);
+      renderLeadtime(leadtime);
+      try { renderExpressAnalysis(expressAnalysis); } catch(e) { console.warn('Express analysis render failed:', e); }
+      loadLeadtime3way();
+    } else if (n === 4) {
+      // 상품별 판매통계 (이미 로드됐어도 재호출 안전)
+      loadPsProductList();
+    }
+  } catch(e) { console.error(e); showToast('대시보드 로딩 실패: ' + e.message); }
+}
+
 function setDashCategory(cat) {
   if (dashCategory === cat) return;
   dashCategory = cat;
@@ -5804,24 +5921,19 @@ function setDashCategory(cat) {
     const parent = vendorSection.closest('.section');
     if (parent) parent.style.display = (cat === 'daeryepum') ? '' : 'none';
   }
-  // 답례품 전용 섹션 (data-dash-only="daeryepum") 토글:
-  //   빠른출고/3-way 리드타임/스티커·메시지/희망출고일별 매출/마케팅/전환율+샘플
-  //   결제대기·빠른출고 / 답례품 매출 예측 (예식 기반)
-  document.querySelectorAll('[data-dash-only="daeryepum"]').forEach(el => {
-    el.style.display = (cat === 'daeryepum') ? '' : 'none';
-  });
+  // 답례품 전용 섹션(data-dash-only) 토글은 _applyDashVisibility 단일 경로로 이관
+  //   (loadDashboard → _applyDashVisibility 에서 카테고리+탭 기준 일괄 처리).
   // 상품별 판매통계 — 카테고리별 다른 상품군이므로 선택 초기화 + 목록 reload
   if (typeof _psSelected !== 'undefined') _psSelected.clear();
   if (typeof renderPsChips === 'function') renderPsChips();
   if (typeof loadPsProductList === 'function') loadPsProductList();
+  // 카테고리 변경 → 로드 캐시 비우고 활성 탭 재로드
+  _dashSectionLoaded.clear();
   loadDashboard();
 }
 
 async function loadDashboard() {
   showDashboardSkeleton();
-  const dashStart = document.getElementById('dash-start').value;
-  const dashEndPlus = fmt(new Date(new Date(document.getElementById('dash-end').value).getTime()+86400000));
-  const catParam = `category=${encodeURIComponent(dashCategory)}`;
   // 상품별 매출 canonical 그룹핑 (migration 033) — bgProductSettings 을 사전 로드
   //   대시보드는 buildDashCanonicalMap 에서 window.bgProductSettings 를 참조.
   //   비어있으면 백그라운드로 채워둠 (실패해도 자동 규칙 fallback).
@@ -5839,36 +5951,11 @@ async function loadDashboard() {
       })
       .catch(() => {});
   }
-  try {
-    const [cmp, forecast, leadtime, summary, expressAnalysis] = await Promise.all([
-      fetch(`${API}/api/dashboard/comparison?${catParam}`).then(r=>r.json()),
-      fetch(`${API}/api/dashboard/forecast?${catParam}`).then(r=>r.json()),
-      fetch(`${API}/api/dashboard/leadtime?${catParam}`).then(r=>r.json()),
-      fetch(`${API}/api/dashboard/summary?${catParam}&start_date=${dashStart}&end_date=${dashEndPlus}`).then(r=>r.json()),
-      fetch(`${API}/api/dashboard/express-analysis?${catParam}&start_date=${dashStart}&end_date=${document.getElementById('dash-end').value}`).then(r=>r.json()),
-    ]);
-    const summaryRows = summary.summary || summary;
-    const orderCounts = summary.order_counts || [];
-    dashboardExpressDaily = summary.express_daily || [];
-    renderSummary(summaryRows, leadtime, orderCounts);
-    try { renderComparison(cmp); } catch(e) { console.warn('Comparison render failed:', e); }
-    renderForecast(forecast);
-    renderLeadtime(leadtime);
-    try { renderExpressAnalysis(expressAnalysis); } catch(e) { console.warn('Express analysis render failed:', e); }
-    // 마케팅 분석 (별도 로드 - 무거운 쿼리)
-    loadMarketing();
-    // 전환율 + 샘플 (별도 로드)
-    fetch(`${API}/api/dashboard/conversion?${catParam}`).then(r=>r.json()).then(renderConversion).catch(e=>console.warn('Conversion load failed:', e));
-    fetch(`${API}/api/dashboard/samples?${catParam}`).then(r=>r.json()).then(renderSamples).catch(e=>console.warn('Samples load failed:', e));
-    // 스티커 · 메시지 분석 (정보입력 완료 주문 기준)
-    loadStickerAnalytics();
-    // 3-way 리드타임 분석 (주문/희망출고/예식)
-    loadLeadtime3way();
-    // 희망출고일별 매출 — 기본 향후 30일 프리셋으로 초기 로드 (사용자가 별도 변경 가능)
-    setBsdPreset('next-30');
-    // 위탁상품 요약 단락 — 답례품 탭에서만
-    if (dashCategory === 'daeryepum') loadDashVendorSummary();
-  } catch(e) { console.error(e); showToast('대시보드 로딩 실패: ' + e.message); }
+  // 하위 탭 재구성 — 섹션 태깅 후 활성 탭만 로드 (전체 Promise.all 제거로 경량화)
+  _dashSectionLoaded.clear();
+  _tagDashSections();
+  _applyDashVisibility();
+  _loadDashSection(dashSubTab);
 }
 
 /**
