@@ -6398,67 +6398,85 @@ async function apiConversionWindow(query = {}) {
   const categoryCfg = CATEGORY_FILTERS[query.category] || CATEGORY_FILTERS.daeryepum;
   const D01_FILTER = categoryCfg.filter;
   const BEFORE = 14, AFTER = 7;
-  const r = await p.request().query(`
-    WITH card_all AS (
-      SELECT DISTINCT co.member_id
-      FROM custom_order co WITH (NOLOCK)
-      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
-      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE c.Card_Div = 'A01' AND co.status_seq >= 2 AND co.status_seq NOT IN (3,5,9)
-        AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
-        AND co.member_id IS NOT NULL AND co.member_id != ''
-    ),
-    card_buyers AS (
-      SELECT DISTINCT co.member_id,
-        TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) AS wedding_date
-      FROM custom_order co WITH (NOLOCK)
-      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
-      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      INNER JOIN S2_UserInfo u WITH (NOLOCK) ON co.member_id = u.uid AND u.site_div = 'SB'
-      WHERE c.Card_Div = 'A01' AND co.status_seq >= 2 AND co.status_seq NOT IN (3,5,9)
-        AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
-        AND co.member_id IS NOT NULL AND co.member_id != ''
-        AND u.wedd_year IS NOT NULL AND LEN(u.wedd_year) = 4
-        AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) IS NOT NULL
-    ),
-    gift_orders AS (
-      SELECT o.member_id, o.order_date
-      FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
-      INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
-      INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3,5,15)
-        AND o.member_id IS NOT NULL AND o.member_id != ''
-        AND o.order_date >= DATEADD(day, -30, ${MK_FROM}) AND o.order_date < DATEADD(day, 2, GETDATE())
-      UNION ALL
-      SELECT co.member_id, co.order_date
-      FROM custom_order co WITH (NOLOCK)
-      INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
-      INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-      WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3,5,9)
-        AND co.member_id IS NOT NULL AND co.member_id != ''
-        AND co.order_date >= DATEADD(day, -30, ${MK_FROM}) AND co.order_date < DATEADD(day, 2, GETDATE())
-    )
-    SELECT
-      (SELECT COUNT(*) FROM card_all) AS card_members_total,
-      (SELECT COUNT(*) FROM card_buyers) AS card_members_dated,
-      COUNT(DISTINCT g.member_id) AS cross_buy
-    FROM card_buyers cb
-    INNER JOIN gift_orders g
-      ON g.member_id = cb.member_id
-      AND g.order_date >= DATEADD(day, -${BEFORE}, cb.wedding_date)
-      AND g.order_date < DATEADD(day, ${AFTER + 1}, cb.wedding_date)
+  // 최적화: SQL 날짜 범위 조인(비-equi)이 무거워 timeout → 3단계로 분리.
+  //   (1) 청첩장 회원+예식일 조회 (2) 그 회원들의 답례품 주문일 chunk 조회 (3) JS 에서 윈도우 판정.
+  // 1) 기간내 청첩장(A01) 구매 회원 + 예식일 (S2_UserInfo 등록)
+  const cardRes = await p.request().query(`
+    SELECT DISTINCT co.member_id,
+      TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) AS wedding_date
+    FROM custom_order co WITH (NOLOCK)
+    INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+    INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+    INNER JOIN S2_UserInfo u WITH (NOLOCK) ON co.member_id = u.uid AND u.site_div = 'SB'
+    WHERE c.Card_Div = 'A01' AND co.status_seq >= 2 AND co.status_seq NOT IN (3,5,9)
+      AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
+      AND co.member_id IS NOT NULL AND co.member_id != ''
+      AND u.wedd_year IS NOT NULL AND LEN(u.wedd_year) = 4
   `);
-  const row = r.recordset[0] || {};
-  const total = Number(row.card_members_total) || 0;
-  const dated = Number(row.card_members_dated) || 0;
-  const cross = Number(row.cross_buy) || 0;
+  const cardBuyers = (cardRes.recordset || [])
+    .filter(r => r.wedding_date)
+    .map(r => ({ member_id: r.member_id, wd: new Date(r.wedding_date) }));
+  // 전체 청첩장 회원 (예식일 무관) — 참고용
+  const cardAllRes = await p.request().query(`
+    SELECT COUNT(DISTINCT co.member_id) AS cnt
+    FROM custom_order co WITH (NOLOCK)
+    INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+    INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+    WHERE c.Card_Div = 'A01' AND co.status_seq >= 2 AND co.status_seq NOT IN (3,5,9)
+      AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
+      AND co.member_id IS NOT NULL AND co.member_id != ''
+  `);
+  const cardMembersTotal = Number(cardAllRes.recordset[0]?.cnt) || 0;
+
+  // 2) 위 회원들의 답례품(D01) 주문일 — member_id chunk IN 조회 (범위 조인 회피)
+  const memberIds = [...new Set(cardBuyers.map(r => r.member_id))];
+  const giftByMember = new Map(); // member_id → [Date]
+  const CHUNK = 800;
+  for (let i = 0; i < memberIds.length; i += CHUNK) {
+    const chunk = memberIds.slice(i, i + CHUNK);
+    const inList = chunk.map(m => `'${String(m).replace(/'/g, "''")}'`).join(',');
+    if (!inList) continue;
+    const gr = await p.request().query(`
+      SELECT member_id, order_date FROM (
+        SELECT o.member_id, o.order_date
+        FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+        INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+        WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3,5,15)
+          AND o.member_id IN (${inList})
+        UNION ALL
+        SELECT co.member_id, co.order_date
+        FROM custom_order co WITH (NOLOCK)
+        INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+        WHERE ${D01_FILTER} AND co.status_seq >= 2 AND co.status_seq NOT IN (3,5,9)
+          AND co.member_id IN (${inList})
+      ) t
+    `);
+    for (const row of (gr.recordset || [])) {
+      const arr = giftByMember.get(row.member_id) || [];
+      arr.push(new Date(row.order_date));
+      giftByMember.set(row.member_id, arr);
+    }
+  }
+
+  // 3) JS 윈도우 판정 — 회원 예식일 [-14, +7일] 사이 답례품 주문 존재 여부
+  let cross = 0;
+  const DAY = 86400000;
+  for (const cb of cardBuyers) {
+    const lo = cb.wd.getTime() - BEFORE * DAY;
+    const hi = cb.wd.getTime() + (AFTER + 1) * DAY; // +7일 포함 → exclusive +8
+    const gifts = giftByMember.get(cb.member_id);
+    if (gifts && gifts.some(d => { const t = d.getTime(); return t >= lo && t < hi; })) cross++;
+  }
+  const dated = cardBuyers.length;
   return {
     period: `${mkStart} ~ ${mkEnd}`,
     mkStart, mkEnd,
     window_days: { before: BEFORE, after: AFTER },
-    card_members_total: total,   // 기간내 청첩장 주문 회원 (전체)
-    card_members_dated: dated,   // 그 중 예식일 등록 회원 (전환율 분모)
-    cross_buy: cross,            // 예식 윈도우(-14~+7) 내 답례품 구매 회원
+    card_members_total: cardMembersTotal, // 기간내 청첩장 주문 회원 (전체)
+    card_members_dated: dated,            // 그 중 예식일 등록 회원 (전환율 분모)
+    cross_buy: cross,                     // 예식 윈도우(-14~+7) 내 답례품 구매 회원
     conversion_pct: dated ? +(cross / dated * 100).toFixed(1) : 0,
   };
 }
@@ -8865,7 +8883,11 @@ const server = http.createServer(async (req, res) => {
           data = await apiConversionWindow(parsed.query);
         } catch (cwErr) {
           console.error('[apiConversionWindow] 실패:', cwErr);
-          data = { error: 'conversion-window 실패: ' + (cwErr?.message || cwErr), _failed: true };
+          data = {
+            error: 'conversion-window 실패', _failed: true,
+            message: cwErr?.message, code: cwErr?.code, number: cwErr?.number,
+            original: cwErr?.originalError?.message || cwErr?.originalError?.info?.message || null,
+          };
         }
       } else if (pathname === '/api/dashboard/samples') {
         data = await apiSamples(parsed.query);
