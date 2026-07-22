@@ -728,6 +728,7 @@ async function apiOrders(query) {
   const orderSeqsList = parseIntList(query.order_seqs);
   const coupangIdsList = parseIntList(query.coupang_ids);
   const naverIdsList = parseStrList(query.naver_ids);
+  const cafe24IdsList = parseStrList(query.cafe24_ids);
   const orderSeqsClause = orderSeqsList.length ? `OR o.order_seq IN (${orderSeqsList.join(',')})` : '';
   const orderSeqsClauseCo = orderSeqsList.length ? `OR co.order_seq IN (${orderSeqsList.join(',')})` : '';
   // L5: 호출자가 status 필터를 SQL 단에서 적용하도록 옵션 제공.
@@ -1110,6 +1111,58 @@ async function apiOrders(query) {
       }
     } catch (e) {
       console.warn('[apiOrders] 네이버 주문 UNION 실패 (무시):', e.message);
+    }
+    // 정수당(카페24) — 쿠팡/네이버와 동일 패턴
+    try {
+      const cafe24Store = require('./cafe24/store');
+      const cafe24Rows = await cafe24Store.listCafe24Orders({
+        startStr: startDate, endStr: endDate, byPaid: false,
+        orderIds: cafe24IdsList.length ? cafe24IdsList : undefined,
+      });
+      if (cafe24Rows && cafe24Rows.length) {
+        const normalized = cafe24Rows.map(r => ({
+          order_seq: r.cafe24_order_id, // 카페24 order_id (TEXT — naver product_order_id 와 동일 처리)
+          member_id: null,
+          order_type: 'CAFE24',
+          has_copurchase: 0,
+          order_date: r.ordered_at,
+          settle_date: r.paid_at,
+          order_name: r.recv_name || '',
+          order_hphone: r.recv_hphone || '',
+          recv_name: r.recv_name || '',
+          recv_hphone: r.recv_hphone || '',
+          recv_address: r.recv_address || '',
+          recv_msg: r.recv_message || '',
+          card_name: r.product_name || '',
+          card_code: r.product_code || '',
+          unit_value: 1,
+          item_count: r.item_count || 0,
+          item_amount: r.item_total_price || 0,
+          settle_price: r.settle_price || 0,
+          coupon_price: 0,
+          status_seq: null,
+          // status — 클라이언트 isCancelled() / row-cancelled 시각 처리 매칭용 (raw 카페24 status)
+          //   CARD/ETC 는 undefined → CARD/ETC 로직 영향 없음. 카페24는 PAID/CANCELED/N40 등.
+          status: r.status,
+          status_label: r.status_label || r.status || '',
+          settle_method: r.settle_method || null,
+          wedding_date: null,
+          site_name: '정수당',
+          file_count: 0,
+          delivery_seq: 1,
+          source: 'cafe24',
+          cafe24_status: r.status,
+          cafe24_line_key: r.line_key,
+          desired_shipping_date: r.desired_shipping_date || null,
+          shipping_method: r.shipping_method || null,
+          input_message: r.input_message || null,
+          display_name: r.recv_name || '',
+        }));
+        rows.push(...normalized);
+        rows.sort((a, b) => String(b.order_date || '').localeCompare(String(a.order_date || '')));
+      }
+    } catch (e) {
+      console.warn('[apiOrders] 카페24 주문 UNION 실패 (무시):', e.message);
     }
   }
   // 바른손더기프트 수동 등록 주문 (bg_manual_orders) UNION — category='bhands_gift' 시에만.
@@ -9672,6 +9725,54 @@ const server = http.createServer(async (req, res) => {
         // 마지막 동기화 메타 조회 (관리자 UI 표시용)
         const coupangStore = require('./coupang/store');
         data = await coupangStore.getSyncState();
+      } else if (pathname === '/api/cafe24/sync' && req.method === 'POST') {
+        // 정수당(카페24) 주문 수동 동기화 — Admin API → Supabase upsert.
+        //   body: { since: 'YYYY-MM-DD', days_back: 7 } (옵션, since 우선; 미지정 시 최근 7일)
+        logAdminAccess(session, req, 'cafe24-sync', {});
+        const body = await new Promise((resolve) => {
+          let raw = ''; req.on('data', c => raw += c);
+          req.on('end', () => {
+            try { resolve(raw ? JSON.parse(raw) : {}); } catch { resolve({}); }
+          });
+        });
+        const cafe24Sync = require('./cafe24/sync');
+        let since = body.since || undefined;
+        if (!since && body.days_back) {
+          since = Date.now() - (parseInt(body.days_back) || 7) * 86400000;
+        }
+        data = await cafe24Sync.syncCafe24Orders({ since });
+      } else if (pathname === '/api/cafe24/sync-state') {
+        // 마지막 동기화 메타 조회 (관리자 UI 표시용)
+        const cafe24Store = require('./cafe24/store');
+        data = await cafe24Store.getSyncState();
+      } else if (pathname === '/api/cafe24/oauth/callback' && req.method === 'GET') {
+        // 카페24 앱 설치/인증 콜백 — code → 토큰 교환 후 저장.
+        //   세션 가드(/api/ 블록 상단 auth gate)로 관리자만 접근 가능.
+        //   redirect_uri 는 인증 요청 시 사용한 값과 정확히 일치해야 함 (BASE_PATH 프리픽스 포함).
+        logAdminAccess(session, req, 'cafe24-oauth-callback', { has_code: !!parsed.query.code });
+        const code = String(parsed.query.code || '').trim();
+        if (!code) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: 'code_required', message: '카페24 인증 code 파라미터 없음' }));
+          return;
+        }
+        // redirect_uri: env 우선, 없으면 요청 host + BASE_PATH 로 구성.
+        const proto = req.headers['x-forwarded-proto'] || 'https';
+        const host = req.headers['x-forwarded-host'] || req.headers.host || '';
+        const redirectUri = process.env.CAFE24_REDIRECT_URI
+          || `${proto}://${host}${BASE_PATH}/api/cafe24/oauth/callback`;
+        try {
+          const cafe24Auth = require('./cafe24/auth');
+          const result = await cafe24Auth.exchangeAuthCode(code, redirectUri);
+          // 성공 → 대시보드로 리다이렉트 (BASE_PATH 프리픽스 유지)
+          res.writeHead(302, { Location: `${BASE_PATH || ''}/?cafe24=connected` });
+          res.end();
+          return;
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: 'cafe24_oauth_failed', message: e.message, redirect_uri: redirectUri }));
+          return;
+        }
       } else if (pathname === '/api/naver/sync' && req.method === 'POST') {
         // 네이버 스마트스토어 수동 동기화 — 커머스 API → Supabase upsert
         logAdminAccess(session, req, 'naver-sync', {});
