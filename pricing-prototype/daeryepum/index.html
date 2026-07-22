@@ -284,7 +284,6 @@ nav.nav-loading a[href^="#"] {
   <a href="#bg-shipping" onclick="showPage('bg-shipping')">📅 출고일설정</a>
   <a href="#coupang-rfm" onclick="showPage('coupang-rfm')">🟥 로켓그로스</a>
   <a href="#bg-vendors" onclick="showPage('bg-vendors')">🤝 위탁업체</a>
-  <a href="#bg-settlements" onclick="showPage('bg-settlements')">💰 위탁정산</a>
   <a href="#bg-artists" onclick="showPage('bg-artists')">🎨 작가 정산</a>
   <a href="#daeryepum-stock" onclick="showPage('daeryepum-stock')">📦 답례품 재고</a>
   <a href="#wedding-calendar" onclick="showPage('wedding-calendar')">💍 예식일 캘린더</a>
@@ -5817,9 +5816,11 @@ function _tagDashSections() {
   if (!page) return;
   // 위탁 대시보드 콘텐츠를 #page-bg-vendor-dashboard 에서 섹션5 컨테이너로 1회 이동 (id 보존).
   const vendorPane = document.getElementById('dash-sec-vendor');
-  const vendorPage = document.getElementById('page-bg-vendor-dashboard');
-  if (vendorPane && vendorPage && !vendorPane.dataset.reparented) {
-    while (vendorPage.firstChild) vendorPane.appendChild(vendorPage.firstChild);
+  if (vendorPane && !vendorPane.dataset.reparented) {
+    const vendorPage = document.getElementById('page-bg-vendor-dashboard');
+    if (vendorPage) while (vendorPage.firstChild) vendorPane.appendChild(vendorPage.firstChild);
+    const settlePage = document.getElementById('page-bg-settlements');
+    if (settlePage) while (settlePage.firstChild) vendorPane.appendChild(settlePage.firstChild);
     vendorPane.dataset.reparented = '1';
   }
   page.querySelectorAll('[data-dash-section-wrap]').forEach(el => {
@@ -5909,10 +5910,11 @@ async function _loadDashSection(n) {
       // 상품별 판매통계 (이미 로드됐어도 재호출 안전)
       loadPsProductList();
     } else if (n === 5) {
-      // 위탁: 위탁 대시보드(자체 필터·기간) + 위탁상품 요약. 위탁 정산 = 답례품 한정.
+      // 위탁: 위탁상품 요약 + 위탁 대시보드 + 위탁 정산 (자체 필터·기간). 위탁 = 답례품 한정.
       if (dashCategory === 'daeryepum') {
-        initBgVendorDashboard();
         loadDashVendorSummary();
+        initBgVendorDashboard();
+        initBgSettlements();
       }
     }
   } catch(e) { console.error(e); showToast('대시보드 로딩 실패: ' + e.message); }
