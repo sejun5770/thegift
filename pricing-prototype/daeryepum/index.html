@@ -1208,6 +1208,9 @@ nav.nav-loading a[href^="#"] {
       <input type="checkbox" data-ord-site="coupang" checked onchange="renderOrderTable()"> 쿠팡
     </label>
     <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" data-ord-site="cafe24" checked onchange="renderOrderTable()"> 정수당
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
       <input type="checkbox" data-ord-site="manual" checked onchange="renderOrderTable()"> 바른손더기프트
     </label>
     <div style="flex:1"></div>
@@ -2880,6 +2883,9 @@ nav.nav-loading a[href^="#"] {
       <input type="checkbox" data-site="coupang" checked onchange="renderBgUnified()"> 쿠팡
     </label>
     <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" data-site="cafe24" checked onchange="renderBgUnified()"> 정수당
+    </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
       <input type="checkbox" data-site="manual" checked onchange="renderBgUnified()"> 바른손더기프트
     </label>
     <div style="flex:1"></div>
@@ -3764,7 +3770,7 @@ function getFilteredOrders() {
   const excludeCancel = isExcludeCancel();
   const excludePending = isExcludePending();
   // 취소 상태 식별 — CARD/ETC (status_seq) + 마켓플레이스 (네이버: CANCELED/RETURNED/EXCHANGED, 쿠팡: CANCEL/RETURNS)
-  const MK_CANCELED = ['CANCELED','RETURNED','EXCHANGED','CANCEL','RETURNS'];
+  const MK_CANCELED = ['CANCELED','RETURNED','EXCHANGED','CANCEL','RETURNS','C00','C10','C11','R00','R10','E00','E10'];
   // 주문사이트 필터 — 답례품 카테고리 전용. 정보입력현황 SITE_CATS 와 동일 매칭 규칙.
   //   UI 미노출 (dashCategory !== 'daeryepum') 이면 모든 주문 통과.
   const ORD_SITE_CATS = [
@@ -3773,6 +3779,7 @@ function getFilteredOrders() {
     { key: 'nv_card', match: o => o.order_type === 'NAVER' && /바른손/i.test(String(o.site_name || '') + '|' + String(o.naver_store_id || '')) },
     { key: 'nv_tnt',  match: o => o.order_type === 'NAVER' && /테넷텐|tenetten|tnt/i.test(String(o.site_name || '') + '|' + String(o.naver_store_id || '')) },
     { key: 'coupang', match: o => o.order_type === 'COUPANG' },
+    { key: 'cafe24',  match: o => o.order_type === 'CAFE24' },
     { key: 'manual',  match: o => o.order_type === 'MANUAL' },
   ];
   const siteFilterVisible = document.getElementById('ord-site-filter')?.style.display !== 'none';
@@ -8598,7 +8605,7 @@ function renderSampleTable() {
 
 // --- 전환율 차트 ---
 let conversionChart = null;
-const SITE_COLORS = {'바른손카드':'#3b82f6','바른손몰':'#10b981','디얼디어':'#8b5cf6','바른손M카드':'#f59e0b','쿠팡':'#ef4444','쿠팡 로켓그로스':'#991b1b','네이버':'#03c75a','기타':'#a1a1aa','비회원':'#94a3b8'};
+const SITE_COLORS = {'바른손카드':'#3b82f6','바른손몰':'#10b981','디얼디어':'#8b5cf6','바른손M카드':'#f59e0b','쿠팡':'#ef4444','쿠팡 로켓그로스':'#991b1b','네이버':'#03c75a','정수당':'#d97706','기타':'#a1a1aa','비회원':'#94a3b8'};
 function renderConversion(data) {
   _conversionData = data;
   const weeks = data.weeks;
@@ -14514,6 +14521,7 @@ function renderBgUnified() {
     { key: 'nv_card', match: o => o.order_type === 'NAVER' && /바른손/i.test(String(o.site_name || '') + '|' + String(o.naver_store_id || '')) },
     { key: 'nv_tnt',  match: o => o.order_type === 'NAVER' && /테넷텐|tenetten|tnt/i.test(String(o.site_name || '') + '|' + String(o.naver_store_id || '')) },
     { key: 'coupang', match: o => o.order_type === 'COUPANG' },
+    { key: 'cafe24',  match: o => o.order_type === 'CAFE24' },  // 정수당 (카페24)
     { key: 'manual',  match: o => o.order_type === 'MANUAL' },  // 바른손더기프트 (CSV 등록)
   ];
   // 사이트 필터는 전체 탭 전용 — 다른 탭에서는 항상 통과 (독립적 동작)
@@ -14536,6 +14544,8 @@ function renderBgUnified() {
     o.status_seq === 3 || o.status_seq === 5
     || o.status === 'CANCELED' || o.status === 'RETURNED' || o.status === 'EXCHANGED'
     || o.status === 'CANCEL' || o.status === 'RETURNS'
+    || o.status === 'C00' || o.status === 'C10' || o.status === 'C11'
+    || o.status === 'R00' || o.status === 'R10' || o.status === 'E00' || o.status === 'E10'
   );
   const visibleBase = bgUnifiedOrders.filter(o =>
     (!hideCancel  || !isCancelled(o)) &&

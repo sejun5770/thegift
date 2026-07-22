@@ -2300,8 +2300,10 @@ async function apiDashboardComparison(query = {}) {
         const rowsRaw = await listFn();
         if (!rowsRaw || !rowsRaw.length) return;
         // 매출 집계 — 취소/반품/교환 자동 제외 (CARD/ETC status_seq NOT IN (3,5,...) 와 동일 정책).
-        //   네이버: CANCELED / RETURNED / EXCHANGED, 쿠팡: CANCEL / RETURNS.
-        const CANCELED_STATUSES = ['CANCELED', 'RETURNED', 'EXCHANGED', 'CANCEL', 'RETURNS'];
+        //   네이버: CANCELED / RETURNED / EXCHANGED, 쿠팡: CANCEL / RETURNS,
+        //   카페24: C00/C10/C11(취소) R00/R10(반품) E00/E10(교환).
+        const CANCELED_STATUSES = ['CANCELED', 'RETURNED', 'EXCHANGED', 'CANCEL', 'RETURNS',
+          'C00', 'C10', 'C11', 'R00', 'R10', 'E00', 'E10'];
         const rows = rowsRaw.filter(r => !CANCELED_STATUSES.includes(r.status));
         if (!rows.length) return;
         const seen = new Set();
@@ -2338,6 +2340,12 @@ async function apiDashboardComparison(query = {}) {
       '네이버',
       () => require('./naver/store').listNaverOrders({ startStr, endStr, byPaid: false }),
       r => `${r.product_order_id}`,
+    );
+    // 정수당(카페24) — 답례품 전용 채널. by_site 에 '정수당' 로 누적 (주문 단위 = cafe24_order_id).
+    if (_isDaeryepumCmp) await mergeMarketplace(
+      '정수당',
+      () => require('./cafe24/store').listCafe24Orders({ startStr, endStr, byPaid: false }),
+      r => `${r.cafe24_order_id}`,
     );
 
     // 쿠팡 로켓그로스(RFM) 매출 — 일별 aggregate (주문 단위 X). 운영자가 Wing 셀러센터
