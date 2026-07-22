@@ -6397,46 +6397,62 @@ async function apiConversionWindow(query = {}) {
   const { mkStart, mkEnd, MK_FROM, MK_TO } = _validateMkPeriod(query);
   const categoryCfg = CATEGORY_FILTERS[query.category] || CATEGORY_FILTERS.daeryepum;
   const D01_FILTER = categoryCfg.filter;
-  const BEFORE = 14, AFTER = 7;
-  // 최적화: SQL 날짜 범위 조인(비-equi)이 무거워 timeout → 3단계로 분리.
-  //   (1) 청첩장 회원+예식일 조회 (2) 그 회원들의 답례품 주문일 chunk 조회 (3) JS 에서 윈도우 판정.
-  // 1) 기간내 청첩장(A01) 구매 회원 + 예식일 (S2_UserInfo 등록)
-  const cardRes = await p.request().query(`
-    SELECT DISTINCT co.member_id,
-      TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) AS wedding_date
-    FROM custom_order co WITH (NOLOCK)
-    INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
-    INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-    INNER JOIN S2_UserInfo u WITH (NOLOCK) ON co.member_id = u.uid AND u.site_div = 'SB'
-    WHERE c.Card_Div = 'A01' AND co.status_seq >= 2 AND co.status_seq NOT IN (3,5,9)
-      AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
-      AND co.member_id IS NOT NULL AND co.member_id != ''
-      AND u.wedd_year IS NOT NULL AND LEN(u.wedd_year) = 4
-  `);
-  const cardBuyers = (cardRes.recordset || [])
-    .filter(r => r.wedding_date)
-    .map(r => ({ member_id: r.member_id, wd: new Date(r.wedding_date) }));
-  // 전체 청첩장 회원 (예식일 무관) — 참고용
-  const cardAllRes = await p.request().query(`
-    SELECT COUNT(DISTINCT co.member_id) AS cnt
-    FROM custom_order co WITH (NOLOCK)
-    INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
-    INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
-    WHERE c.Card_Div = 'A01' AND co.status_seq >= 2 AND co.status_seq NOT IN (3,5,9)
-      AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
-      AND co.member_id IS NOT NULL AND co.member_id != ''
-  `);
-  const cardMembersTotal = Number(cardAllRes.recordset[0]?.cnt) || 0;
+  const BEFORE = 14, AFTER = 7, DAY = 86400000;
+  // 무거운 조인 제거 — 회원ID 축소 후 예식일·답례품을 전부 인덱스 기반 chunk IN 조회.
+  //   step 라벨로 실패 지점 추적 (기존 'code: UNKNOWN' 마스킹 대응).
+  let step = 'init';
+  const q = async (label, sqlText) => {
+    step = label;
+    try { return await p.request().query(sqlText); }
+    catch (e) { const err = new Error(`[step:${label}] ${e?.message || e}`); err.step = label; throw err; }
+  };
+  const CHUNK = 1000;
+  const chunks = arr => { const o = []; for (let i = 0; i < arr.length; i += CHUNK) o.push(arr.slice(i, i + CHUNK)); return o; };
+  const esc = m => `'${String(m).replace(/'/g, "''")}'`;
 
-  // 2) 위 회원들의 답례품(D01) 주문일 — member_id chunk IN 조회 (범위 조인 회피)
-  const memberIds = [...new Set(cardBuyers.map(r => r.member_id))];
+  // 1) 기간내 청첩장(A01) 구매 회원 ID (S2_UserInfo 조인 없이 — 경량)
+  const cardRes = await q('card_members', `
+    SELECT DISTINCT co.member_id
+    FROM custom_order co WITH (NOLOCK)
+    INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+    INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+    WHERE c.Card_Div = 'A01' AND co.status_seq >= 2 AND co.status_seq NOT IN (3,5,9)
+      AND co.order_date >= ${MK_FROM} AND co.order_date < ${MK_TO}
+      AND co.member_id IS NOT NULL AND co.member_id != ''
+  `);
+  const cardMemberIds = [...new Set((cardRes.recordset || []).map(r => r.member_id))];
+  const cardMembersTotal = cardMemberIds.length;
+
+  // 2) 그 회원들의 예식일 — S2_UserInfo uid chunk IN (인덱스 seek)
+  const weddingByMember = new Map(); // member_id → Date
+  const parseWed = (y, m, d) => {
+    const yr = parseInt(y, 10), mo = parseInt(m, 10), dy = parseInt(d, 10);
+    if (!(yr >= 2000 && yr < 2100 && mo >= 1 && mo <= 12 && dy >= 1 && dy <= 31)) return null;
+    return new Date(yr, mo - 1, dy);
+  };
+  for (const chunk of chunks(cardMemberIds)) {
+    if (!chunk.length) continue;
+    const inList = chunk.map(esc).join(',');
+    const wr = await q('wedding', `
+      SELECT uid, wedd_year, wedd_month, wedd_day
+      FROM S2_UserInfo WITH (NOLOCK)
+      WHERE site_div = 'SB' AND uid IN (${inList})
+        AND wedd_year IS NOT NULL AND LEN(wedd_year) = 4
+    `);
+    for (const row of (wr.recordset || [])) {
+      if (weddingByMember.has(row.uid)) continue;
+      const wd = parseWed(row.wedd_year, row.wedd_month, row.wedd_day);
+      if (wd) weddingByMember.set(row.uid, wd);
+    }
+  }
+  const cardBuyers = cardMemberIds.filter(m => weddingByMember.has(m)).map(m => ({ member_id: m, wd: weddingByMember.get(m) }));
+
+  // 3) 예식일 등록 회원들의 답례품(D01) 주문일 — member_id chunk IN
   const giftByMember = new Map(); // member_id → [Date]
-  const CHUNK = 800;
-  for (let i = 0; i < memberIds.length; i += CHUNK) {
-    const chunk = memberIds.slice(i, i + CHUNK);
-    const inList = chunk.map(m => `'${String(m).replace(/'/g, "''")}'`).join(',');
-    if (!inList) continue;
-    const gr = await p.request().query(`
+  for (const chunk of chunks(cardBuyers.map(r => r.member_id))) {
+    if (!chunk.length) continue;
+    const inList = chunk.map(esc).join(',');
+    const gr = await q('gift', `
       SELECT member_id, order_date FROM (
         SELECT o.member_id, o.order_date
         FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
@@ -6460,9 +6476,8 @@ async function apiConversionWindow(query = {}) {
     }
   }
 
-  // 3) JS 윈도우 판정 — 회원 예식일 [-14, +7일] 사이 답례품 주문 존재 여부
+  // 4) JS 윈도우 판정 — 회원 예식일 [-14, +7일] 사이 답례품 주문 존재 여부
   let cross = 0;
-  const DAY = 86400000;
   for (const cb of cardBuyers) {
     const lo = cb.wd.getTime() - BEFORE * DAY;
     const hi = cb.wd.getTime() + (AFTER + 1) * DAY; // +7일 포함 → exclusive +8
