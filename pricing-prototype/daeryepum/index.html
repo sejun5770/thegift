@@ -285,7 +285,6 @@ nav.nav-loading a[href^="#"] {
   <a href="#coupang-rfm" onclick="showPage('coupang-rfm')">🟥 로켓그로스</a>
   <a href="#bg-vendors" onclick="showPage('bg-vendors')">🤝 위탁업체</a>
   <a href="#bg-settlements" onclick="showPage('bg-settlements')">💰 위탁정산</a>
-  <a href="#bg-vendor-dashboard" onclick="showPage('bg-vendor-dashboard')">📈 위탁 대시보드</a>
   <a href="#bg-artists" onclick="showPage('bg-artists')">🎨 작가 정산</a>
   <a href="#daeryepum-stock" onclick="showPage('daeryepum-stock')">📦 답례품 재고</a>
   <a href="#wedding-calendar" onclick="showPage('wedding-calendar')">💍 예식일 캘린더</a>
@@ -320,6 +319,7 @@ nav.nav-loading a[href^="#"] {
     <button class="btn" id="dash-subtab-2" onclick="setDashSubTab(2)" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">📊 보조지표1</button>
     <button class="btn" id="dash-subtab-3" onclick="setDashSubTab(3)" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">🔮 보조지표2</button>
     <button class="btn" id="dash-subtab-4" onclick="setDashSubTab(4)" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">📦 상품별 판매통계</button>
+    <button class="btn" id="dash-subtab-5" onclick="setDashSubTab(5)" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">🤝 위탁</button>
   </div>
 
   <!-- 기간 매출 현황 블록 (.section 래퍼 없음 → lazy-load 태깅용 wrap) -->
@@ -367,7 +367,6 @@ nav.nav-loading a[href^="#"] {
   <div class="section" data-dash-only="daeryepum">
     <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
       <span>🤝 위탁상품 요약</span>
-      <a href="#bg-vendor-dashboard" onclick="showPage('bg-vendor-dashboard')" style="font-size:12px;color:var(--primary);text-decoration:none;font-weight:500">전체 보기 →</a>
     </div>
     <div class="card-grid card-grid-4" id="dash-vendor-summary">
       <div class="card"><h3>위탁 매출</h3><div class="value" id="dash-vendor-gross">-</div><div class="sub" id="dash-vendor-gross-sub">최근 30일</div></div>
@@ -891,6 +890,9 @@ nav.nav-loading a[href^="#"] {
       </div>
     </div>
   </div>
+
+  <!-- 위탁 대시보드 (하위 탭 5) — 콘텐츠는 JS(_tagDashSections)에서 #page-bg-vendor-dashboard 에서 reparent -->
+  <div data-dash-section="5" id="dash-sec-vendor" data-dash-only="daeryepum"></div>
 
 </div>
 
@@ -5813,6 +5815,13 @@ let _dashSectionLoaded = new Set();
 function _tagDashSections() {
   const page = document.getElementById('page-dashboard');
   if (!page) return;
+  // 위탁 대시보드 콘텐츠를 #page-bg-vendor-dashboard 에서 섹션5 컨테이너로 1회 이동 (id 보존).
+  const vendorPane = document.getElementById('dash-sec-vendor');
+  const vendorPage = document.getElementById('page-bg-vendor-dashboard');
+  if (vendorPane && vendorPage && !vendorPane.dataset.reparented) {
+    while (vendorPage.firstChild) vendorPane.appendChild(vendorPage.firstChild);
+    vendorPane.dataset.reparented = '1';
+  }
   page.querySelectorAll('[data-dash-section-wrap]').forEach(el => {
     el.dataset.dashSection = el.getAttribute('data-dash-section-wrap');
   });
@@ -5821,7 +5830,8 @@ function _tagDashSections() {
     const titleEl = sec.querySelector('.section-title') || sec.querySelector('h3');
     const t = titleEl ? titleEl.textContent : '';
     let n = 0;
-    if (t.includes('위탁상품 요약') || t.includes('어제 vs 오늘') || t.includes('지난주 동기간') || t.includes('희망출고일별 매출')) n = 1;
+    if (t.includes('위탁상품 요약')) n = 5; // 위탁 탭으로 이동
+    else if (t.includes('어제 vs 오늘') || t.includes('지난주 동기간') || t.includes('희망출고일별 매출')) n = 1;
     else if (t.includes('마케팅 분석') || t.includes('주차별 전환율')) n = 2;
     else if (t.includes('빠른출고 분석') || t.includes('매출 예측') || t.includes('리드타임 분포') || t.includes('3-way 리드타임')) n = 3;
     else if (t.includes('상품별 판매 통계')) n = 4;
@@ -5843,7 +5853,7 @@ function _applyDashVisibility() {
 // 하위 탭 전환 — 스타일 갱신 + 표시 갱신 + (아직 안 불린 탭이면) 로드.
 function setDashSubTab(n) {
   dashSubTab = n;
-  for (let i = 1; i <= 4; i++) {
+  for (let i = 1; i <= 5; i++) {
     const btn = document.getElementById('dash-subtab-' + i);
     if (!btn) continue;
     const active = (i === n);
@@ -5879,7 +5889,6 @@ async function _loadDashSection(n) {
       renderSummary(summaryRows, leadtime, orderCounts);
       try { renderComparison(cmp); } catch(e) { console.warn('Comparison render failed:', e); }
       setBsdPreset('next-30');
-      if (dashCategory === 'daeryepum') loadDashVendorSummary();
     } else if (n === 2) {
       // 보조지표1: 마케팅 / 주차별 전환율 / 샘플
       loadMarketing();
@@ -5899,6 +5908,12 @@ async function _loadDashSection(n) {
     } else if (n === 4) {
       // 상품별 판매통계 (이미 로드됐어도 재호출 안전)
       loadPsProductList();
+    } else if (n === 5) {
+      // 위탁: 위탁 대시보드(자체 필터·기간) + 위탁상품 요약. 위탁 정산 = 답례품 한정.
+      if (dashCategory === 'daeryepum') {
+        initBgVendorDashboard();
+        loadDashVendorSummary();
+      }
     }
   } catch(e) { console.error(e); showToast('대시보드 로딩 실패: ' + e.message); }
 }
