@@ -12,7 +12,7 @@ const { getAccessToken } = require('./auth');
 
 const MALL = process.env.CAFE24_MALL_ID || 'barunn01';
 const ADMIN_BASE = `https://${MALL}.cafe24api.com/api/v2/admin`;
-const VERSION = process.env.CAFE24_API_VERSION || '2025-06-01';
+const VERSION = process.env.CAFE24_API_VERSION || '2026-03-01';
 
 function isConfigured() {
   return !!(process.env.CAFE24_CLIENT_ID && process.env.CAFE24_CLIENT_SECRET);

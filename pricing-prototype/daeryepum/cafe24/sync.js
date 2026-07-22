@@ -72,6 +72,14 @@ function normalizeDate(v) {
   return m ? `${m[1]}-${pad(m[2])}-${pad(m[3])}` : null;
 }
 
+/** 'YYYY-MM-DD' 유효 날짜만 반환 (카페24의 '0000-00-00'/빈값 방어). 아니면 null */
+function validDateStr(v) {
+  const s = String(v == null ? '' : v).trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m || m[1] === '0000') return null;
+  return s;
+}
+
 /** 주문일 + N영업일 (주말 건너뜀). 주문일 없으면 오늘 기준. */
 function addBusinessDays(orderDate, n) {
   const base = orderDate ? new Date(orderDate) : new Date();
@@ -131,8 +139,11 @@ function normalizeOrder(o) {
   const paidAt = o.paid === 'T' ? (parseCafe24Date(o.paid_date) || orderedAt) : null;
 
   const rawItems = Array.isArray(o.items) ? o.items : [];
-  // 희망출고일: 옵션 파싱, 없으면 주문일+3영업일 폴백 (order 단위 공통)
-  const desired = parseDesiredShippingDate(rawItems) || addBusinessDays(o.order_date, 3);
+  // 희망출고일: 카페24 네이티브 wished_delivery_date 우선 → 옵션 파싱 → 주문일+3영업일 폴백
+  //   (실주문 확인: 프런트가 wished_delivery_date 필드로 전달, 옵션엔 스티커 문구만 존재)
+  const desired = validDateStr(o.wished_delivery_date)
+    || parseDesiredShippingDate(rawItems)
+    || addBusinessDays(o.order_date, 3);
   // shipping_method: '오늘출발' 품목 포함 시 same_day
   const isSameDay = rawItems.some(it => String(it.product_name == null ? '' : it.product_name).includes('오늘출발'));
 
@@ -144,14 +155,15 @@ function normalizeOrder(o) {
   const recvPostal = receiver.zipcode != null ? String(receiver.zipcode).trim() : null;
   const recvMessage = receiver.shipping_message != null ? String(receiver.shipping_message).trim() : null;
 
-  const rawStatus = o.order_status || (o.canceled === 'T' ? 'CANCELED' : (o.paid === 'T' ? 'PAID' : 'UNPAID'));
-  const statusLabel = STATUS_LABEL[rawStatus] || rawStatus;
+  // 상태는 품목 레벨(order_status: N10 등) — 주문 레벨엔 order_status 없음. 카페24가 준 status_text 우선 사용.
+  const orderFallbackStatus = o.canceled === 'T' ? 'CANCELED' : (o.paid === 'T' ? 'PAID' : 'UNPAID');
   const settlePrice = toInt(o.payment_amount != null ? o.payment_amount : o.order_price_amount, 0);
   const settleMethod = o.payment_method || (Array.isArray(o.payment_method_name) ? o.payment_method_name.join(',') : (o.payment_method_name || null));
 
   return rawItems.map((it, idx) => {
     const qty = toInt(it.quantity, 1);
     const unit = toInt(it.product_price, 0);
+    const itStatus = it.order_status || orderFallbackStatus;
     const lineKey = (it.order_item_code != null && String(it.order_item_code).trim())
       ? String(it.order_item_code).trim()
       : `${it.product_no != null ? it.product_no : 'p'}:${idx}`;
@@ -173,8 +185,8 @@ function normalizeOrder(o) {
       recv_message: recvMessage,
       settle_price: settlePrice,
       settle_method: settleMethod,
-      status: rawStatus,
-      status_label: statusLabel,
+      status: itStatus,
+      status_label: it.status_text || STATUS_LABEL[itStatus] || itStatus,
       desired_shipping_date: desired,
       shipping_method: isSameDay ? 'same_day' : 'parcel',
       input_message: parseStickerMessage(it),
