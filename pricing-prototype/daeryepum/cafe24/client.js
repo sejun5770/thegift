@@ -25,14 +25,14 @@ async function cafe24Get(path, params = {}) {
   const url = `${ADMIN_BASE}${path}${qs ? `?${qs}` : ''}`;
 
   const MAX_RETRY = 4;
+  let omitVersion = false; // 잘못 설정된 버전(env) 대응 — 버전 미지원 400 시 헤더 제거 후 앱 기본버전으로 재시도
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'X-Cafe24-Api-Version': VERSION,
-      },
-    });
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    };
+    if (!omitVersion) headers['X-Cafe24-Api-Version'] = VERSION;
+    const res = await fetch(url, { headers });
 
     if (res.status === 429 && attempt < MAX_RETRY) {
       // 몰당 버킷(초당) 제한 — 지수 백오프
@@ -41,7 +41,14 @@ async function cafe24Get(path, params = {}) {
       continue;
     }
     if (!res.ok) {
-      throw new Error(`Cafe24 API ${res.status} (${path}): ${(await res.text()).slice(0, 500)}`);
+      const body = await res.text();
+      // 버전 미지원(잘못된 CAFE24_API_VERSION env) → 버전 헤더 제거 후 앱 기본버전으로 1회 재시도.
+      if (res.status === 400 && !omitVersion && /version/i.test(body)) {
+        console.warn(`[cafe24] API 버전 '${VERSION}' 미지원 → 버전 헤더 제거 후 앱 기본버전으로 재시도`);
+        omitVersion = true;
+        continue;
+      }
+      throw new Error(`Cafe24 API ${res.status} (${path}): ${body.slice(0, 500)}`);
     }
     return res.json();
   }

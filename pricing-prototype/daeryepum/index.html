@@ -16777,10 +16777,11 @@ function copyBgUnified() {
     }
 
     // N열(index 13) = 스티커코드(수량) — 나눔배송 대응 (product_qty 우선, sel.quantity 폴백)
-    if (sel?.sticker_code) {
+    //   코드 미매칭(카페24 미등록 타입 등)이면 원문 스티커 타입명(sticker_name) 노출 — 인쇄팀 확인용.
+    if (sel?.sticker_code || sel?.sticker_name) {
       const qty = product_qty || sel.quantity;
       const qtyStr = qty ? `(${qty}개)` : '';
-      cells[13] = `${sel.sticker_code}${qtyStr}`;
+      cells[13] = `${sel.sticker_code || sel.sticker_name}${qtyStr}`;
     }
 
     // P열(index 15) = K/L 로 매핑되지 않은 3번째+ 그룹들만 '그룹명: 이름' 형태로 노출 (canonical 순서).
