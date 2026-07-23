@@ -9781,6 +9781,19 @@ const server = http.createServer(async (req, res) => {
             real_sticker_code: rs.sticker_code,
           };
         } catch (e) { data.real_fetch_err = e.message; }
+        // ?run=1 이면 실제 syncCafe24Orders 를 배포 컨테이너에서 실행하고 저장된 stub 을 읽어 반환.
+        if (parsed.query.run === '1') {
+          try {
+            const csync = require('./cafe24/sync');
+            const syncResult = await csync.syncCafe24Orders({ since: Date.now() - 7 * 86400000 });
+            const ciRes = await fetch(`${SUPABASE_URL}/rest/v1/bg_order_customer_info?order_id=eq.CF-20260722-0000042&select=sticker_selections`, { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } });
+            const ci = (await ciRes.json())[0];
+            data.full_sync_test = {
+              sync_result: syncResult,
+              stored_sticker_code: ci && ci.sticker_selections && ci.sticker_selections[0] && ci.sticker_selections[0].sticker_code,
+            };
+          } catch (e) { data.full_sync_err = e.message; }
+        }
       } else if (pathname === '/api/cafe24/sync-state') {
         // 마지막 동기화 메타 조회 (관리자 UI 표시용)
         const cafe24Store = require('./cafe24/store');
