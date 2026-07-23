@@ -9750,12 +9750,17 @@ const server = http.createServer(async (req, res) => {
         }
         data = await cafe24Sync.syncCafe24Orders({ since });
       } else if (pathname === '/api/cafe24/version') {
-        // 배포 검증용 — 실제 실행 중인 코드가 최신인지 판별. 마커를 커밋마다 갱신.
-        //   variantCode/토큰 로직 존재 여부를 실제 모듈에서 확인해 반환.
-        let hasVariant = false, hasForceRefresh = false;
-        try { hasVariant = /variantCode/.test(require('fs').readFileSync(require('path').join(__dirname, 'cafe24/option-parser.js'), 'utf8')); } catch {}
-        try { hasForceRefresh = typeof require('./cafe24/auth').forceRefresh === 'function'; } catch {}
-        data = { marker: 'cafe24-v4-variant-token-2026-07-23', has_variant_code: hasVariant, has_force_refresh: hasForceRefresh };
+        // 배포 검증/진단용 — 실행 중인 컨테이너에서 실제 파일·로직을 확인.
+        const fsx = require('fs'), pathx = require('path');
+        let hasVariant = false, syncPasses = false, testCode = null, testName = null, diagErr = null;
+        try { hasVariant = /variantCode/.test(fsx.readFileSync(pathx.join(__dirname, 'cafe24/option-parser.js'), 'utf8')); } catch (e) { diagErr = 'op:' + e.message; }
+        try { syncPasses = /variantCode:\s*it\.custom_variant_code/.test(fsx.readFileSync(pathx.join(__dirname, 'cafe24/sync.js'), 'utf8')); } catch (e) { diagErr = 'sync:' + e.message; }
+        try {
+          const { enrichCafe24Item } = require('./cafe24/option-parser');
+          const t = enrichCafe24Item({ productCode: 'TGJSD04D1', productName: 't', quantity: 1, optionValue: '스티커 옵션=축하 06', message: 'm', variantCode: 'TGJSD01S7', stickers: [], productSettings: [] });
+          testCode = t.sticker_code; testName = t.sticker_name;
+        } catch (e) { diagErr = 'enrich:' + e.message; }
+        data = { marker: 'cafe24-v5-diag-2026-07-23', has_variant_code: hasVariant, sync_passes_variant: syncPasses, test_sticker_code: testCode, test_sticker_name: testName, diag_err: diagErr };
       } else if (pathname === '/api/cafe24/sync-state') {
         // 마지막 동기화 메타 조회 (관리자 UI 표시용)
         const cafe24Store = require('./cafe24/store');
