@@ -9760,7 +9760,27 @@ const server = http.createServer(async (req, res) => {
           const t = enrichCafe24Item({ productCode: 'TGJSD04D1', productName: 't', quantity: 1, optionValue: '스티커 옵션=축하 06', message: 'm', variantCode: 'TGJSD01S7', stickers: [], productSettings: [] });
           testCode = t.sticker_code; testName = t.sticker_name;
         } catch (e) { diagErr = 'enrich:' + e.message; }
-        data = { marker: 'cafe24-v5-diag-2026-07-23', has_variant_code: hasVariant, sync_passes_variant: syncPasses, test_sticker_code: testCode, test_sticker_name: testName, diag_err: diagErr };
+        data = { marker: 'cafe24-v6-realfetch-2026-07-23', has_variant_code: hasVariant, sync_passes_variant: syncPasses, test_sticker_code: testCode, test_sticker_name: testName, diag_err: diagErr };
+        // 실제 fetch + enrich — 배포 sync 경로 그대로 재현해 fetch 응답의 custom_variant_code 확인.
+        try {
+          const cclient = require('./cafe24/client');
+          const { enrichCafe24Item } = require('./cafe24/option-parser');
+          const now = new Date();
+          const end = now.toISOString().slice(0, 10);
+          const start = new Date(now.getTime() - 14 * 86400000).toISOString().slice(0, 10);
+          const orders = await cclient.fetchOrders(start, end);
+          const o = orders.find(x => String(x.order_id) === '20260722-0000042') || orders[0];
+          const it = (o && Array.isArray(o.items) && o.items[0]) || {};
+          const rs = enrichCafe24Item({ productCode: it.custom_product_code || it.product_code, productName: it.product_name, quantity: it.quantity, optionValue: it.option_value, message: '', variantCode: it.custom_variant_code, stickers: [], productSettings: [] });
+          data.real_fetch = {
+            order_id: o && o.order_id,
+            fetched_count: orders.length,
+            item_keys_has_variant: Object.prototype.hasOwnProperty.call(it, 'custom_variant_code'),
+            item_custom_variant_code: it.custom_variant_code,
+            item_option_value: it.option_value,
+            real_sticker_code: rs.sticker_code,
+          };
+        } catch (e) { data.real_fetch_err = e.message; }
       } else if (pathname === '/api/cafe24/sync-state') {
         // 마지막 동기화 메타 조회 (관리자 UI 표시용)
         const cafe24Store = require('./cafe24/store');
