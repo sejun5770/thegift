@@ -7010,7 +7010,14 @@ const server = http.createServer(async (req, res) => {
   }
 
   // --- Auth gate: require login for all other routes (개발모드 우회) ---
-  if (!session && !DEV_SKIP_AUTH) {
+  //   크론 자동수집 예외: 채널 sync 라우트(POST)는 유효한 API 키(Authorization: Bearer EXPORT_API_KEY)면
+  //   세션 없이 허용. 외부 크론/스케줄러가 로그인 없이 15분 주기로 호출 가능.
+  const isCronSyncPath = req.method === 'POST' && (
+    pathname === '/api/cafe24/sync' ||
+    pathname === '/api/naver/sync' ||
+    pathname === '/api/coupang/sync'
+  );
+  if (!session && !DEV_SKIP_AUTH && !(isCronSyncPath && validateApiKey(req))) {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(getLoginPageHtml());
     return;
