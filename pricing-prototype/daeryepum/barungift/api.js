@@ -1203,7 +1203,10 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         const st = stickerMap.get(sel.sticker_id);
         return {
           ...sel,
-          sticker_code: st?.sticker_code || null,
+          // sticker_id 가 있으면 bg_stickers lookup 으로 canonical 정규화.
+          // sticker_id 가 없으면(카페24 변형코드 등 bg_stickers 미매칭 코드) 저장된 sticker_code 를 보존.
+          //   ※ 미보존 시 카페24 sticker_code(변형코드)가 null 로 drift 판정돼 백그라운드로 지워짐.
+          sticker_code: sel.sticker_id ? (st?.sticker_code || null) : (sel.sticker_code || null),
           sticker_name: sel.sticker_name || st?.name || sel.sticker_id,
         };
       });
