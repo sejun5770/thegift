@@ -54,6 +54,22 @@ async function tokenRequest(params) {
 }
 
 /**
+ * 카페24 만료시각 정규화 — 카페24는 expires_at 을 KST(타임존 없이)로 준다.
+ *   타임존이 없으면 +09:00(KST)로 간주해 정확한 UTC ISO 로 변환.
+ *   (미변환 시 UTC 로 저장돼 실제보다 9시간 늦게 기록 → 죽은 토큰을 유효로 오판 → 401)
+ */
+function normalizeCafeExpiry(s) {
+  if (!s) return null;
+  let str = String(s).trim();
+  if (!str) return null;
+  if (str.includes(' ') && !str.includes('T')) str = str.replace(' ', 'T');
+  const hasTz = /([+-]\d{2}:?\d{2}|Z)$/i.test(str);
+  if (!hasTz) str = str + '+09:00';
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/**
  * 토큰을 cafe24_tokens(단일 행, id=1)에 저장.
  *   refresh_token 은 갱신 시마다 새 값 → 반드시 덮어씀 (merge-duplicates upsert).
  */
@@ -68,8 +84,8 @@ async function saveTokens(t) {
       mall_id: MALL,
       access_token: t.access_token,
       refresh_token: t.refresh_token,
-      access_expires_at: t.expires_at,
-      refresh_expires_at: t.refresh_token_expires_at,
+      access_expires_at: normalizeCafeExpiry(t.expires_at),
+      refresh_expires_at: normalizeCafeExpiry(t.refresh_token_expires_at),
       updated_at: new Date().toISOString(),
     }),
   });
@@ -89,8 +105,8 @@ async function exchangeAuthCode(code, redirectUri) {
   return { ok: true, mall_id: MALL, access_expires_at: t.expires_at, refresh_expires_at: t.refresh_token_expires_at };
 }
 
-/** 유효한 access_token 반환 (만료 5분 전이면 refresh 로 자동 갱신) */
-async function getAccessToken() {
+/** 저장된 토큰 행 조회. */
+async function loadStored() {
   assertSupabase();
   const res = await fetch(`${REST_BASE}/cafe24_tokens?id=eq.1&select=*&limit=1`, {
     headers: SERVICE_HEADERS,
@@ -103,13 +119,29 @@ async function getAccessToken() {
   if (!data) {
     throw new Error('Cafe24 토큰 없음 — 앱 설치/인증(OAuth) 필요');
   }
+  return data;
+}
 
+/** refresh_token 으로 강제 갱신 → 새 access_token 반환 (401 대응/만료 임박 공용). */
+async function forceRefresh() {
+  const data = await loadStored();
+  const t = await tokenRequest({
+    grant_type: 'refresh_token',
+    refresh_token: data.refresh_token,
+  });
+  await saveTokens(t);
+  return t.access_token;
+}
+
+/** 유효한 access_token 반환 (만료 5분 전이면 refresh 로 자동 갱신) */
+async function getAccessToken() {
+  const data = await loadStored();
   const soon = Date.now() + 5 * 60 * 1000; // 5분 여유
-  if (new Date(data.access_expires_at).getTime() > soon) {
+  const exp = new Date(data.access_expires_at).getTime();
+  if (Number.isFinite(exp) && exp > soon) {
     return data.access_token;
   }
-
-  // 만료 임박 → 갱신 (refresh_token 도 새 값으로 교체되므로 저장 필수)
+  // 만료(임박) → 갱신
   const t = await tokenRequest({
     grant_type: 'refresh_token',
     refresh_token: data.refresh_token,
@@ -121,5 +153,6 @@ async function getAccessToken() {
 module.exports = {
   exchangeAuthCode,
   getAccessToken,
+  forceRefresh,
   MALL,
 };
