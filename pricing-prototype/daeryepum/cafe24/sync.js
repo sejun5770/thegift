@@ -334,6 +334,7 @@ async function syncCafe24Orders({ since } = {}) {
             quantity: it.quantity,
             optionValue: it.option_value,
             message: parseStickerMessage(it),
+            variantCode: it.custom_variant_code, // 스티커 변형코드 → sticker_code
             stickers, productSettings,
           });
           if (sel.sticker_code || sel.box_code) enrichedCount++;

@@ -44,6 +44,7 @@ function enrichCafe24Item({
   quantity,
   optionValue,
   message,
+  variantCode,   // 카페24 custom_variant_code — 스티커 변형코드 (예: TGJSD01S7 = '축하 06')
   stickers = [],
   productSettings = [],
 }) {
@@ -64,13 +65,18 @@ function enrichCafe24Item({
   const box = matchBox(productSettings, productCode, boxType);
   const msg = (message == null ? '' : String(message)).trim();
 
+  // 스티커 코드 — bg_stickers 매칭 우선, 미등록이면 카페24 변형코드(custom_variant_code) 사용.
+  //   스티커 옵션이 있는 품목에 한해 변형코드를 스티커코드로 간주 (변형코드가 스티커 선택을 대표).
+  const vc = variantCode != null ? String(variantCode).trim() : '';
+  const stickerCode = (sticker && sticker.sticker_code) || (stickerType && vc ? vc : null);
+
   return {
     product_code: productCode || null,
     product_name: productName || null,
     quantity: Number(quantity) || 0,
     sticker_id: sticker ? sticker.id : null,
-    sticker_code: sticker ? sticker.sticker_code : null,
-    // 카페24: 스티커 타입 원문 보존 (매칭명 우선, 없으면 옵션 원문) — 운영자 확인용.
+    sticker_code: stickerCode,
+    // 카페24: 스티커 타입 원문 보존 (매칭명 우선, 없으면 옵션 원문) — 코드와 함께 표기.
     sticker_name: (sticker && sticker.name) || stickerType || null,
     custom_values: msg ? { text: msg } : {},
     box_code: box ? box.code : null,
