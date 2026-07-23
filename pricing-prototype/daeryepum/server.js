@@ -9760,7 +9760,10 @@ const server = http.createServer(async (req, res) => {
           const t = enrichCafe24Item({ productCode: 'TGJSD04D1', productName: 't', quantity: 1, optionValue: '스티커 옵션=축하 06', message: 'm', variantCode: 'TGJSD01S7', stickers: [], productSettings: [] });
           testCode = t.sticker_code; testName = t.sticker_name;
         } catch (e) { diagErr = 'enrich:' + e.message; }
-        data = { marker: 'cafe24-v6-realfetch-2026-07-23', has_variant_code: hasVariant, sync_passes_variant: syncPasses, test_sticker_code: testCode, test_sticker_name: testName, diag_err: diagErr };
+        let instHost = '', instSupa = '';
+        try { instHost = require('os').hostname(); } catch {}
+        try { instSupa = (String(SUPABASE_URL).match(/https?:\/\/([^.]+)/) || [])[1] || ''; } catch {}
+        data = { marker: 'cafe24-v7-instance-2026-07-23', instance: { host: instHost, pid: process.pid, supabase: instSupa }, has_variant_code: hasVariant, sync_passes_variant: syncPasses, test_sticker_code: testCode, test_sticker_name: testName, diag_err: diagErr };
         // 실제 fetch + enrich — 배포 sync 경로 그대로 재현해 fetch 응답의 custom_variant_code 확인.
         try {
           const cclient = require('./cafe24/client');
