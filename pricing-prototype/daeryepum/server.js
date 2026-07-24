@@ -1551,6 +1551,160 @@ async function apiProductStats(query) {
 }
 
 /**
+ * GET /api/product-ranking?start_date=2026-07-20&end_date=2026-07-26
+ *
+ * 선택 기간(단일)의 답례품 상품 판매 순위 — 전체 채널 합산.
+ *   · MSSQL (바른손카드 custom_order + 바른손몰 CUSTOM_ETC_ORDER, 답례품만 = D01_FILTER)
+ *   · Supabase 마켓 (쿠팡 / 네이버 / 정수당) — 취소·반품·교환 status 제외
+ *
+ * 병합 키: 정규화 상품명(선행 [..] 프리픽스 제거 + trim, 소문자). MSSQL·마켓 전부 합산.
+ * 반환: { period, products:[{name, qty, revenue, channels[]}], totals:{qty,revenue} } (qty 내림차순)
+ */
+async function apiProductRanking(query = {}) {
+  const startStr = query.start_date;
+  const endStr = query.end_date;
+  if (!startStr || !endStr) return { error: 'start_date and end_date required' };
+
+  // end exclusive (+1일) — MSSQL order_date < @e / 마켓 store endStr(lt) 공통.
+  const endPlus = fmtDate(addDays(new Date(endStr + 'T00:00:00'), 1));
+
+  // 상품명 정규화 — 선행 [XX%할인]/[시크릿특가] 등 [..] 프리픽스 제거.
+  const cleanName = (n) => String(n || '').replace(/^\[.*?\]\s*/g, '').trim();
+  // BASE 코드 정규화 (apiProductStats.toBase 재사용) — _A/_B 변형 → base.
+  const toBase = (code) => {
+    if (!code) return code;
+    const m = String(code).match(/^(.+)_[A-Za-z0-9]+$/);
+    return m ? m[1] : code;
+  };
+
+  // 병합 맵 — key: 정규화 상품명(소문자). value: { name, qty, revenue, channels:Set }.
+  const byName = new Map();
+  function addEntry(rawName, qty, revenue, channelLabel) {
+    const clean = cleanName(rawName) || String(rawName || '').trim();
+    const key = clean.toLowerCase();
+    if (!key) return;
+    if (!byName.has(key)) byName.set(key, { name: clean, qty: 0, revenue: 0, channels: new Set() });
+    const e = byName.get(key);
+    e.qty += Number(qty) || 0;
+    e.revenue += Number(revenue) || 0;
+    if (channelLabel) e.channels.add(channelLabel);
+  }
+
+  // ── 1) MSSQL (CARD + ETC, 답례품만) ──────────────────────────────
+  try {
+    const p = await getPool();
+
+    // CARD (바른손카드 custom_order) — GROUP BY card_code, 금액/status 는 apiProductStats 와 동일.
+    const cardQ = await p.request()
+      .input('s', sql.VarChar, startStr)
+      .input('e', sql.VarChar, endPlus)
+      .query(`
+        SELECT c.Card_Code AS card_code, MAX(c.Card_Name) AS card_name,
+               SUM(coi.item_count) AS qty,
+               SUM(
+                 CASE WHEN si.SiteName IS NULL
+                      THEN CAST(coi.item_sale_price AS float) * coi.item_count
+                           / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                      ELSE CAST(coi.item_sale_price AS float)
+                 END
+               ) AS amount
+        FROM custom_order co WITH (NOLOCK)
+        INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+        LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+        WHERE ${D01_FILTER}
+          AND co.order_date >= @s AND co.order_date < @e
+          AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+        GROUP BY c.Card_Code
+      `);
+
+    // ETC (바른손몰 CUSTOM_ETC_ORDER) — coupon 차감, status NOT IN (3,5,15).
+    const etcQ = await p.request()
+      .input('s', sql.VarChar, startStr)
+      .input('e', sql.VarChar, endPlus)
+      .query(`
+        SELECT c.Card_Code AS card_code, MAX(c.Card_Name) AS card_name,
+               SUM(ei.order_count) AS qty,
+               SUM(
+                 CASE WHEN si.SiteName IS NULL
+                      THEN CAST(ei.card_sale_price AS float) * ei.order_count
+                           / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                           - ISNULL(o.coupon_price, 0)
+                      ELSE CAST(ei.card_sale_price AS float) - ISNULL(o.coupon_price, 0)
+                 END
+               ) AS amount
+        FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+        INNER JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON o.order_seq = ei.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
+        LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+        WHERE ${D01_FILTER}
+          AND o.order_date >= @s AND o.order_date < @e
+          AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+        GROUP BY c.Card_Code
+      `);
+
+    // toBase 로 변형 코드(_A/_B) 를 base 로 묶어 이름 선택 후 addEntry (최종 병합은 상품명 기준).
+    const baseAgg = new Map(); // base code → { name, qty, revenue }
+    for (const r of [...cardQ.recordset, ...etcQ.recordset]) {
+      const base = toBase(r.card_code) || r.card_code;
+      if (!baseAgg.has(base)) baseAgg.set(base, { name: null, qty: 0, revenue: 0 });
+      const b = baseAgg.get(base);
+      // 가장 깔끔한(프리픽스 없는) 이름 우선
+      if (r.card_name) {
+        const cleaned = cleanName(r.card_name);
+        if (!b.name || (cleaned && cleaned.length < cleanName(b.name).length) || b.name.startsWith('[')) {
+          b.name = cleaned || r.card_name;
+        }
+      }
+      b.qty += Number(r.qty) || 0;
+      b.revenue += Number(r.amount) || 0;
+    }
+    for (const b of baseAgg.values()) {
+      addEntry(b.name, b.qty, Math.round(b.revenue), 'card');
+    }
+  } catch (e) {
+    console.warn('[product-ranking] MSSQL 집계 실패 (무시):', e.message);
+  }
+
+  // ── 2) Supabase 마켓 (쿠팡 / 네이버 / 정수당) ─────────────────────
+  // 취소/반품/교환 status 제외 (CARD/ETC status_seq NOT IN 정책과 동일).
+  const CANCELLED_STATUS = new Set([
+    'CANCELED', 'RETURNED', 'EXCHANGED', 'CANCEL', 'RETURNS',
+    'C00', 'C10', 'C11', 'R00', 'R10', 'E00', 'E10',
+  ]);
+  async function mergeMarket(label, loader) {
+    try {
+      const rows = await loader();
+      for (const r of (rows || [])) {
+        if (r.status && CANCELLED_STATUS.has(String(r.status).toUpperCase())) continue;
+        addEntry(r.product_name, r.item_count, r.item_total_price, label);
+      }
+    } catch (e) {
+      console.warn(`[product-ranking] ${label} 집계 실패 (무시):`, e.message);
+    }
+  }
+  await mergeMarket('쿠팡', () => require('./coupang/store').listCoupangOrders({ startStr, endStr: endPlus, byPaid: false }));
+  await mergeMarket('네이버', () => require('./naver/store').listNaverOrders({ startStr, endStr: endPlus, byPaid: false }));
+  await mergeMarket('정수당', () => require('./cafe24/store').listCafe24Orders({ startStr, endStr: endPlus, byPaid: false }));
+
+  // ── 3) 결과 정리 — qty 내림차순 ─────────────────────────────────
+  const products = [...byName.values()]
+    .map(e => ({ name: e.name, qty: e.qty, revenue: Math.round(e.revenue), channels: [...e.channels] }))
+    .sort((a, b) => b.qty - a.qty);
+
+  const totals = {
+    qty: products.reduce((s, p) => s + p.qty, 0),
+    revenue: products.reduce((s, p) => s + p.revenue, 0),
+  };
+
+  return {
+    period: { start_date: startStr, end_date: endStr },
+    products,
+    totals,
+  };
+}
+
+/**
  * 작가별 정산 합계 + 품목별 drill-down (Phase 3).
  *
  * 매출 기준:
@@ -13250,6 +13404,8 @@ const server = http.createServer(async (req, res) => {
         data = await apiOrderFiles(parsed.query);
       } else if (pathname === '/api/product-stats') {
         data = await apiProductStats(parsed.query);
+      } else if (pathname === '/api/product-ranking') {
+        data = await apiProductRanking(parsed.query);
       } else if (pathname === '/api/categories') {
         data = Object.entries(CATEGORY_FILTERS).map(([key, val]) => ({ key, label: val.label }));
       } else if (pathname === '/api/worklog') {

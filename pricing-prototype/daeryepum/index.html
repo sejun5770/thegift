@@ -638,6 +638,52 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- ============================================
+       상품 판매 순위 — 일/주/월 기간별 전체 채널 순위
+       ============================================ -->
+  <div class="section" data-dash-section="4">
+    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span>🏆 상품 판매 순위</span>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;font-weight:400">
+        <!-- granularity 토글 -->
+        <div style="display:flex;gap:2px;border:1px solid var(--gray-200);border-radius:6px;overflow:hidden">
+          <button class="btn btn-sm pr-gran" data-gran="day" onclick="setPrGran('day')" style="border:0;border-radius:0;padding:5px 10px">일별</button>
+          <button class="btn btn-sm pr-gran" data-gran="week" onclick="setPrGran('week')" style="border:0;border-radius:0;padding:5px 10px">주별</button>
+          <button class="btn btn-sm pr-gran" data-gran="month" onclick="setPrGran('month')" style="border:0;border-radius:0;padding:5px 10px">월별</button>
+        </div>
+        <span style="color:var(--gray-300);margin:0 2px">|</span>
+        <!-- 기간 이동 -->
+        <button class="btn btn-sm" onclick="movePrPeriod(-1)" title="이전 기간">◀</button>
+        <span id="pr-period-label" style="min-width:150px;text-align:center;font-weight:600;color:var(--gray-700)">-</span>
+        <button class="btn btn-sm" onclick="movePrPeriod(1)" title="다음 기간">▶</button>
+        <span style="color:var(--gray-300);margin:0 2px">|</span>
+        <!-- 정렬 토글 -->
+        <div style="display:flex;gap:2px;border:1px solid var(--gray-200);border-radius:6px;overflow:hidden">
+          <button class="btn btn-sm pr-sort" data-sort="qty" onclick="setPrSort('qty')" style="border:0;border-radius:0;padding:5px 10px">수량순</button>
+          <button class="btn btn-sm pr-sort" data-sort="revenue" onclick="setPrSort('revenue')" style="border:0;border-radius:0;padding:5px 10px">매출순</button>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="padding:16px">
+      <div id="pr-body" style="overflow-x:auto">
+        <div id="pr-status" style="padding:40px 20px;text-align:center;color:var(--gray-400)">기간을 선택하면 순위가 표시됩니다</div>
+        <table id="pr-table" style="width:100%;border-collapse:collapse;font-size:13px;display:none">
+          <thead>
+            <tr style="border-bottom:2px solid var(--gray-200);text-align:left;color:var(--gray-500);font-size:12px">
+              <th style="padding:8px 10px;width:56px">순위</th>
+              <th style="padding:8px 10px">상품명</th>
+              <th style="padding:8px 10px;width:140px">채널</th>
+              <th style="padding:8px 10px;width:100px;text-align:right">판매수량</th>
+              <th style="padding:8px 10px;width:130px;text-align:right">매출액</th>
+              <th style="padding:8px 10px;width:80px;text-align:right">비중%</th>
+            </tr>
+          </thead>
+          <tbody id="pr-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================
        상품별 판매 통계 — 썸네일 선택 + 다상품 비교
        ============================================ -->
   <div class="section">
@@ -4486,6 +4532,120 @@ function onPsCustomDate() {
   if (_psSelected.size > 0) loadProductStats();
 }
 
+// ============================================================
+//  🏆 상품 판매 순위 — 일/주/월 기간별 전체 채널 순위
+// ============================================================
+function _prTodayMidnightMs() {
+  const n = new Date();
+  return new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
+}
+let _prState = { gran: 'week', anchorMs: _prTodayMidnightMs(), sortBy: 'qty' };
+
+// granularity 별 기간 계산 → { start:Date, end:Date }
+function _prPeriod() {
+  const anchor = new Date(_prState.anchorMs);
+  const g = _prState.gran;
+  let start, end;
+  if (g === 'day') {
+    start = new Date(anchor); end = new Date(anchor);
+  } else if (g === 'month') {
+    start = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+    end = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
+  } else { // week — 월요일 시작
+    const dow = (anchor.getDay() + 6) % 7; // Mon=0 … Sun=6
+    start = new Date(anchor); start.setDate(anchor.getDate() - dow);
+    end = new Date(start); end.setDate(start.getDate() + 6);
+  }
+  return { start, end };
+}
+
+function _prLabel(start, end) {
+  const g = _prState.gran;
+  if (g === 'day') return fmt(start);
+  if (g === 'month') return `${start.getFullYear()}년 ${start.getMonth() + 1}월`;
+  const mm = (d) => String(d.getMonth() + 1).padStart(2, '0');
+  const dd = (d) => String(d.getDate()).padStart(2, '0');
+  return `${fmt(start)} ~ ${mm(end)}-${dd(end)}`;
+}
+
+// 활성 버튼 하이라이트 (granularity / sort)
+function _prUpdateButtons() {
+  document.querySelectorAll('.pr-gran').forEach(b => {
+    const on = b.dataset.gran === _prState.gran;
+    b.style.background = on ? 'var(--primary)' : 'transparent';
+    b.style.color = on ? '#fff' : 'var(--gray-600)';
+    b.style.fontWeight = on ? '600' : '400';
+  });
+  document.querySelectorAll('.pr-sort').forEach(b => {
+    const on = b.dataset.sort === _prState.sortBy;
+    b.style.background = on ? 'var(--primary)' : 'transparent';
+    b.style.color = on ? '#fff' : 'var(--gray-600)';
+    b.style.fontWeight = on ? '600' : '400';
+  });
+}
+
+function setPrGran(g) {
+  if (_prState.gran === g) return;
+  _prState.gran = g;
+  loadProductRanking();
+}
+function setPrSort(s) {
+  if (_prState.sortBy === s) return;
+  _prState.sortBy = s;
+  loadProductRanking();
+}
+function movePrPeriod(dir) {
+  const a = new Date(_prState.anchorMs);
+  if (_prState.gran === 'day') a.setDate(a.getDate() + dir);
+  else if (_prState.gran === 'month') a.setMonth(a.getMonth() + dir);
+  else a.setDate(a.getDate() + 7 * dir);
+  _prState.anchorMs = a.getTime();
+  loadProductRanking();
+}
+
+/** 상품 판매 순위 조회 + 렌더 */
+async function loadProductRanking() {
+  _prUpdateButtons();
+  const { start, end } = _prPeriod();
+  const startStr = fmt(start), endStr = fmt(end);
+  const $label = document.getElementById('pr-period-label');
+  const $status = document.getElementById('pr-status');
+  const $table = document.getElementById('pr-table');
+  const $tbody = document.getElementById('pr-tbody');
+  if (!$status || !$table || !$tbody) return;
+  if ($label) $label.textContent = _prLabel(start, end);
+  $status.style.display = ''; $status.style.color = 'var(--gray-400)'; $status.textContent = '불러오는 중...';
+  $table.style.display = 'none';
+  try {
+    const url = `${API}/api/product-ranking?start_date=${startStr}&end_date=${endStr}`;
+    const data = await fetch(url).then(r => r.json());
+    if (data.error) { $status.textContent = '오류: ' + data.error; $status.style.color = 'var(--red)'; return; }
+    const sortBy = _prState.sortBy;
+    const products = (data.products || []).slice().sort((a, b) => (Number(b[sortBy]) || 0) - (Number(a[sortBy]) || 0));
+    if (!products.length) { $status.textContent = '해당 기간 판매 데이터가 없습니다'; $status.style.color = 'var(--gray-400)'; return; }
+    const totalBase = products.reduce((s, p) => s + (Number(p[sortBy]) || 0), 0);
+    $tbody.innerHTML = products.map((p, i) => {
+      const rank = i + 1;
+      const medal = rank <= 3 ? ['🥇', '🥈', '🥉'][rank - 1] : String(rank);
+      const share = totalBase > 0 ? (Number(p[sortBy]) || 0) / totalBase * 100 : 0;
+      const channels = (p.channels || []).join(', ');
+      return `<tr style="border-bottom:1px solid var(--gray-100)">
+        <td style="padding:8px 10px;text-align:center;font-weight:600">${medal}</td>
+        <td style="padding:8px 10px">${esc(p.name || '-')}</td>
+        <td style="padding:8px 10px;color:var(--gray-500);font-size:12px">${esc(channels)}</td>
+        <td style="padding:8px 10px;text-align:right">${(Number(p.qty) || 0).toLocaleString('ko-KR')}</td>
+        <td style="padding:8px 10px;text-align:right">${fmtKRW(p.revenue)}</td>
+        <td style="padding:8px 10px;text-align:right;color:var(--gray-600)">${share.toFixed(1)}%</td>
+      </tr>`;
+    }).join('');
+    $status.style.display = 'none';
+    $table.style.display = '';
+  } catch (e) {
+    console.error('[loadProductRanking]', e);
+    $status.textContent = '조회 실패: ' + e.message; $status.style.color = 'var(--red)';
+  }
+}
+
 /** 상품 판매 통계 조회 */
 async function loadProductStats() {
   if (_psSelected.size === 0) return showPsEmpty();
@@ -5971,6 +6131,7 @@ async function _loadDashSection(n) {
     } else if (n === 4) {
       // 상품별 판매통계 (이미 로드됐어도 재호출 안전)
       loadPsProductList();
+      loadProductRanking();
     } else if (n === 5) {
       // 위탁: 위탁상품 요약 + 위탁 대시보드 + 위탁 정산 (자체 필터·기간). 위탁 = 답례품 한정.
       if (dashCategory === 'daeryepum') {
