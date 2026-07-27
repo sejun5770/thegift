@@ -3066,6 +3066,7 @@ async function apiDashboardSummary(query) {
           CONVERT(varchar(10), o.order_date, 120) AS order_day,
           ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
           CASE WHEN ecp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END AS order_type,
+          CASE WHEN c.Card_Code LIKE 'COM[_]%' THEN N'위탁' ELSE N'일반' END AS consign_type,
           COUNT(DISTINCT o.order_seq) AS order_count,
           SUM(oi.order_count) AS total_qty,
           SUM(${etcAmountExprForCat}) AS total_amount
@@ -3077,7 +3078,8 @@ async function apiDashboardSummary(query) {
         ${etcCouponDivisorForCategory}
         WHERE ${categoryFilter} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
         GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)),
-          CASE WHEN ecp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
+          CASE WHEN ecp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END,
+          CASE WHEN c.Card_Code LIKE 'COM[_]%' THEN N'위탁' ELSE N'일반' END
 
         UNION ALL
 
@@ -3087,6 +3089,7 @@ async function apiDashboardSummary(query) {
           CONVERT(varchar(10), co.order_date, 120) AS order_day,
           ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
           CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END AS order_type,
+          CASE WHEN c.Card_Code LIKE 'COM[_]%' THEN N'위탁' ELSE N'일반' END AS consign_type,
           COUNT(DISTINCT co.order_seq),
           SUM(coi.item_count),
           SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ${cardUnitDivisor})
@@ -3097,7 +3100,8 @@ async function apiDashboardSummary(query) {
         LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
         WHERE ${categoryFilter} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
         GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
-          CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
+          CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END,
+          CASE WHEN c.Card_Code LIKE 'COM[_]%' THEN N'위탁' ELSE N'일반' END
 
         ORDER BY order_day DESC, total_amount DESC
       `),
@@ -3121,6 +3125,7 @@ async function apiDashboardSummary(query) {
           CONVERT(varchar(10), o.order_date, 120) AS order_day,
           ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
           CASE WHEN ecp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END AS order_type,
+          CASE WHEN c.Card_Code LIKE 'COM[_]%' THEN N'위탁' ELSE N'일반' END AS consign_type,
           COUNT(DISTINCT o.order_seq) AS distinct_order_count
         FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
         INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
@@ -3129,7 +3134,8 @@ async function apiDashboardSummary(query) {
         LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
         WHERE ${categoryFilter} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
         GROUP BY CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)),
-          CASE WHEN ecp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
+          CASE WHEN ecp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END,
+          CASE WHEN c.Card_Code LIKE 'COM[_]%' THEN N'위탁' ELSE N'일반' END
 
         UNION ALL
 
@@ -3137,6 +3143,7 @@ async function apiDashboardSummary(query) {
           CONVERT(varchar(10), co.order_date, 120) AS order_day,
           ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
           CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END AS order_type,
+          CASE WHEN c.Card_Code LIKE 'COM[_]%' THEN N'위탁' ELSE N'일반' END AS consign_type,
           COUNT(DISTINCT co.order_seq) AS distinct_order_count
         FROM custom_order co WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
@@ -3145,7 +3152,8 @@ async function apiDashboardSummary(query) {
         LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
         WHERE ${categoryFilter} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
         GROUP BY CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
-          CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END
+          CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END,
+          CASE WHEN c.Card_Code LIKE 'COM[_]%' THEN N'위탁' ELSE N'일반' END
       `),
   ]);
 

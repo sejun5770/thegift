@@ -6839,7 +6839,9 @@ function renderSummary(summary, lt, orderCounts) {
     return bySite[sn];
   }
   summary.forEach(r => {
-    const site = ensureSite(r.site_name || '기타');
+    // 위탁답례품(COM_)은 실제 사이트(바른손카드 등) 대신 '위탁답례품' 별도 라인으로 분리.
+    //   → 자사 라인은 D01만 남고, 위탁은 독립 breakdown 행. 총합(총매출 값)은 그대로 위탁 포함.
+    const site = ensureSite(r.consign_type === '위탁' ? '위탁답례품' : (r.site_name || '기타'));
     site.total_amount += r.total_amount || 0;
     site.total_qty += r.total_qty || 0;
     const bucket = r.order_type === '동시구매' ? site.copurchase : site.standalone;
@@ -6847,7 +6849,7 @@ function renderSummary(summary, lt, orderCounts) {
     bucket.qty += r.total_qty || 0;
   });
   dashboardOrderCounts.forEach(r => {
-    const site = ensureSite(r.site_name || '기타');
+    const site = ensureSite(r.consign_type === '위탁' ? '위탁답례품' : (r.site_name || '기타'));
     site.order_count += r.distinct_order_count || 0;
     const bucket = r.order_type === '동시구매' ? site.copurchase : site.standalone;
     bucket.orders += r.distinct_order_count || 0;
@@ -8936,7 +8938,7 @@ function renderSampleTable() {
 
 // --- 전환율 차트 ---
 let conversionChart = null;
-const SITE_COLORS = {'바른손카드':'#3b82f6','바른손몰':'#10b981','디얼디어':'#8b5cf6','바른손M카드':'#f59e0b','쿠팡':'#ef4444','쿠팡 로켓그로스':'#991b1b','네이버':'#03c75a','정수당':'#d97706','기타':'#a1a1aa','비회원':'#94a3b8'};
+const SITE_COLORS = {'바른손카드':'#3b82f6','바른손몰':'#10b981','디얼디어':'#8b5cf6','바른손M카드':'#f59e0b','쿠팡':'#ef4444','쿠팡 로켓그로스':'#991b1b','네이버':'#03c75a','정수당':'#d97706','위탁답례품':'#a855f7','기타':'#a1a1aa','비회원':'#94a3b8'};
 function renderConversion(data) {
   _conversionData = data;
   const weeks = data.weeks;
