@@ -1574,6 +1574,12 @@ async function apiProductRanking(query = {}) {
 
   // 상품명 정규화 — 선행 [XX%할인]/[시크릿특가] 등 [..] 프리픽스 제거.
   const cleanName = (n) => String(n || '').replace(/^\[.*?\]\s*/g, '').trim();
+  // 자사(카드/더기프트) 병합용 — 프리픽스 제거 + 끝의 (80g)/(4종 8개입) 등 괄호 규격/용량 접미사 제거.
+  //   채널별 상품명 표기 차이(카드 "메이플 호두정과" vs 더기프트 "메이플 호두정과 (80g)")를 한 상품으로 병합.
+  const normName = (n) => cleanName(n)
+    .replace(/\s*\([^()]*\)\s*$/, '')   // 끝 괄호 그룹 1회 제거
+    .replace(/\s*\([^()]*\)\s*$/, '')   // 접미 괄호 2개 대비 1회 더
+    .trim();
   // BASE 코드 정규화 (apiProductStats.toBase 재사용) — _A/_B 변형 → base.
   const toBase = (code) => {
     if (!code) return code;
@@ -1583,11 +1589,16 @@ async function apiProductRanking(query = {}) {
 
   // 병합 맵 — key: 정규화 상품명(소문자). value: { name, qty, revenue, channels:Set }.
   const byName = new Map();
-  function addEntry(rawName, qty, revenue, channelLabel) {
-    const clean = cleanName(rawName) || String(rawName || '').trim();
-    const key = clean.toLowerCase();
-    if (!key) return;
-    if (!byName.has(key)) byName.set(key, { name: clean, qty: 0, revenue: 0, channels: new Set() });
+  //   scope 'own'    : 자사(바른손카드/바른손몰/더기프트) — normName 으로 병합(규격 접미사까지 통일).
+  //   scope 'market' : 외부 마켓(네이버/쿠팡/정수당) — 상품명이 마케팅 롱타이틀이라 자사와 표기가 달라,
+  //                    자사 상품과 섞이지 않도록 'M|' 네임스페이스로 분리(= 카드와 별도 행 유지).
+  function addEntry(rawName, qty, revenue, channelLabel, scope = 'own') {
+    const display = scope === 'own'
+      ? (normName(rawName) || cleanName(rawName) || String(rawName || '').trim())
+      : (cleanName(rawName) || String(rawName || '').trim());
+    if (!display) return;
+    const key = (scope === 'own' ? 'O|' : 'M|') + display.toLowerCase();
+    if (!byName.has(key)) byName.set(key, { name: display, qty: 0, revenue: 0, channels: new Set() });
     const e = byName.get(key);
     e.qty += Number(qty) || 0;
     e.revenue += Number(revenue) || 0;
@@ -1681,7 +1692,7 @@ async function apiProductRanking(query = {}) {
       const rows = await loader();
       for (const r of (rows || [])) {
         if (r.status && CANCELLED_STATUS.has(String(r.status).toUpperCase())) continue;
-        addEntry(r.product_name, r.item_count, r.item_total_price, label);
+        addEntry(r.product_name, r.item_count, r.item_total_price, label, 'market');
       }
     } catch (e) {
       console.warn(`[product-ranking] ${label} 집계 실패 (무시):`, e.message);
