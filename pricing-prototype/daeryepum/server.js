@@ -1743,8 +1743,9 @@ async function apiProductRanking(query = {}) {
 /**
  * GET /api/weekly-report?weeks=12
  *
- * 주간보고용 — 최근 N주(기본 12, 주 시작=월요일)의 주차별 상관관계 데이터.
- *   · wedding_count : 해당 주에 예식(결혼)이 있는 바른손카드(통합회원) 수.
+ * 주간보고용 — 최근 N주(기본 12, 주 시작=일요일, 일~토)의 주차별 상관관계 데이터.
+ *   · wedding_count : 각 주차의 28일 비대칭 윈도우(-14~+7일) 내 예식(결혼) 수.
+ *       (apiForecast wedding_pool 과 동일 — 답례품은 예식 전후 걸쳐 주문되므로 풀 기준)
  *       apiForecast/apiConversionWindow 의 예식 집계 로직 재사용:
  *       S2_UserInfo wedd_year/month/day, site_div='SB' 중복제거, USE_YORN='Y'.
  *   · order_count   : 해당 주 답례품 주문 수(distinct order) — 전체 채널.
@@ -1762,21 +1763,22 @@ async function apiProductRanking(query = {}) {
 async function apiWeeklyReport(query = {}) {
   const nWeeks = Math.max(1, Math.min(52, parseInt(query.weeks, 10) || 12));
 
-  // 주 시작 = 월요일. JS getDay(): 일=0..토=6 → 월요일 오프셋 (dow+6)%7.
+  // 주 시작 = 일요일 (일~토 주). JS getDay(): 일=0..토=6 → 이번주 일요일 = 오늘 - dow.
   const todayDate = today();
   const dow = todayDate.getDay();
-  const thisMonday = addDays(todayDate, -((dow + 6) % 7));
+  const thisSunday = addDays(todayDate, -dow);
 
   // 오래된→최신 순으로 주차 골격 생성.
   const weeks = [];
   for (let i = nWeeks - 1; i >= 0; i--) {
-    const weekStart = addDays(thisMonday, -7 * i);
-    const weekEnd = addDays(weekStart, 6);
+    const weekStart = addDays(thisSunday, -7 * i);   // 일요일
+    const weekEnd = addDays(weekStart, 6);            // 토요일
     const fmtMD = (d) => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+    const wkNo = getISOWeek(addDays(weekStart, 4));   // 일~토 주의 목요일 기준 ISO 주차 (07/19~07/25 → W30)
     weeks.push({
       week_start: fmtDate(weekStart),
-      week_no: getISOWeek(weekStart),
-      label: `W${getISOWeek(weekStart)} ${fmtMD(weekStart)}~${fmtMD(weekEnd)}`,
+      week_no: wkNo,
+      label: `W${wkNo} ${fmtMD(weekStart)}~${fmtMD(weekEnd)}`,
       wedding_count: 0,
       order_count: 0,
       revenue: 0,
@@ -1787,21 +1789,24 @@ async function apiWeeklyReport(query = {}) {
   const weekIndexOf = (dateStr) => {
     if (!dateStr) return undefined;
     const d = new Date(dateStr + 'T00:00:00');
-    const diffDays = Math.floor((d - new Date(fmtDate(addDays(thisMonday, -7 * (nWeeks - 1))) + 'T00:00:00')) / 86400000);
+    const diffDays = Math.floor((d - new Date(fmtDate(addDays(thisSunday, -7 * (nWeeks - 1))) + 'T00:00:00')) / 86400000);
     if (diffDays < 0) return undefined;
     const idx = Math.floor(diffDays / 7);
     return idx >= 0 && idx < weeks.length ? idx : undefined;
   };
 
   const rangeStart = weeks[0].week_start;                       // inclusive
-  const rangeEndExcl = fmtDate(addDays(thisMonday, 7));         // 현재 주 종료 다음날 (exclusive)
+  const rangeEndExcl = fmtDate(addDays(thisSunday, 7));         // 현재 주(토) 다음 일요일 (exclusive)
+  // 예식수는 각 주차의 28일 윈도우(-14~+7일) 합산 → 예식 조회 범위를 앞뒤로 확장.
+  const weddQueryStart = fmtDate(addDays(new Date(rangeStart + 'T00:00:00'), -14));
+  const weddQueryEndExcl = fmtDate(addDays(thisSunday, 14));    // 마지막주 토(+6) + 7일 + 1
 
   // ── 1) 예식 수 (S2_UserInfo, site_div='SB' 중복제거) ────────────────
   try {
     const p = await getPool();
     const weddRes = await p.request()
-      .input('ws', sql.VarChar, rangeStart)
-      .input('we', sql.VarChar, rangeEndExcl)
+      .input('ws', sql.VarChar, weddQueryStart)
+      .input('we', sql.VarChar, weddQueryEndExcl)
       .query(`
         SELECT wedd_date, COUNT(*) AS wedding_count
         FROM (
@@ -1816,9 +1821,17 @@ async function apiWeeklyReport(query = {}) {
         ) t
         GROUP BY wedd_date
       `);
+    // 예식일별 카운트 맵 → 각 주차 예식수 = 28일 비대칭 윈도우(-14~+7일) 합.
+    //   apiForecast 의 wedding_pool 과 동일 정책 (답례품은 예식 전후 걸쳐 주문되므로 풀 기준).
+    const weddingDailyMap = {};
     for (const r of weddRes.recordset) {
-      const idx = weekIndexOf(r.wedd_date);
-      if (idx !== undefined) weeks[idx].wedding_count += Number(r.wedding_count) || 0;
+      weddingDailyMap[r.wedd_date] = (weddingDailyMap[r.wedd_date] || 0) + (Number(r.wedding_count) || 0);
+    }
+    for (const w of weeks) {
+      const ws = new Date(w.week_start + 'T00:00:00');
+      let pool = 0;
+      for (let dd = -14; dd <= 6 + 7; dd++) pool += weddingDailyMap[fmtDate(addDays(ws, dd))] || 0;
+      w.wedding_count = pool;
     }
   } catch (e) {
     console.warn('[weekly-report] 예식 집계 실패 (무시):', e.message);
