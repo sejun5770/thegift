@@ -638,6 +638,22 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- ============================================
+       주차별 예식·주문·매출 상관관계 (주간보고) — 상품별 판매통계 탭 최상단
+       ============================================ -->
+  <div class="section" data-dash-section="4">
+    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span>📈 주차별 예식·주문·매출 상관관계</span>
+      <span style="font-size:11px;font-weight:400;color:var(--gray-500)">최근 12주 · 주 시작=월요일</span>
+    </div>
+    <div class="card" style="padding:16px">
+      <div id="wr-status" style="padding:40px 20px;text-align:center;color:var(--gray-400)">불러오는 중...</div>
+      <div id="wr-chart-wrap" style="display:none">
+        <div class="chart-container" style="height:340px"><canvas id="weeklyReportChart"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================
        상품 판매 순위 — 일/주/월 기간별 전체 채널 순위
        ============================================ -->
   <div class="section" data-dash-section="4">
@@ -670,6 +686,7 @@ nav.nav-loading a[href^="#"] {
           <thead>
             <tr style="border-bottom:2px solid var(--gray-200);text-align:left;color:var(--gray-500);font-size:12px">
               <th style="padding:8px 10px;width:56px">순위</th>
+              <th style="padding:8px 10px;width:64px">변동</th>
               <th style="padding:8px 10px">상품명</th>
               <th style="padding:8px 10px;width:140px">채널</th>
               <th style="padding:8px 10px;width:100px;text-align:right">판매수량</th>
@@ -4542,8 +4559,8 @@ function _prTodayMidnightMs() {
 let _prState = { gran: 'week', anchorMs: _prTodayMidnightMs(), sortBy: 'qty' };
 
 // granularity 별 기간 계산 → { start:Date, end:Date }
-function _prPeriod() {
-  const anchor = new Date(_prState.anchorMs);
+function _prPeriod(anchorMs) {
+  const anchor = new Date(anchorMs != null ? anchorMs : _prState.anchorMs);
   const g = _prState.gran;
   let start, end;
   if (g === 'day') {
@@ -4603,11 +4620,93 @@ function movePrPeriod(dir) {
   loadProductRanking();
 }
 
-/** 상품 판매 순위 조회 + 렌더 */
+// ============================================================
+//  📈 주차별 예식·주문·매출 상관관계 (주간보고, 이중축 line chart)
+// ============================================================
+let weeklyReportChart = null;
+async function loadWeeklyReport() {
+  const $status = document.getElementById('wr-status');
+  const $wrap = document.getElementById('wr-chart-wrap');
+  const $canvas = document.getElementById('weeklyReportChart');
+  if (!$status || !$wrap || !$canvas) return;
+  $status.style.display = ''; $status.style.color = 'var(--gray-400)'; $status.textContent = '불러오는 중...';
+  $wrap.style.display = 'none';
+  try {
+    const data = await fetch(`${API}/api/weekly-report?weeks=12`).then(r => r.json());
+    if (data.error) { $status.textContent = '오류: ' + data.error; $status.style.color = 'var(--red)'; return; }
+    const weeks = data.weeks || [];
+    if (!weeks.length) { $status.textContent = '표시할 데이터가 없습니다'; return; }
+    const labels = weeks.map(w => w.label);
+    if (weeklyReportChart) weeklyReportChart.destroy();
+    weeklyReportChart = new Chart($canvas.getContext('2d'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: '예식 수', data: weeks.map(w => w.wedding_count), borderColor: '#8b5cf6', backgroundColor: '#8b5cf6', pointRadius: 3, borderWidth: 2, yAxisID: 'yWed', tension: 0.3 },
+          { label: '답례품 주문 수', data: weeks.map(w => w.order_count), borderColor: '#f97316', backgroundColor: '#f97316', pointRadius: 3, borderWidth: 2, yAxisID: 'yOrd', tension: 0.3 },
+          { label: '답례품 매출(원)', data: weeks.map(w => w.revenue), borderColor: '#3b82f6', backgroundColor: '#3b82f6', pointRadius: 3, borderWidth: 2, yAxisID: 'yRev', tension: 0.3 },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'bottom', labels: { font: { size: 11 }, usePointStyle: true, boxWidth: 12 } },
+          tooltip: {
+            callbacks: {
+              label: function(ctx) {
+                if (ctx.dataset.yAxisID === 'y1') return ctx.dataset.label + ': ' + (Number(ctx.raw) || 0).toLocaleString('ko-KR') + '원';
+                return ctx.dataset.label + ': ' + (Number(ctx.raw) || 0).toLocaleString('ko-KR') + '건';
+              }
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { font: { size: 10 }, maxRotation: 45 } },
+          // 3개 지표 스케일이 크게 달라(예식수~1000 / 주문수~수십 / 매출~백만) 각각 독립 축 — 추세 비교용.
+          yWed: { beginAtZero: true, position: 'left', title: { display: true, text: '예식 수', color: '#8b5cf6' }, ticks: { color: '#8b5cf6' } },
+          yOrd: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '주문 수', color: '#f97316' }, ticks: { color: '#f97316' } },
+          yRev: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '매출(원)', color: '#3b82f6' }, ticks: { color: '#3b82f6', callback: v => (Number(v) || 0).toLocaleString('ko-KR') } }
+        }
+      }
+    });
+    $status.style.display = 'none';
+    $wrap.style.display = '';
+  } catch (e) {
+    console.error('[loadWeeklyReport]', e);
+    $status.textContent = '조회 실패: ' + e.message; $status.style.color = 'var(--red)';
+  }
+}
+
+// 현재 anchor 기준 직전 기간(gran 단위 -1)의 anchorMs 반환.
+//   일별 → -1일, 주별 → -7일(WoW), 월별 → -1개월(MoM). 정렬/토글과 자동 호환.
+function _prPrevAnchorMs() {
+  const a = new Date(_prState.anchorMs);
+  if (_prState.gran === 'day') a.setDate(a.getDate() - 1);
+  else if (_prState.gran === 'month') a.setMonth(a.getMonth() - 1);
+  else a.setDate(a.getDate() - 7);
+  return a.getTime();
+}
+
+// 순위 변동 뱃지 HTML (현재순위 rank, 직전순위 prevRank[없으면 null]).
+function _prChangeBadge(rank, prevRank) {
+  if (prevRank == null) {
+    return `<span style="display:inline-block;font-size:10px;font-weight:700;color:#2563eb;background:#dbeafe;border-radius:4px;padding:1px 5px">NEW</span>`;
+  }
+  const diff = prevRank - rank; // 양수 = 순위 상승
+  if (diff > 0) return `<span style="color:#16a34a;font-weight:600">▲${diff}</span>`;
+  if (diff < 0) return `<span style="color:#dc2626;font-weight:600">▼${Math.abs(diff)}</span>`;
+  return `<span style="color:var(--gray-400)">-</span>`;
+}
+
+/** 상품 판매 순위 조회 + 렌더 (현재 기간 + 직전 기간 순위 비교 → 변동 컬럼) */
 async function loadProductRanking() {
   _prUpdateButtons();
   const { start, end } = _prPeriod();
   const startStr = fmt(start), endStr = fmt(end);
+  const prev = _prPeriod(_prPrevAnchorMs());
+  const prevStartStr = fmt(prev.start), prevEndStr = fmt(prev.end);
   const $label = document.getElementById('pr-period-label');
   const $status = document.getElementById('pr-status');
   const $table = document.getElementById('pr-table');
@@ -4617,20 +4716,36 @@ async function loadProductRanking() {
   $status.style.display = ''; $status.style.color = 'var(--gray-400)'; $status.textContent = '불러오는 중...';
   $table.style.display = 'none';
   try {
-    const url = `${API}/api/product-ranking?start_date=${startStr}&end_date=${endStr}`;
-    const data = await fetch(url).then(r => r.json());
-    if (data.error) { $status.textContent = '오류: ' + data.error; $status.style.color = 'var(--red)'; return; }
     const sortBy = _prState.sortBy;
+    // 현재 + 직전 기간 병렬 fetch. 직전 기간 실패는 무시(변동 컬럼만 '-' 처리).
+    const [data, prevData] = await Promise.all([
+      fetch(`${API}/api/product-ranking?start_date=${startStr}&end_date=${endStr}`).then(r => r.json()),
+      fetch(`${API}/api/product-ranking?start_date=${prevStartStr}&end_date=${prevEndStr}`).then(r => r.json()).catch(() => null),
+    ]);
+    if (data.error) { $status.textContent = '오류: ' + data.error; $status.style.color = 'var(--red)'; return; }
     const products = (data.products || []).slice().sort((a, b) => (Number(b[sortBy]) || 0) - (Number(a[sortBy]) || 0));
     if (!products.length) { $status.textContent = '해당 기간 판매 데이터가 없습니다'; $status.style.color = 'var(--gray-400)'; return; }
+
+    // 직전 기간 순위 맵 (정규화 상품명 → 순위). 정렬기준(sortBy) 동일하게 적용.
+    const prevRankByName = new Map();
+    if (prevData && !prevData.error && Array.isArray(prevData.products)) {
+      prevData.products.slice()
+        .sort((a, b) => (Number(b[sortBy]) || 0) - (Number(a[sortBy]) || 0))
+        .forEach((p, i) => { prevRankByName.set(String(p.name || '').trim().toLowerCase(), i + 1); });
+    }
+
     const totalBase = products.reduce((s, p) => s + (Number(p[sortBy]) || 0), 0);
     $tbody.innerHTML = products.map((p, i) => {
       const rank = i + 1;
       const medal = rank <= 3 ? ['🥇', '🥈', '🥉'][rank - 1] : String(rank);
       const share = totalBase > 0 ? (Number(p[sortBy]) || 0) / totalBase * 100 : 0;
       const channels = (p.channels || []).join(', ');
+      const prevRank = prevRankByName.has(String(p.name || '').trim().toLowerCase())
+        ? prevRankByName.get(String(p.name || '').trim().toLowerCase())
+        : null;
       return `<tr style="border-bottom:1px solid var(--gray-100)">
         <td style="padding:8px 10px;text-align:center;font-weight:600">${medal}</td>
+        <td style="padding:8px 10px;text-align:center;font-size:12px">${_prChangeBadge(rank, prevRank)}</td>
         <td style="padding:8px 10px">${esc(p.name || '-')}</td>
         <td style="padding:8px 10px;color:var(--gray-500);font-size:12px">${esc(channels)}</td>
         <td style="padding:8px 10px;text-align:right">${(Number(p.qty) || 0).toLocaleString('ko-KR')}</td>
@@ -6130,6 +6245,7 @@ async function _loadDashSection(n) {
       loadLeadtime3way();
     } else if (n === 4) {
       // 상품별 판매통계 (이미 로드됐어도 재호출 안전)
+      loadWeeklyReport();
       loadPsProductList();
       loadProductRanking();
     } else if (n === 5) {

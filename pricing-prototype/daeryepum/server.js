@@ -1705,6 +1705,193 @@ async function apiProductRanking(query = {}) {
 }
 
 /**
+ * GET /api/weekly-report?weeks=12
+ *
+ * 주간보고용 — 최근 N주(기본 12, 주 시작=월요일)의 주차별 상관관계 데이터.
+ *   · wedding_count : 해당 주에 예식(결혼)이 있는 바른손카드(통합회원) 수.
+ *       apiForecast/apiConversionWindow 의 예식 집계 로직 재사용:
+ *       S2_UserInfo wedd_year/month/day, site_div='SB' 중복제거, USE_YORN='Y'.
+ *   · order_count   : 해당 주 답례품 주문 수(distinct order) — 전체 채널.
+ *       MSSQL: custom_order(CARD)+CUSTOM_ETC_ORDER(ETC), D01_FILTER, order_date 주,
+ *              status_seq >=2 AND NOT IN(3,5,9)(CARD)/(3,5,15)(ETC), distinct order_seq.
+ *       마켓: 쿠팡/네이버/정수당 — 취소status 제외 후 distinct 주문키.
+ *   · revenue       : 해당 주 답례품 매출 — MSSQL 산식은 apiProductRanking 과 동일
+ *       (사이트 기반, ETC coupon 차감), 마켓은 item_total_price 합.
+ *
+ * 각 소스 try/catch 로 격리 — 한 채널 실패가 전체를 막지 않음 (헬스체크 안전).
+ *
+ * 반환: { weeks:[{ week_start:'YYYY-MM-DD', label:'MM/DD~MM/DD',
+ *                  wedding_count, order_count, revenue }] }  (오래된→최신 순)
+ */
+async function apiWeeklyReport(query = {}) {
+  const nWeeks = Math.max(1, Math.min(52, parseInt(query.weeks, 10) || 12));
+
+  // 주 시작 = 월요일. JS getDay(): 일=0..토=6 → 월요일 오프셋 (dow+6)%7.
+  const todayDate = today();
+  const dow = todayDate.getDay();
+  const thisMonday = addDays(todayDate, -((dow + 6) % 7));
+
+  // 오래된→최신 순으로 주차 골격 생성.
+  const weeks = [];
+  for (let i = nWeeks - 1; i >= 0; i--) {
+    const weekStart = addDays(thisMonday, -7 * i);
+    const weekEnd = addDays(weekStart, 6);
+    const fmtMD = (d) => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+    weeks.push({
+      week_start: fmtDate(weekStart),
+      label: `${fmtMD(weekStart)}~${fmtMD(weekEnd)}`,
+      wedding_count: 0,
+      order_count: 0,
+      revenue: 0,
+    });
+  }
+  // 날짜(YYYY-MM-DD) → 주차 index 매핑 (범위 밖이면 undefined).
+  const weekIndexOf = (dateStr) => {
+    if (!dateStr) return undefined;
+    const d = new Date(dateStr + 'T00:00:00');
+    const diffDays = Math.floor((d - new Date(fmtDate(addDays(thisMonday, -7 * (nWeeks - 1))) + 'T00:00:00')) / 86400000);
+    if (diffDays < 0) return undefined;
+    const idx = Math.floor(diffDays / 7);
+    return idx >= 0 && idx < weeks.length ? idx : undefined;
+  };
+
+  const rangeStart = weeks[0].week_start;                       // inclusive
+  const rangeEndExcl = fmtDate(addDays(thisMonday, 7));         // 현재 주 종료 다음날 (exclusive)
+
+  // ── 1) 예식 수 (S2_UserInfo, site_div='SB' 중복제거) ────────────────
+  try {
+    const p = await getPool();
+    const weddRes = await p.request()
+      .input('ws', sql.VarChar, rangeStart)
+      .input('we', sql.VarChar, rangeEndExcl)
+      .query(`
+        SELECT wedd_date, COUNT(*) AS wedding_count
+        FROM (
+          SELECT DISTINCT u.uid,
+            CONVERT(varchar(10), TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date), 120) AS wedd_date
+          FROM S2_UserInfo u WITH (NOLOCK)
+          WHERE u.site_div = 'SB'
+            AND u.USE_YORN = 'Y'
+            AND u.wedd_year IS NOT NULL AND LEN(u.wedd_year) = 4
+            AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) >= @ws
+            AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) < @we
+        ) t
+        GROUP BY wedd_date
+      `);
+    for (const r of weddRes.recordset) {
+      const idx = weekIndexOf(r.wedd_date);
+      if (idx !== undefined) weeks[idx].wedding_count += Number(r.wedding_count) || 0;
+    }
+  } catch (e) {
+    console.warn('[weekly-report] 예식 집계 실패 (무시):', e.message);
+  }
+
+  // ── 2) MSSQL 답례품 주문 수 + 매출 (CARD + ETC, 일별 → 주차 버킷) ──
+  //   금액 산식은 apiProductRanking 과 동일 (사이트 기반, ETC coupon 차감).
+  //   order_count = COUNT(DISTINCT order_seq) — order_date 는 주문당 단일이라 일별 distinct 합산 = 주별 distinct.
+  try {
+    const p = await getPool();
+    const cardDaily = await p.request()
+      .input('s', sql.VarChar, rangeStart)
+      .input('e', sql.VarChar, rangeEndExcl)
+      .query(`
+        SELECT CONVERT(varchar(10), co.order_date, 120) AS d,
+               COUNT(DISTINCT co.order_seq) AS order_count,
+               SUM(
+                 CASE WHEN si.SiteName IS NULL
+                      THEN CAST(coi.item_sale_price AS float) * coi.item_count
+                           / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                      ELSE CAST(coi.item_sale_price AS float)
+                 END
+               ) AS revenue
+        FROM custom_order co WITH (NOLOCK)
+        INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+        LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+        WHERE ${D01_FILTER}
+          AND co.order_date >= @s AND co.order_date < @e
+          AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+        GROUP BY CONVERT(varchar(10), co.order_date, 120)
+      `);
+    const etcDaily = await p.request()
+      .input('s', sql.VarChar, rangeStart)
+      .input('e', sql.VarChar, rangeEndExcl)
+      .query(`
+        SELECT CONVERT(varchar(10), o.order_date, 120) AS d,
+               COUNT(DISTINCT o.order_seq) AS order_count,
+               SUM(
+                 CASE WHEN si.SiteName IS NULL
+                      THEN CAST(ei.card_sale_price AS float) * ei.order_count
+                           / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                           - ISNULL(o.coupon_price, 0)
+                      ELSE CAST(ei.card_sale_price AS float) - ISNULL(o.coupon_price, 0)
+                 END
+               ) AS revenue
+        FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+        INNER JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON o.order_seq = ei.order_seq
+        INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
+        LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+        WHERE ${D01_FILTER}
+          AND o.order_date >= @s AND o.order_date < @e
+          AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+        GROUP BY CONVERT(varchar(10), o.order_date, 120)
+      `);
+    for (const r of [...cardDaily.recordset, ...etcDaily.recordset]) {
+      const idx = weekIndexOf(r.d);
+      if (idx === undefined) continue;
+      weeks[idx].order_count += Number(r.order_count) || 0;
+      weeks[idx].revenue += Number(r.revenue) || 0;
+    }
+  } catch (e) {
+    console.warn('[weekly-report] MSSQL 주문/매출 집계 실패 (무시):', e.message);
+  }
+
+  // ── 3) 마켓 (쿠팡 / 네이버 / 정수당) ─────────────────────────────
+  //   취소 status 제외 → distinct 주문키(주차별) 카운트 + item_total_price 합.
+  //   ordered_at 주 기준 (byPaid=false). 각 채널 독립 try/catch.
+  const CANCELLED_STATUS = new Set([
+    'CANCELED', 'RETURNED', 'EXCHANGED', 'CANCEL', 'RETURNS',
+    'C00', 'C10', 'C11', 'R00', 'R10', 'E00', 'E10',
+  ]);
+  // 주차별 distinct 주문키 집합 (order_count 계산용)
+  const weekOrderKeys = weeks.map(() => new Set());
+  async function mergeMarket(loader, getKey) {
+    try {
+      const rows = await loader();
+      for (const r of (rows || [])) {
+        if (r.status && CANCELLED_STATUS.has(String(r.status).toUpperCase())) continue;
+        const day = String(r.ordered_at || '').slice(0, 10);
+        const idx = weekIndexOf(day);
+        if (idx === undefined) continue;
+        weeks[idx].revenue += Number(r.item_total_price) || 0;
+        weekOrderKeys[idx].add(getKey(r));
+      }
+    } catch (e) {
+      console.warn('[weekly-report] 마켓 집계 실패 (무시):', e.message);
+    }
+  }
+  await mergeMarket(
+    () => require('./coupang/store').listCoupangOrders({ startStr: rangeStart, endStr: rangeEndExcl, byPaid: false }),
+    r => `${r.coupang_order_id}::${r.shipment_box_id}`,
+  );
+  await mergeMarket(
+    () => require('./naver/store').listNaverOrders({ startStr: rangeStart, endStr: rangeEndExcl, byPaid: false }),
+    r => `${r.product_order_id}`,
+  );
+  await mergeMarket(
+    () => require('./cafe24/store').listCafe24Orders({ startStr: rangeStart, endStr: rangeEndExcl, byPaid: false }),
+    r => `${r.cafe24_order_id}`,
+  );
+  // 마켓 distinct 주문키 → order_count 합산
+  weeks.forEach((w, i) => { w.order_count += weekOrderKeys[i].size; });
+
+  // 매출 반올림 정리
+  weeks.forEach(w => { w.revenue = Math.round(w.revenue); });
+
+  return { weeks };
+}
+
+/**
  * 작가별 정산 합계 + 품목별 drill-down (Phase 3).
  *
  * 매출 기준:
@@ -13406,6 +13593,8 @@ const server = http.createServer(async (req, res) => {
         data = await apiProductStats(parsed.query);
       } else if (pathname === '/api/product-ranking') {
         data = await apiProductRanking(parsed.query);
+      } else if (pathname === '/api/weekly-report') {
+        data = await apiWeeklyReport(parsed.query);
       } else if (pathname === '/api/categories') {
         data = Object.entries(CATEGORY_FILTERS).map(([key, val]) => ({ key, label: val.label }));
       } else if (pathname === '/api/worklog') {
