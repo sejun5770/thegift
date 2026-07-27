@@ -1340,7 +1340,11 @@ function etcAmountGrossExpr({ skipUnitValue = false } = {}) {
 }
 
 const ETC_AMOUNT_EXPR = etcAmountExpr('D01');
-const ETC_COUPON_DIVISOR_JOIN_D01 = etcCouponDivisorJoin('D01');
+// 쿠폰 분배 분모(ecd.item_count)는 답례품 WHERE(D01_FILTER = D01 + 위탁COM_)와 반드시 일치해야 함.
+//   D01 만 세면 COM_(위탁답례품, Card_Div=D04 등) 단독주문은 item_count=NULL → 금액식의
+//   coupon/NULLIF(NULL,0) = NULL → 행 전체 NULL → SUM NULL → 0원 (위탁 대시보드 0원 버그).
+//   또 D01+COM_ 혼합주문은 분모가 작아 쿠폰이 과다차감되던 문제도 함께 해소.
+const ETC_COUPON_DIVISOR_JOIN_D01 = etcCouponDivisorJoin("(c_cpd.Card_Div = 'D01' OR c_cpd.Card_Code LIKE 'COM[_]%')");
 
 /**
  * 상품별 판매 통계 — 단일/다중 상품 + 기간 + (선택)전기대비
@@ -1687,7 +1691,28 @@ async function apiProductRanking(query = {}) {
   await mergeMarket('네이버', () => require('./naver/store').listNaverOrders({ startStr, endStr: endPlus, byPaid: false }));
   await mergeMarket('정수당', () => require('./cafe24/store').listCafe24Orders({ startStr, endStr: endPlus, byPaid: false }));
 
-  // ── 3) 결과 정리 — qty 내림차순 ─────────────────────────────────
+  // ── 3) 더기프트 수동 등록 (bg_manual_orders, category=daeryepum) ───
+  //   주문조회 "답례품_더기프트" 탭 소스 — API 미연동 채널이라 CSV 업로드로 관리자 직접 등록.
+  //   MSSQL 답례품과 분리 저장돼 있어(이중계산 없음) 상품별 통계엔 별도 소스로 합산.
+  //   items[] flatten → 상품명 기준 병합. 매출 우선순위: item_amount > unit_price×qty.
+  try {
+    const manualOrders = await require('./barungift/store').listManualOrders({
+      category: 'daeryepum', startDate: startStr, endDate: endStr,
+    });
+    for (const mo of (manualOrders || [])) {
+      const items = Array.isArray(mo.items) ? mo.items : [];
+      for (const it of items) {
+        const qty = Number(it.quantity) || 0;
+        const amt = Number(it.item_amount) || (Number(it.unit_price) || 0) * qty;
+        if (!it.product_name && !qty && !amt) continue;
+        addEntry(it.product_name, qty, amt, '더기프트');
+      }
+    }
+  } catch (e) {
+    console.warn('[product-ranking] 더기프트 수동주문 집계 실패 (무시):', e.message);
+  }
+
+  // ── 4) 결과 정리 — qty 내림차순 ─────────────────────────────────
   const products = [...byName.values()]
     .map(e => ({ name: e.name, qty: e.qty, revenue: Math.round(e.revenue), channels: [...e.channels] }))
     .sort((a, b) => b.qty - a.qty);
