@@ -4631,6 +4631,11 @@ async function apiForecast(query = {}) {
   const PAST_WINDOW = 14;
   const FUTURE_WINDOW = 7;
   const BASE_WEEKS = 4; // 이동평균 기준: 최근 완료 4주
+  // 예측 카드 히스토리 유지 범위 — 2026-01 부터 현재까지 표시 (요청: 연초 데이터 유지).
+  //   thisSunday 기준 과거 주차 수 = anchor(2026-01-01)까지 거리. 최소 8주 보장, 상한 60주(안전장치).
+  //   NOTE: 이동평균(activeWeeks.slice(-BASE_WEEKS))은 최근 주만 사용 → 과거 확장은 표시용, 모델 영향 없음.
+  const FORECAST_HISTORY_ANCHOR = new Date('2026-01-04T00:00:00'); // 2026 ISO 1주차 시작 일요일
+  const PAST_WEEKS = Math.max(8, Math.min(60, Math.round((thisSunday - FORECAST_HISTORY_ANCHOR) / (7 * 86400000))));
 
   // 1) 예식일별 건수 — 통합회원(S2_UserInfo) 의 wedd_year/wedd_month/wedd_day 기준
   //    가입사이트(REFERER_SALES_GUBUN) 무관, 청첩장 주문 여부 무관 — 회원이 입력한 예식일
@@ -4638,7 +4643,7 @@ async function apiForecast(query = {}) {
   //    이전 모델(custom_order_WeddInfo) 은 청첩장 주문 있는 사람만 잡혀서 '단독 답례품'
   //    구매자의 결혼식이 분모에서 누락 → 전환율 과대 평가 → 회원정보 기반으로 전환.
   //    DB 조회 범위 — 윈도우 양 끝 (가장 보수적인 PAST 사용)
-  const weddStart = fmtDate(addDays(thisSunday, -7 * 8 - PAST_WINDOW));
+  const weddStart = fmtDate(addDays(thisSunday, -7 * PAST_WEEKS - PAST_WINDOW));
   const weddEnd = fmtDate(addDays(thisSunday, 7 * 12 + 7 + FUTURE_WINDOW));
 
   const weddingsByDate = await p.request()
@@ -4670,7 +4675,7 @@ async function apiForecast(query = {}) {
 
   // 2) 주차별 예식 윈도우 건수 (예식일 ±14일 범위)
   const weeks = [];
-  for (let w = -8; w < 12; w++) {
+  for (let w = -PAST_WEEKS; w < 12; w++) {
     const weekStart = addDays(thisSunday, w * 7);
     const weekEnd = addDays(thisSunday, w * 7 + 6);
 
@@ -4697,7 +4702,7 @@ async function apiForecast(query = {}) {
   }
 
   // 3) 주차별 실제 매출 조회 (ETC + CARD 합산)
-  const actualWeeklyStart = fmtDate(addDays(thisSunday, -7 * 8)); // 8주 전부터
+  const actualWeeklyStart = fmtDate(addDays(thisSunday, -7 * PAST_WEEKS)); // 2026 1주차부터
   const actualWeeklyEnd = fmtDate(addDays(todayDate, 1));
 
   const actualWeekly = await p.request()
