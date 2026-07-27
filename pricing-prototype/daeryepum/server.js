@@ -1598,7 +1598,7 @@ async function apiProductRanking(query = {}) {
       : (cleanName(rawName) || String(rawName || '').trim());
     if (!display) return;
     const key = (scope === 'own' ? 'O|' : 'M|') + display.toLowerCase();
-    if (!byName.has(key)) byName.set(key, { name: display, qty: 0, revenue: 0, channels: new Set() });
+    if (!byName.has(key)) byName.set(key, { name: display, qty: 0, revenue: 0, channels: new Set(), scope });
     const e = byName.get(key);
     e.qty += Number(qty) || 0;
     e.revenue += Number(revenue) || 0;
@@ -1725,7 +1725,7 @@ async function apiProductRanking(query = {}) {
 
   // ── 4) 결과 정리 — qty 내림차순 ─────────────────────────────────
   const products = [...byName.values()]
-    .map(e => ({ name: e.name, qty: e.qty, revenue: Math.round(e.revenue), channels: [...e.channels] }))
+    .map(e => ({ name: e.name, qty: e.qty, revenue: Math.round(e.revenue), channels: [...e.channels], scope: e.scope }))
     .sort((a, b) => b.qty - a.qty);
 
   const totals = {

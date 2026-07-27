@@ -4731,36 +4731,47 @@ async function loadProductRanking() {
       fetch(`${API}/api/product-ranking?start_date=${prevStartStr}&end_date=${prevEndStr}`).then(r => r.json()).catch(() => null),
     ]);
     if (data.error) { $status.textContent = '오류: ' + data.error; $status.style.color = 'var(--red)'; return; }
-    const products = (data.products || []).slice().sort((a, b) => (Number(b[sortBy]) || 0) - (Number(a[sortBy]) || 0));
-    if (!products.length) { $status.textContent = '해당 기간 판매 데이터가 없습니다'; $status.style.color = 'var(--gray-400)'; return; }
+    const allProducts = data.products || [];
+    if (!allProducts.length) { $status.textContent = '해당 기간 판매 데이터가 없습니다'; $status.style.color = 'var(--gray-400)'; return; }
+    const prevAll = (prevData && !prevData.error && Array.isArray(prevData.products)) ? prevData.products : [];
+    const sortFn = (a, b) => (Number(b[sortBy]) || 0) - (Number(a[sortBy]) || 0);
 
-    // 직전 기간 순위 맵 (정규화 상품명 → 순위). 정렬기준(sortBy) 동일하게 적용.
-    const prevRankByName = new Map();
-    if (prevData && !prevData.error && Array.isArray(prevData.products)) {
-      prevData.products.slice()
-        .sort((a, b) => (Number(b[sortBy]) || 0) - (Number(a[sortBy]) || 0))
-        .forEach((p, i) => { prevRankByName.set(String(p.name || '').trim().toLowerCase(), i + 1); });
+    // 자사 / 외부채널 2개 섹션으로 분리 렌더 — 각 섹션 독립 순위·비중·WoW 변동.
+    const GROUPS = [
+      { key: 'own',    title: '🏢 자사 (바른손카드 + 더기프트)',   color: '#3b82f6' },
+      { key: 'market', title: '🛒 외부채널 (네이버 · 쿠팡 · 정수당)', color: '#10b981' },
+    ];
+    let html = '';
+    for (const g of GROUPS) {
+      const prods = allProducts.filter(p => (p.scope || 'own') === g.key).sort(sortFn);
+      const prevRankByName = new Map();
+      prevAll.filter(p => (p.scope || 'own') === g.key).sort(sortFn)
+        .forEach((p, i) => prevRankByName.set(String(p.name || '').trim().toLowerCase(), i + 1));
+      const totalBase = prods.reduce((s, p) => s + (Number(p[sortBy]) || 0), 0);
+      html += `<tr><td colspan="7" style="padding:9px 10px;background:${g.color}14;border-top:2px solid ${g.color};font-weight:700;color:${g.color};font-size:13px">${g.title} <span style="font-weight:400;color:var(--gray-400);font-size:11px">· ${prods.length}개 상품</span></td></tr>`;
+      if (!prods.length) {
+        html += `<tr><td colspan="7" style="padding:14px;text-align:center;color:var(--gray-400);font-size:12px">해당 기간 판매 없음</td></tr>`;
+        continue;
+      }
+      html += prods.map((p, i) => {
+        const rank = i + 1;
+        const medal = rank <= 3 ? ['🥇', '🥈', '🥉'][rank - 1] : String(rank);
+        const share = totalBase > 0 ? (Number(p[sortBy]) || 0) / totalBase * 100 : 0;
+        const channels = (p.channels || []).join(', ');
+        const nm = String(p.name || '').trim().toLowerCase();
+        const prevRank = prevRankByName.has(nm) ? prevRankByName.get(nm) : null;
+        return `<tr style="border-bottom:1px solid var(--gray-100)">
+          <td style="padding:8px 10px;text-align:center;font-weight:600">${medal}</td>
+          <td style="padding:8px 10px;text-align:center;font-size:12px">${_prChangeBadge(rank, prevRank)}</td>
+          <td style="padding:8px 10px">${esc(p.name || '-')}</td>
+          <td style="padding:8px 10px;color:var(--gray-500);font-size:12px">${esc(channels)}</td>
+          <td style="padding:8px 10px;text-align:right">${(Number(p.qty) || 0).toLocaleString('ko-KR')}</td>
+          <td style="padding:8px 10px;text-align:right">${fmtKRW(p.revenue)}</td>
+          <td style="padding:8px 10px;text-align:right;color:var(--gray-600)">${share.toFixed(1)}%</td>
+        </tr>`;
+      }).join('');
     }
-
-    const totalBase = products.reduce((s, p) => s + (Number(p[sortBy]) || 0), 0);
-    $tbody.innerHTML = products.map((p, i) => {
-      const rank = i + 1;
-      const medal = rank <= 3 ? ['🥇', '🥈', '🥉'][rank - 1] : String(rank);
-      const share = totalBase > 0 ? (Number(p[sortBy]) || 0) / totalBase * 100 : 0;
-      const channels = (p.channels || []).join(', ');
-      const prevRank = prevRankByName.has(String(p.name || '').trim().toLowerCase())
-        ? prevRankByName.get(String(p.name || '').trim().toLowerCase())
-        : null;
-      return `<tr style="border-bottom:1px solid var(--gray-100)">
-        <td style="padding:8px 10px;text-align:center;font-weight:600">${medal}</td>
-        <td style="padding:8px 10px;text-align:center;font-size:12px">${_prChangeBadge(rank, prevRank)}</td>
-        <td style="padding:8px 10px">${esc(p.name || '-')}</td>
-        <td style="padding:8px 10px;color:var(--gray-500);font-size:12px">${esc(channels)}</td>
-        <td style="padding:8px 10px;text-align:right">${(Number(p.qty) || 0).toLocaleString('ko-KR')}</td>
-        <td style="padding:8px 10px;text-align:right">${fmtKRW(p.revenue)}</td>
-        <td style="padding:8px 10px;text-align:right;color:var(--gray-600)">${share.toFixed(1)}%</td>
-      </tr>`;
-    }).join('');
+    $tbody.innerHTML = html;
     $status.style.display = 'none';
     $table.style.display = '';
   } catch (e) {
