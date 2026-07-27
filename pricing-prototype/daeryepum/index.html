@@ -4645,7 +4645,9 @@ async function loadWeeklyReport() {
         datasets: [
           { label: '예식 수', data: weeks.map(w => w.wedding_count), borderColor: '#8b5cf6', backgroundColor: '#8b5cf6', pointRadius: 3, borderWidth: 2, yAxisID: 'yWed', tension: 0.3 },
           { label: '답례품 주문 수', data: weeks.map(w => w.order_count), borderColor: '#f97316', backgroundColor: '#f97316', pointRadius: 3, borderWidth: 2, yAxisID: 'yOrd', tension: 0.3 },
-          { label: '답례품 매출(원)', data: weeks.map(w => w.revenue), borderColor: '#3b82f6', backgroundColor: '#3b82f6', pointRadius: 3, borderWidth: 2, yAxisID: 'yRev', tension: 0.3 },
+          { label: '답례품 매출(원)', data: weeks.map(w => w.revenue), borderColor: '#3b82f6', backgroundColor: '#3b82f6', pointRadius: 3, borderWidth: 2, yAxisID: 'yRev', tension: 0.3, order: 0 },
+          // 전환율 = 답례품 주문수 ÷ 예식수 (%). 막대 — order 1 로 선 뒤에 렌더.
+          { type: 'bar', label: '전환율(%)', data: weeks.map(w => w.conversion_rate), backgroundColor: 'rgba(16,185,129,0.28)', borderColor: 'rgba(16,185,129,0.6)', borderWidth: 1, yAxisID: 'yConv', order: 1 },
         ]
       },
       options: {
@@ -4656,8 +4658,12 @@ async function loadWeeklyReport() {
           tooltip: {
             callbacks: {
               label: function(ctx) {
-                if (ctx.dataset.yAxisID === 'y1') return ctx.dataset.label + ': ' + (Number(ctx.raw) || 0).toLocaleString('ko-KR') + '원';
-                return ctx.dataset.label + ': ' + (Number(ctx.raw) || 0).toLocaleString('ko-KR') + '건';
+                const v = (Number(ctx.raw) || 0).toLocaleString('ko-KR');
+                const ax = ctx.dataset.yAxisID;
+                if (ax === 'yRev') return ctx.dataset.label + ': ' + v + '원';
+                if (ax === 'yConv') return ctx.dataset.label + ': ' + (Number(ctx.raw) || 0) + '%';
+                if (ax === 'yWed') return ctx.dataset.label + ': ' + v + '명';
+                return ctx.dataset.label + ': ' + v + '건';
               }
             }
           }
@@ -4667,7 +4673,9 @@ async function loadWeeklyReport() {
           // 3개 지표 스케일이 크게 달라(예식수~1000 / 주문수~수십 / 매출~백만) 각각 독립 축 — 추세 비교용.
           yWed: { beginAtZero: true, position: 'left', title: { display: true, text: '예식 수', color: '#8b5cf6' }, ticks: { color: '#8b5cf6' } },
           yOrd: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '주문 수', color: '#f97316' }, ticks: { color: '#f97316' } },
-          yRev: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '매출(원)', color: '#3b82f6' }, ticks: { color: '#3b82f6', callback: v => (Number(v) || 0).toLocaleString('ko-KR') } }
+          yRev: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: '매출(원)', color: '#3b82f6' }, ticks: { color: '#3b82f6', callback: v => (Number(v) || 0).toLocaleString('ko-KR') } },
+          // 전환율(%) — 막대. 좌측(예식수와 함께) 배치해 우측 축 과밀 방지.
+          yConv: { beginAtZero: true, position: 'left', grid: { drawOnChartArea: false }, title: { display: true, text: '전환율(%)', color: '#10b981' }, ticks: { color: '#10b981', callback: v => v + '%' } }
         }
       }
     });

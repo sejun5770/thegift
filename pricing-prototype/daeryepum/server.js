@@ -1775,10 +1775,12 @@ async function apiWeeklyReport(query = {}) {
     const fmtMD = (d) => `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
     weeks.push({
       week_start: fmtDate(weekStart),
-      label: `${fmtMD(weekStart)}~${fmtMD(weekEnd)}`,
+      week_no: getISOWeek(weekStart),
+      label: `W${getISOWeek(weekStart)} ${fmtMD(weekStart)}~${fmtMD(weekEnd)}`,
       wedding_count: 0,
       order_count: 0,
       revenue: 0,
+      conversion_rate: 0,   // = order_count / wedding_count (%) — 최종 패스에서 계산
     });
   }
   // 날짜(YYYY-MM-DD) → 주차 index 매핑 (범위 밖이면 undefined).
@@ -1921,8 +1923,13 @@ async function apiWeeklyReport(query = {}) {
   // 마켓 distinct 주문키 → order_count 합산
   weeks.forEach((w, i) => { w.order_count += weekOrderKeys[i].size; });
 
-  // 매출 반올림 정리
-  weeks.forEach(w => { w.revenue = Math.round(w.revenue); });
+  // 매출 반올림 + 전환율(답례품 주문수 ÷ 예식수, %) 계산
+  weeks.forEach(w => {
+    w.revenue = Math.round(w.revenue);
+    w.conversion_rate = w.wedding_count > 0
+      ? Math.round(w.order_count / w.wedding_count * 1000) / 10   // 소수점 1자리 %
+      : 0;
+  });
 
   return { weeks };
 }
