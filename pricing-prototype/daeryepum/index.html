@@ -6206,6 +6206,36 @@ function _applyDashVisibility() {
   });
 }
 
+// 서브탭 버튼 가시성 — 현재 카테고리에서 "보이는 섹션이 하나도 없는" 탭 버튼은 숨김.
+//   데코소품 등 비-답례품 카테고리: 위탁(섹션 전부 daeryepum 전용) + 내용 없는 보조지표 탭 자동 축소.
+//   활성 탭이 숨겨지면 매출현황(1)로 전환. (_tagDashSections 이후 호출 필요)
+function _applyDashTabVisibility() {
+  let hiddenActive = false;
+  for (let n = 1; n <= 5; n++) {
+    const btn = document.getElementById('dash-subtab-' + n);
+    if (!btn) continue;
+    let hasVisible = false;
+    document.querySelectorAll(`#page-dashboard [data-dash-section="${n}"]`).forEach(el => {
+      const onlyDrp = el.getAttribute('data-dash-only') === 'daeryepum';
+      if (!(onlyDrp && dashCategory !== 'daeryepum')) hasVisible = true;
+    });
+    btn.style.display = hasVisible ? '' : 'none';
+    if (!hasVisible && dashSubTab === n) hiddenActive = true;
+  }
+  if (hiddenActive) {
+    dashSubTab = 1;
+    for (let i = 1; i <= 5; i++) {
+      const b = document.getElementById('dash-subtab-' + i);
+      if (!b) continue;
+      const active = (i === 1);
+      b.style.borderBottom = active ? '2px solid var(--primary)' : '2px solid transparent';
+      b.style.color = active ? 'var(--primary)' : 'var(--gray-500)';
+      b.style.fontWeight = active ? '600' : '500';
+    }
+    _applyDashVisibility();
+  }
+}
+
 // 하위 탭 전환 — 스타일 갱신 + 표시 갱신 + (아직 안 불린 탭이면) 로드.
 function setDashSubTab(n) {
   dashSubTab = n;
@@ -6349,6 +6379,7 @@ async function loadDashboard() {
   _dashSectionLoaded.clear();
   _tagDashSections();
   _applyDashVisibility();
+  _applyDashTabVisibility();   // 카테고리에 맞춰 빈 서브탭 버튼 숨김 (+활성탭 숨겨지면 1로)
   _loadDashSection(dashSubTab);
 }
 
