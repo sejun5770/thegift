@@ -4761,9 +4761,34 @@ async function apiForecast(query = {}) {
     actualDailyMap[r.order_day].qty += r.total_qty || 0;
   }
 
+  // 더기프트(bg_manual_orders) 일별 매출 맵 — "실제 매출" 표시용에만 합산.
+  //   예측 계산(전환율·객단가)은 자사(MSSQL)만 사용 → 아래 actual_own_* 필드와 분리.
+  const manualDailyMap = {};
+  try {
+    const _manual = await require('./barungift/store').listManualOrders({
+      category: 'daeryepum', startDate: actualWeeklyStart, endDate: todayStr,
+    });
+    for (const mo of (_manual || [])) {
+      const st = Number(mo.status_seq) || 0;
+      if (!(st >= 2 && ![3, 5, 15].includes(st))) continue;   // 취소/환불/반품 제외
+      const day = (mo.order_date || '').toString().slice(0, 10);
+      if (!day) continue;
+      if (!manualDailyMap[day]) manualDailyMap[day] = { amount: 0, orders: 0, qty: 0 };
+      manualDailyMap[day].orders += 1;                          // 주문 1건
+      for (const it of (Array.isArray(mo.items) ? mo.items : [])) {
+        const q = Number(it.quantity) || 0;
+        manualDailyMap[day].amount += Number(it.item_amount) || (Number(it.unit_price) || 0) * q;
+        manualDailyMap[day].qty += q;
+      }
+    }
+  } catch (e) {
+    console.warn('[forecast] 더기프트 실매출 집계 실패 (무시):', e.message);
+  }
+
   // 각 주차에 실제 매출 매핑
   for (const w of weeks) {
-    let actAmount = 0, actOrders = 0, actQty = 0, actDays = 0;
+    let actAmount = 0, actOrders = 0, actQty = 0, actDays = 0;   // 자사(MSSQL) — 예측 모델 기준
+    let mAmount = 0, mOrders = 0, mQty = 0;                       // 더기프트 — 표시용 가산
     for (let d = 0; d < 7; d++) {
       const key = fmtDate(addDays(new Date(w.week_start), d));
       const isPast = new Date(key) < todayDate;
@@ -4775,10 +4800,19 @@ async function apiForecast(query = {}) {
       } else if (isPast) {
         actDays++; // 과거인데 매출 0인 날도 카운트
       }
+      if (isPast && manualDailyMap[key]) {
+        mAmount += manualDailyMap[key].amount;
+        mOrders += manualDailyMap[key].orders;
+        mQty += manualDailyMap[key].qty;
+      }
     }
-    w.actual_weekly_revenue = Math.round(actAmount);
-    w.actual_orders = actOrders;
-    w.actual_qty = actQty;
+    // 자사 전용 (예측 모델 계산 기준 — 전환율·객단가) — 더기프트 미포함
+    w.actual_own_revenue = Math.round(actAmount);
+    w.actual_own_orders = actOrders;
+    // 표시용 실제 = 자사 + 더기프트
+    w.actual_weekly_revenue = Math.round(actAmount + mAmount);
+    w.actual_orders = actOrders + mOrders;
+    w.actual_qty = actQty + mQty;
     w.actual_days = actDays; // 경과일 수 (7이면 완료된 주)
     w.is_past = actDays >= 7;
     w.is_current = actDays > 0 && actDays < 7;
@@ -4790,19 +4824,19 @@ async function apiForecast(query = {}) {
   //    가중치: 가장 오래된 주 1, ..., 가장 최근 주 N (선형 가중)
   const MIN_WEEKLY_ORDERS = 20; // 오퍼레이팅 초기 등 비정상 주차 제외 기준
   const completedWeeks = weeks.filter(w => w.is_past);
-  const activeWeeks = completedWeeks.filter(w => w.actual_orders >= MIN_WEEKLY_ORDERS);
+  const activeWeeks = completedWeeks.filter(w => w.actual_own_orders >= MIN_WEEKLY_ORDERS); // 자사 기준
   const baseWeeks = activeWeeks.slice(-BASE_WEEKS);
   let baseTotalRevenue = 0, baseTotalOrders = 0, baseTotalWeddings = 0;
   let weightedOrders = 0, weightedWeddings = 0, weightedRevenue = 0, weightSum = 0;
   baseWeeks.forEach((bw, i) => {
     const weight = i + 1; // 1, 2, 3, 4 (최근일수록 높은 가중치)
     weightSum += weight;
-    weightedOrders += bw.actual_orders * weight;
+    weightedOrders += bw.actual_own_orders * weight;
     weightedWeddings += bw.wedding_pool * weight;
-    weightedRevenue += bw.actual_weekly_revenue * weight;
-    // 단순 합계도 유지 (참고용)
-    baseTotalRevenue += bw.actual_weekly_revenue;
-    baseTotalOrders += bw.actual_orders;
+    weightedRevenue += bw.actual_own_revenue * weight;
+    // 단순 합계도 유지 (참고용) — 자사 기준
+    baseTotalRevenue += bw.actual_own_revenue;
+    baseTotalOrders += bw.actual_own_orders;
     baseTotalWeddings += bw.wedding_pool;
   });
   const conversionRate = weightedWeddings > 0 ? weightedOrders / weightedWeddings : 0;
@@ -4850,9 +4884,9 @@ async function apiForecast(query = {}) {
     week_no: w.week_no,
     week_start: w.week_start,
     wedding_pool: w.wedding_pool,
-    actual_orders: w.actual_orders,
-    conversion_rate: w.wedding_pool > 0 ? Math.round(w.actual_orders / w.wedding_pool * 10000) / 100 : 0,
-    avg_order_value: w.actual_orders > 0 ? Math.round(w.actual_weekly_revenue / w.actual_orders) : 0,
+    actual_orders: w.actual_own_orders,
+    conversion_rate: w.wedding_pool > 0 ? Math.round(w.actual_own_orders / w.wedding_pool * 10000) / 100 : 0,
+    avg_order_value: w.actual_own_orders > 0 ? Math.round(w.actual_own_revenue / w.actual_own_orders) : 0,
   }));
 
   // 이동평균에 실제 사용된 기간 (일-토 기준) — 프론트엔드에서 카드/툴팁에 명시 노출
