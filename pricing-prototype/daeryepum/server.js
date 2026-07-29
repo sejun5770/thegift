@@ -1866,6 +1866,28 @@ async function apiProductRanking(query = {}) {
   await mergeMarket('네이버', () => require('./naver/store').listNaverOrders({ startStr, endStr: endPlus, byPaid: false }));
   await mergeMarket('정수당', () => require('./cafe24/store').listCafe24Orders({ startStr, endStr: endPlus, byPaid: false }));
 
+  // ── 쿠팡 로켓그로스 (RFM) — 일반 쿠팡과 별도 채널 섹션으로 분리 ────────
+  //   정산 리포트 업로드분(일자×옵션 단위)만 상품 순위에 반영.
+  //   vendor_item_id='_manual'(일별 합계 수동입력)은 상품이 아니므로 제외.
+  //   수량/매출은 환불 차감한 순 기준 (다른 채널도 취소 제외 순 기준이라 일관).
+  try {
+    const rfmRows = await require('./coupang/rfm-store').listSales({ startDate: startStr, endDate: endStr });
+    for (const r of (rfmRows || [])) {
+      if (String(r.vendor_item_id) === '_manual') continue;
+      const qty = (Number(r.sales_qty) || 0) - (Number(r.refund_qty) || 0);
+      const amt = Number(r.net_amount ?? ((Number(r.sales_amount) || 0) - (Number(r.refund_amount) || 0))) || 0;
+      if (!qty && !amt) continue;
+      const gName = sgIndex.byCode.get(String(r.product_id || '').trim().toLowerCase())
+        || groupForName('쿠팡 로켓그로스', r.product_name);
+      addEntry(gName || r.product_name, qty, amt, '쿠팡 로켓그로스', 'market:쿠팡 로켓그로스',
+        r.product_id
+          ? { site_name: '', match_type: 'code', match_value: String(r.product_id), label: r.product_name }
+          : { site_name: '쿠팡 로켓그로스', match_type: 'name', match_value: r.product_name, label: r.product_name });
+    }
+  } catch (e) {
+    console.warn('[product-ranking] 로켓그로스 집계 실패 (무시):', e.message);
+  }
+
   // ── 3) 더기프트 수동 등록 (bg_manual_orders, category=daeryepum) ───
   //   주문조회 "답례품_더기프트" 탭 소스 — API 미연동 채널이라 CSV 업로드로 관리자 직접 등록.
   //   MSSQL 답례품과 분리 저장돼 있어(이중계산 없음) 상품별 통계엔 별도 소스로 합산.
