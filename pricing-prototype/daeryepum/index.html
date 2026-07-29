@@ -4433,14 +4433,50 @@ function fmtNumK(n) { return (n || 0).toLocaleString('ko-KR'); }
 function fmtKRW(n) { return fmtNumK(n) + '원'; }
 
 /** 페이지 접속 시 상품 목록 최초 로드 — 대시보드 카테고리 탭에 맞춰 분기 */
+/**
+ * 매출 데이터 그룹(migration 040) 을 상품 목록에 반영 — 같은 그룹 상품들을 한 줄로 병합.
+ *   대표 코드는 서버(apiProductStats) 와 동일 규칙: 그룹 멤버 코드 정렬 후 첫 번째.
+ *   → 목록에서 그룹 하나를 고르면 서버가 형제 코드까지 확장 조회해 합산 표시한다.
+ */
+function _psApplyGroups(list) {
+  const groups = window.bgSalesGroups || [];
+  if (!groups.length) return list;
+  const groupByCode = new Map();   // 코드(소문자) → { name, repCode, memberCount }
+  groups.forEach(g => {
+    const codes = (g.members || []).filter(m => m.match_type === 'code').map(m => String(m.match_value).trim());
+    if (!codes.length) return;
+    const rep = [...codes].sort()[0];
+    codes.forEach(c => groupByCode.set(c.toLowerCase(), { name: g.name, repCode: rep, memberCount: codes.length }));
+  });
+  if (!groupByCode.size) return list;
+  const out = [];
+  const merged = new Map();        // 그룹명 → 병합 항목
+  list.forEach(p => {
+    const g = groupByCode.get(String(p.card_code || '').trim().toLowerCase());
+    if (!g) { out.push(p); return; }
+    if (!merged.has(g.name)) {
+      const item = { card_code: g.repCode, card_name: g.name, total_revenue: 0, total_qty: 0, _isGroup: true, _memberCount: g.memberCount };
+      merged.set(g.name, item);
+      out.push(item);
+    }
+    const it = merged.get(g.name);
+    it.total_revenue += Number(p.total_revenue) || 0;
+    it.total_qty += Number(p.total_qty) || 0;
+  });
+  return out.sort((a, b) => (Number(b.total_revenue) || 0) - (Number(a.total_revenue) || 0));
+}
+
 async function loadPsProductList() {
   try {
     const cat = (typeof dashCategory !== 'undefined' && dashCategory) ? dashCategory : 'daeryepum';
     const res = await fetch(`${API}/api/bg/products/sales-list?days=180&category=${encodeURIComponent(cat)}`);
     const j = await res.json();
     // 서버 500 or 인증 실패 시 응답이 { error: ... } 로 옴 → Array 아니면 안전하게 빈배열.
-    _psAllProducts = Array.isArray(j) ? j : [];
+    const raw = Array.isArray(j) ? j : [];
     if (!Array.isArray(j)) console.warn('[loadPsProductList] 응답이 배열 아님:', j?.error || j);
+    // 그룹 정보가 아직 없으면 먼저 로드 (그룹 편집 직후 반영)
+    if (!Array.isArray(window.bgSalesGroups)) { try { await _loadSalesGroups(); } catch {} }
+    _psAllProducts = _psApplyGroups(raw);
   } catch (e) {
     console.error('[loadPsProductList]', e);
     _psAllProducts = [];
@@ -4769,11 +4805,18 @@ async function loadProductRanking() {
     const prevAll = (prevData && !prevData.error && Array.isArray(prevData.products)) ? prevData.products : [];
     const sortFn = (a, b) => (Number(b[sortBy]) || 0) - (Number(a[sortBy]) || 0);
 
-    // 자사 / 외부채널 2개 섹션으로 분리 렌더 — 각 섹션 독립 순위·비중·WoW 변동.
-    const GROUPS = [
-      { key: 'own',    title: '🏢 자사 (바른손카드 + 더기프트)',   color: '#3b82f6' },
-      { key: 'market', title: '🛒 외부채널 (네이버 · 쿠팡 · 정수당)', color: '#10b981' },
-    ];
+    // 자사 + 외부채널(쿠팡/네이버/정수당 각각) 섹션으로 분리 렌더.
+    //   각 섹션 독립 순위·비중·WoW 변동. 판매 없는 채널은 섹션 자체를 만들지 않는다.
+    const CH_STYLE = { '쿠팡': { icon: '🚀', color: '#ef4444' }, '네이버': { icon: '🟢', color: '#03c75a' }, '정수당': { icon: '🏬', color: '#d97706' } };
+    const GROUPS = [{ key: 'own', title: '🏢 자사 (바른손카드 + 더기프트)', color: '#3b82f6' }];
+    // 데이터에 실제로 존재하는 마켓 채널만 섹션 추가 (매출/판매 없는 채널 제외)
+    [...new Set(allProducts.map(p => p.scope).filter(s => String(s || '').startsWith('market:')))]
+      .sort()
+      .forEach(sc => {
+        const ch = sc.slice('market:'.length);
+        const st = CH_STYLE[ch] || { icon: '🛒', color: '#10b981' };
+        GROUPS.push({ key: sc, title: `${st.icon} ${ch}`, color: st.color });
+      });
     let html = '';
     for (const g of GROUPS) {
       const prods = allProducts.filter(p => (p.scope || 'own') === g.key).sort(sortFn);

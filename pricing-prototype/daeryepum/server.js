@@ -1377,6 +1377,25 @@ async function apiProductStats(query) {
   if (!startStr || !endStr) return { error: 'start_date and end_date required' };
   if (productCodes.length > 10) return { error: '최대 10개까지 조회 가능' };
 
+  // 매출 데이터 그룹 (migration 040) — 선택한 코드가 그룹에 속하면
+  //   같은 그룹의 형제 코드까지 함께 조회해 하나의 그룹으로 합산 표시한다.
+  const sgIndex = await _loadSalesGroupIndex(query.category || 'daeryepum');
+  const groupOf = (code) => sgIndex.byCode.get(String(code || '').trim().toLowerCase()) || null;
+  // 조회 대상 코드 = 입력 코드 + (그룹 소속이면) 형제 코드
+  const queryCodes = [];
+  const bucketKeys = [];          // 집계 단위 (그룹이면 'G:그룹명', 아니면 코드)
+  const bucketLabel = new Map();  // 집계 단위 → 표시명 (그룹명)
+  for (const c of productCodes) {
+    const g = groupOf(c);
+    const key = g ? `G:${g}` : c;
+    if (!bucketKeys.includes(key)) {
+      bucketKeys.push(key);
+      if (g) bucketLabel.set(key, g);
+    }
+    const codes = g ? (sgIndex.codesByGroup.get(g) || [c]) : [c];
+    codes.forEach(x => { if (!queryCodes.includes(x)) queryCodes.push(x); });
+  }
+
   const p = await getPool();
 
   // 기간 계산 helper
@@ -1455,7 +1474,8 @@ async function apiProductStats(query) {
   /** rows → 상품별 {name, daily[], total{}}
    *   BASE 매칭: row.card_code (예: TGJSD01O4_A) 에서 _XXX suffix 제거 → BASE 코드.
    *   입력 codes 가 BASE 단위면 모든 변형 row 가 자동 그룹핑. */
-  function aggregate(rows, codes) {
+  function aggregate(rows, codes, keys = null, labels = null) {
+    //   keys/labels 가 주어지면 매출 그룹 단위로 집계 (keys: 'G:그룹명' 또는 코드).
     // BASE 코드 추출 — 변형 접미사 '단일 영문자'(_A/_B/_C) 만 제거.
     //   영숫자 전체를 떼면 데코(2026_acryl_08 → 2026_acryl) / 위탁(COM_A01003 → COM) 처럼
     //   서로 다른 상품이 한 행으로 합산된다. (2026-07-29 수정)
@@ -1466,17 +1486,21 @@ async function apiProductStats(query) {
     };
     // product_name 의 [prefix] 제거 (가장 깔끔한 이름 선호용)
     const cleanName = (n) => String(n || '').replace(/^\[.*?\]\s*/g, '').trim();
+    const bucketList = keys && keys.length ? keys : codes;
     const byProduct = new Map();
-    codes.forEach(c => byProduct.set(c, {
+    bucketList.forEach(c => byProduct.set(c, {
       product_code: c, product_name: null,
       dayMap: new Map(), allOrders: new Set(),
       variantCodes: new Set(),
     }));
     for (const r of rows) {
+      // 1순위: 매출 그룹 — 그룹 소속 코드는 'G:그룹명' bucket 으로
+      const gName = keys ? (sgIndex.byCode.get(String(r.card_code || '').trim().toLowerCase()) || null) : null;
       // raw card_code → BASE
       const base = toBase(r.card_code);
       // BASE 가 직접 매칭되면 그 bucket, 아니면 raw 도 시도 (입력이 raw 인 경우)
-      const key = byProduct.has(base) ? base : (byProduct.has(r.card_code) ? r.card_code : null);
+      const key = (gName && byProduct.has(`G:${gName}`)) ? `G:${gName}`
+        : (byProduct.has(base) ? base : (byProduct.has(r.card_code) ? r.card_code : null));
       if (!key) continue;
       const bucket = byProduct.get(key);
       bucket.variantCodes.add(r.card_code);
@@ -1496,7 +1520,7 @@ async function apiProductStats(query) {
       bucket.allOrders.add(r.order_seq);
     }
     // 최종 형태로 변환
-    const products = codes.map(c => {
+    const products = bucketList.map(c => {
       const b = byProduct.get(c);
       const daily = [...b.dayMap.entries()]
         .sort((x, y) => x[0].localeCompare(y[0]))
@@ -1507,10 +1531,18 @@ async function apiProductStats(query) {
       const totalRevenue = daily.reduce((s, d) => s + d.revenue, 0);
       const totalOrders = b.allOrders.size;
       const withSales = daily.filter(d => d.revenue > 0);
+      const gLabel = labels ? labels.get(c) : null;   // 매출 그룹이면 그룹명 표시
+      // 그룹 bucket 은 'G:그룹명' 대신 대표 코드를 노출 (프론트 선택 상태와 일치).
+      //   판매 유무와 무관하게 그룹 멤버 목록에서 결정 — 기간마다 대표코드가 바뀌면
+      //   전기대비(prev_total) 매칭이 깨지므로 고정값이어야 한다.
+      const gRepCode = gLabel
+        ? ([...(sgIndex.codesByGroup.get(gLabel) || [])].sort()[0] || c)
+        : null;
       return {
-        product_code: c,
-        product_name: b.product_name,
-        variant_codes: [...b.variantCodes].sort(), // 통합된 raw 코드들 (_A/_B/_C)
+        product_code: gRepCode || c,
+        product_name: gLabel || b.product_name,
+        is_group: !!gLabel,
+        variant_codes: [...b.variantCodes].sort(), // 통합된 raw 코드들 (_A/_B/_C, 그룹이면 멤버 코드)
         total: {
           qty: totalQty,
           orders: totalOrders,
@@ -1526,13 +1558,13 @@ async function apiProductStats(query) {
   }
 
   // 현재 기간 조회
-  const curRows = await queryRange(productCodes, startStr, endPlus);
-  const products = aggregate(curRows, productCodes);
+  const curRows = await queryRange(queryCodes, startStr, endPlus);
+  const products = aggregate(curRows, productCodes, bucketKeys, bucketLabel);
 
   // 전기 대비 (선택)
   if (comparePrev) {
-    const prevRows = await queryRange(productCodes, prevStart, prevEndPlus);
-    const prevProducts = aggregate(prevRows, productCodes);
+    const prevRows = await queryRange(queryCodes, prevStart, prevEndPlus);
+    const prevProducts = aggregate(prevRows, productCodes, bucketKeys, bucketLabel);
     const prevMap = new Map(prevProducts.map(p => [p.product_code, p.total]));
     products.forEach(p => { p.prev_total = prevMap.get(p.product_code) || null; });
   }
@@ -1572,7 +1604,8 @@ async function apiProductStats(query) {
  * 조회 실패해도 빈 인덱스 반환 (그룹 미적용으로 fallback).
  */
 async function _loadSalesGroupIndex(category = 'daeryepum') {
-  const empty = { byCode: new Map(), byName: new Map() };
+  //   codesByGroup: 그룹명 → [상품코드...] (상품별 판매통계에서 형제 코드까지 확장 조회용)
+  const empty = { byCode: new Map(), byName: new Map(), codesByGroup: new Map() };
   try {
     const REST = process.env.SUPABASE_URL ? `${process.env.SUPABASE_URL}/rest/v1` : null;
     if (!REST) return empty;
@@ -1590,8 +1623,12 @@ async function _loadSalesGroupIndex(category = 'daeryepum') {
       if (!gName) continue;                       // 다른 카테고리 그룹
       const v = String(m.match_value || '').trim().toLowerCase();
       if (!v) continue;
-      if (m.match_type === 'code') empty.byCode.set(v, gName);
-      else empty.byName.set(`${String(m.site_name || '').trim()}|${v}`, gName);
+      if (m.match_type === 'code') {
+        empty.byCode.set(v, gName);
+        if (!empty.codesByGroup.has(gName)) empty.codesByGroup.set(gName, []);
+        // 원본 대소문자 보존 — MSSQL 조회 파라미터로 그대로 사용
+        empty.codesByGroup.get(gName).push(String(m.match_value).trim());
+      } else empty.byName.set(`${String(m.site_name || '').trim()}|${v}`, gName);
     }
     return empty;
   } catch (e) {
@@ -1628,15 +1665,15 @@ async function apiProductRanking(query = {}) {
 
   // 병합 맵 — key: 정규화 상품명(소문자). value: { name, qty, revenue, channels:Set }.
   const byName = new Map();
-  //   scope 'own'    : 자사(바른손카드/바른손몰/더기프트) — normName 으로 병합(규격 접미사까지 통일).
-  //   scope 'market' : 외부 마켓(네이버/쿠팡/정수당) — 상품명이 마케팅 롱타이틀이라 자사와 표기가 달라,
-  //                    자사 상품과 섞이지 않도록 'M|' 네임스페이스로 분리(= 카드와 별도 행 유지).
+  //   scope 'own'          : 자사(바른손카드/바른손몰/더기프트) — normName 으로 병합(규격 접미사까지 통일).
+  //   scope 'market:{채널}' : 외부 마켓 — 상품명이 마케팅 롱타이틀이라 자사와 표기가 달라 섞이지 않도록
+  //                          분리하고, 채널(쿠팡/네이버/정수당)별로도 각각 나눈다.
   function addEntry(rawName, qty, revenue, channelLabel, scope = 'own', memberSpec = null) {
     const display = scope === 'own'
       ? (normName(rawName) || cleanName(rawName) || String(rawName || '').trim())
       : (cleanName(rawName) || String(rawName || '').trim());
     if (!display) return;
-    const key = (scope === 'own' ? 'O|' : 'M|') + display.toLowerCase();
+    const key = `${scope}|` + display.toLowerCase();
     if (!byName.has(key)) byName.set(key, { name: display, qty: 0, revenue: 0, channels: new Set(), scope, members: new Map() });
     const e = byName.get(key);
     e.qty += Number(qty) || 0;
@@ -1757,8 +1794,9 @@ async function apiProductRanking(query = {}) {
       for (const r of (rows || [])) {
         if (r.status && CANCELLED_STATUS.has(String(r.status).toUpperCase())) continue;
         // 매출 그룹에 담긴 마켓 상품명은 그룹명으로 합산 (사이트 지정 멤버 우선, 없으면 전체).
+        // 채널별 섹션 분리를 위해 scope 에 채널명 포함 (market:쿠팡 / market:네이버 / market:정수당)
         addEntry(groupForName(label, r.product_name) || r.product_name,
-          r.item_count, r.item_total_price, label, 'market',
+          r.item_count, r.item_total_price, label, `market:${label}`,
           { site_name: label, match_type: 'name', match_value: r.product_name, label: r.product_name });
       }
     } catch (e) {
