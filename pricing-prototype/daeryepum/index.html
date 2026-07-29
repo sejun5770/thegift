@@ -17437,10 +17437,15 @@ function _getStickerFieldEntries(sel) {
     ? sticker.custom_fields : null;
   if (fields) {
     // 정의 순서대로 — 값 있는 row 만 노출
-    return fields.map(f => {
+    const defined = fields.map(f => {
       const key = f.field_id || f.name || f.field_label;
       return { key, label: f.field_label || f.name || key, value: sel.custom_values[key] };
     }).filter(e => e.value !== undefined && e.value !== null && String(e.value) !== '');
+    // 정의 키로 하나도 못 찾으면 저장된 값을 그대로 노출 (fallback).
+    //   CSV 업로드(더기프트)·일부 채널은 문구를 custom_fields 키가 아닌 'text' 로 저장하는데,
+    //   그때 정의 키(field_id)만 조회하면 값이 있는데도 화면/수집복사에서 통째로 사라졌음.
+    //   (2026-07-29 수정 — 문구 저장돼 있으나 미표시 80행 복구)
+    if (defined.length) return defined;
   }
   // fallback: custom_values 키 순서 (default 'text' 단일 필드 케이스 포함)
   return Object.entries(sel.custom_values)
