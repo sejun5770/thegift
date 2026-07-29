@@ -1873,8 +1873,12 @@ async function apiProductRanking(query = {}) {
       });
       const out = [];
       for (const rows of byOrder.values()) {
+        // 세트 라벨 판별: 0원 + '세트' 또는 '(N구)' 명칭 (돌잔치 수건 답례품 (2구) 등).
+        //   이름 조건을 두는 이유: 0원 사은품 라인(스티커 증정 등)을 라벨로 오인해
+        //   주문 전체 매출이 사은품 이름으로 귀속되는 것을 방지.
         const labels = rows.filter(r => Math.round(Number(r.amount) || 0) === 0
-          && (Number(r.qty) || 0) > 0 && /세트/.test(String(r.card_name || '')));
+          && (Number(r.qty) || 0) > 0
+          && /세트|\(\s*\d+\s*구\s*\)/.test(String(r.card_name || '')));
         const labelCodes = new Set(labels.map(l => l.card_code));
         const labelQty = labels.reduce((s, l) => s + (Number(l.qty) || 0), 0);
         const paid = rows.filter(r => !labels.includes(r));
