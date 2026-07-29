@@ -13161,6 +13161,46 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/coupang/rfm/upload' && req.method === 'POST') {
+        // 로켓그로스 '판매 수수료 리포트'(xlsx) 업로드 → 일자×옵션 단위 매출 등록.
+        //   body: { file_base64, filename, dry_run }
+        //   dry_run=true 면 저장 없이 파싱 결과만 반환 (업로드 전 미리보기).
+        //   저장 시 같은 날짜의 수동입력(_manual) 합계 행은 삭제 — 이중 계상 방지.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const body = await new Promise((resolve) => {
+          let raw = '';
+          req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+        });
+        const dryRun = body.dry_run === true || body.dry_run === '1';
+        logAdminAccess(session, req, 'coupang-rfm-upload', { filename: body.filename, dry_run: dryRun });
+        try {
+          if (!body.file_base64) throw new Error('파일이 없습니다');
+          const buf = Buffer.from(String(body.file_base64), 'base64');
+          if (!buf.length) throw new Error('빈 파일입니다');
+          const { parseRfmSettlementXlsx } = require('./coupang/rfm-xlsx');
+          const parsed = parseRfmSettlementXlsx(buf);
+          if (!parsed.rows.length) throw new Error('등록할 매출 행이 없습니다 (파일 내용을 확인해주세요)');
+          if (dryRun) {
+            data = { ok: true, dry_run: true, ...parsed, rows: parsed.rows.slice(0, 100) };
+          } else {
+            const rfmStore = require('./coupang/rfm-store');
+            // 1) 같은 날짜의 수동입력 합계 행 제거 (상품별 데이터로 교체)
+            const del = await rfmStore.deleteManualSalesByDates(parsed.dates);
+            // 2) 상품별 매출 upsert — UNIQUE(sale_date, vendor_item_id) 로 재업로드도 안전
+            const up = await rfmStore.upsertSales(parsed.rows);
+            data = {
+              ok: true, upserted: up.upserted, manual_deleted: del.deleted,
+              dates: parsed.dates, summary: parsed.summary, skipped: parsed.skipped,
+            };
+          }
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
       } else if (pathname.match(/^\/api\/coupang\/rfm\/sales\/[^/]+$/) && req.method === 'DELETE') {
         // 단일 row 삭제 (잘못 입력 정정용)
         if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {

@@ -29,6 +29,25 @@ async function upsertSales(rows) {
 }
 
 /**
+ * 지정 날짜들의 수동 입력(_manual) 합계 행 삭제.
+ *   정산 리포트 업로드로 같은 날짜의 상품별 매출이 들어오면, 기존 일별 합계 행이 남아 있을 때
+ *   같은 매출이 두 번 잡힌다(이중 계상). 업로드 직전에 해당 날짜 범위의 _manual 행만 제거한다.
+ */
+async function deleteManualSalesByDates(dates) {
+  if (!USE || !Array.isArray(dates) || !dates.length) return { deleted: 0 };
+  const inList = [...new Set(dates)].map(d => `"${d}"`).join(',');
+  const url = `${REST}/coupang_rocket_growth_sales`
+    + `?vendor_item_id=eq._manual&sale_date=in.(${encodeURIComponent(inList)})`;
+  const res = await fetch(url, { method: 'DELETE', headers: { ...HDR, Prefer: 'return=representation' } });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`Supabase delete _manual [${res.status}]: ${t.slice(0, 300)}`);
+  }
+  const rows = await res.json().catch(() => []);
+  return { deleted: Array.isArray(rows) ? rows.length : 0 };
+}
+
+/**
  * 수동 입력 단일 row upsert — Coupang Open API 가 RFM 매출 노출 안 해서 운영자가 Wing
  *   셀러센터 보고 직접 입력하는 path. vendor_item_id 는 '_manual' 고정 (날짜당 1 row).
  *   같은 날 재제출 시 덮어씀.
@@ -134,6 +153,7 @@ module.exports = {
   USE,
   upsertSales,
   upsertManualSale,
+  deleteManualSalesByDates,
   deleteSaleById,
   listSales,
   getSyncState,

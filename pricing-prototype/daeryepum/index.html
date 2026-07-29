@@ -1098,9 +1098,26 @@ nav.nav-loading a[href^="#"] {
     <button class="btn" onclick="loadCoupangRfm()" style="padding:5px 12px;font-size:12px">🔄 새로고침</button>
   </div>
 
+  <!-- 정산 리포트 업로드 — 상품(옵션) 단위 일별 매출 일괄 등록 -->
+  <div class="card" style="margin-bottom:16px;padding:16px;border:1px solid #bfdbfe;background:#f8fbff">
+    <div style="font-weight:700;font-size:14px;margin-bottom:6px">📤 판매 수수료 리포트 업로드 <span style="font-weight:400;font-size:11px;color:var(--gray-500)">(상품·옵션 단위 일별 매출)</span></div>
+    <div style="font-size:11px;color:var(--gray-500);margin-bottom:10px;line-height:1.6">
+      Wing → 정산현황 → <b>판매 수수료 리포트</b> 엑셀(.xlsx)을 그대로 올리면 <b>매출인식일 × 옵션</b> 단위로 등록됩니다.
+      ‘주문 정산취소’는 환불로 분리되고, 같은 파일을 다시 올려도 덮어쓰기라 중복되지 않습니다.<br>
+      ※ 업로드한 날짜에 기존 <b>수동 입력 합계</b> 행이 있으면 이중 계상 방지를 위해 자동 삭제됩니다.
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input type="file" id="rfm-upload-file" accept=".xlsx" onchange="rfmPreviewUpload()" style="font-size:12px">
+      <button class="btn btn-primary" id="rfm-upload-btn" onclick="rfmConfirmUpload()" style="display:none">✅ 등록</button>
+      <button class="btn" id="rfm-upload-cancel" onclick="rfmResetUpload()" style="display:none">취소</button>
+    </div>
+    <div id="rfm-upload-status" style="font-size:12px;margin-top:8px"></div>
+    <div id="rfm-upload-preview" style="margin-top:10px"></div>
+  </div>
+
   <!-- 입력 폼 -->
   <div class="card" style="margin-bottom:16px;padding:16px">
-    <div style="font-weight:700;font-size:14px;margin-bottom:10px">📝 매출 입력 / 수정</div>
+    <div style="font-weight:700;font-size:14px;margin-bottom:10px">📝 매출 입력 / 수정 <span style="font-weight:400;font-size:11px;color:var(--gray-500)">(리포트가 없는 기간 임시 입력용)</span></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px;align-items:end">
       <div>
         <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:3px">매출일자 *</label>
@@ -14496,6 +14513,84 @@ function renderWcTrend(data) {
 }
 
 // ============================================
+// ── 로켓그로스 판매 수수료 리포트(xlsx) 업로드 ──────────────────────
+//   파일을 base64 로 서버에 보내면 서버가 파싱(zlib) → 일자×옵션 단위로 집계해 저장.
+//   1) 파일 선택 → dry_run 파싱으로 미리보기  2) '등록' 클릭 시 실제 저장.
+let _rfmUploadB64 = null, _rfmUploadName = '';
+function rfmResetUpload() {
+  _rfmUploadB64 = null; _rfmUploadName = '';
+  const f = document.getElementById('rfm-upload-file'); if (f) f.value = '';
+  ['rfm-upload-btn', 'rfm-upload-cancel'].forEach(id => { const b = document.getElementById(id); if (b) b.style.display = 'none'; });
+  const st = document.getElementById('rfm-upload-status'); if (st) st.textContent = '';
+  const pv = document.getElementById('rfm-upload-preview'); if (pv) pv.innerHTML = '';
+}
+async function rfmPreviewUpload() {
+  const f = document.getElementById('rfm-upload-file')?.files?.[0];
+  const $st = document.getElementById('rfm-upload-status');
+  const $pv = document.getElementById('rfm-upload-preview');
+  if (!f) return;
+  $st.style.color = 'var(--gray-500)'; $st.textContent = '파일 분석 중…'; $pv.innerHTML = '';
+  try {
+    const buf = await f.arrayBuffer();
+    // ArrayBuffer → base64 (대용량 대비 청크 처리)
+    const bytes = new Uint8Array(buf);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+    _rfmUploadB64 = btoa(bin); _rfmUploadName = f.name;
+    const r = await fetch(`${API}/api/coupang/rfm/upload`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_base64: _rfmUploadB64, filename: f.name, dry_run: true }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || '분석 실패');
+    const s = j.summary || {};
+    $st.style.color = 'var(--gray-700)';
+    $st.innerHTML = `📊 <b>${s.row_count}</b>행 (옵션 ${s.product_count}종) · ${j.dates?.[0] || ''} ~ ${j.dates?.[j.dates.length - 1] || ''}`
+      + ` · 판매 <b>${fmtNum(s.sales_qty)}개 ${fmtKRW(s.sales_amount)}</b>`
+      + (s.refund_qty ? ` · 환불 ${fmtNum(s.refund_qty)}개 ${fmtKRW(s.refund_amount)}` : '')
+      + ` → 순매출 <b style="color:#1d4ed8">${fmtKRW(s.net_amount)}</b>`;
+    const rows = (j.rows || []).slice(0, 12);
+    $pv.innerHTML = `<div style="max-height:230px;overflow:auto;border:1px solid var(--gray-200);border-radius:8px">
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <thead><tr style="background:var(--gray-50);color:var(--gray-500)">
+          <th style="padding:5px 8px;text-align:left">매출인식일</th><th style="padding:5px 8px;text-align:left">상품 / 옵션</th>
+          <th style="padding:5px 8px;text-align:right">판매</th><th style="padding:5px 8px;text-align:right">환불</th></tr></thead>
+        <tbody>${rows.map(x => `<tr style="border-top:1px solid var(--gray-100)">
+          <td style="padding:4px 8px">${esc(x.sale_date)}</td>
+          <td style="padding:4px 8px">${esc(x.product_name || x.vendor_item_id)}</td>
+          <td style="padding:4px 8px;text-align:right">${fmtNum(x.sales_qty)}개 ${fmtKRW(x.sales_amount)}</td>
+          <td style="padding:4px 8px;text-align:right;color:${x.refund_qty ? '#dc2626' : 'var(--gray-300)'}">${x.refund_qty ? fmtNum(x.refund_qty) + '개 ' + fmtKRW(x.refund_amount) : '-'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+      ${(j.summary?.row_count > rows.length) ? `<div style="font-size:11px;color:var(--gray-400);margin-top:4px">… 외 ${j.summary.row_count - rows.length}행</div>` : ''}`;
+    document.getElementById('rfm-upload-btn').style.display = '';
+    document.getElementById('rfm-upload-cancel').style.display = '';
+  } catch (e) {
+    $st.style.color = 'var(--red)'; $st.textContent = '분석 실패: ' + e.message;
+    _rfmUploadB64 = null;
+    document.getElementById('rfm-upload-btn').style.display = 'none';
+  }
+}
+async function rfmConfirmUpload() {
+  if (!_rfmUploadB64) { showToast('파일을 먼저 선택해주세요'); return; }
+  const $st = document.getElementById('rfm-upload-status');
+  const $btn = document.getElementById('rfm-upload-btn');
+  $btn.disabled = true; $st.style.color = 'var(--gray-500)'; $st.textContent = '등록 중…';
+  try {
+    const r = await fetch(`${API}/api/coupang/rfm/upload`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_base64: _rfmUploadB64, filename: _rfmUploadName }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || '등록 실패');
+    showToast(`${j.upserted}건 등록 완료${j.manual_deleted ? ` (수동입력 ${j.manual_deleted}건 대체)` : ''}`);
+    rfmResetUpload();
+    loadCoupangRfm();
+  } catch (e) {
+    $st.style.color = 'var(--red)'; $st.textContent = '등록 실패: ' + e.message;
+  } finally { $btn.disabled = false; }
+}
+
 // 쿠팡 로켓그로스 (RFM) 매출 수동 입력
 // ============================================
 let _rfmRows = [];
