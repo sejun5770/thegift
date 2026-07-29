@@ -643,8 +643,9 @@ nav.nav-loading a[href^="#"] {
 
   <!-- ============================================
        주차별 예식·주문·매출 상관관계 (주간보고) — 상품별 판매통계 탭 최상단
+       데이터가 답례품 전용(예식·D01 필터 고정)이라 데코소품 탭에서는 숨김
        ============================================ -->
-  <div class="section" data-dash-section="4">
+  <div class="section" data-dash-section="4" data-dash-only="daeryepum">
     <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <span>📈 주차별 예식·주문·매출 상관관계</span>
       <div style="display:flex;gap:6px;align-items:center;font-size:12px;font-weight:400">
@@ -671,8 +672,9 @@ nav.nav-loading a[href^="#"] {
 
   <!-- ============================================
        상품 판매 순위 — 일/주/월 기간별 전체 채널 순위
+       apiProductRanking 이 답례품 필터 고정이라 데코소품 탭에서는 숨김
        ============================================ -->
-  <div class="section" data-dash-section="4">
+  <div class="section" data-dash-section="4" data-dash-only="daeryepum">
     <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <span>🏆 상품 판매 순위</span>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;font-weight:400">
