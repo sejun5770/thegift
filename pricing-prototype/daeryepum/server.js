@@ -13994,11 +13994,25 @@ const server = http.createServer(async (req, res) => {
   // Static files
   let filePath = pathname === '/' ? '/index.html' : pathname;
   filePath = path.join(__dirname, filePath);
+  // 경로 탈출 방지 — __dirname 밖 접근 차단
+  if (!filePath.startsWith(__dirname)) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return;
+  }
   const ext = path.extname(filePath).toLowerCase();
   const mimeTypes = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.json': 'application/json' };
-  const contentType = mimeTypes[ext] || 'application/octet-stream';
+  // 이미지 등 바이너리 — utf-8 로 읽으면 깨지므로 Buffer 그대로 응답 (매뉴얼 캡처 이미지용)
+  const binaryTypes = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.ico': 'image/x-icon' };
 
   try {
+    if (binaryTypes[ext]) {
+      const buf = fs.readFileSync(filePath);
+      res.writeHead(200, { 'Content-Type': binaryTypes[ext], 'Cache-Control': 'public, max-age=3600' });
+      res.end(buf);
+      return;
+    }
+    const contentType = mimeTypes[ext] || 'application/octet-stream';
     const content = fs.readFileSync(filePath, 'utf-8');
     res.writeHead(200, { 'Content-Type': contentType + '; charset=utf-8' });
     res.end(content);
