@@ -646,7 +646,19 @@ nav.nav-loading a[href^="#"] {
   <div class="section" data-dash-section="4">
     <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <span>📈 주차별 예식·주문·매출 상관관계</span>
-      <span style="font-size:11px;font-weight:400;color:var(--gray-500)">최근 12주 · 주 시작=월요일</span>
+      <div style="display:flex;gap:6px;align-items:center;font-size:12px;font-weight:400">
+        <!-- 기간 프리셋 + 직접 입력 -->
+        <div style="display:flex;gap:2px;border:1px solid var(--gray-200);border-radius:6px;overflow:hidden">
+          <button class="btn btn-sm wr-preset" data-weeks="12" onclick="setWrWeeks(12)" style="border:0;border-radius:0;padding:5px 10px">12주</button>
+          <button class="btn btn-sm wr-preset" data-weeks="26" onclick="setWrWeeks(26)" style="border:0;border-radius:0;padding:5px 10px">26주</button>
+          <button class="btn btn-sm wr-preset" data-weeks="52" onclick="setWrWeeks(52)" style="border:0;border-radius:0;padding:5px 10px">52주</button>
+        </div>
+        <input type="number" id="wr-weeks-input" min="1" max="52" placeholder="주" title="주차 수 직접 입력 (1~52)"
+          style="width:58px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px"
+          onkeydown="if(event.key==='Enter')setWrWeeks(this.value)">
+        <button class="btn btn-sm" onclick="setWrWeeks(document.getElementById('wr-weeks-input').value)" style="padding:5px 10px">적용</button>
+        <span style="font-size:11px;color:var(--gray-500)">주 시작=일요일(일~토)</span>
+      </div>
     </div>
     <div class="card" style="padding:16px">
       <div id="wr-status" style="padding:40px 20px;text-align:center;color:var(--gray-400)">불러오는 중...</div>
@@ -4702,15 +4714,31 @@ function movePrPeriod(dir) {
 //  📈 주차별 예식·주문·매출 상관관계 (주간보고, 이중축 line chart)
 // ============================================================
 let weeklyReportChart = null;
+let _wrWeeks = 12;   // 조회 주차 수 (1~52) — 프리셋/직접입력으로 변경
+function setWrWeeks(n) {
+  const w = Math.max(1, Math.min(52, parseInt(n, 10) || 12));
+  _wrWeeks = w;
+  // 프리셋 버튼 활성 표시
+  document.querySelectorAll('.wr-preset').forEach(b => {
+    b.className = 'btn btn-sm wr-preset' + (Number(b.dataset.weeks) === w ? ' btn-primary' : '');
+  });
+  const inp = document.getElementById('wr-weeks-input');
+  if (inp && Number(inp.value) !== w) inp.value = [12, 26, 52].includes(w) ? '' : w;
+  loadWeeklyReport();
+}
 async function loadWeeklyReport() {
   const $status = document.getElementById('wr-status');
   const $wrap = document.getElementById('wr-chart-wrap');
   const $canvas = document.getElementById('weeklyReportChart');
   if (!$status || !$wrap || !$canvas) return;
+  // 프리셋 버튼 활성 표시 동기화 (최초 로드 포함)
+  document.querySelectorAll('.wr-preset').forEach(b => {
+    b.className = 'btn btn-sm wr-preset' + (Number(b.dataset.weeks) === _wrWeeks ? ' btn-primary' : '');
+  });
   $status.style.display = ''; $status.style.color = 'var(--gray-400)'; $status.textContent = '불러오는 중...';
   $wrap.style.display = 'none';
   try {
-    const data = await fetch(`${API}/api/weekly-report?weeks=12`).then(r => r.json());
+    const data = await fetch(`${API}/api/weekly-report?weeks=${_wrWeeks}`).then(r => r.json());
     if (data.error) { $status.textContent = '오류: ' + data.error; $status.style.color = 'var(--red)'; return; }
     const weeks = data.weeks || [];
     if (!weeks.length) { $status.textContent = '표시할 데이터가 없습니다'; return; }
