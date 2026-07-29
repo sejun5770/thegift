@@ -938,6 +938,61 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   }
 
   // ============================================
+  // 매뉴얼 위키 (migration 041) — 편집 + 수정 히스토리
+  //   현재 문서 = 최신 revision. 저장 시마다 revision 추가 (삭제 없음 → 히스토리 보존).
+  // ============================================
+  const wikiMatch = pathname.match(/^\/api\/bg\/wiki\/([a-z0-9-]+)$/);
+  // GET /api/bg/wiki/:slug — 현재 문서 (없으면 content:null → 프론트가 기본 내용 사용)
+  if (wikiMatch && method === 'GET') {
+    try {
+      const cur = await store.getWikiCurrent(wikiMatch[1]);
+      return json(res, cur
+        ? { content: cur.content, updated_at: cur.created_at, updated_by: cur.created_by }
+        : { content: null });
+    } catch (err) {
+      console.error('[wiki GET] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+  // PUT /api/bg/wiki/:slug — 저장 (revision 추가). 로그인 사용자 누구나, 수정자 기록.
+  if (wikiMatch && method === 'PUT') {
+    try {
+      const body = await parseBody(req);
+      const saved = await store.saveWikiRevision(wikiMatch[1], body.content, {
+        note: body.note || null,
+        created_by: session?.email || null,
+      });
+      return json(res, { ok: true, id: saved?.id, created_at: saved?.created_at });
+    } catch (err) {
+      console.error('[wiki PUT] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  // GET /api/bg/wiki/:slug/revisions — 히스토리 목록
+  const wikiRevListMatch = pathname.match(/^\/api\/bg\/wiki\/([a-z0-9-]+)\/revisions$/);
+  if (wikiRevListMatch && method === 'GET') {
+    try {
+      const revisions = await store.listWikiRevisions(wikiRevListMatch[1]);
+      return json(res, { revisions });
+    } catch (err) {
+      console.error('[wiki revisions GET] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+  // GET /api/bg/wiki-revision/:id — 특정 revision 내용 (미리보기/복원)
+  const wikiRevMatch = pathname.match(/^\/api\/bg\/wiki-revision\/([^/]+)$/);
+  if (wikiRevMatch && method === 'GET') {
+    try {
+      const rev = await store.getWikiRevision(decodeURIComponent(wikiRevMatch[1]));
+      if (!rev) return json(res, { error: 'revision 없음' }, 404);
+      return json(res, rev);
+    } catch (err) {
+      console.error('[wiki-revision GET] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
+  // ============================================
   // 매출 데이터 그룹 (migration 040)
   //   매출 시트/상품 순위에서 여러 행을 하나의 그룹으로 묶어 합산 표시.
   //   멤버 = (site_name, match_type 'code'|'name', match_value).

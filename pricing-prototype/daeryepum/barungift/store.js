@@ -1636,7 +1636,46 @@ async function removeSalesGroupMember(memberId) {
   return { ok: true };
 }
 
+// ─────────────────────────────────────────────────────────────
+// 매뉴얼 위키 (migration 041) — 최신 revision = 현재 문서, 저장할 때마다 히스토리 추가
+// ─────────────────────────────────────────────────────────────
+
+/** 현재 문서 (최신 revision). 없으면 null — 프론트가 기본 manual.html 내용 사용. */
+async function getWikiCurrent(slug) {
+  if (!USE_SUPABASE) throw new Error('Supabase 미설정');
+  const rows = await sbGet('bg_wiki_revisions',
+    `slug=eq.${encodeURIComponent(slug)}&order=created_at.desc&limit=1`);
+  return rows[0] || null;
+}
+
+/** revision 저장 (= 문서 갱신). */
+async function saveWikiRevision(slug, content, { note = null, created_by = null } = {}) {
+  if (!USE_SUPABASE) throw new Error('Supabase 미설정');
+  const body = String(content ?? '');
+  if (!body.trim()) throw new Error('내용이 비어 있습니다');
+  if (body.length > 2_000_000) throw new Error('내용이 너무 큽니다 (2MB 초과)');
+  return sbInsert('bg_wiki_revisions', { slug, content: body, note: note || null, created_by });
+}
+
+/** 히스토리 목록 (content 제외 — 목록 경량화). */
+async function listWikiRevisions(slug, { limit = 100 } = {}) {
+  if (!USE_SUPABASE) throw new Error('Supabase 미설정');
+  return sbGet('bg_wiki_revisions',
+    `slug=eq.${encodeURIComponent(slug)}&select=id,note,created_by,created_at&order=created_at.desc&limit=${Math.min(500, limit)}`);
+}
+
+/** 특정 revision 전체 (content 포함) — 미리보기/복원용. */
+async function getWikiRevision(id) {
+  if (!USE_SUPABASE) throw new Error('Supabase 미설정');
+  const rows = await sbGet('bg_wiki_revisions', `id=eq.${encodeURIComponent(id)}`);
+  return rows[0] || null;
+}
+
 module.exports = {
+  getWikiCurrent,
+  saveWikiRevision,
+  listWikiRevisions,
+  getWikiRevision,
   getAllStickers,
   getStickerById,
   createSticker,
