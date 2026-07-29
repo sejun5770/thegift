@@ -99,6 +99,8 @@ const FILES = {
   vendors: path.join(DATA_DIR, 'bg_vendors.json'),
   vendorPortalTokens: path.join(DATA_DIR, 'bg_vendor_portal_tokens.json'),
   manualOrders: path.join(DATA_DIR, 'bg_manual_orders.json'),
+  salesGroups: path.join(DATA_DIR, 'bg_sales_groups.json'),
+  salesGroupMembers: path.join(DATA_DIR, 'bg_sales_group_members.json'),
 };
 
 function ensureDataDir() {
@@ -1503,6 +1505,137 @@ async function updateSiteSettings(patch, updatedBy = null) {
   return sbInsert('bg_site_settings', { id: 1, ...clean });
 }
 
+// ─────────────────────────────────────────────────────────────
+// 매출 데이터 그룹 (migration 040)
+//   상품 단위 설정이 아니라 "매출 행"을 그룹에 담는 방식.
+//   멤버 = (site_name, match_type 'code'|'name', match_value).
+//   site_name '' = 전체 사이트. 마켓(코드 없음)은 site + name 으로 지정.
+// ─────────────────────────────────────────────────────────────
+
+/** 그룹 + 멤버 목록. 반환: [{ id, name, category, memo, members: [...] }] */
+async function listSalesGroups({ category = null } = {}) {
+  let groups, members;
+  if (USE_SUPABASE) {
+    const gFilter = (category ? `category=eq.${encodeURIComponent(category)}&` : '') + 'order=name.asc';
+    groups = await sbGet('bg_sales_groups', gFilter);
+    members = await sbGet('bg_sales_group_members', 'order=created_at.asc&limit=5000');
+  } else {
+    groups = readJson(FILES.salesGroups, []);
+    if (category) groups = groups.filter(g => (g.category || 'daeryepum') === category);
+    members = readJson(FILES.salesGroupMembers, []);
+  }
+  const byGroup = new Map();
+  (members || []).forEach(m => {
+    if (!byGroup.has(m.group_id)) byGroup.set(m.group_id, []);
+    byGroup.get(m.group_id).push(m);
+  });
+  return (groups || []).map(g => ({ ...g, members: byGroup.get(g.id) || [] }));
+}
+
+async function createSalesGroup(data) {
+  const name = String(data?.name || '').trim();
+  if (!name) throw new Error('그룹명은 필수입니다');
+  const payload = {
+    name,
+    category: String(data.category || 'daeryepum'),
+    memo: data.memo || null,
+    created_by: data.created_by || null,
+  };
+  if (USE_SUPABASE) return sbInsert('bg_sales_groups', payload);
+  const list = readJson(FILES.salesGroups, []);
+  if (list.some(g => g.name === name && (g.category || 'daeryepum') === payload.category)) {
+    throw new Error('이미 존재하는 그룹명입니다');
+  }
+  const local = { id: uuid(), ...payload, created_at: now(), updated_at: now() };
+  list.push(local);
+  writeJson(FILES.salesGroups, list);
+  return local;
+}
+
+async function updateSalesGroup(id, data) {
+  if (!id) throw new Error('id 필수');
+  const patch = {};
+  if (data.name !== undefined) {
+    const nm = String(data.name).trim();
+    if (!nm) throw new Error('그룹명은 비울 수 없습니다');
+    patch.name = nm;
+  }
+  if (data.memo !== undefined) patch.memo = data.memo || null;
+  patch.updated_at = now();
+  if (USE_SUPABASE) return sbUpdate('bg_sales_groups', `id=eq.${encodeURIComponent(id)}`, patch);
+  const list = readJson(FILES.salesGroups, []);
+  const idx = list.findIndex(g => g.id === id);
+  if (idx < 0) throw new Error('그룹을 찾을 수 없습니다');
+  list[idx] = { ...list[idx], ...patch };
+  writeJson(FILES.salesGroups, list);
+  return list[idx];
+}
+
+/** 그룹 삭제 — 멤버도 함께 제거 (Supabase 는 FK ON DELETE CASCADE). */
+async function deleteSalesGroup(id) {
+  if (!id) throw new Error('id 필수');
+  if (USE_SUPABASE) {
+    await sbDelete('bg_sales_groups', `id=eq.${encodeURIComponent(id)}`);
+    return { ok: true };
+  }
+  writeJson(FILES.salesGroups, readJson(FILES.salesGroups, []).filter(g => g.id !== id));
+  writeJson(FILES.salesGroupMembers, readJson(FILES.salesGroupMembers, []).filter(m => m.group_id !== id));
+  return { ok: true };
+}
+
+/**
+ * 멤버 추가 (bulk). 이미 다른 그룹에 속한 (site,type,value) 는 그 그룹에서 옮겨온다
+ *   — UNIQUE(site_name, match_type, match_value) 제약과 일치시키기 위해 선삭제 후 삽입.
+ * members: [{ site_name, match_type, match_value, label }]
+ */
+async function addSalesGroupMembers(groupId, members, createdBy = null) {
+  if (!groupId) throw new Error('group_id 필수');
+  const rows = (Array.isArray(members) ? members : [])
+    .map(m => ({
+      group_id: groupId,
+      site_name: String(m.site_name ?? '').trim(),
+      match_type: m.match_type === 'name' ? 'name' : 'code',
+      match_value: String(m.match_value ?? '').trim(),
+      label: m.label ? String(m.label) : null,
+      created_by: createdBy,
+    }))
+    .filter(m => m.match_value);
+  if (!rows.length) return [];
+  // 중복 제거 (같은 요청 안에서)
+  const seen = new Set();
+  const uniq = rows.filter(r => {
+    const k = `${r.site_name}|${r.match_type}|${r.match_value}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  if (USE_SUPABASE) {
+    // 기존 소속 제거 후 삽입 (그룹 이동 허용)
+    for (const r of uniq) {
+      const f = `site_name=eq.${encodeURIComponent(r.site_name)}`
+        + `&match_type=eq.${encodeURIComponent(r.match_type)}`
+        + `&match_value=eq.${encodeURIComponent(r.match_value)}`;
+      try { await sbDelete('bg_sales_group_members', f); } catch { /* 없으면 무시 */ }
+    }
+    return sbInsert('bg_sales_group_members', uniq);
+  }
+  const list = readJson(FILES.salesGroupMembers, [])
+    .filter(m => !uniq.some(r => r.site_name === (m.site_name || '') && r.match_type === m.match_type && r.match_value === m.match_value));
+  const added = uniq.map(r => ({ id: uuid(), ...r, created_at: now() }));
+  writeJson(FILES.salesGroupMembers, list.concat(added));
+  return added;
+}
+
+async function removeSalesGroupMember(memberId) {
+  if (!memberId) throw new Error('member id 필수');
+  if (USE_SUPABASE) {
+    await sbDelete('bg_sales_group_members', `id=eq.${encodeURIComponent(memberId)}`);
+    return { ok: true };
+  }
+  writeJson(FILES.salesGroupMembers, readJson(FILES.salesGroupMembers, []).filter(m => m.id !== memberId));
+  return { ok: true };
+}
+
 module.exports = {
   getAllStickers,
   getStickerById,
@@ -1534,6 +1667,12 @@ module.exports = {
   logAlimtalkSend,
   getAlimtalkHistory,
   // 위탁업체 (Phase 1)
+  listSalesGroups,
+  createSalesGroup,
+  updateSalesGroup,
+  deleteSalesGroup,
+  addSalesGroupMembers,
+  removeSalesGroupMember,
   listVendors,
   getVendor,
   createVendor,

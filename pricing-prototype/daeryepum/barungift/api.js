@@ -893,6 +893,86 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   }
 
   // ============================================
+  // 매출 데이터 그룹 (migration 040)
+  //   매출 시트/상품 순위에서 여러 행을 하나의 그룹으로 묶어 합산 표시.
+  //   멤버 = (site_name, match_type 'code'|'name', match_value).
+  // ============================================
+  // GET /api/bg/sales-groups?category=daeryepum
+  if (pathname === '/api/bg/sales-groups' && method === 'GET') {
+    try {
+      const groups = await store.listSalesGroups({ category: query.category || null });
+      return json(res, { groups });
+    } catch (err) {
+      console.error('[sales-groups GET] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+  // POST /api/bg/sales-groups — 그룹 생성 (+ members 동시 등록 가능)
+  if (pathname === '/api/bg/sales-groups' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const email = session?.email || null;
+      const group = await store.createSalesGroup({ ...body, created_by: email });
+      let members = [];
+      if (Array.isArray(body.members) && body.members.length) {
+        members = await store.addSalesGroupMembers(group.id, body.members, email);
+      }
+      return json(res, { ...group, members }, 201);
+    } catch (err) {
+      console.error('[sales-groups POST] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  // PUT/DELETE /api/bg/sales-groups/:id
+  const salesGroupMatch = pathname.match(/^\/api\/bg\/sales-groups\/([^/]+)$/);
+  if (salesGroupMatch && method === 'PUT') {
+    try {
+      const body = await parseBody(req);
+      const group = await store.updateSalesGroup(decodeURIComponent(salesGroupMatch[1]), body);
+      return json(res, group);
+    } catch (err) {
+      console.error('[sales-groups PUT] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  if (salesGroupMatch && method === 'DELETE') {
+    try {
+      const result = await store.deleteSalesGroup(decodeURIComponent(salesGroupMatch[1]));
+      return json(res, result);
+    } catch (err) {
+      console.error('[sales-groups DELETE] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  // POST /api/bg/sales-groups/:id/members — 멤버 추가 (다른 그룹 소속이면 이동)
+  const salesGroupMembersMatch = pathname.match(/^\/api\/bg\/sales-groups\/([^/]+)\/members$/);
+  if (salesGroupMembersMatch && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const added = await store.addSalesGroupMembers(
+        decodeURIComponent(salesGroupMembersMatch[1]),
+        body.members || [],
+        session?.email || null,
+      );
+      return json(res, { members: added }, 201);
+    } catch (err) {
+      console.error('[sales-groups members POST] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  // DELETE /api/bg/sales-group-members/:id — 멤버 해제
+  const salesGroupMemberDelMatch = pathname.match(/^\/api\/bg\/sales-group-members\/([^/]+)$/);
+  if (salesGroupMemberDelMatch && method === 'DELETE') {
+    try {
+      const result = await store.removeSalesGroupMember(decodeURIComponent(salesGroupMemberDelMatch[1]));
+      return json(res, result);
+    } catch (err) {
+      console.error('[sales-group-members DELETE] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+
+  // ============================================
   // 위탁업체 (vendors) — Phase 1
   // ============================================
   // GET /api/bg/vendors?active_only=1

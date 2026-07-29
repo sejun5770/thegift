@@ -330,6 +330,9 @@ nav.nav-loading a[href^="#"] {
       <button class="btn btn-sm btn-primary" id="btn-view-card" onclick="setDashView('card')">카드 보기</button>
       <button class="btn btn-sm" id="btn-view-table" onclick="setDashView('table')">테이블 보기</button>
       <button class="btn btn-sm" id="btn-dash-download" onclick="downloadDashTableExcel()" style="display:none;border-color:#10b981;color:#047857" title="현재 테이블 내용을 엑셀로 다운로드">📥 엑셀</button>
+      <!-- 매출 그룹 — 상품별 매출 행을 체크해 하나의 그룹으로 묶어 합산 표시 -->
+      <button class="btn btn-sm btn-primary" id="sheet-group-btn" onclick="_sheetOpenGroupModal()" style="display:none">🔗 그룹으로 묶기 (<span id="sheet-sel-count">0</span>)</button>
+      <button class="btn btn-sm" id="btn-sheet-groups" onclick="openSalesGroupManager()" style="display:none" title="매출 그룹 관리">⚙️ 그룹</button>
     </div>
   </div>
   <div id="dash-card-view">
@@ -677,6 +680,10 @@ nav.nav-loading a[href^="#"] {
           <button class="btn btn-sm pr-sort" data-sort="qty" onclick="setPrSort('qty')" style="border:0;border-radius:0;padding:5px 10px">수량순</button>
           <button class="btn btn-sm pr-sort" data-sort="revenue" onclick="setPrSort('revenue')" style="border:0;border-radius:0;padding:5px 10px">매출순</button>
         </div>
+        <span style="color:var(--gray-300);margin:0 2px">|</span>
+        <!-- 매출 그룹 — 여러 행을 체크해 하나의 그룹으로 묶어 합산 표시 -->
+        <button class="btn btn-sm btn-primary" id="pr-group-btn" onclick="_prOpenGroupModal()" style="display:none;padding:5px 10px">🔗 그룹으로 묶기 (<span id="pr-sel-count">0</span>)</button>
+        <button class="btn btn-sm" onclick="openSalesGroupManager()" style="padding:5px 10px" title="매출 그룹 관리">⚙️ 그룹</button>
       </div>
     </div>
     <div class="card" style="padding:16px">
@@ -685,6 +692,7 @@ nav.nav-loading a[href^="#"] {
         <table id="pr-table" style="width:100%;border-collapse:collapse;font-size:13px;display:none">
           <thead>
             <tr style="border-bottom:2px solid var(--gray-200);text-align:left;color:var(--gray-500);font-size:12px">
+              <th style="padding:8px 6px;width:30px" title="매출 그룹으로 묶을 항목 선택"></th>
               <th style="padding:8px 10px;width:56px">순위</th>
               <th style="padding:8px 10px;width:64px">변동</th>
               <th style="padding:8px 10px">상품명</th>
@@ -4708,6 +4716,29 @@ function _prChangeBadge(rank, prevRank) {
   return `<span style="color:var(--gray-400)">-</span>`;
 }
 
+// 매출 그룹 묶기 — 순위표 선택 상태 관리
+let _prAllProducts = [];
+function _prSelChanged() {
+  const n = document.querySelectorAll('.pr-chk:checked').length;
+  const btn = document.getElementById('pr-group-btn');
+  const cnt = document.getElementById('pr-sel-count');
+  if (cnt) cnt.textContent = n;
+  if (btn) btn.style.display = n > 0 ? '' : 'none';
+}
+/** 체크된 순위 행 → 멤버 스펙 수집 후 그룹 모달 오픈 */
+function _prOpenGroupModal() {
+  const items = [];
+  document.querySelectorAll('.pr-chk:checked').forEach(chk => {
+    const p = _prAllProducts[Number(chk.dataset.idx)];
+    if (!p) return;
+    const ms = p.members || [];
+    if (ms.length) ms.forEach(m => items.push({ ...m, label: m.label || p.name }));
+    // members 없으면(코드 없는 행) 상품명 기준으로 등록
+    else if (p.name) items.push({ site_name: '', match_type: 'name', match_value: p.name, label: p.name });
+  });
+  openSalesGroupModal(items);
+}
+
 /** 상품 판매 순위 조회 + 렌더 (현재 기간 + 직전 기간 순위 비교 → 변동 컬럼) */
 async function loadProductRanking() {
   _prUpdateButtons();
@@ -4733,6 +4764,8 @@ async function loadProductRanking() {
     if (data.error) { $status.textContent = '오류: ' + data.error; $status.style.color = 'var(--red)'; return; }
     const allProducts = data.products || [];
     if (!allProducts.length) { $status.textContent = '해당 기간 판매 데이터가 없습니다'; $status.style.color = 'var(--gray-400)'; return; }
+    _prAllProducts = allProducts;   // 그룹 묶기 모달이 members 스펙 참조
+    _prSelChanged();                // 이전 선택 초기화 (재조회 시)
     const prevAll = (prevData && !prevData.error && Array.isArray(prevData.products)) ? prevData.products : [];
     const sortFn = (a, b) => (Number(b[sortBy]) || 0) - (Number(a[sortBy]) || 0);
 
@@ -4748,9 +4781,9 @@ async function loadProductRanking() {
       prevAll.filter(p => (p.scope || 'own') === g.key).sort(sortFn)
         .forEach((p, i) => prevRankByName.set(String(p.name || '').trim().toLowerCase(), i + 1));
       const totalBase = prods.reduce((s, p) => s + (Number(p[sortBy]) || 0), 0);
-      html += `<tr><td colspan="7" style="padding:9px 10px;background:${g.color}14;border-top:2px solid ${g.color};font-weight:700;color:${g.color};font-size:13px">${g.title} <span style="font-weight:400;color:var(--gray-400);font-size:11px">· ${prods.length}개 상품</span></td></tr>`;
+      html += `<tr><td colspan="8" style="padding:9px 10px;background:${g.color}14;border-top:2px solid ${g.color};font-weight:700;color:${g.color};font-size:13px">${g.title} <span style="font-weight:400;color:var(--gray-400);font-size:11px">· ${prods.length}개 상품</span></td></tr>`;
       if (!prods.length) {
-        html += `<tr><td colspan="7" style="padding:14px;text-align:center;color:var(--gray-400);font-size:12px">해당 기간 판매 없음</td></tr>`;
+        html += `<tr><td colspan="8" style="padding:14px;text-align:center;color:var(--gray-400);font-size:12px">해당 기간 판매 없음</td></tr>`;
         continue;
       }
       html += prods.map((p, i) => {
@@ -4760,7 +4793,9 @@ async function loadProductRanking() {
         const channels = (p.channels || []).join(', ');
         const nm = String(p.name || '').trim().toLowerCase();
         const prevRank = prevRankByName.has(nm) ? prevRankByName.get(nm) : null;
+        const gi = allProducts.indexOf(p);
         return `<tr style="border-bottom:1px solid var(--gray-100)">
+          <td style="padding:8px 6px;text-align:center"><input type="checkbox" class="pr-chk" data-idx="${gi}" onchange="_prSelChanged()"></td>
           <td style="padding:8px 10px;text-align:center;font-weight:600">${medal}</td>
           <td style="padding:8px 10px;text-align:center;font-size:12px">${_prChangeBadge(rank, prevRank)}</td>
           <td style="padding:8px 10px">${esc(p.name || '-')}</td>
@@ -6375,6 +6410,13 @@ async function loadDashboard() {
       })
       .catch(() => {});
   }
+  // 매출 데이터 그룹 (migration 040) — 운영자가 매출 화면에서 직접 묶은 그룹.
+  //   canonical(033) 보다 우선 적용. 매번 최신값 로드 (그룹 편집 직후 반영).
+  _loadSalesGroups().then(changed => {
+    if (changed && dashboardSummaryData && dashboardSummaryData.length) {
+      try { renderDashTable(); } catch (e) { console.warn('매출그룹 re-render 실패 (무시):', e); }
+    }
+  });
   // 하위 탭 재구성 — 섹션 태깅 후 활성 탭만 로드 (전체 Promise.all 제거로 경량화)
   _dashSectionLoaded.clear();
   _tagDashSections();
@@ -9348,9 +9390,12 @@ function setDashView(mode) {
   document.getElementById('dash-table-view').style.display = mode === 'table' ? '' : 'none';
   document.getElementById('btn-view-card').className = 'btn btn-sm' + (mode === 'card' ? ' btn-primary' : '');
   document.getElementById('btn-view-table').className = 'btn btn-sm' + (mode === 'table' ? ' btn-primary' : '');
-  // 엑셀 다운로드 버튼은 테이블 뷰에서만 노출
+  // 엑셀 다운로드 / 매출 그룹 버튼은 테이블 뷰에서만 노출
   const btnDl = document.getElementById('btn-dash-download');
   if (btnDl) btnDl.style.display = (mode === 'table') ? '' : 'none';
+  const btnGrp = document.getElementById('btn-sheet-groups');
+  if (btnGrp) btnGrp.style.display = (mode === 'table') ? '' : 'none';
+  if (mode !== 'table') { const b = document.getElementById('sheet-group-btn'); if (b) b.style.display = 'none'; }
   if (mode === 'table' && dashboardSummaryData.length > 0) renderDashTable();
 }
 
@@ -9437,7 +9482,219 @@ function _dashCanonicalCodeBase(rawCode) {
  *
  * bgProductSettings 를 window 전역에서 참조 (dashboard 페이지 로드 시 이미 채워짐).
  */
+// ─── 매출 데이터 그룹 (migration 040) ────────────────────────────────
+//   운영자가 매출 시트/상품 순위에서 직접 묶은 그룹. canonical(033) 보다 우선 적용.
+//   멤버 매칭 = (site_name, 'code'|'name', match_value). site_name '' = 전체 사이트.
+//   상품코드/상품명 기준이라 이후 매출이 새로 발생해도 그룹이 자동 유지된다.
+let bgSalesGroups = [];
+async function _loadSalesGroups() {
+  try {
+    const cat = (typeof dashCategory !== 'undefined' && dashCategory) ? dashCategory : 'daeryepum';
+    const r = await fetch(`${API}/api/bg/sales-groups?category=${encodeURIComponent(cat)}`);
+    if (!r.ok) return false;
+    const j = await r.json();
+    bgSalesGroups = j.groups || [];
+    window.bgSalesGroups = bgSalesGroups;
+    return true;
+  } catch { return false; }
+}
+
+/** 멤버 → 그룹명 lookup 인덱스. key: `${site}|${type}|${value(소문자)}` */
+function _buildSalesGroupIndex() {
+  const idx = new Map();
+  (window.bgSalesGroups || []).forEach(g => {
+    (g.members || []).forEach(m => {
+      const v = String(m.match_value || '').trim().toLowerCase();
+      if (!v) return;
+      idx.set(`${String(m.site_name || '').trim()}|${m.match_type}|${v}`, g.name);
+    });
+  });
+  return idx;
+}
+
+/** 매출 행 → 그룹명 (없으면 null). 사이트 지정 멤버 우선, 없으면 전체('') 멤버. */
+function _resolveSalesGroup(idx, site, code, name) {
+  if (!idx || !idx.size) return null;
+  const s = String(site || '').trim();
+  const c = String(code || '').trim().toLowerCase();
+  const raw = String(name || '').trim().toLowerCase();
+  const clean = _dashCleanName(String(name || '')).trim().toLowerCase();
+  const keys = [];
+  if (c) keys.push(`${s}|code|${c}`, `|code|${c}`);
+  [raw, clean].forEach(n => { if (n) keys.push(`${s}|name|${n}`, `|name|${n}`); });
+  for (const k of keys) { const g = idx.get(k); if (g) return g; }
+  return null;
+}
+
+// ─── 매출 그룹 묶기 모달 (매출 시트 / 상품 순위 공용) ──────────────────
+//   items: [{ site_name, match_type:'code'|'name', match_value, label }]
+let _sgPendingItems = [];
+function openSalesGroupModal(items) {
+  _sgPendingItems = (items || []).filter(i => i && i.match_value);
+  if (!_sgPendingItems.length) { showToast('선택된 항목이 없습니다'); return; }
+  let el = document.getElementById('sg-modal');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'sg-modal';
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+    el.onclick = e => { if (e.target === el) closeSalesGroupModal(); };
+    document.body.appendChild(el);
+  }
+  const groups = (window.bgSalesGroups || []);
+  const itemList = _sgPendingItems.map(i =>
+    `<div style="font-size:12px;color:var(--gray-700);padding:3px 0;border-bottom:1px solid var(--gray-100)">
+       ${esc(i.label || i.match_value)}
+       <span style="color:var(--gray-400);font-size:10px;margin-left:6px">${i.site_name ? esc(i.site_name) + ' · ' : ''}${i.match_type === 'code' ? '코드' : '상품명'} ${esc(i.match_value)}</span>
+     </div>`).join('');
+  el.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:560px;width:100%;max-height:86vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.2)" onclick="event.stopPropagation()">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--gray-200);display:flex;justify-content:space-between;align-items:center">
+        <strong style="font-size:15px">🔗 매출 그룹으로 묶기</strong>
+        <button class="btn btn-sm" onclick="closeSalesGroupModal()">닫기</button>
+      </div>
+      <div style="padding:16px 20px">
+        <div style="font-size:12px;color:var(--gray-500);margin-bottom:6px">선택한 매출 항목 ${_sgPendingItems.length}개</div>
+        <div style="max-height:150px;overflow:auto;border:1px solid var(--gray-200);border-radius:8px;padding:8px 10px;margin-bottom:16px">${itemList}</div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:6px">
+          <input type="radio" name="sg-mode" value="new" checked onchange="_sgToggleMode()"> 새 그룹 만들기
+        </label>
+        <input type="text" id="sg-new-name" placeholder="그룹명 (예: 송월 수건&주방타올 답례품 세트)"
+          style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px;margin-bottom:14px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:6px">
+          <input type="radio" name="sg-mode" value="exist" onchange="_sgToggleMode()" ${groups.length ? '' : 'disabled'}> 기존 그룹에 추가
+        </label>
+        <select id="sg-exist-id" disabled style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
+          ${groups.length ? groups.map(g => `<option value="${esc(g.id)}">${esc(g.name)} (${(g.members || []).length}개)</option>`).join('')
+                          : '<option>등록된 그룹 없음</option>'}
+        </select>
+        <div style="font-size:11px;color:var(--gray-500);margin-top:12px;line-height:1.6">
+          · 그룹명이 매출 시트·상품 순위에 대표 이름으로 표시되고 수량/매출이 합산됩니다.<br>
+          · 이후 같은 상품의 매출이 새로 발생해도 그룹이 자동 유지됩니다.<br>
+          · 이미 다른 그룹에 속한 항목은 이 그룹으로 이동합니다.
+        </div>
+      </div>
+      <div style="padding:12px 20px;border-top:1px solid var(--gray-200);display:flex;justify-content:space-between;align-items:center">
+        <button class="btn btn-sm" onclick="openSalesGroupManager()">⚙️ 그룹 관리</button>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm" onclick="closeSalesGroupModal()">취소</button>
+          <button class="btn btn-sm btn-primary" onclick="_sgSubmit()">저장</button>
+        </div>
+      </div>
+    </div>`;
+  el.style.display = 'flex';
+}
+function closeSalesGroupModal() {
+  const el = document.getElementById('sg-modal');
+  if (el) el.style.display = 'none';
+}
+function _sgToggleMode() {
+  const isNew = document.querySelector('input[name="sg-mode"][value="new"]')?.checked;
+  const nameEl = document.getElementById('sg-new-name');
+  const selEl = document.getElementById('sg-exist-id');
+  if (nameEl) nameEl.disabled = !isNew;
+  if (selEl) selEl.disabled = !!isNew;
+}
+async function _sgSubmit() {
+  const isNew = document.querySelector('input[name="sg-mode"][value="new"]')?.checked;
+  try {
+    if (isNew) {
+      const name = (document.getElementById('sg-new-name')?.value || '').trim();
+      if (!name) { showToast('그룹명을 입력해주세요'); return; }
+      const r = await fetch(`${API}/api/bg/sales-groups`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, category: dashCategory || 'daeryepum', members: _sgPendingItems }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || '그룹 생성 실패');
+    } else {
+      const gid = document.getElementById('sg-exist-id')?.value;
+      if (!gid) { showToast('그룹을 선택해주세요'); return; }
+      const r = await fetch(`${API}/api/bg/sales-groups/${encodeURIComponent(gid)}/members`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ members: _sgPendingItems }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || '멤버 추가 실패');
+    }
+    closeSalesGroupModal();
+    showToast('그룹이 저장되었습니다');
+    await _sgRefreshViews();
+  } catch (e) {
+    showToast('저장 실패: ' + e.message);
+  }
+}
+/** 그룹 변경 후 관련 화면 갱신 (시트 + 순위) */
+async function _sgRefreshViews() {
+  await _loadSalesGroups();
+  try { if (dashboardSummaryData && dashboardSummaryData.length) renderDashTable(); } catch {}
+  try { if (typeof loadProductRanking === 'function' && document.getElementById('pr-tbody')) loadProductRanking(); } catch {}
+}
+/** 그룹 관리 — 목록 / 이름변경 / 멤버해제 / 삭제 */
+async function openSalesGroupManager() {
+  await _loadSalesGroups();
+  const groups = window.bgSalesGroups || [];
+  let el = document.getElementById('sg-modal');
+  if (!el) { el = document.createElement('div'); el.id = 'sg-modal'; document.body.appendChild(el); }
+  el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  el.onclick = e => { if (e.target === el) closeSalesGroupModal(); };
+  const body = groups.length ? groups.map(g => `
+    <div style="border:1px solid var(--gray-200);border-radius:8px;padding:10px 12px;margin-bottom:10px">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+        <input type="text" value="${esc(g.name)}" id="sg-nm-${esc(g.id)}"
+          style="flex:1;padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;font-weight:600">
+        <button class="btn btn-sm" onclick="_sgRename('${esc(g.id)}')">이름변경</button>
+        <button class="btn btn-sm" style="color:#dc2626;border-color:#fecaca" onclick="_sgDelete('${esc(g.id)}')">삭제</button>
+      </div>
+      ${(g.members || []).length ? (g.members || []).map(m => `
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--gray-600);padding:3px 0;border-top:1px solid var(--gray-100)">
+          <span>${esc(m.label || m.match_value)}
+            <span style="color:var(--gray-400);margin-left:6px">${m.site_name ? esc(m.site_name) + ' · ' : ''}${m.match_type === 'code' ? '코드' : '상품명'} ${esc(m.match_value)}</span>
+          </span>
+          <button class="btn btn-sm" style="padding:1px 6px;font-size:10px" onclick="_sgRemoveMember('${esc(m.id)}')">해제</button>
+        </div>`).join('') : '<div style="font-size:11px;color:var(--gray-400);padding:4px 0">멤버 없음</div>'}
+    </div>`).join('') : '<div style="text-align:center;color:var(--gray-400);padding:30px;font-size:13px">등록된 그룹이 없습니다</div>';
+  el.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:640px;width:100%;max-height:86vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.2)" onclick="event.stopPropagation()">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--gray-200);display:flex;justify-content:space-between;align-items:center">
+        <strong style="font-size:15px">⚙️ 매출 그룹 관리</strong>
+        <button class="btn btn-sm" onclick="closeSalesGroupModal()">닫기</button>
+      </div>
+      <div style="padding:16px 20px">${body}</div>
+    </div>`;
+  el.style.display = 'flex';
+}
+async function _sgRename(id) {
+  const name = (document.getElementById('sg-nm-' + id)?.value || '').trim();
+  if (!name) { showToast('그룹명을 입력해주세요'); return; }
+  try {
+    const r = await fetch(`${API}/api/bg/sales-groups/${encodeURIComponent(id)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+    });
+    if (!r.ok) throw new Error((await r.json()).error || '실패');
+    showToast('그룹명이 변경되었습니다');
+    await _sgRefreshViews(); await openSalesGroupManager();
+  } catch (e) { showToast('변경 실패: ' + e.message); }
+}
+async function _sgDelete(id) {
+  if (!confirm('그룹을 삭제할까요? 묶여 있던 항목들은 다시 개별 표시됩니다.')) return;
+  try {
+    const r = await fetch(`${API}/api/bg/sales-groups/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error((await r.json()).error || '실패');
+    showToast('그룹이 삭제되었습니다');
+    await _sgRefreshViews(); await openSalesGroupManager();
+  } catch (e) { showToast('삭제 실패: ' + e.message); }
+}
+async function _sgRemoveMember(mid) {
+  try {
+    const r = await fetch(`${API}/api/bg/sales-group-members/${encodeURIComponent(mid)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error((await r.json()).error || '실패');
+    await _sgRefreshViews(); await openSalesGroupManager();
+  } catch (e) { showToast('해제 실패: ' + e.message); }
+}
+
 function buildDashCanonicalMap(rows) {
+  // 0) 매출 데이터 그룹 (migration 040) — 최우선. 여기서 잡히면 그룹명 그대로 사용.
+  const salesGroupIdx = _buildSalesGroupIndex();
   // 1) product_code → canonical_group_key / canonical_display_name lookup 구축
   const settingsByCode = new Map();
   const settingsByBase = new Map();  // base code fallback (변형 코드 → base 매핑 편의)
@@ -9480,7 +9737,10 @@ function buildDashCanonicalMap(rows) {
   });
 
   // 4) row → canonical name resolver
-  return function resolve(r) {
+  function resolve(r) {
+    // 0순위: 매출 데이터 그룹 (운영자가 매출 화면에서 직접 묶은 것)
+    const sg = _resolveSalesGroup(salesGroupIdx, r.site_name, r.card_code, r.card_name);
+    if (sg) return sg;
     const s = settingsByCode.get(r.card_code) || settingsByBase.get(_dashCanonicalCodeBase(r.card_code || ''));
     if (s?.canonical_group_key) {
       return groupDisplay.get(s.canonical_group_key) || s.canonical_display_name
@@ -9488,7 +9748,46 @@ function buildDashCanonicalMap(rows) {
     }
     const base = _dashCanonicalCodeBase(r.card_code || '') || `nm:${_dashCleanName(r.card_name||'')}`;
     return byBase.get(base)?.canonicalName || _dashCleanName(r.card_name || '') || (r.card_name || '');
-  };
+  }
+
+  // 5) 그룹 묶기 UI 용 — 시트 표시명 → 멤버 스펙 수집.
+  //    코드 있는 행은 code 매칭, 없는 행(마켓 등)은 사이트+상품명 매칭.
+  const memberMap = new Map();
+  rows.forEach(r => {
+    const nm = resolve(r);
+    if (!nm) return;
+    const code = String(r.card_code || '').trim();
+    const spec = code
+      ? { site_name: '', match_type: 'code', match_value: code, label: r.card_name || code }
+      : (r.card_name ? { site_name: String(r.site_name || '').trim(), match_type: 'name', match_value: r.card_name, label: r.card_name } : null);
+    if (!spec) return;
+    if (!memberMap.has(nm)) memberMap.set(nm, new Map());
+    const mk = `${spec.site_name}|${spec.match_type}|${spec.match_value}`;
+    if (!memberMap.get(nm).has(mk)) memberMap.get(nm).set(mk, spec);
+  });
+  window._sheetGroupMembers = memberMap;
+
+  return resolve;
+}
+
+// 매출 시트 — 상품별 매출 행 선택 → 그룹 묶기
+function _sheetSelChanged() {
+  const n = document.querySelectorAll('.sheet-chk:checked').length;
+  const btn = document.getElementById('sheet-group-btn');
+  const cnt = document.getElementById('sheet-sel-count');
+  if (cnt) cnt.textContent = n;
+  if (btn) btn.style.display = n > 0 ? '' : 'none';
+}
+function _sheetOpenGroupModal() {
+  const items = [];
+  const mm = window._sheetGroupMembers || new Map();
+  document.querySelectorAll('.sheet-chk:checked').forEach(chk => {
+    const nm = chk.dataset.name;
+    const specs = mm.get(nm);
+    if (specs && specs.size) specs.forEach(s => items.push(s));
+    else if (nm) items.push({ site_name: '', match_type: 'name', match_value: nm, label: nm });
+  });
+  openSalesGroupModal(items);
 }
 
 function getTopProducts(data) {
@@ -9785,7 +10084,7 @@ function renderDailyTable(data, topProducts) {
     const label = p.length > 16 ? p.slice(0,16)+'…' : p;
     const bg = i % 2 === 0 ? '#fff' : '#fafafa';
     return `<tr>
-      <td style="${STICKY}background:${bg};font-size:12px;color:var(--gray-700);padding-left:16px;white-space:nowrap">${label}</td>
+      <td style="${STICKY}background:${bg};font-size:12px;color:var(--gray-700);padding-left:8px;white-space:nowrap"><input type="checkbox" class="sheet-chk" data-name="${esc(p)}" onchange="_sheetSelChanged()" style="margin-right:5px;vertical-align:middle" title="매출 그룹으로 묶기">${label}</td>
       ${pCells}
       <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${pTotal ? fmtKRW(pTotal)+' <span style="color:var(--gray-500)">('+pPct+'%, '+fmtNum(pTotalQty)+'개)</span>' : '-'}</td>
     </tr>`;
@@ -10159,7 +10458,7 @@ function renderWeeklyTable(data, topProducts) {
     const label = p.length > 16 ? p.slice(0,16)+'…' : p;
     const bg = i % 2 === 0 ? '#fff' : '#fafafa';
     return `<tr>
-      <td style="${STICKY}background:${bg};font-size:12px;color:var(--gray-700);padding-left:16px;white-space:nowrap">${label}</td>
+      <td style="${STICKY}background:${bg};font-size:12px;color:var(--gray-700);padding-left:8px;white-space:nowrap"><input type="checkbox" class="sheet-chk" data-name="${esc(p)}" onchange="_sheetSelChanged()" style="margin-right:5px;vertical-align:middle" title="매출 그룹으로 묶기">${label}</td>
       ${pCells}
       <td class="num" style="background:#fef9c3;font-size:12px;border-left:2px solid var(--gray-200)">${pTotal ? fmtKRW(pTotal)+' <span style="color:var(--gray-500)">('+pPct+'%, '+fmtNum(pTotalQty)+'개)</span>' : '-'}</td>
     </tr>`;

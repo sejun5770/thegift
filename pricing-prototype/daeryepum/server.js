@@ -1564,10 +1564,48 @@ async function apiProductStats(query) {
  * 병합 키: 정규화 상품명(선행 [..] 프리픽스 제거 + trim, 소문자). MSSQL·마켓 전부 합산.
  * 반환: { period, products:[{name, qty, revenue, channels[]}], totals:{qty,revenue} } (qty 내림차순)
  */
+/**
+ * 매출 데이터 그룹 (migration 040) lookup 인덱스.
+ *   byCode: 상품코드(소문자) → 그룹명       — 자사(코드 있는) 매출 행
+ *   byName: `${site}|${상품명(소문자)}` → 그룹명, site '' 는 전체 사이트
+ * 조회 실패해도 빈 인덱스 반환 (그룹 미적용으로 fallback).
+ */
+async function _loadSalesGroupIndex(category = 'daeryepum') {
+  const empty = { byCode: new Map(), byName: new Map() };
+  try {
+    const REST = process.env.SUPABASE_URL ? `${process.env.SUPABASE_URL}/rest/v1` : null;
+    if (!REST) return empty;
+    const hdr = { apikey: process.env.SUPABASE_ANON_KEY, Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}` };
+    const [gRes, mRes] = await Promise.all([
+      fetch(`${REST}/bg_sales_groups?select=id,name,category&category=eq.${encodeURIComponent(category)}`, { headers: hdr }),
+      fetch(`${REST}/bg_sales_group_members?select=group_id,site_name,match_type,match_value&limit=5000`, { headers: hdr }),
+    ]);
+    if (!gRes.ok || !mRes.ok) return empty;
+    const groups = await gRes.json();
+    const members = await mRes.json();
+    const nameById = new Map((groups || []).map(g => [g.id, g.name]));
+    for (const m of (members || [])) {
+      const gName = nameById.get(m.group_id);
+      if (!gName) continue;                       // 다른 카테고리 그룹
+      const v = String(m.match_value || '').trim().toLowerCase();
+      if (!v) continue;
+      if (m.match_type === 'code') empty.byCode.set(v, gName);
+      else empty.byName.set(`${String(m.site_name || '').trim()}|${v}`, gName);
+    }
+    return empty;
+  } catch (e) {
+    console.warn('[sales-groups] 인덱스 로드 실패 (무시):', e.message);
+    return empty;
+  }
+}
+
 async function apiProductRanking(query = {}) {
   const startStr = query.start_date;
   const endStr = query.end_date;
   if (!startStr || !endStr) return { error: 'start_date and end_date required' };
+
+  // 매출 데이터 그룹 — 운영자가 묶은 그룹은 이름/코드 규칙보다 우선 적용.
+  const sgIndex = await _loadSalesGroupIndex(query.category || 'daeryepum');
 
   // end exclusive (+1일) — MSSQL order_date < @e / 마켓 store endStr(lt) 공통.
   const endPlus = fmtDate(addDays(new Date(endStr + 'T00:00:00'), 1));
@@ -1592,17 +1630,36 @@ async function apiProductRanking(query = {}) {
   //   scope 'own'    : 자사(바른손카드/바른손몰/더기프트) — normName 으로 병합(규격 접미사까지 통일).
   //   scope 'market' : 외부 마켓(네이버/쿠팡/정수당) — 상품명이 마케팅 롱타이틀이라 자사와 표기가 달라,
   //                    자사 상품과 섞이지 않도록 'M|' 네임스페이스로 분리(= 카드와 별도 행 유지).
-  function addEntry(rawName, qty, revenue, channelLabel, scope = 'own') {
+  function addEntry(rawName, qty, revenue, channelLabel, scope = 'own', memberSpec = null) {
     const display = scope === 'own'
       ? (normName(rawName) || cleanName(rawName) || String(rawName || '').trim())
       : (cleanName(rawName) || String(rawName || '').trim());
     if (!display) return;
     const key = (scope === 'own' ? 'O|' : 'M|') + display.toLowerCase();
-    if (!byName.has(key)) byName.set(key, { name: display, qty: 0, revenue: 0, channels: new Set(), scope });
+    if (!byName.has(key)) byName.set(key, { name: display, qty: 0, revenue: 0, channels: new Set(), scope, members: new Map() });
     const e = byName.get(key);
     e.qty += Number(qty) || 0;
     e.revenue += Number(revenue) || 0;
     if (channelLabel) e.channels.add(channelLabel);
+    // 이 행을 매출 그룹에 담을 때 쓸 멤버 스펙 (프론트 '그룹으로 묶기' 가 그대로 전송).
+    if (memberSpec && memberSpec.match_value) {
+      const mk = `${memberSpec.site_name || ''}|${memberSpec.match_type}|${memberSpec.match_value}`;
+      if (!e.members.has(mk)) e.members.set(mk, { ...memberSpec, label: memberSpec.label || display });
+    }
+  }
+
+  /** 상품명 → 매출 그룹명 (사이트 지정 멤버 우선 → 전체 사이트 멤버). 없으면 null. */
+  function groupForName(site, rawName) {
+    if (!sgIndex.byName.size) return null;
+    const s = String(site || '').trim();
+    const n = String(rawName || '').trim().toLowerCase();
+    const c = cleanName(rawName).trim().toLowerCase();
+    for (const v of [n, c]) {
+      if (!v) continue;
+      const hit = sgIndex.byName.get(`${s}|${v}`) || sgIndex.byName.get(`|${v}`);
+      if (hit) return hit;
+    }
+    return null;
   }
 
   // ── 1) MSSQL (CARD + ETC, 답례품만) ──────────────────────────────
@@ -1661,8 +1718,17 @@ async function apiProductRanking(query = {}) {
     // toBase 로 변형 코드(_A/_B) 를 base 로 묶어 이름 선택 후 addEntry (최종 병합은 상품명 기준).
     const baseAgg = new Map(); // base code → { name, qty, revenue }
     for (const r of [...cardQ.recordset, ...etcQ.recordset]) {
+      // 매출 그룹(migration 040) 에 담긴 코드는 그룹명으로 바로 합산 — base/이름 규칙보다 우선.
+      const gName = sgIndex.byCode.get(String(r.card_code || '').trim().toLowerCase())
+        || sgIndex.byCode.get(String(toBase(r.card_code) || '').trim().toLowerCase());
+      const mSpec = { site_name: '', match_type: 'code', match_value: r.card_code, label: r.card_name };
+      if (gName) {
+        addEntry(gName, Number(r.qty) || 0, Math.round(Number(r.amount) || 0), 'card', 'own', mSpec);
+        continue;
+      }
       const base = toBase(r.card_code) || r.card_code;
-      if (!baseAgg.has(base)) baseAgg.set(base, { name: null, qty: 0, revenue: 0 });
+      if (!baseAgg.has(base)) baseAgg.set(base, { name: null, qty: 0, revenue: 0, specs: [] });
+      baseAgg.get(base).specs.push(mSpec);
       const b = baseAgg.get(base);
       // 가장 깔끔한(프리픽스 없는) 이름 우선
       if (r.card_name) {
@@ -1675,7 +1741,8 @@ async function apiProductRanking(query = {}) {
       b.revenue += Number(r.amount) || 0;
     }
     for (const b of baseAgg.values()) {
-      addEntry(b.name, b.qty, Math.round(b.revenue), 'card');
+      // base 하나에 여러 코드(변형)가 묶일 수 있어 각 코드를 멤버 후보로 모두 전달.
+      (b.specs || []).forEach((sp, i) => addEntry(b.name, i === 0 ? b.qty : 0, i === 0 ? Math.round(b.revenue) : 0, 'card', 'own', sp));
     }
   } catch (e) {
     console.warn('[product-ranking] MSSQL 집계 실패 (무시):', e.message);
@@ -1692,7 +1759,10 @@ async function apiProductRanking(query = {}) {
       const rows = await loader();
       for (const r of (rows || [])) {
         if (r.status && CANCELLED_STATUS.has(String(r.status).toUpperCase())) continue;
-        addEntry(r.product_name, r.item_count, r.item_total_price, label, 'market');
+        // 매출 그룹에 담긴 마켓 상품명은 그룹명으로 합산 (사이트 지정 멤버 우선, 없으면 전체).
+        addEntry(groupForName(label, r.product_name) || r.product_name,
+          r.item_count, r.item_total_price, label, 'market',
+          { site_name: label, match_type: 'name', match_value: r.product_name, label: r.product_name });
       }
     } catch (e) {
       console.warn(`[product-ranking] ${label} 집계 실패 (무시):`, e.message);
@@ -1716,7 +1786,13 @@ async function apiProductRanking(query = {}) {
         const qty = Number(it.quantity) || 0;
         const amt = Number(it.item_amount) || (Number(it.unit_price) || 0) * qty;
         if (!it.product_name && !qty && !amt) continue;
-        addEntry(it.product_name, qty, amt, '더기프트');
+        // 매출 그룹 — 상품코드 매칭 우선, 없으면 (사이트 더기프트 + 상품명) 매칭.
+        const gName = sgIndex.byCode.get(String(it.product_code || '').trim().toLowerCase())
+          || groupForName('더기프트', it.product_name);
+        const mSpec = it.product_code
+          ? { site_name: '', match_type: 'code', match_value: it.product_code, label: it.product_name }
+          : { site_name: '더기프트', match_type: 'name', match_value: it.product_name, label: it.product_name };
+        addEntry(gName || it.product_name, qty, amt, '더기프트', 'own', mSpec);
       }
     }
   } catch (e) {
@@ -1725,7 +1801,11 @@ async function apiProductRanking(query = {}) {
 
   // ── 4) 결과 정리 — qty 내림차순 ─────────────────────────────────
   const products = [...byName.values()]
-    .map(e => ({ name: e.name, qty: e.qty, revenue: Math.round(e.revenue), channels: [...e.channels], scope: e.scope }))
+    .map(e => ({
+      name: e.name, qty: e.qty, revenue: Math.round(e.revenue),
+      channels: [...e.channels], scope: e.scope,
+      members: [...e.members.values()],   // '그룹으로 묶기' 용 멤버 스펙
+    }))
     .sort((a, b) => b.qty - a.qty);
 
   const totals = {
