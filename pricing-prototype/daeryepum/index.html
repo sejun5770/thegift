@@ -18325,33 +18325,61 @@ async function loadBgEditAuditLog(orderId) {
       view: '👁️', submit: '✏️', reset: '🔄', not_found: '❓',
       search: '🔍', login_success: '🔑', login_fail: '🚫',
       rate_limited: '🚦', invalid_signature: '⚠️',
+      mark_processed: '✅', unmark_processed: '↩️',
+      mark_processed_batch: '✅', unmark_processed_batch: '↩️',
+      alimtalk_send_start: '📨', alimtalk_send_done: '📨', alimtalk_send_error: '📨',
+      alimtalk_sp_reset: '📨', debug_schema: '🔧',
     };
     const actionLabel = {
       view: '조회', submit: '제출', reset: '초기화', not_found: '찾을수없음',
       search: '검색', login_success: '로그인성공', login_fail: '로그인실패',
       rate_limited: '요청제한초과', invalid_signature: '서명오류',
+      mark_processed: '처리 완료', unmark_processed: '처리 해제',
+      mark_processed_batch: '일괄 처리 완료', unmark_processed_batch: '일괄 처리 해제',
+      alimtalk_send_start: '알림톡 발송 시작', alimtalk_send_done: '알림톡 발송 완료',
+      alimtalk_send_error: '알림톡 발송 오류', alimtalk_sp_reset: '알림톡 상태 초기화',
+      debug_schema: '스키마 점검',
+    };
+    // HTTP 상태코드 → 한글 (200번대 = 정상)
+    const statusLabel = (code) => {
+      if (!code) return '-';
+      if (code >= 200 && code < 300) return '정상';
+      const map = { 400: '잘못된 요청', 401: '인증 필요', 403: '권한 없음', 404: '찾을 수 없음', 409: '충돌', 429: '요청 제한' };
+      if (map[code]) return map[code];
+      if (code >= 500) return '서버 오류';
+      return `오류(${code})`;
+    };
+    // 사용자 표시 — metadata 의 actor(관리자 이메일) 우선, 없으면 이메일 형태 값 탐색, 그래도 없으면 '고객'
+    //   (view/submit 은 고객 페이지 접근이라 actor 가 없음)
+    const actorOf = (meta) => {
+      if (!meta || typeof meta !== 'object') return '고객';
+      if (typeof meta.actor === 'string' && meta.actor.includes('@')) return meta.actor;
+      for (const v of Object.values(meta)) {
+        if (typeof v === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return v;
+      }
+      return '고객';
     };
     $log.innerHTML = '<table style="width:100%;border-collapse:collapse">'
       + '<thead><tr style="border-bottom:1px solid var(--gray-200);color:var(--gray-500);font-size:10px">'
       + '<th style="text-align:left;padding:4px 6px">시각</th>'
       + '<th style="text-align:left;padding:4px 6px">이벤트</th>'
       + '<th style="text-align:left;padding:4px 6px">상태</th>'
-      + '<th style="text-align:left;padding:4px 6px">IP 해시</th>'
-      + '<th style="text-align:left;padding:4px 6px">메타</th>'
+      + '<th style="text-align:left;padding:4px 6px">사용자</th>'
       + '</tr></thead><tbody>'
       + logs.map(l => {
           const d = l.created_at ? new Date(l.created_at).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '-';
           const emoji = actionEmoji[l.action] || '•';
           const label = actionLabel[l.action] || l.action;
-          const statusColor = l.status_code >= 400 ? '#dc2626' : (l.status_code >= 200 ? '#16a34a' : 'var(--gray-500)');
-          const ipShort = (l.ip_hash || '').slice(0, 8);
+          const ok = l.status_code >= 200 && l.status_code < 300;
+          const statusColor = l.status_code >= 400 ? '#dc2626' : (ok ? '#16a34a' : 'var(--gray-500)');
+          // 세부 메타는 툴팁으로만 유지 (감사 추적용)
           const metaPretty = l.metadata ? Object.entries(l.metadata).filter(([,v])=>v!==null&&v!==undefined&&v!=='').map(([k,v])=>`${k}=${typeof v==='object'?JSON.stringify(v):v}`).join(', ') : '';
+          const actor = actorOf(l.metadata);
           return `<tr style="border-bottom:1px solid var(--gray-100);font-size:10px">
             <td style="padding:4px 6px;white-space:nowrap;color:var(--gray-600)">${d}</td>
-            <td style="padding:4px 6px">${emoji} ${label}</td>
-            <td style="padding:4px 6px;color:${statusColor};font-family:monospace">${l.status_code || '-'}</td>
-            <td style="padding:4px 6px;font-family:monospace;color:var(--gray-500)" title="${l.ip_hash || ''}">${ipShort}…</td>
-            <td style="padding:4px 6px;color:var(--gray-500);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${metaPretty}">${metaPretty}</td>
+            <td style="padding:4px 6px;white-space:nowrap">${emoji} ${label}</td>
+            <td style="padding:4px 6px;color:${statusColor}" title="HTTP ${l.status_code || '-'}">${statusLabel(l.status_code)}</td>
+            <td style="padding:4px 6px;color:var(--gray-600);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${metaPretty}">${actor === '고객' ? '<span style="color:var(--gray-400)">고객</span>' : actor}</td>
           </tr>`;
         }).join('')
       + '</tbody></table>';
