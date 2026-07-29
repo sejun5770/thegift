@@ -1811,12 +1811,12 @@ async function apiProductRanking(query = {}) {
   try {
     const p = await getPool();
 
-    // CARD (바른손카드 custom_order) — GROUP BY card_code, 금액/status 는 apiProductStats 와 동일.
+    // CARD (바른손카드 custom_order) — 라인 단위 조회 (세트 재구성용).
     const cardQ = await p.request()
       .input('s', sql.VarChar, startStr)
       .input('e', sql.VarChar, endPlus)
       .query(`
-        SELECT c.Card_Code AS card_code, MAX(c.Card_Name) AS card_name,
+        SELECT co.order_seq, c.Card_Code AS card_code, c.Card_Name AS card_name,
                SUM(coi.item_count) AS qty,
                -- item_sale_price = 단가 → 항상 수량 곱 (2026-07-29 수정, 위 apiProductStats 동일)
                SUM(CAST(coi.item_sale_price AS float) * coi.item_count
@@ -1828,15 +1828,15 @@ async function apiProductRanking(query = {}) {
         WHERE ${D01_FILTER}
           AND co.order_date >= @s AND co.order_date < @e
           AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
-        GROUP BY c.Card_Code
+        GROUP BY co.order_seq, c.Card_Code, c.Card_Name
       `);
 
-    // ETC (바른손몰 CUSTOM_ETC_ORDER) — coupon 차감, status NOT IN (3,5,15).
+    // ETC (바른손몰 CUSTOM_ETC_ORDER) — 라인 단위 조회 (세트 재구성용), coupon 차감.
     const etcQ = await p.request()
       .input('s', sql.VarChar, startStr)
       .input('e', sql.VarChar, endPlus)
       .query(`
-        SELECT c.Card_Code AS card_code, MAX(c.Card_Name) AS card_name,
+        SELECT o.order_seq, c.Card_Code AS card_code, c.Card_Name AS card_name,
                SUM(ei.order_count) AS qty,
                SUM(
                  CASE WHEN si.SiteName IS NULL
@@ -1853,21 +1853,62 @@ async function apiProductRanking(query = {}) {
         WHERE ${D01_FILTER}
           AND o.order_date >= @s AND o.order_date < @e
           AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
-        GROUP BY c.Card_Code
+        GROUP BY o.order_seq, c.Card_Code, c.Card_Name
       `);
+
+    // ── 세트 재구성 (바른손몰 옵션구성 세트 주문) ───────────────────────
+    //   바른손몰 세트 주문은 [유료 구성품 라인들 + 0원 세트 라벨 라인] 으로 기록된다.
+    //     예) "수건&주방타올 세트" 150세트 = 수건무지40 150개(58.5만) + 스퀘어34 150개(46.5만)
+    //         + 세트라벨 150개(0원)
+    //   그대로 코드 집계하면 ① 0원 라벨 수량이 허수로 잡혀 객단가 왜곡,
+    //   ② 구성품 코드(스퀘어34 등)가 여러 세트 공용이라 매출이 엉뚱한 상품/그룹에 배분,
+    //   ③ 구성품 낱개명(고리수건_엑스34)으로 표시돼 그룹화가 애매해짐.
+    //   → 주문 안에 0원 세트 라벨이 정확히 1종이면: 유료 라인 매출 전부를 세트명으로 귀속,
+    //     수량은 라벨 수량(=세트 수) 사용. 라벨이 없거나 2종 이상(배분 모호)이면 현행 유지.
+    const reconstructSets = (lines) => {
+      const byOrder = new Map();
+      lines.forEach(r => {
+        if (!byOrder.has(r.order_seq)) byOrder.set(r.order_seq, []);
+        byOrder.get(r.order_seq).push(r);
+      });
+      const out = [];
+      for (const rows of byOrder.values()) {
+        const labels = rows.filter(r => Math.round(Number(r.amount) || 0) === 0
+          && (Number(r.qty) || 0) > 0 && /세트/.test(String(r.card_name || '')));
+        const labelCodes = new Set(labels.map(l => l.card_code));
+        const labelQty = labels.reduce((s, l) => s + (Number(l.qty) || 0), 0);
+        const paid = rows.filter(r => !labels.includes(r));
+        // 안전장치: 유료 라인 수량이 라벨 수량을 초과하면(세트와 무관한 단독 상품 혼재 의심)
+        //   귀속이 모호하므로 재구성하지 않고 현행 유지.
+        const ambiguous = paid.some(r => (Number(r.qty) || 0) > labelQty);
+        if (labels.length && labelCodes.size === 1 && labelQty > 0 && paid.length && !ambiguous) {
+          const label = labels[0];
+          const rev = paid.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+          out.push({ card_code: label.card_code, card_name: label.card_name,
+            qty: labelQty, amount: rev, _setRecon: true });
+        } else {
+          out.push(...rows);
+        }
+      }
+      return out;
+    };
+    const mssqlRows = reconstructSets([...cardQ.recordset, ...etcQ.recordset]);
 
     // toBase 로 변형 코드(_A/_B) 를 base 로 묶어 이름 선택 후 addEntry (최종 병합은 상품명 기준).
     const baseAgg = new Map(); // base code → { name, qty, revenue }
-    for (const r of [...cardQ.recordset, ...etcQ.recordset]) {
+    for (const r of mssqlRows) {
       // 매출 그룹(migration 040) 에 담긴 코드는 그룹명으로 바로 합산 — base/이름 규칙보다 우선.
+      //   재구성된 세트 행(_setRecon)은 라벨 코드가 구성품 코드 계열(TGJBK09O6_A 등)이라
+      //   BASE 폴백을 쓰면 엉뚱한 구성품 그룹에 붙을 수 있음 → 정확 일치만 허용.
       const gName = sgIndex.byCode.get(String(r.card_code || '').trim().toLowerCase())
-        || sgIndex.byCode.get(String(toBase(r.card_code) || '').trim().toLowerCase());
+        || (r._setRecon ? null : sgIndex.byCode.get(String(toBase(r.card_code) || '').trim().toLowerCase()));
       const mSpec = { site_name: '', match_type: 'code', match_value: r.card_code, label: r.card_name };
       if (gName) {
         addEntry(gName, Number(r.qty) || 0, Math.round(Number(r.amount) || 0), 'card', 'own', mSpec);
         continue;
       }
-      const base = toBase(r.card_code) || r.card_code;
+      // 재구성 세트는 라벨 코드 그대로 (BASE 병합 시 구성품 낱개 행과 뭉치는 것 방지)
+      const base = r._setRecon ? r.card_code : (toBase(r.card_code) || r.card_code);
       if (!baseAgg.has(base)) baseAgg.set(base, { name: null, qty: 0, revenue: 0, specs: [] });
       baseAgg.get(base).specs.push(mSpec);
       const b = baseAgg.get(base);
