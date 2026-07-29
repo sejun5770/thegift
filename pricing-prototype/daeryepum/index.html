@@ -17308,7 +17308,11 @@ function resolveBgMappedProductCode(rawCode) {
   if (!rawCode) return rawCode || '';
   let cur = String(rawCode);
   for (let i = 0; i < 3; i++) {
-    const m = cur.match(/^(.+)_[A-Za-z0-9]+$/);
+    // 변형 접미사는 '단일 영문자'(_A/_B/_C) 만 제거한다.
+    //   기존 /_[A-Za-z0-9]+$/ + 3회 반복은 코드 자체의 밑줄까지 잘라내,
+    //   데코(2026_acryl_08 → 2026) / 위탁(COM_A01003 → COM) 처럼 전혀 다른 상품들이
+    //   한 행으로 뭉쳐 매출·수량이 부풀려졌다. (2026-07-29 수정)
+    const m = cur.match(/^(.+)_[A-Za-z]$/);
     if (!m || m[1] === cur) break;
     cur = m[1];
   }

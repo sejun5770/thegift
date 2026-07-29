@@ -1406,13 +1406,12 @@ async function apiProductStats(query) {
       SELECT c.Card_Code AS card_code, MAX(c.Card_Name) AS card_name,
              CAST(co.order_date AS DATE) AS d, co.order_seq,
              SUM(coi.item_count) AS qty,
-             SUM(
-               CASE WHEN si.SiteName IS NULL
-                    THEN CAST(coi.item_sale_price AS float) * coi.item_count
-                         / ISNULL(NULLIF(c.Unit_Value, 0), 1)
-                    ELSE CAST(coi.item_sale_price AS float)
-               END
-             ) AS amount
+             -- custom_order.item_sale_price 는 '단가' → 항상 수량을 곱한다.
+             --   (CUSTOM_ETC_ORDER.card_sale_price 는 라인합계라 곱하지 않는데,
+             --    그 식을 CARD 쿼리에 그대로 옮겨와 자사 주문 매출이 수량만큼 과소집계됐음.
+             --    2026-07-29 수정 — apiDashboardSummary 등 다른 쿼리는 원래 곱하고 있었음)
+             SUM(CAST(coi.item_sale_price AS float) * coi.item_count
+                 / ISNULL(NULLIF(c.Unit_Value, 0), 1)) AS amount
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
@@ -1457,10 +1456,12 @@ async function apiProductStats(query) {
    *   BASE 매칭: row.card_code (예: TGJSD01O4_A) 에서 _XXX suffix 제거 → BASE 코드.
    *   입력 codes 가 BASE 단위면 모든 변형 row 가 자동 그룹핑. */
   function aggregate(rows, codes) {
-    // BASE 코드 추출 — _XXX (영숫자만) suffix 1단 제거
+    // BASE 코드 추출 — 변형 접미사 '단일 영문자'(_A/_B/_C) 만 제거.
+    //   영숫자 전체를 떼면 데코(2026_acryl_08 → 2026_acryl) / 위탁(COM_A01003 → COM) 처럼
+    //   서로 다른 상품이 한 행으로 합산된다. (2026-07-29 수정)
     const toBase = (code) => {
       if (!code) return code;
-      const m = String(code).match(/^(.+)_[A-Za-z0-9]+$/);
+      const m = String(code).match(/^(.+)_[A-Za-z]$/);
       return m ? m[1] : code;
     };
     // product_name 의 [prefix] 제거 (가장 깔끔한 이름 선호용)
@@ -1618,10 +1619,10 @@ async function apiProductRanking(query = {}) {
     .replace(/\s*\([^()]*\)\s*$/, '')   // 끝 괄호 그룹 1회 제거
     .replace(/\s*\([^()]*\)\s*$/, '')   // 접미 괄호 2개 대비 1회 더
     .trim();
-  // BASE 코드 정규화 (apiProductStats.toBase 재사용) — _A/_B 변형 → base.
+  // BASE 코드 정규화 (apiProductStats.toBase 재사용) — 단일 영문자 변형(_A/_B) 만 base 로.
   const toBase = (code) => {
     if (!code) return code;
-    const m = String(code).match(/^(.+)_[A-Za-z0-9]+$/);
+    const m = String(code).match(/^(.+)_[A-Za-z]$/);
     return m ? m[1] : code;
   };
 
@@ -1673,13 +1674,9 @@ async function apiProductRanking(query = {}) {
       .query(`
         SELECT c.Card_Code AS card_code, MAX(c.Card_Name) AS card_name,
                SUM(coi.item_count) AS qty,
-               SUM(
-                 CASE WHEN si.SiteName IS NULL
-                      THEN CAST(coi.item_sale_price AS float) * coi.item_count
-                           / ISNULL(NULLIF(c.Unit_Value, 0), 1)
-                      ELSE CAST(coi.item_sale_price AS float)
-                 END
-               ) AS amount
+               -- item_sale_price = 단가 → 항상 수량 곱 (2026-07-29 수정, 위 apiProductStats 동일)
+               SUM(CAST(coi.item_sale_price AS float) * coi.item_count
+                   / ISNULL(NULLIF(c.Unit_Value, 0), 1)) AS amount
         FROM custom_order co WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
@@ -1928,13 +1925,9 @@ async function apiWeeklyReport(query = {}) {
       .query(`
         SELECT CONVERT(varchar(10), co.order_date, 120) AS d,
                COUNT(DISTINCT co.order_seq) AS order_count,
-               SUM(
-                 CASE WHEN si.SiteName IS NULL
-                      THEN CAST(coi.item_sale_price AS float) * coi.item_count
-                           / ISNULL(NULLIF(c.Unit_Value, 0), 1)
-                      ELSE CAST(coi.item_sale_price AS float)
-                 END
-               ) AS revenue
+               -- item_sale_price = 단가 → 항상 수량 곱 (2026-07-29 수정)
+               SUM(CAST(coi.item_sale_price AS float) * coi.item_count
+                   / ISNULL(NULLIF(c.Unit_Value, 0), 1)) AS revenue
         FROM custom_order co WITH (NOLOCK)
         INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
