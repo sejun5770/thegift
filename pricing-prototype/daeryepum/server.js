@@ -1380,7 +1380,17 @@ async function apiProductStats(query) {
   // 매출 데이터 그룹 (migration 040) — 선택한 코드가 그룹에 속하면
   //   같은 그룹의 형제 코드까지 함께 조회해 하나의 그룹으로 합산 표시한다.
   const sgIndex = await _loadSalesGroupIndex(query.category || 'daeryepum');
-  const groupOf = (code) => sgIndex.byCode.get(String(code || '').trim().toLowerCase()) || null;
+  //   목록(sales-list)은 BASE 코드를 주고 그룹 멤버는 변형코드(_A/_B)로 등록돼 있을 수 있어
+  //   정확 일치 → BASE 일치 순으로 조회한다.
+  const _base1 = (c) => { const m = String(c || '').match(/^(.+)_[A-Za-z]$/); return m ? m[1] : String(c || ''); };
+  const groupOf = (code) => {
+    const c = String(code || '').trim().toLowerCase();
+    if (!c) return null;
+    if (sgIndex.byCode.has(c)) return sgIndex.byCode.get(c);
+    // 멤버 중 base 가 일치하는 것이 있으면 그 그룹
+    for (const [mc, g] of sgIndex.byCode) if (_base1(mc) === c || _base1(c) === mc) return g;
+    return null;
+  };
   // 조회 대상 코드 = 입력 코드 + (그룹 소속이면) 형제 코드
   const queryCodes = [];
   const bucketKeys = [];          // 집계 단위 (그룹이면 'G:그룹명', 아니면 코드)
@@ -1468,7 +1478,45 @@ async function apiProductStats(query) {
       GROUP BY c.Card_Code, CAST(o.order_date AS DATE), o.order_seq
     `);
 
-    return [...card.recordset, ...etc.recordset];
+    // ── 마켓(쿠팡/네이버/정수당) + 더기프트 일별 행 추가 ─────────────────
+    //   MSSQL rows 와 동일 스키마({card_code, card_name, d, order_seq, qty, amount})로
+    //   정규화해 붙이면 아래 aggregate() 가 그대로 그룹/BASE 단위 집계한다.
+    //   매칭 키 = product_code (쿠팡=등록상품ID, 네이버·정수당=자사코드).
+    const mkRows = [];
+    if (!query.category || query.category === 'daeryepum') {
+      const wanted = new Set(codes.map(c => String(c).trim().toLowerCase()));
+      const CANCELLED = new Set(['CANCELED', 'RETURNED', 'EXCHANGED', 'CANCEL', 'RETURNS',
+        'C00', 'C10', 'C11', 'R00', 'R10', 'E00', 'E10']);
+      const push = (code, name, day, orderKey, qty, amount) => {
+        const c = String(code || '').trim();
+        if (!c || !wanted.has(c.toLowerCase())) return;
+        mkRows.push({ card_code: c, card_name: name || c, d: String(day).slice(0, 10), order_seq: orderKey, qty: Number(qty) || 0, amount: Number(amount) || 0 });
+      };
+      const mergeMarket = async (loader, keyOf) => {
+        try {
+          for (const r of (await loader()) || []) {
+            if (r.status && CANCELLED.has(String(r.status).toUpperCase())) continue;
+            push(r.product_code, r.product_name, r.ordered_at, keyOf(r), r.item_count, r.item_total_price);
+          }
+        } catch (e) { console.warn('[product-stats] 마켓 병합 실패 (무시):', e.message); }
+      };
+      await mergeMarket(() => require('./coupang/store').listCoupangOrders({ startStr: s, endStr: e, byPaid: false }), r => `CP:${r.coupang_order_id}`);
+      await mergeMarket(() => require('./naver/store').listNaverOrders({ startStr: s, endStr: e, byPaid: false }), r => `NV:${r.product_order_id}`);
+      await mergeMarket(() => require('./cafe24/store').listCafe24Orders({ startStr: s, endStr: e, byPaid: false }), r => `CF:${r.cafe24_order_id}`);
+      try {
+        const mos = await require('./barungift/store').listManualOrders({ category: 'daeryepum', startDate: s, endDate: e });
+        for (const mo of (mos || [])) {
+          const st = Number(mo.status_seq) || 0;
+          if (!(st >= 2 && ![3, 5, 15].includes(st))) continue;
+          for (const it of (Array.isArray(mo.items) ? mo.items : [])) {
+            const q = Number(it.quantity) || 0;
+            push(it.product_code, it.product_name, mo.order_date, `MO:${mo.order_id}`, q, Number(it.item_amount) || (Number(it.unit_price) || 0) * q);
+          }
+        }
+      } catch (err) { console.warn('[product-stats] 더기프트 병합 실패 (무시):', err.message); }
+    }
+
+    return [...card.recordset, ...etc.recordset, ...mkRows];
   }
 
   /** rows → 상품별 {name, daily[], total{}}
@@ -1494,8 +1542,8 @@ async function apiProductStats(query) {
       variantCodes: new Set(),
     }));
     for (const r of rows) {
-      // 1순위: 매출 그룹 — 그룹 소속 코드는 'G:그룹명' bucket 으로
-      const gName = keys ? (sgIndex.byCode.get(String(r.card_code || '').trim().toLowerCase()) || null) : null;
+      // 1순위: 매출 그룹 — 그룹 소속 코드는 'G:그룹명' bucket 으로 (BASE 매칭 포함)
+      const gName = keys ? groupOf(r.card_code) : null;
       // raw card_code → BASE
       const base = toBase(r.card_code);
       // BASE 가 직접 매칭되면 그 bucket, 아니면 raw 도 시도 (입력이 raw 인 경우)
@@ -1535,8 +1583,10 @@ async function apiProductStats(query) {
       // 그룹 bucket 은 'G:그룹명' 대신 대표 코드를 노출 (프론트 선택 상태와 일치).
       //   판매 유무와 무관하게 그룹 멤버 목록에서 결정 — 기간마다 대표코드가 바뀌면
       //   전기대비(prev_total) 매칭이 깨지므로 고정값이어야 한다.
+      //   대표 코드 규칙은 프론트 _sgPickRepCode 와 동일해야 선택 상태가 일치한다:
+      //   숫자만인 마켓 상품ID보다 자사 코드를 우선.
       const gRepCode = gLabel
-        ? ([...(sgIndex.codesByGroup.get(gLabel) || [])].sort()[0] || c)
+        ? (_sgPickRepCode(sgIndex.codesByGroup.get(gLabel) || []) || c)
         : null;
       return {
         product_code: gRepCode || c,
@@ -1603,6 +1653,15 @@ async function apiProductStats(query) {
  *   byName: `${site}|${상품명(소문자)}` → 그룹명, site '' 는 전체 사이트
  * 조회 실패해도 빈 인덱스 반환 (그룹 미적용으로 fallback).
  */
+/** 그룹 대표 코드 선정 — 숫자만인 마켓 상품ID보다 자사 코드 우선. (프론트 _sgPickRepCode 와 동일) */
+function _sgPickRepCode(codes) {
+  return [...(codes || [])].sort((a, b) => {
+    const na = /^\d+$/.test(a), nb = /^\d+$/.test(b);
+    if (na !== nb) return na ? 1 : -1;
+    return String(a).localeCompare(String(b));
+  })[0] || null;
+}
+
 async function _loadSalesGroupIndex(category = 'daeryepum') {
   //   codesByGroup: 그룹명 → [상품코드...] (상품별 판매통계에서 형제 코드까지 확장 조회용)
   const empty = { byCode: new Map(), byName: new Map(), codesByGroup: new Map() };

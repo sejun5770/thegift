@@ -4455,15 +4455,32 @@ function fmtKRW(n) { return fmtNumK(n) + '원'; }
  *   대표 코드는 서버(apiProductStats) 와 동일 규칙: 그룹 멤버 코드 정렬 후 첫 번째.
  *   → 목록에서 그룹 하나를 고르면 서버가 형제 코드까지 확장 조회해 합산 표시한다.
  */
+/** 그룹 대표 코드 선정 — 숫자만인 마켓 상품ID보다 자사 코드를 우선. (서버 _sgPickRepCode 와 동일 규칙) */
+function _sgPickRepCode(codes) {
+  return [...codes].sort((a, b) => {
+    const na = /^\d+$/.test(a), nb = /^\d+$/.test(b);
+    if (na !== nb) return na ? 1 : -1;
+    return String(a).localeCompare(String(b));
+  })[0];
+}
+
 function _psApplyGroups(list) {
   const groups = window.bgSalesGroups || [];
   if (!groups.length) return list;
   const groupByCode = new Map();   // 코드(소문자) → { name, repCode, memberCount }
+  // 목록은 BASE 코드(TGJSD01O4)를 주는데 그룹 멤버는 변형코드(TGJSD01O4_A)로 등록될 수 있어
+  //   멤버의 원본 코드와 BASE 코드를 둘 다 색인한다. (미등록 시 그룹이 안 합쳐지던 문제)
+  const base1 = c => { const m = String(c || '').match(/^(.+)_[A-Za-z]$/); return m ? m[1] : String(c || ''); };
   groups.forEach(g => {
     const codes = (g.members || []).filter(m => m.match_type === 'code').map(m => String(m.match_value).trim());
     if (!codes.length) return;
-    const rep = [...codes].sort()[0];
-    codes.forEach(c => groupByCode.set(c.toLowerCase(), { name: g.name, repCode: rep, memberCount: codes.length }));
+    const rep = _sgPickRepCode(codes);
+    const info = { name: g.name, repCode: rep, memberCount: codes.length };
+    codes.forEach(c => {
+      groupByCode.set(c.toLowerCase(), info);
+      const b = base1(c).toLowerCase();
+      if (b && !groupByCode.has(b)) groupByCode.set(b, info);
+    });
   });
   if (!groupByCode.size) return list;
   const out = [];

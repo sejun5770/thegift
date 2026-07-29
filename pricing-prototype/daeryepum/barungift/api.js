@@ -788,12 +788,13 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       // 데코는 Unit_Value 가 1 인 경우가 있어 분모 적용시 매출 왜곡 발생 → skip
       const skipUnitValue = query.category === 'deco';
       const cardUnitDivisor = skipUnitValue ? '1' : 'ISNULL(NULLIF(c.Unit_Value, 0), 1)';
-      // BASE 코드 추출 (TGJSD01O4_A → TGJSD01O4) — 마지막 _XXX (영숫자만) 제거.
-      //   사용자 정책: 동일 BASE 의 변형 (_A/_B/_C 캠페인별 분리) 을 단일 상품으로 통합.
+      // BASE 코드 추출 (TGJSD01O4_A → TGJSD01O4) — 변형 접미사 '단일 영문자'만 제거.
+      //   영숫자 전체를 떼면 데코(2026_acryl_08 → 2026_acryl) / 위탁(COM_A01003 → COM) 처럼
+      //   서로 다른 상품이 한 줄로 뭉친다. (2026-07-29 수정 — server.js toBase 와 동일 정책)
       const baseCodeExpr = (col) => `CASE
-        WHEN CHARINDEX('_', REVERSE(${col})) > 0
-          AND RIGHT(${col}, CHARINDEX('_', REVERSE(${col})) - 1) NOT LIKE '%[^A-Za-z0-9]%'
-        THEN LEFT(${col}, LEN(${col}) - CHARINDEX('_', REVERSE(${col})))
+        WHEN CHARINDEX('_', REVERSE(${col})) = 2
+          AND RIGHT(${col}, 1) NOT LIKE '%[^A-Za-z]%'
+        THEN LEFT(${col}, LEN(${col}) - 2)
         ELSE ${col}
       END`;
       const pool = await getPool();
@@ -801,13 +802,10 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         WITH card_agg AS (
           SELECT c.Card_Code AS code, MAX(c.Card_Name) AS name,
                  SUM(coi.item_count) AS qty,
-                 SUM(
-                   CASE WHEN si.SiteName IS NULL
-                        THEN CAST(coi.item_sale_price AS float) * coi.item_count
-                             / ${cardUnitDivisor}
-                        ELSE CAST(coi.item_sale_price AS float)
-                   END
-                 ) AS revenue,
+                 -- custom_order.item_sale_price 는 '단가' → 항상 수량 곱.
+                 --   (라인합계인 CUSTOM_ETC_ORDER.card_sale_price 식을 옮겨와 자사 주문이
+                 --    수량만큼 과소집계되던 버그. 2026-07-29 수정)
+                 SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ${cardUnitDivisor}) AS revenue,
                  MAX(co.order_date) AS last_sold
           FROM custom_order co WITH (NOLOCK)
           INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
@@ -847,14 +845,61 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         GROUP BY ${baseCodeExpr('u.code')}
         ORDER BY SUM(u.revenue) DESC
       `);
-      return json(res, r.recordset.map(row => ({
+      const items = r.recordset.map(row => ({
         card_code: row.code, // BASE 코드 (변형 통합)
         card_name: (row.name || '').replace(/^\[.*?\]\s*/g, ''),
         total_qty: row.total_qty || 0,
         total_revenue: Math.round(row.total_revenue || 0),
         last_sold_at: row.last_sold_at,
         variant_count: row.variant_count || 1, // 통합된 변형(_A/_B/_C) 개수
-      })));
+      }));
+
+      // ── 마켓(쿠팡/네이버/정수당) + 더기프트 병합 — 답례품 카테고리 한정 ──────
+      //   매출 그룹 멤버가 마켓 상품코드(쿠팡 등록상품ID / 네이버·정수당은 자사코드)로
+      //   등록돼 있어 product_code 기준으로 합치면 그룹 병합이 그대로 성립한다.
+      if (!query.category || query.category === 'daeryepum') {
+        const CANCELLED = new Set(['CANCELED', 'RETURNED', 'EXCHANGED', 'CANCEL', 'RETURNS',
+          'C00', 'C10', 'C11', 'R00', 'R10', 'E00', 'E10']);
+        const byCode = new Map(items.map(i => [String(i.card_code).toLowerCase(), i]));
+        const addRow = (code, name, qty, revenue, soldAt) => {
+          const key = String(code || '').trim().toLowerCase();
+          if (!key) return;
+          let it = byCode.get(key);
+          if (!it) {
+            it = { card_code: String(code).trim(), card_name: name || String(code), total_qty: 0, total_revenue: 0, last_sold_at: null, variant_count: 1 };
+            byCode.set(key, it); items.push(it);
+          }
+          it.total_qty += Number(qty) || 0;
+          it.total_revenue += Math.round(Number(revenue) || 0);
+          if (soldAt && (!it.last_sold_at || String(soldAt) > String(it.last_sold_at))) it.last_sold_at = soldAt;
+        };
+        const endPlus = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+        const mergeMarket = async (loader) => {
+          try {
+            for (const row of (await loader()) || []) {
+              if (row.status && CANCELLED.has(String(row.status).toUpperCase())) continue;
+              addRow(row.product_code, row.product_name, row.item_count, row.item_total_price, row.ordered_at);
+            }
+          } catch (e) { console.warn('[products/sales-list] 마켓 병합 실패 (무시):', e.message); }
+        };
+        await mergeMarket(() => require('../coupang/store').listCoupangOrders({ startStr, endStr: endPlus, byPaid: false }));
+        await mergeMarket(() => require('../naver/store').listNaverOrders({ startStr, endStr: endPlus, byPaid: false }));
+        await mergeMarket(() => require('../cafe24/store').listCafe24Orders({ startStr, endStr: endPlus, byPaid: false }));
+        // 더기프트 수동 등록 (bg_manual_orders)
+        try {
+          const mos = await store.listManualOrders({ category: 'daeryepum', startDate: startStr, endDate: endPlus });
+          for (const mo of (mos || [])) {
+            const st = Number(mo.status_seq) || 0;
+            if (!(st >= 2 && ![3, 5, 15].includes(st))) continue;
+            for (const it of (Array.isArray(mo.items) ? mo.items : [])) {
+              const q = Number(it.quantity) || 0;
+              addRow(it.product_code, it.product_name, q, Number(it.item_amount) || (Number(it.unit_price) || 0) * q, mo.order_date);
+            }
+          }
+        } catch (e) { console.warn('[products/sales-list] 더기프트 병합 실패 (무시):', e.message); }
+        items.sort((a, b) => (b.total_revenue || 0) - (a.total_revenue || 0));
+      }
+      return json(res, items);
     } catch (err) {
       console.error('[products/sales-list] error:', err.message);
       return json(res, { error: 'MSSQL 조회 실패: ' + err.message }, 500);
