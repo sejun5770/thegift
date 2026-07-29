@@ -698,7 +698,8 @@ nav.nav-loading a[href^="#"] {
         <span style="color:var(--gray-300);margin:0 2px">|</span>
         <!-- 매출 그룹 — 여러 행을 체크해 하나의 그룹으로 묶어 합산 표시 -->
         <button class="btn btn-sm btn-primary" id="pr-group-btn" onclick="_prOpenGroupModal()" style="display:none;padding:5px 10px">🔗 그룹으로 묶기 (<span id="pr-sel-count">0</span>)</button>
-        <button class="btn btn-sm" onclick="openSalesGroupManager()" style="padding:5px 10px" title="매출 그룹 관리">⚙️ 그룹</button>
+        <button class="btn btn-sm" id="pr-excl-btn" onclick="_prExcludeSelected()" style="display:none;padding:5px 10px;color:#dc2626;border-color:#fecaca" title="선택한 품목을 답례품 매출 집계에서 제외 (자개카드·탈취제 등 비-답례품)">🚫 답례품 아님</button>
+        <button class="btn btn-sm" onclick="openSalesGroupManager()" style="padding:5px 10px" title="매출 그룹 · 제외 품목 관리">⚙️ 그룹</button>
       </div>
     </div>
     <div class="card" style="padding:16px">
@@ -4825,6 +4826,34 @@ function _prSelChanged() {
   const cnt = document.getElementById('pr-sel-count');
   if (cnt) cnt.textContent = n;
   if (btn) btn.style.display = n > 0 ? '' : 'none';
+  const ex = document.getElementById('pr-excl-btn');
+  if (ex) ex.style.display = n > 0 ? '' : 'none';
+}
+/** 체크된 행 → 답례품 매출 집계 제외 (migration 042). 코드/이름 멤버 스펙 그대로 등록. */
+async function _prExcludeSelected() {
+  const items = [];
+  document.querySelectorAll('.pr-chk:checked').forEach(chk => {
+    const p = _prAllProducts[Number(chk.dataset.idx)];
+    if (!p) return;
+    const ms = p.members || [];
+    if (ms.length) ms.forEach(m => items.push({ ...m, label: m.label || p.name }));
+    else if (p.name) items.push({ site_name: '', match_type: 'name', match_value: p.name, label: p.name });
+  });
+  if (!items.length) { showToast('선택된 항목이 없습니다'); return; }
+  const names = [...new Set(items.map(i => i.label || i.match_value))];
+  if (!confirm(`아래 품목을 답례품 매출 집계에서 제외할까요?\n(매출현황·상품순위·통계·주간리포트 미포함, 주문조회에는 유지)\n\n· ${names.slice(0, 8).join('\n· ')}${names.length > 8 ? `\n… 외 ${names.length - 8}건` : ''}`)) return;
+  try {
+    const r = await fetch(`${API}/api/bg/sales-exclusions`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items, reason: '답례품 아님 (순위표에서 지정)' }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || '등록 실패');
+    showToast(`${(j.items || []).length}건 제외 등록 — 집계에서 빠집니다`);
+    loadProductRanking();
+  } catch (e) {
+    showToast('제외 실패: ' + e.message + ' (migration 042 필요 여부 확인)');
+  }
 }
 /** 체크된 순위 행 → 멤버 스펙 수집 후 그룹 모달 오픈 */
 function _prOpenGroupModal() {
@@ -9761,6 +9790,22 @@ async function openSalesGroupManager() {
           <button class="btn btn-sm" style="padding:1px 6px;font-size:10px" onclick="_sgRemoveMember('${esc(m.id)}')">해제</button>
         </div>`).join('') : '<div style="font-size:11px;color:var(--gray-400);padding:4px 0">멤버 없음</div>'}
     </div>`).join('') : '<div style="text-align:center;color:var(--gray-400);padding:30px;font-size:13px">등록된 그룹이 없습니다</div>';
+  // 제외 품목 목록 (migration 042) — 실패해도 그룹 관리에는 지장 없음
+  let exclBody = '<div style="font-size:11px;color:var(--gray-400);padding:8px 0">제외 품목 없음</div>';
+  try {
+    const er = await fetch(`${API}/api/bg/sales-exclusions`);
+    const ej = await er.json();
+    const exs = ej.exclusions || [];
+    if (exs.length) {
+      exclBody = exs.map(x => `
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--gray-600);padding:4px 0;border-top:1px solid var(--gray-100)">
+          <span>${esc(x.label || x.match_value)}
+            <span style="color:var(--gray-400);margin-left:6px">${x.site_name ? esc(x.site_name) + ' · ' : ''}${x.match_type === 'code' ? '코드' : '상품명'} ${esc(x.match_value)}</span>
+          </span>
+          <button class="btn btn-sm" style="padding:1px 6px;font-size:10px" onclick="_sxRemove('${esc(x.id)}')">해제</button>
+        </div>`).join('');
+    }
+  } catch { exclBody = '<div style="font-size:11px;color:var(--gray-400);padding:8px 0">제외 목록 조회 실패 (migration 042 필요 여부 확인)</div>'; }
   el.innerHTML = `
     <div style="background:#fff;border-radius:12px;max-width:640px;width:100%;max-height:86vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.2)" onclick="event.stopPropagation()">
       <div style="padding:16px 20px;border-bottom:1px solid var(--gray-200);display:flex;justify-content:space-between;align-items:center">
@@ -9768,8 +9813,22 @@ async function openSalesGroupManager() {
         <button class="btn btn-sm" onclick="closeSalesGroupModal()">닫기</button>
       </div>
       <div style="padding:16px 20px">${body}</div>
+      <div style="padding:14px 20px;border-top:2px solid var(--gray-200)">
+        <div style="font-weight:700;font-size:13px;margin-bottom:4px">🚫 답례품 매출 제외 품목</div>
+        <div style="font-size:11px;color:var(--gray-500);margin-bottom:6px">비-답례품(자개카드·탈취제·아크릴액자 등). 순위표에서 행 체크 → [🚫 답례품 아님]으로 추가합니다. 해제하면 다시 집계에 포함됩니다.</div>
+        ${exclBody}
+      </div>
     </div>`;
   el.style.display = 'flex';
+}
+async function _sxRemove(id) {
+  try {
+    const r = await fetch(`${API}/api/bg/sales-exclusions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error((await r.json()).error || '실패');
+    showToast('제외 해제 — 다시 집계에 포함됩니다');
+    await openSalesGroupManager();
+    try { loadProductRanking(); } catch {}
+  } catch (e) { showToast('해제 실패: ' + e.message); }
 }
 async function _sgRename(id) {
   const name = (document.getElementById('sg-nm-' + id)?.value || '').trim();

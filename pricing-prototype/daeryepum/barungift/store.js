@@ -101,6 +101,7 @@ const FILES = {
   manualOrders: path.join(DATA_DIR, 'bg_manual_orders.json'),
   salesGroups: path.join(DATA_DIR, 'bg_sales_groups.json'),
   salesGroupMembers: path.join(DATA_DIR, 'bg_sales_group_members.json'),
+  salesExclusions: path.join(DATA_DIR, 'bg_sales_exclusions.json'),
 };
 
 function ensureDataDir() {
@@ -1671,7 +1672,67 @@ async function getWikiRevision(id) {
   return rows[0] || null;
 }
 
+// ─────────────────────────────────────────────────────────────
+// 답례품 매출 제외 목록 (migration 042)
+//   매칭 규칙은 매출 그룹 멤버와 동일: (site_name, 'code'|'name', match_value)
+// ─────────────────────────────────────────────────────────────
+
+async function listSalesExclusions() {
+  if (USE_SUPABASE) return sbGet('bg_sales_exclusions', 'order=created_at.desc&limit=1000');
+  return readJson(FILES.salesExclusions, []);
+}
+
+/** 제외 항목 추가 (bulk). 이미 있으면 무시(멱등). */
+async function addSalesExclusions(items, createdBy = null, reason = null) {
+  const rows = (Array.isArray(items) ? items : [])
+    .map(m => ({
+      site_name: String(m.site_name ?? '').trim(),
+      match_type: m.match_type === 'name' ? 'name' : 'code',
+      match_value: String(m.match_value ?? '').trim(),
+      label: m.label ? String(m.label) : null,
+      reason: m.reason || reason || null,
+      created_by: createdBy,
+    }))
+    .filter(m => m.match_value);
+  if (!rows.length) return [];
+  const seen = new Set();
+  const uniq = rows.filter(r => {
+    const k = `${r.site_name}|${r.match_type}|${r.match_value}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  if (USE_SUPABASE) {
+    // 중복은 무시하고 삽입 (UNIQUE 충돌 시 merge-duplicates)
+    const res = await fetch(`${REST_BASE}/bg_sales_exclusions?on_conflict=site_name,match_type,match_value`, {
+      method: 'POST',
+      headers: { ...HEADERS, Prefer: 'resolution=merge-duplicates,return=representation' },
+      body: JSON.stringify(uniq),
+    });
+    if (!res.ok) throw new Error(`Supabase INSERT bg_sales_exclusions [${res.status}]: ${await res.text()}`);
+    return res.json();
+  }
+  const list = readJson(FILES.salesExclusions, [])
+    .filter(m => !uniq.some(r => r.site_name === (m.site_name || '') && r.match_type === m.match_type && r.match_value === m.match_value));
+  const added = uniq.map(r => ({ id: uuid(), ...r, created_at: now() }));
+  writeJson(FILES.salesExclusions, list.concat(added));
+  return added;
+}
+
+async function removeSalesExclusion(id) {
+  if (!id) throw new Error('id 필수');
+  if (USE_SUPABASE) {
+    await sbDelete('bg_sales_exclusions', `id=eq.${encodeURIComponent(id)}`);
+    return { ok: true };
+  }
+  writeJson(FILES.salesExclusions, readJson(FILES.salesExclusions, []).filter(m => m.id !== id));
+  return { ok: true };
+}
+
 module.exports = {
+  listSalesExclusions,
+  addSalesExclusions,
+  removeSalesExclusion,
   getWikiCurrent,
   saveWikiRevision,
   listWikiRevisions,

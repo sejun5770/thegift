@@ -874,17 +874,30 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
           if (soldAt && (!it.last_sold_at || String(soldAt) > String(it.last_sold_at))) it.last_sold_at = soldAt;
         };
         const endPlus = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-        const mergeMarket = async (loader) => {
+        // 답례품 아님으로 지정된 마켓 품목 제외 (migration 042)
+        let excl = [];
+        try { excl = await store.listSalesExclusions(); } catch { /* 테이블 없으면 미적용 */ }
+        const exclSet = new Set((excl || []).map(m => `${String(m.site_name || '').trim()}|${m.match_type}|${String(m.match_value || '').trim().toLowerCase()}`));
+        const isExcluded = (site, code, name) => {
+          if (!exclSet.size) return false;
+          const s = String(site || '').trim();
+          const c = String(code || '').trim().toLowerCase();
+          const n = String(name || '').trim().toLowerCase();
+          return (c && (exclSet.has(`${s}|code|${c}`) || exclSet.has(`|code|${c}`)))
+            || (n && (exclSet.has(`${s}|name|${n}`) || exclSet.has(`|name|${n}`)));
+        };
+        const mergeMarket = async (loader, site) => {
           try {
             for (const row of (await loader()) || []) {
               if (row.status && CANCELLED.has(String(row.status).toUpperCase())) continue;
+              if (isExcluded(site, row.product_code, row.product_name)) continue;
               addRow(row.product_code, row.product_name, row.item_count, row.item_total_price, row.ordered_at);
             }
           } catch (e) { console.warn('[products/sales-list] 마켓 병합 실패 (무시):', e.message); }
         };
-        await mergeMarket(() => require('../coupang/store').listCoupangOrders({ startStr, endStr: endPlus, byPaid: false }));
-        await mergeMarket(() => require('../naver/store').listNaverOrders({ startStr, endStr: endPlus, byPaid: false }));
-        await mergeMarket(() => require('../cafe24/store').listCafe24Orders({ startStr, endStr: endPlus, byPaid: false }));
+        await mergeMarket(() => require('../coupang/store').listCoupangOrders({ startStr, endStr: endPlus, byPaid: false }), '쿠팡');
+        await mergeMarket(() => require('../naver/store').listNaverOrders({ startStr, endStr: endPlus, byPaid: false }), '네이버');
+        await mergeMarket(() => require('../cafe24/store').listCafe24Orders({ startStr, endStr: endPlus, byPaid: false }), '정수당');
         // 더기프트 수동 등록 (bg_manual_orders)
         try {
           const mos = await store.listManualOrders({ category: 'daeryepum', startDate: startStr, endDate: endPlus });
@@ -935,6 +948,38 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     const productId = decodeURIComponent(productSettingsMatch[1]);
     await store.deleteProductSettings(productId);
     return json(res, { ok: true });
+  }
+
+  // ============================================
+  // 답례품 매출 제외 목록 (migration 042)
+  //   마켓의 비-답례품(자개카드·탈취제·아크릴액자 등)을 매출 집계에서 제외.
+  // ============================================
+  if (pathname === '/api/bg/sales-exclusions' && method === 'GET') {
+    try {
+      return json(res, { exclusions: await store.listSalesExclusions() });
+    } catch (err) {
+      console.error('[sales-exclusions GET] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+  if (pathname === '/api/bg/sales-exclusions' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const added = await store.addSalesExclusions(body.items || [], session?.email || null, body.reason || null);
+      return json(res, { items: added }, 201);
+    } catch (err) {
+      console.error('[sales-exclusions POST] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  const salesExclDelMatch = pathname.match(/^\/api\/bg\/sales-exclusions\/([^/]+)$/);
+  if (salesExclDelMatch && method === 'DELETE') {
+    try {
+      return json(res, await store.removeSalesExclusion(decodeURIComponent(salesExclDelMatch[1])));
+    } catch (err) {
+      console.error('[sales-exclusions DELETE] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
   }
 
   // ============================================

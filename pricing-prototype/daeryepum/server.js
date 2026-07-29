@@ -1380,6 +1380,7 @@ async function apiProductStats(query) {
   // 매출 데이터 그룹 (migration 040) — 선택한 코드가 그룹에 속하면
   //   같은 그룹의 형제 코드까지 함께 조회해 하나의 그룹으로 합산 표시한다.
   const sgIndex = await _loadSalesGroupIndex(query.category || 'daeryepum');
+  const giftExcl = await _loadGiftExclusions();   // 답례품 아님 제외 (마켓 비-답례품)
   //   목록(sales-list)은 BASE 코드를 주고 그룹 멤버는 변형코드(_A/_B)로 등록돼 있을 수 있어
   //   정확 일치 → BASE 일치 순으로 조회한다.
   const _base1 = (c) => { const m = String(c || '').match(/^(.+)_[A-Za-z]$/); return m ? m[1] : String(c || ''); };
@@ -1487,22 +1488,23 @@ async function apiProductStats(query) {
       const wanted = new Set(codes.map(c => String(c).trim().toLowerCase()));
       const CANCELLED = new Set(['CANCELED', 'RETURNED', 'EXCHANGED', 'CANCEL', 'RETURNS',
         'C00', 'C10', 'C11', 'R00', 'R10', 'E00', 'E10']);
-      const push = (code, name, day, orderKey, qty, amount) => {
+      const push = (code, name, day, orderKey, qty, amount, site = '') => {
         const c = String(code || '').trim();
         if (!c || !wanted.has(c.toLowerCase())) return;
+        if (giftExcl.has(site, c, name)) return;   // 답례품 아님 → 제외
         mkRows.push({ card_code: c, card_name: name || c, d: String(day).slice(0, 10), order_seq: orderKey, qty: Number(qty) || 0, amount: Number(amount) || 0 });
       };
-      const mergeMarket = async (loader, keyOf) => {
+      const mergeMarket = async (loader, keyOf, site) => {
         try {
           for (const r of (await loader()) || []) {
             if (r.status && CANCELLED.has(String(r.status).toUpperCase())) continue;
-            push(r.product_code, r.product_name, r.ordered_at, keyOf(r), r.item_count, r.item_total_price);
+            push(r.product_code, r.product_name, r.ordered_at, keyOf(r), r.item_count, r.item_total_price, site);
           }
         } catch (e) { console.warn('[product-stats] 마켓 병합 실패 (무시):', e.message); }
       };
-      await mergeMarket(() => require('./coupang/store').listCoupangOrders({ startStr: s, endStr: e, byPaid: false }), r => `CP:${r.coupang_order_id}`);
-      await mergeMarket(() => require('./naver/store').listNaverOrders({ startStr: s, endStr: e, byPaid: false }), r => `NV:${r.product_order_id}`);
-      await mergeMarket(() => require('./cafe24/store').listCafe24Orders({ startStr: s, endStr: e, byPaid: false }), r => `CF:${r.cafe24_order_id}`);
+      await mergeMarket(() => require('./coupang/store').listCoupangOrders({ startStr: s, endStr: e, byPaid: false }), r => `CP:${r.coupang_order_id}`, '쿠팡');
+      await mergeMarket(() => require('./naver/store').listNaverOrders({ startStr: s, endStr: e, byPaid: false }), r => `NV:${r.product_order_id}`, '네이버');
+      await mergeMarket(() => require('./cafe24/store').listCafe24Orders({ startStr: s, endStr: e, byPaid: false }), r => `CF:${r.cafe24_order_id}`, '정수당');
       try {
         const mos = await require('./barungift/store').listManualOrders({ category: 'daeryepum', startDate: s, endDate: e });
         for (const mo of (mos || [])) {
@@ -1662,6 +1664,50 @@ function _sgPickRepCode(codes) {
   })[0] || null;
 }
 
+/**
+ * 답례품 매출 제외 목록 (migration 042) — 마켓의 비-답례품 필터.
+ *   자사(MSSQL)는 Card_Div 로 답례품이 걸러지지만 마켓은 구분이 없어
+ *   자개 연하장·탈취제·아크릴 액자 등이 답례품 매출에 섞인다.
+ *   반환: { has(site, code, name) → boolean }. 조회 실패 시 아무것도 제외 안 함(fail-open).
+ *   60초 캐시 — 집계 함수마다 매번 조회하지 않도록.
+ */
+let _giftExclCache = { at: 0, idx: null };
+async function _loadGiftExclusions() {
+  const EMPTY = { size: 0, has: () => false };
+  if (_giftExclCache.idx && Date.now() - _giftExclCache.at < 60000) return _giftExclCache.idx;
+  try {
+    const REST = process.env.SUPABASE_URL ? `${process.env.SUPABASE_URL}/rest/v1` : null;
+    if (!REST) return EMPTY;
+    const hdr = { apikey: process.env.SUPABASE_ANON_KEY, Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}` };
+    const r = await fetch(`${REST}/bg_sales_exclusions?select=site_name,match_type,match_value&limit=2000`, { headers: hdr });
+    if (!r.ok) return EMPTY;
+    const rows = await r.json();
+    const set = new Set();
+    for (const m of (rows || [])) {
+      const v = String(m.match_value || '').trim().toLowerCase();
+      if (!v) continue;
+      set.add(`${String(m.site_name || '').trim()}|${m.match_type}|${v}`);
+    }
+    const idx = {
+      size: set.size,
+      has(site, code, name) {
+        if (!set.size) return false;
+        const s = String(site || '').trim();
+        const c = String(code || '').trim().toLowerCase();
+        const n = String(name || '').trim().toLowerCase();
+        if (c && (set.has(`${s}|code|${c}`) || set.has(`|code|${c}`))) return true;
+        if (n && (set.has(`${s}|name|${n}`) || set.has(`|name|${n}`))) return true;
+        return false;
+      },
+    };
+    _giftExclCache = { at: Date.now(), idx };
+    return idx;
+  } catch (e) {
+    console.warn('[sales-exclusions] 로드 실패 (제외 미적용):', e.message);
+    return EMPTY;
+  }
+}
+
 async function _loadSalesGroupIndex(category = 'daeryepum') {
   //   codesByGroup: 그룹명 → [상품코드...] (상품별 판매통계에서 형제 코드까지 확장 조회용)
   const empty = { byCode: new Map(), byName: new Map(), codesByGroup: new Map() };
@@ -1703,6 +1749,8 @@ async function apiProductRanking(query = {}) {
 
   // 매출 데이터 그룹 — 운영자가 묶은 그룹은 이름/코드 규칙보다 우선 적용.
   const sgIndex = await _loadSalesGroupIndex(query.category || 'daeryepum');
+  // 답례품 아님으로 지정된 마켓 품목 제외 (자개카드·탈취제·아크릴액자 등)
+  const giftExcl = await _loadGiftExclusions();
 
   // end exclusive (+1일) — MSSQL order_date < @e / 마켓 store endStr(lt) 공통.
   const endPlus = fmtDate(addDays(new Date(endStr + 'T00:00:00'), 1));
@@ -1852,6 +1900,7 @@ async function apiProductRanking(query = {}) {
       const rows = await loader();
       for (const r of (rows || [])) {
         if (r.status && CANCELLED_STATUS.has(String(r.status).toUpperCase())) continue;
+        if (giftExcl.has(label, r.product_code, r.product_name)) continue;   // 답례품 아님 → 제외
         // 매출 그룹에 담긴 마켓 상품명은 그룹명으로 합산 (사이트 지정 멤버 우선, 없으면 전체).
         // 채널별 섹션 분리를 위해 scope 에 채널명 포함 (market:쿠팡 / market:네이버 / market:정수당)
         addEntry(groupForName(label, r.product_name) || r.product_name,
@@ -1874,6 +1923,7 @@ async function apiProductRanking(query = {}) {
     const rfmRows = await require('./coupang/rfm-store').listSales({ startDate: startStr, endDate: endStr });
     for (const r of (rfmRows || [])) {
       if (String(r.vendor_item_id) === '_manual') continue;
+      if (giftExcl.has('쿠팡 로켓그로스', r.product_id, r.product_name)) continue;   // 답례품 아님 → 제외
       const qty = (Number(r.sales_qty) || 0) - (Number(r.refund_qty) || 0);
       const amt = Number(r.net_amount ?? ((Number(r.sales_amount) || 0) - (Number(r.refund_amount) || 0))) || 0;
       if (!qty && !amt) continue;
@@ -2098,11 +2148,13 @@ async function apiWeeklyReport(query = {}) {
   ]);
   // 주차별 distinct 주문키 집합 (order_count 계산용)
   const weekOrderKeys = weeks.map(() => new Set());
-  async function mergeMarket(loader, getKey) {
+  const giftExcl = await _loadGiftExclusions();   // 답례품 아님 제외 (마켓 비-답례품)
+  async function mergeMarket(loader, getKey, site = '') {
     try {
       const rows = await loader();
       for (const r of (rows || [])) {
         if (r.status && CANCELLED_STATUS.has(String(r.status).toUpperCase())) continue;
+        if (giftExcl.has(site, r.product_code, r.product_name)) continue;
         const day = String(r.ordered_at || '').slice(0, 10);
         const idx = weekIndexOf(day);
         if (idx === undefined) continue;
@@ -2115,15 +2167,15 @@ async function apiWeeklyReport(query = {}) {
   }
   await mergeMarket(
     () => require('./coupang/store').listCoupangOrders({ startStr: rangeStart, endStr: rangeEndExcl, byPaid: false }),
-    r => `${r.coupang_order_id}::${r.shipment_box_id}`,
+    r => `${r.coupang_order_id}::${r.shipment_box_id}`, '쿠팡',
   );
   await mergeMarket(
     () => require('./naver/store').listNaverOrders({ startStr: rangeStart, endStr: rangeEndExcl, byPaid: false }),
-    r => `${r.product_order_id}`,
+    r => `${r.product_order_id}`, '네이버',
   );
   await mergeMarket(
     () => require('./cafe24/store').listCafe24Orders({ startStr: rangeStart, endStr: rangeEndExcl, byPaid: false }),
-    r => `${r.cafe24_order_id}`,
+    r => `${r.cafe24_order_id}`, '정수당',
   );
   // 마켓 distinct 주문키 → order_count 합산
   weeks.forEach((w, i) => { w.order_count += weekOrderKeys[i].size; });
@@ -2884,6 +2936,7 @@ async function apiDashboardComparison(query = {}) {
     //   기간 차원 일관: order_date 기준 (MSSQL 와 동일하게 byPaid=false 사용).
     //   distinct order 단위 카운트: 쿠팡=(order_id, shipment_box_id) / 네이버=product_order_id.
     //   실패해도 MSSQL 결과는 유지.
+    const _cmpGiftExcl = await _loadGiftExclusions();   // 답례품 아님 제외 (마켓 비-답례품)
     async function mergeMarketplace(siteName, listFn, getOrderKey) {
       try {
         const rowsRaw = await listFn();
@@ -2893,7 +2946,8 @@ async function apiDashboardComparison(query = {}) {
         //   카페24: C00/C10/C11(취소) R00/R10(반품) E00/E10(교환).
         const CANCELED_STATUSES = ['CANCELED', 'RETURNED', 'EXCHANGED', 'CANCEL', 'RETURNS',
           'C00', 'C10', 'C11', 'R00', 'R10', 'E00', 'E10'];
-        const rows = rowsRaw.filter(r => !CANCELED_STATUSES.includes(r.status));
+        const rows = rowsRaw.filter(r => !CANCELED_STATUSES.includes(r.status)
+          && !_cmpGiftExcl.has(siteName, r.product_code, r.product_name));   // 답례품 아님 제외
         if (!rows.length) return;
         const seen = new Set();
         let amount = 0, orders = 0, qty = 0;
@@ -2945,22 +2999,24 @@ async function apiDashboardComparison(query = {}) {
       const rfmStore = require('./coupang/rfm-store');
       const endIncl = endStr ? new Date(new Date(endStr).getTime() - 86400000).toISOString().slice(0, 10) : null;
       const rfmRows = await rfmStore.listSales({ startDate: startStr, endDate: endIncl });
-      if (rfmRows && rfmRows.length) {
+      // 답례품 아님으로 지정된 품목(아크릴 액자 등) 제외
+      const rfmKept = (rfmRows || []).filter(r => !_cmpGiftExcl.has('쿠팡 로켓그로스', r.product_id, r.product_name));
+      if (rfmKept.length) {
         let amount = 0, qty = 0;
-        for (const r of rfmRows) {
+        for (const r of rfmKept) {
           amount += Number(r.net_amount) || 0;
           qty += Number(r.sales_qty) || 0;
         }
-        if (amount !== 0 || qty !== 0 || rfmRows.length) {
+        if (amount !== 0 || qty !== 0 || rfmKept.length) {
           const site = ensureSite('쿠팡 로켓그로스');
-          site.order_count += rfmRows.length;
+          site.order_count += rfmKept.length;
           site.total_amount += amount;
           site.total_qty += qty;
           site.standalone.amount += amount;
-          site.standalone.orders += rfmRows.length;
+          site.standalone.orders += rfmKept.length;
           site.standalone.qty += qty;
           standalone_amount += amount;
-          standalone_orders += rfmRows.length;
+          standalone_orders += rfmKept.length;
           standalone_qty += qty;
         }
       }
@@ -3249,6 +3305,8 @@ async function apiDashboardComparison(query = {}) {
 
 async function apiDashboardSummary(query) {
   const p = await getPool();
+  // 답례품 아님으로 지정된 마켓 품목 제외 (migration 042)
+  const _sumGiftExcl = await _loadGiftExclusions();
   const startDate = query.start_date || fmtDate(addDays(today(), -30));
   const endDate = query.end_date || fmtDate(addDays(today(), 1));
 
@@ -3590,7 +3648,8 @@ async function apiDashboardSummary(query) {
     });
     // 매출 집계 — 취소/반품 자동 제외 (CARD/ETC 의 status_seq NOT IN (3,5,...) 와 동일 정책).
     //   주문조회 / 정보입력완료 등 다른 호출은 store 함수가 모든 row 반환 → 취소 표시 가능.
-    const coupangRows = (coupangRowsRaw || []).filter(r => !['CANCEL', 'RETURNS'].includes(r.status));
+    const coupangRows = (coupangRowsRaw || []).filter(r => !['CANCEL', 'RETURNS'].includes(r.status)
+      && !_sumGiftExcl.has('쿠팡', r.product_code, r.product_name));   // 답례품 아님 제외
     if (coupangRows && coupangRows.length) {
       // (order_day, product) 키로 묶어 일×상품 단위 합산 → MSSQL summary 와 동일 단위
       const byDayProduct = new Map();
@@ -3642,7 +3701,8 @@ async function apiDashboardSummary(query) {
       startStr: startDate, endStr: endDate, byPaid: false,
     });
     // 매출 집계 — 취소/반품/교환 자동 제외 (CARD/ETC 의 status_seq NOT IN (3,5,...) 와 동일 정책).
-    const naverRows = (naverRowsRaw || []).filter(r => !['CANCELED', 'RETURNED', 'EXCHANGED'].includes(r.status));
+    const naverRows = (naverRowsRaw || []).filter(r => !['CANCELED', 'RETURNED', 'EXCHANGED'].includes(r.status)
+      && !_sumGiftExcl.has('네이버', r.product_code, r.product_name));   // 답례품 아님 제외
     if (naverRows && naverRows.length) {
       const byDayProduct = new Map();
       const byDayForCount = new Map();
@@ -3699,7 +3759,9 @@ async function apiDashboardSummary(query) {
     const rfmStore = require('./coupang/rfm-store');
     // endDate 는 exclusive — listSales 의 lte 와 맞추려 -1 일
     const endIncl = endDate ? new Date(new Date(endDate).getTime() - 86400000).toISOString().slice(0, 10) : null;
-    const rgRows = await rfmStore.listSales({ startDate, endDate: endIncl });
+    const rgRowsRaw = await rfmStore.listSales({ startDate, endDate: endIncl });
+    // 답례품 아님으로 지정된 품목(아크릴 액자 등) 제외
+    const rgRows = (rgRowsRaw || []).filter(r => !_sumGiftExcl.has('쿠팡 로켓그로스', r.product_id, r.product_name));
     if (rgRows && rgRows.length) {
       for (const r of rgRows) {
         const day = String(r.sale_date || '').slice(0, 10);
