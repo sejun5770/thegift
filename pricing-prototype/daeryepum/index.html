@@ -614,6 +614,16 @@ nav.nav-loading a[href^="#"] {
           <button id="bsd-view-table" onclick="setBsdView('table')" style="padding:6px 12px;font-size:12px;border:none;background:#fff;color:var(--gray-700);cursor:pointer;border-left:1px solid var(--gray-300)">📋 테이블</button>
         </div>
         <button class="btn btn-sm" onclick="downloadBsdExcel()" style="border-color:#10b981;color:#047857;padding:6px 12px;font-size:12px" title="현재 조회된 희망출고일별 매출을 엑셀로 다운로드">📥 엑셀</button>
+        <!-- 주차별 복사 — 예식 캘린더와 동일 포맷 (사이트 행 × 일~토 열) -->
+        <select id="bsd-copy-metric" style="padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px" title="복사할 값">
+          <option value="amount">매출</option>
+          <option value="orders">건수</option>
+          <option value="qty">수량</option>
+        </select>
+        <select id="bsd-copy-site" style="padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px" title="복사할 사이트">
+          <option value="__all__">전체 사이트(행 분리)</option>
+        </select>
+        <button class="btn btn-sm" onclick="copyBsdWeeks()" style="padding:6px 12px;font-size:12px" title="주차별 × 일~토 형태로 클립보드 복사">📋 주차별 복사</button>
       </div>
       <div style="display:flex;gap:24px;margin-bottom:12px;flex-wrap:wrap">
         <div><span style="font-size:12px;color:var(--gray-500)">총 매출</span><br><strong id="bsd-total-amount" style="font-size:16px">-</strong></div>
@@ -8383,8 +8393,93 @@ function downloadBsdExcel() {
   showToast(`${rows.length}일 다운로드 완료`);
 }
 
+/**
+ * 희망출고일별 매출 — 주차별(일~토) × 사이트별 TSV 복사.
+ *   예식 캘린더 주차 복사와 동일한 그리드 포맷:
+ *     주차 라벨 행 + [사이트명, 일, 월, ..., 토, 주합계] 행들.
+ *   사이트 선택: '전체 사이트(행 분리)' 면 사이트마다 행 + 합계 행,
+ *                특정 사이트면 그 사이트 1행만.
+ *   주 경계는 일요일 시작 (예식 캘린더와 동일).
+ */
+function copyBsdWeeks() {
+  const data = _lastBsdData;
+  if (!data || !Array.isArray(data.ship_dates) || !data.ship_dates.length) {
+    showToast('복사할 데이터가 없습니다'); return;
+  }
+  const metric = document.getElementById('bsd-copy-metric')?.value || 'amount';
+  const siteSel = document.getElementById('bsd-copy-site')?.value || '__all__';
+  const siteList = (Array.isArray(data.sites) ? data.sites : []).map(s => s.site_name);
+  const sites = siteSel === '__all__' ? siteList : [siteSel];
+  if (!sites.length) { showToast('사이트 데이터가 없습니다'); return; }
+
+  // 날짜 → 값 조회. 사이트별 by_site 에 없으면 0.
+  const dayMap = new Map(data.ship_dates.map(d => [d.date, d]));
+  const valOf = (dateStr, site) => {
+    const d = dayMap.get(dateStr);
+    if (!d) return null;                     // 조회 범위 밖 → 빈 칸
+    const v = (d.by_site || {})[site];
+    return Number(v?.[metric]) || 0;
+  };
+
+  // 주 그리드 구성 — 첫 날이 속한 주의 일요일부터 마지막 날이 속한 주의 토요일까지
+  const dates = data.ship_dates.map(d => d.date).sort();
+  const first = new Date(dates[0] + 'T00:00:00');
+  const last = new Date(dates[dates.length - 1] + 'T00:00:00');
+  const gridStart = new Date(first); gridStart.setDate(gridStart.getDate() - gridStart.getDay());
+  const gridEnd = new Date(last); gridEnd.setDate(gridEnd.getDate() + (6 - gridEnd.getDay()));
+
+  const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
+  const lines = [];
+  let weekNo = 0;
+  for (let cur = new Date(gridStart); cur <= gridEnd; cur.setDate(cur.getDate() + 7)) {
+    weekNo++;
+    const weekDates = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(cur); d.setDate(d.getDate() + i);
+      weekDates.push(fmt(d));
+    }
+    // 주차 헤더 (기간 표기)
+    lines.push([`${weekNo}주차`, `${weekDates[0]}~${weekDates[6]}`, ...DAY_NAMES, '주 합계'].join('\t'));
+    let weekTotal = 0;
+    sites.forEach(site => {
+      const cells = weekDates.map(ds => {
+        const v = valOf(ds, site);
+        return v === null ? '' : String(v);
+      });
+      const rowSum = weekDates.reduce((s, ds) => s + (valOf(ds, site) || 0), 0);
+      weekTotal += rowSum;
+      lines.push(['', site, ...cells, String(rowSum)].join('\t'));
+    });
+    if (sites.length > 1) {
+      const sumCells = weekDates.map(ds => {
+        const anyData = dayMap.has(ds);
+        if (!anyData) return '';
+        return String(sites.reduce((s, site) => s + (valOf(ds, site) || 0), 0));
+      });
+      lines.push(['', '합계', ...sumCells, String(weekTotal)].join('\t'));
+    }
+    lines.push('');   // 주차 사이 빈 행
+  }
+  const metricLabel = { amount: '매출', orders: '건수', qty: '수량' }[metric];
+  const tsv = lines.join('\n');
+  navigator.clipboard.writeText(tsv).then(() => {
+    showToast(`✅ ${weekNo}개 주차 복사됨 (${metricLabel} · ${siteSel === '__all__' ? `사이트 ${sites.length}개` : siteSel})`);
+  }).catch(e => alert('클립보드 복사 실패: ' + e.message));
+}
+
 function renderByShipDate(data) {
   _lastBsdData = data; // 엑셀 다운로드 재활용용 cache
+  // 주차별 복사용 사이트 드롭다운 갱신 (응답 sites 순서 = 매출 desc)
+  try {
+    const $sel = document.getElementById('bsd-copy-site');
+    if ($sel) {
+      const prev = $sel.value;
+      const opts = ['<option value="__all__">전체 사이트(행 분리)</option>']
+        .concat((data?.sites || []).map(s => `<option value="${esc(s.site_name)}">${esc(s.site_name)}</option>`));
+      $sel.innerHTML = opts.join('');
+      if (prev && [...$sel.options].some(o => o.value === prev)) $sel.value = prev;
+    }
+  } catch (e) { console.warn('[bsd] 사이트 목록 갱신 실패:', e); }
   const safe = data || {};
   const total = safe.total || { amount: 0, orders: 0, qty: 0 };
   const dates = Array.isArray(safe.ship_dates) ? safe.ship_dates : [];
