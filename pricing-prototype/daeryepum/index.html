@@ -18676,6 +18676,10 @@ const BG_CSV_COL = {
   희망배송일: 15,
   판매금액: 16,   // Q열 — 상품별 합계 (수량 × 단가). 서버에서 주문 settle_price = SUM 계산. CSV 에 없으면 0.
   결제일자: 17,   // R열 — 매출 집계 기준일. bg_manual_orders.order_date 로 저장.
+  // ── 반품/취소 대응 (2026-08 추가) — 퍼스트몰 기본 export 에 없어 운영자가 덧붙이는 열.
+  //   두 열이 없으면(구버전 파일) 취소수량 0 으로 간주되어 기존 동작 그대로.
+  판매가: 18,     // S열 — 개당 단가. 취소금액(단가×취소수량) 산출용.
+  취소수량: 19,   // T열 — 반품/취소 수량. 수량·금액에서 차감.
 };
 
 // CSV 결제일자 파싱 — 다양한 형식 허용.
@@ -18889,10 +18893,20 @@ function _bgCsvBuildOrders(rows) {
       const rowStatus = (r[BG_CSV_COL.주문상품상태] || '').toString().trim() || baseInfo.status_raw;
       const rowIsAfterShipping = _bgIsAfterShipping(rowStatus);
       const rawQty = rowIsAfterShipping ? r[BG_CSV_COL.보낸수량] : r[BG_CSV_COL.보낼수량];
-      const quantity = parseInt(rawQty) || 0;
+      const grossQty = parseInt(rawQty) || 0;
       // 판매금액 (Q열=16) — 상품별 합계. 쉼표/원 표기 허용.
       const rawAmount = (r[BG_CSV_COL.판매금액] || '').toString().replace(/[,\s원]/g, '');
-      const itemAmount = parseInt(rawAmount) || 0;
+      const grossAmount = parseInt(rawAmount) || 0;
+      // ── 반품/취소 차감 (S열 판매가 · T열 취소수량) ────────────────────
+      //   퍼스트몰 기본 export 에 취소 금액이 없어 운영자가 두 열을 덧붙인다.
+      //   수량 = (보낸/보낼수량) − 취소수량,  금액 = 판매가x수량 − (판매가 × 취소수량).
+      //   S열이 비어 있으면 Q/수량 으로 단가를 역산해 차감 (스티커 등 0원 행은 0 유지).
+      //   두 열이 없는 구버전 파일은 취소수량 0 → 기존 동작과 완전히 동일.
+      const cancelQty = parseInt((r[BG_CSV_COL.취소수량] || '').toString().replace(/[,\s]/g, '')) || 0;
+      const unitPrice = parseInt((r[BG_CSV_COL.판매가] || '').toString().replace(/[,\s원]/g, '')) || 0;
+      const effUnit = unitPrice > 0 ? unitPrice : (grossQty > 0 ? Math.round(grossAmount / grossQty) : 0);
+      const quantity = Math.max(0, grossQty - cancelQty);
+      const itemAmount = Math.max(0, grossAmount - (effUnit * cancelQty));
       if (!barcode || itemName === '(상동)' || itemName === '상동') return;
       const lower = itemName.toLowerCase();
       let itemType = 'product';
