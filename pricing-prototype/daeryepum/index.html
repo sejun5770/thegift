@@ -4268,6 +4268,181 @@ function copyDecoOrders() {
   });
 }
 
+// ============================================
+// 📗 XLSX 생성기 — 외부 라이브러리 없이 순수 JS
+//   ZIP(STORE, 무압축) 컨테이너 + 최소 OOXML 5개 파트로 .xlsx 를 만든다.
+//   숫자만으로 이루어진 값은 숫자 셀로 기록 → Excel 에서 바로 합계/정렬 가능.
+//   (기존 .tsv/.csv 다운로드는 확장자만 엑셀이었고 실제로는 텍스트였다)
+// ============================================
+let _XL_CRC_TABLE = null;
+function _xlCrc32(bytes) {
+  if (!_XL_CRC_TABLE) {
+    _XL_CRC_TABLE = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      _XL_CRC_TABLE[n] = c >>> 0;
+    }
+  }
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) crc = _XL_CRC_TABLE[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function _xlEsc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');  // XML 1.0 금지 제어문자
+}
+
+/** 0-based 열 인덱스 → A, B, ... Z, AA, AB ... */
+function _xlCol(n) {
+  let s = '';
+  let v = n + 1;
+  while (v > 0) { const r = (v - 1) % 26; s = String.fromCharCode(65 + r) + s; v = (v - r - 1) / 26; }
+  return s;
+}
+
+/** files: [{name, data:Uint8Array}] → ZIP Blob (STORE 방식, 무압축) */
+function _xlZip(files) {
+  const enc = new TextEncoder();
+  const parts = [], central = [];
+  let offset = 0;
+  files.forEach(f => {
+    const nameBytes = enc.encode(f.name);
+    const crc = _xlCrc32(f.data);
+    const local = new Uint8Array(30 + nameBytes.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);        // version needed
+    lv.setUint16(6, 0x0800, true);    // UTF-8 파일명 플래그
+    lv.setUint16(8, 0, true);         // compression: STORE
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, f.data.length, true);
+    lv.setUint32(22, f.data.length, true);
+    lv.setUint16(26, nameBytes.length, true);
+    local.set(nameBytes, 30);
+    parts.push(local, f.data);
+
+    const cd = new Uint8Array(46 + nameBytes.length);
+    const cv = new DataView(cd.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);        // version made by
+    cv.setUint16(6, 20, true);        // version needed
+    cv.setUint16(8, 0x0800, true);
+    cv.setUint16(10, 0, true);        // STORE
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, f.data.length, true);
+    cv.setUint32(24, f.data.length, true);
+    cv.setUint16(28, nameBytes.length, true);
+    cv.setUint32(42, offset, true);   // local header 상대 오프셋
+    cd.set(nameBytes, 46);
+    central.push(cd);
+    offset += local.length + f.data.length;
+  });
+
+  const cdSize = central.reduce((a, b) => a + b.length, 0);
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, files.length, true);
+  ev.setUint16(10, files.length, true);
+  ev.setUint32(12, cdSize, true);
+  ev.setUint32(16, offset, true);
+
+  return new Blob([...parts, ...central, eocd],
+    { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+
+/** rows: string[][] → .xlsx Blob */
+function _xlsxBlob(rows, sheetName) {
+  const enc = new TextEncoder();
+  const sheet = (String(sheetName || 'Sheet1').replace(/[\[\]:*?\/\\]/g, ' ').trim().slice(0, 31)) || 'Sheet1';
+  const XD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+
+  const sheetData = (rows || []).map((row, r) => {
+    const cells = (row || []).map((val, c) => {
+      const s = val == null ? '' : String(val);
+      if (s === '') return '';
+      const ref = _xlCol(c) + (r + 1);
+      // 순수 숫자만 숫자 셀로 (선행 0 / 15자리 초과는 문자로 — 주문번호·전화번호 보존)
+      if (/^-?(0|[1-9]\d*)(\.\d+)?$/.test(s) && s.replace(/[-.]/g, '').length <= 15) {
+        return `<c r="${ref}"><v>${s}</v></c>`;
+      }
+      return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${_xlEsc(s)}</t></is></c>`;
+    }).join('');
+    return `<row r="${r + 1}">${cells}</row>`;
+  }).join('');
+
+  const files = [
+    { name: '[Content_Types].xml', text: XD
+      + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+      + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+      + '<Default Extension="xml" ContentType="application/xml"/>'
+      + '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+      + '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+      + '</Types>' },
+    { name: '_rels/.rels', text: XD
+      + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+      + '</Relationships>' },
+    { name: 'xl/workbook.xml', text: XD
+      + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+      + ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+      + `<sheets><sheet name="${_xlEsc(sheet)}" sheetId="1" r:id="rId1"/></sheets></workbook>` },
+    { name: 'xl/_rels/workbook.xml.rels', text: XD
+      + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+      + '</Relationships>' },
+    { name: 'xl/worksheets/sheet1.xml', text: XD
+      + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+      + `<sheetData>${sheetData}</sheetData></worksheet>` },
+  ];
+
+  return _xlZip(files.map(f => ({ name: f.name, data: enc.encode(f.text) })));
+}
+
+/** rows(2차원 배열)를 .xlsx 로 저장 — filename 에 확장자는 붙이지 않는다 */
+function downloadXlsxRows(rows, filename, sheetName) {
+  const blob = _xlsxBlob(rows, sheetName);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${filename}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+/** 기존 TSV 문자열을 그대로 받아 .xlsx 로 저장 (BOM 제거 + 탭 분리) */
+function downloadXlsxFromTsv(tsv, filename, sheetName) {
+  const rows = String(tsv || '').replace(/^﻿/, '').split(/\r?\n/).map(line => line.split('\t'));
+  downloadXlsxRows(rows, filename, sheetName);
+}
+
+/** 기존 CSV 문자열을 받아 .xlsx 로 저장 — 따옴표 필드·이스케이프("") 지원 */
+function downloadXlsxFromCsv(csv, filename, sheetName) {
+  const text = String(csv || '').replace(/^﻿/, '');
+  const rows = [];
+  let row = [], field = '', inQuote = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuote) {
+      if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (ch === '"') inQuote = false;
+      else field += ch;
+    } else if (ch === '"') inQuote = true;
+    else if (ch === ',') { row.push(field); field = ''; }
+    else if (ch === '\r') { /* CRLF 의 CR 무시 */ }
+    else if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+    else field += ch;
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  downloadXlsxRows(rows, filename, sheetName);
+}
+
+
 function downloadExcel() {
   const cols = getSelectedCols();
   const data = getSelectedRows();
@@ -4275,11 +4450,7 @@ function downloadExcel() {
   const header = cols.map(c => c.label).join('\t');
   const rows = data.map(r => cols.map(c => r[c.key] ?? '').join('\t'));
   const tsv = BOM + [header, ...rows].join('\n');
-  const blob = new Blob([tsv], { type: 'text/tab-separated-values;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `답례품_주문_${document.getElementById('ord-start').value}.tsv`;
-  a.click();
+  downloadXlsxFromTsv(tsv, `답례품_주문_${document.getElementById('ord-start').value}`, '주문목록');
   showToast(`${data.length}건 다운로드 완료`);
 }
 
@@ -5168,15 +5339,9 @@ function downloadPsCsv() {
     });
   });
   const csv = '\uFEFF' + lines.join('\n');  // UTF-8 BOM (엑셀 한글)
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
   const codes = [..._psSelected].join('_');
-  a.href = url;
-  a.download = `product_stats_${codes}_${data.period.start}_${data.period.end}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-  showToast('CSV 다운로드 시작');
+  downloadXlsxFromCsv(csv, `product_stats_${codes}_${data.period.start}_${data.period.end}`, '상품별통계');
+  showToast('엑셀 다운로드 시작');
 }
 
 // --- Dashboard ---
@@ -6054,15 +6219,8 @@ function downloadMonthlyReportTsv() {
   if (!tsv) { showToast('먼저 조회를 실행해주세요'); return; }
   const { month } = _mrData;
   // Excel 한글 깨짐 방지 — UTF-8 BOM (U+FEFF) 명시적 prepend
-  const blob = new Blob(['﻿' + tsv], { type: 'text/tab-separated-values;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `월간보고서_${month}.tsv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  showToast(`월간보고서_${month}.tsv 다운로드 완료`);
+  downloadXlsxFromTsv(tsv, `월간보고서_${month}`, '월간보고서');
+  showToast(`월간보고서_${month}.xlsx 다운로드 완료`);
 }
 
 // ============================================
@@ -8387,13 +8545,9 @@ function downloadBsdExcel() {
   const footer = ['합계', '-', total.amount, total.orders, total.qty, totalRegAmt, totalRegOrd, totalExprAmt, totalExprOrd, totalExprPct, ...footerSites].join('\t');
   const BOM = '﻿';
   const tsv = BOM + [headers.join('\t'), ...rows, footer].join('\n');
-  const blob = new Blob([tsv], { type: 'text/tab-separated-values;charset=utf-8' });
   const start = document.getElementById('bsd-start')?.value || '';
   const end = document.getElementById('bsd-end')?.value || '';
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `희망출고일별매출_${start}_${end}.tsv`;
-  a.click();
+  downloadXlsxFromTsv(tsv, `희망출고일별매출_${start}_${end}`, '희망출고일별매출');
   showToast(`${rows.length}일 다운로드 완료`);
 }
 
@@ -9657,14 +9811,10 @@ function downloadDashTableExcel() {
   if (!rows.length) { showToast('다운로드할 데이터가 없습니다'); return; }
   const BOM = '﻿';
   const tsv = BOM + rows.join('\n');
-  const blob = new Blob([tsv], { type: 'text/tab-separated-values;charset=utf-8' });
   const start = document.getElementById('dash-start')?.value || '';
   const end = document.getElementById('dash-end')?.value || '';
   const tabSuffix = tableTabMode === 'weekly' ? '주차별' : '일자별';
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `기간매출_${tabSuffix}_${start}_${end}.tsv`;
-  a.click();
+  downloadXlsxFromTsv(tsv, `기간매출_${tabSuffix}_${start}_${end}`, `기간매출_${tabSuffix}`);
   showToast(`${rows.length - 1}행 다운로드 완료`);
 }
 
@@ -13025,11 +13175,7 @@ function downloadBvdVendorExcel() {
   const end = document.getElementById('bvd-end')?.value || '';
   const BOM = '﻿';
   const tsv = BOM + [headers.join('\t'), ...lines, footer].join('\n');
-  const blob = new Blob([tsv], { type: 'text/tab-separated-values;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `위탁정산_거래처별_${start}_${end}.tsv`;
-  a.click();
+  downloadXlsxFromTsv(tsv, `위탁정산_거래처별_${start}_${end}`, '거래처별정산');
   showToast(`${lines.length}개 행 다운로드 완료`);
 }
 
@@ -13622,12 +13768,8 @@ function downloadStockCsv() {
     ].join(','));
   }
   const csv = '﻿' + lines.join('\r\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `답례품재고_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(a.href);
+  downloadXlsxFromCsv(csv, `답례품재고_${new Date().toISOString().slice(0, 10)}`, '답례품재고');
+  showToast('엑셀 다운로드 완료');
 }
 
 // ============================================
@@ -14111,13 +14253,9 @@ function downloadSettlementCsv() {
   lines.push(['"합계"', '"-"', '-', d.totals.total_qty, d.totals.total_amount, '-', d.totals.settlement_amount].join(','));
   // BOM (한글 Excel 호환)
   const csv = '﻿' + lines.join('\r\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
   const _uiEnd = document.getElementById('art-stl-end').value || d.period.end;
-  a.download = `작가정산_${d.period.start}_${_uiEnd}.csv`;
-  a.click();
-  URL.revokeObjectURL(a.href);
+  downloadXlsxFromCsv(csv, `작가정산_${d.period.start}_${_uiEnd}`, '작가정산');
+  showToast('엑셀 다운로드 완료');
 }
 
 function setArtistTab(tab) {
