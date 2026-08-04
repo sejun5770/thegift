@@ -1,0 +1,231 @@
+/**
+ * 답례품 재고 데일리 슬랙 알림.
+ *
+ *   bg_stock_alerts 에 등록된 품목코드만 골라 /api/daeryepum-stock 결과에서
+ *   재고 현황을 뽑아 슬랙 메시지로 만들어 보낸다.
+ *
+ * 발송 채널 (둘 중 하나만 있으면 됨. 봇 토큰 우선):
+ *   SLACK_BOT_TOKEN + BG_STOCK_SLACK_CHANNEL   ← chat.postMessage
+ *   BG_STOCK_SLACK_WEBHOOK                     ← Incoming Webhook
+ *
+ * 스케줄:
+ *   BG_STOCK_ALERT_ENABLED=1   자동 발송 켜기 (미설정이면 수동 발송만 가능)
+ *   BG_STOCK_ALERT_TIME=09:00  KST 발송 시각 (기본 09:00)
+ */
+const https = require('https');
+const store = require('./store');
+
+const SLACK_TOKEN = process.env.SLACK_BOT_TOKEN || '';
+const SLACK_CHANNEL = process.env.BG_STOCK_SLACK_CHANNEL || '';
+const SLACK_WEBHOOK = process.env.BG_STOCK_SLACK_WEBHOOK || '';
+
+/** 발송 수단이 설정되어 있는지 */
+function slackConfigured() {
+  return !!((SLACK_TOKEN && SLACK_CHANNEL) || SLACK_WEBHOOK);
+}
+
+function _postJson(urlStr, payload, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlStr);
+    const body = JSON.stringify(payload);
+    const req = https.request({
+      hostname: u.hostname,
+      path: u.pathname + u.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Length': Buffer.byteLength(body),
+        ...headers,
+      },
+      timeout: 15000,
+    }, res => {
+      let data = '';
+      res.on('data', c => { data += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body: data }));
+    });
+    req.on('timeout', () => { req.destroy(new Error('Slack 요청 timeout (15s)')); });
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
+/** 슬랙 전송 — 봇 토큰이 있으면 chat.postMessage, 없으면 webhook */
+async function postToSlack(text, channelOverride = null) {
+  const channel = channelOverride || SLACK_CHANNEL;
+  if (SLACK_TOKEN && channel) {
+    const r = await _postJson('https://slack.com/api/chat.postMessage',
+      { channel, text, mrkdwn: true },
+      { Authorization: `Bearer ${SLACK_TOKEN}` });
+    let parsed = {};
+    try { parsed = JSON.parse(r.body); } catch { /* 비-JSON 응답 */ }
+    if (!parsed.ok) throw new Error(`Slack chat.postMessage 실패: ${parsed.error || r.body.slice(0, 200)}`);
+    return { via: 'bot', channel, ts: parsed.ts };
+  }
+  if (SLACK_WEBHOOK) {
+    const r = await _postJson(SLACK_WEBHOOK, { text });
+    if (r.status !== 200) throw new Error(`Slack webhook 실패 [${r.status}]: ${r.body.slice(0, 200)}`);
+    return { via: 'webhook' };
+  }
+  throw new Error('슬랙 발송 설정 없음 — SLACK_BOT_TOKEN + BG_STOCK_SLACK_CHANNEL 또는 BG_STOCK_SLACK_WEBHOOK 필요');
+}
+
+function _fmt(n) {
+  return (Number(n) || 0).toLocaleString('ko-KR');
+}
+
+/** KST 기준 'YYYY-MM-DD (요일)' */
+function _kstDateLabel(d = new Date()) {
+  const kst = new Date(d.getTime() + 9 * 3600 * 1000);
+  const days = ['일', '월', '화', '수', '목', '금', '토'];
+  return `${kst.toISOString().slice(0, 10)} (${days[kst.getUTCDay()]})`;
+}
+
+/**
+ * 등록된 품목의 재고 현황을 조회해 메시지 텍스트까지 만든다.
+ *   baseUrl: 자기 자신 (예: http://localhost:3457) — 재고 API 재사용
+ * 반환: { rows, missing, warnCount, text, targetCount }
+ */
+async function buildStockReport(baseUrl) {
+  const targets = await store.listStockAlerts({ enabledOnly: true });
+  if (!targets.length) {
+    return { rows: [], missing: [], warnCount: 0, targetCount: 0, text: null };
+  }
+
+  // 세션 없는 내부 호출 — server.js 가 발급한 프로세스 토큰으로 auth gate 통과
+  const res = await fetch(`${baseUrl}/api/daeryepum-stock`, {
+    headers: { 'x-internal-token': process.env.BG_INTERNAL_TOKEN || '' },
+  });
+  const raw = await res.text();
+  let data;
+  try { data = JSON.parse(raw); }
+  catch { throw new Error(`재고 API 가 JSON 이 아닌 응답 반환 [${res.status}] — 인증 게이트 확인 필요`); }
+  if (data.error) throw new Error(`재고 조회 실패: ${data.error}`);
+
+  const byCode = new Map();
+  for (const it of (data.items || [])) byCode.set(it.product_code, it);
+
+  const rows = [];
+  const missing = [];
+  for (const t of targets) {
+    const it = byCode.get(t.product_code);
+    if (!it) { missing.push(t.product_code); continue; }
+    // 경고 판정 — threshold 가 있으면 가용재고 기준, 없으면 소진예상 30일 기준
+    const warn = t.threshold != null
+      ? it.available_qty <= t.threshold
+      : (it.days_to_soldout !== null && it.days_to_soldout <= 30);
+    rows.push({
+      product_code: it.product_code,
+      product_name: it.product_name || t.label || '',
+      threshold: t.threshold,
+      current_qty: it.current_qty,
+      available_qty: it.available_qty,
+      sales_qty_30d: it.sales_qty_30d,
+      daily_avg_30d: it.daily_avg_30d,
+      days_to_soldout: it.days_to_soldout,
+      soldout: it.available_qty <= 0,
+      warn,
+    });
+  }
+
+  // 소진 → 경고 → 정상 순, 각 그룹 안에서는 소진예상일 오름차순
+  const rank = r => (r.soldout ? 0 : r.warn ? 1 : 2);
+  rows.sort((a, b) => rank(a) - rank(b) || (a.days_to_soldout ?? 99999) - (b.days_to_soldout ?? 99999));
+
+  const line = r => {
+    const icon = r.soldout ? '⛔' : r.warn ? '⚠️' : '✅';
+    const days = r.days_to_soldout === null ? '소진예상 -' : `소진예상 *${r.days_to_soldout}일*`;
+    const thr = r.threshold != null ? ` (임계 ${_fmt(r.threshold)})` : '';
+    const name = r.product_name || '(이름 없음)';
+    return `${icon} \`${r.product_code}\` ${name}\n`
+      + `    가용 *${_fmt(r.available_qty)}* / 현재고 ${_fmt(r.current_qty)}${thr}`
+      + ` · 30일 판매 ${_fmt(r.sales_qty_30d)} (일평균 ${r.daily_avg_30d}) · ${days}`;
+  };
+
+  const warnRows = rows.filter(r => r.soldout || r.warn);
+  const okRows = rows.filter(r => !r.soldout && !r.warn);
+
+  const parts = [`📦 *답례품 재고 현황* · ${_kstDateLabel()}`];
+  if (warnRows.length) {
+    parts.push(`\n*🔴 확인 필요 ${warnRows.length}건*\n` + warnRows.map(line).join('\n'));
+  }
+  if (okRows.length) {
+    parts.push(`\n*정상 ${okRows.length}건*\n` + okRows.map(line).join('\n'));
+  }
+  if (!warnRows.length && !okRows.length) {
+    parts.push('\n등록된 품목의 재고 데이터를 찾지 못했습니다.');
+  }
+  if (missing.length) {
+    parts.push(`\n_⚠️ 재고 데이터에 없는 코드: ${missing.join(', ')}_`);
+  }
+
+  return {
+    rows,
+    missing,
+    warnCount: warnRows.length,
+    targetCount: targets.length,
+    text: parts.join('\n'),
+  };
+}
+
+/**
+ * 리포트 생성 + 발송.
+ *   dryRun=true 면 메시지만 만들고 슬랙에 보내지 않는다 (미리보기).
+ */
+async function sendStockAlert(baseUrl, { dryRun = false, channel = null } = {}) {
+  const report = await buildStockReport(baseUrl);
+  if (!report.text) {
+    return { ok: false, skipped: true, reason: '알림 대상 품목이 없습니다', ...report };
+  }
+  if (dryRun) return { ok: true, dryRun: true, ...report };
+  const sent = await postToSlack(report.text, channel);
+  return { ok: true, sent, ...report };
+}
+
+/** 매일 KST 지정 시각 자동 발송. BG_STOCK_ALERT_ENABLED=1 일 때만 등록. */
+function scheduleDailyStockAlert(baseUrl) {
+  if (process.env.BG_STOCK_ALERT_ENABLED !== '1') {
+    console.log('[stock-alert] 자동 발송 비활성 (BG_STOCK_ALERT_ENABLED=1 로 활성화)');
+    return;
+  }
+  if (!slackConfigured()) {
+    console.warn('[stock-alert] 슬랙 설정 없음 — 자동 발송 등록하지 않음');
+    return;
+  }
+  const [hh, mm] = String(process.env.BG_STOCK_ALERT_TIME || '09:00').split(':');
+  const kstHour = Math.min(23, Math.max(0, parseInt(hh, 10) || 9));
+  const kstMin = Math.min(59, Math.max(0, parseInt(mm, 10) || 0));
+  // KST = UTC+9 → UTC 시각으로 환산 (음수면 전날로 넘어가지만 다음 실행 계산에서 자연 보정)
+  const utcHour = ((kstHour - 9) + 24) % 24;
+
+  function msUntilNextRun() {
+    const now = new Date();
+    const target = new Date();
+    target.setUTCHours(utcHour, kstMin, 0, 0);
+    if (target <= now) target.setUTCDate(target.getUTCDate() + 1);
+    return target.getTime() - now.getTime();
+  }
+
+  async function runOnce() {
+    try {
+      const r = await sendStockAlert(baseUrl, {});
+      console.log('[stock-alert] 발송 완료 —',
+        `대상 ${r.targetCount}건 / 확인필요 ${r.warnCount}건`, r.sent || r.reason || '');
+    } catch (err) {
+      console.error('[stock-alert] 발송 실패:', err.message);
+    }
+    setTimeout(runOnce, msUntilNextRun());
+  }
+
+  const waitMs = msUntilNextRun();
+  setTimeout(runOnce, waitMs);
+  const h = Math.floor(waitMs / 3600000);
+  const m = Math.floor((waitMs % 3600000) / 60000);
+  console.log(`[stock-alert] 매일 ${String(kstHour).padStart(2, '0')}:${String(kstMin).padStart(2, '0')} KST 등록 — 첫 실행까지 ${h}시간 ${m}분`);
+}
+
+module.exports = {
+  slackConfigured,
+  buildStockReport,
+  sendStockAlert,
+  scheduleDailyStockAlert,
+};

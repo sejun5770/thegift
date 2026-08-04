@@ -6,6 +6,7 @@ const store = require('./store');
 const { logAccess, getRecentLogs } = require('./audit-log');
 const { check: rlCheck, rateLimitResponse, LIMITS: RL_LIMITS } = require('./rate-limit');
 const signedUrl = require('./signed-url');
+const stockAlert = require('./stock-alert');
 
 // 답례품 필터 SQL 조건 — 자체매입 (Card_Div='D01') + 위탁답례품 (Card_Code LIKE 'COM_%')
 // custom_order_item + S2_Card JOIN 후 사용. c 에일리어스 사용.
@@ -978,6 +979,70 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       return json(res, await store.removeSalesExclusion(decodeURIComponent(salesExclDelMatch[1])));
     } catch (err) {
       console.error('[sales-exclusions DELETE] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+
+  // ============================================
+  // 재고 데일리 슬랙 알림 (migration 043)
+  //   대상 품목 CRUD + 미리보기/수동 발송.
+  // ============================================
+  if (pathname === '/api/bg/stock-alerts' && method === 'GET') {
+    try {
+      return json(res, {
+        alerts: await store.listStockAlerts(),
+        slack_configured: stockAlert.slackConfigured(),
+        schedule: process.env.BG_STOCK_ALERT_ENABLED === '1'
+          ? `매일 ${process.env.BG_STOCK_ALERT_TIME || '09:00'} KST`
+          : null,
+      });
+    } catch (err) {
+      console.error('[stock-alerts GET] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+  if (pathname === '/api/bg/stock-alerts' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const added = await store.addStockAlerts(body.items || [], session?.email || null);
+      return json(res, { items: added }, 201);
+    } catch (err) {
+      console.error('[stock-alerts POST] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  // POST /api/bg/stock-alerts/send  { dry_run?: true, channel?: 'C…' }
+  //   dry_run 이면 메시지만 만들어 돌려주고 슬랙에는 보내지 않는다.
+  if (pathname === '/api/bg/stock-alerts/send' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const base = `http://localhost:${process.env.PORT || '3457'}${process.env.BASE_PATH || ''}`;
+      const out = await stockAlert.sendStockAlert(base, {
+        dryRun: !!body.dry_run,
+        channel: body.channel || null,
+      });
+      return json(res, out);
+    } catch (err) {
+      console.error('[stock-alerts send] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  const stockAlertIdMatch = pathname.match(/^\/api\/bg\/stock-alerts\/([^/]+)$/);
+  if (stockAlertIdMatch && method === 'PATCH') {
+    try {
+      const body = await parseBody(req);
+      const row = await store.updateStockAlert(decodeURIComponent(stockAlertIdMatch[1]), body);
+      return json(res, row || { error: 'not found' }, row ? 200 : 404);
+    } catch (err) {
+      console.error('[stock-alerts PATCH] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  if (stockAlertIdMatch && method === 'DELETE') {
+    try {
+      return json(res, await store.removeStockAlert(decodeURIComponent(stockAlertIdMatch[1])));
+    } catch (err) {
+      console.error('[stock-alerts DELETE] error:', err.message);
       return json(res, { error: err.message }, 400);
     }
   }

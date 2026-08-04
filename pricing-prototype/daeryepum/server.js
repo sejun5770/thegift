@@ -8,6 +8,12 @@ const crypto = require('crypto');
 const PORT = parseInt(process.env.PORT || '3457');
 const BASE_PATH = process.env.BASE_PATH || '';  // 예: /c/barungift
 
+// 컨테이너 내부 자기호출(스케줄러 등)이 세션 없이 API 를 쓰기 위한 1회성 토큰.
+//   프로세스마다 새로 만드는 랜덤값이라 외부에서 추측/재사용 불가.
+//   같은 프로세스의 하위 모듈은 process.env 로 읽는다.
+const INTERNAL_TOKEN = crypto.randomBytes(24).toString('hex');
+process.env.BG_INTERNAL_TOKEN = INTERNAL_TOKEN;
+
 // --- 바른기프트 모듈 ---
 const { handleBarungiftApi } = require('./barungift/api');
 
@@ -7773,7 +7779,9 @@ const server = http.createServer(async (req, res) => {
     pathname === '/api/naver/sync' ||
     pathname === '/api/coupang/sync'
   );
-  if (!session && !DEV_SKIP_AUTH && !(isCronSyncPath && validateApiKey(req))) {
+  //   컨테이너 내부 자기호출(재고 알림 스케줄러 등): 프로세스 랜덤 토큰이면 통과.
+  const isInternalCall = req.headers['x-internal-token'] === INTERNAL_TOKEN;
+  if (!session && !DEV_SKIP_AUTH && !isInternalCall && !(isCronSyncPath && validateApiKey(req))) {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(getLoginPageHtml());
     return;
@@ -14212,6 +14220,9 @@ function scheduleDailyOrderRawSync() {
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`답례품 관리 서버: http://localhost:${PORT}${BASE_PATH || ''}`);
   scheduleDailyOrderRawSync();
+  // 재고 데일리 슬랙 알림 — BG_STOCK_ALERT_ENABLED=1 일 때만 등록
+  require('./barungift/stock-alert')
+    .scheduleDailyStockAlert(`http://localhost:${PORT}${BASE_PATH || ''}`);
 });
 
 // 서버 크래시 방지

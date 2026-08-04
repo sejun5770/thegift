@@ -102,6 +102,7 @@ const FILES = {
   salesGroups: path.join(DATA_DIR, 'bg_sales_groups.json'),
   salesGroupMembers: path.join(DATA_DIR, 'bg_sales_group_members.json'),
   salesExclusions: path.join(DATA_DIR, 'bg_sales_exclusions.json'),
+  stockAlerts: path.join(DATA_DIR, 'bg_stock_alerts.json'),
 };
 
 function ensureDataDir() {
@@ -1729,7 +1730,92 @@ async function removeSalesExclusion(id) {
   return { ok: true };
 }
 
+// ─────────────────────────────────────────────────────────────
+// 재고 데일리 슬랙 알림 대상 (migration 043)
+//   product_code 단위 UNIQUE — 같은 코드를 두 번 등록하면 갱신(upsert).
+// ─────────────────────────────────────────────────────────────
+
+async function listStockAlerts({ enabledOnly = false } = {}) {
+  let rows;
+  if (USE_SUPABASE) {
+    rows = await sbGet('bg_stock_alerts', 'order=sort_order.asc,created_at.asc&limit=500');
+  } else {
+    rows = readJson(FILES.stockAlerts, [])
+      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  }
+  return enabledOnly ? rows.filter(r => r.enabled !== false) : rows;
+}
+
+/** 대상 추가 (bulk upsert). product_code 중복은 갱신. */
+async function addStockAlerts(items, createdBy = null) {
+  const rows = (Array.isArray(items) ? items : [])
+    .map(m => ({
+      product_code: String(m.product_code ?? '').trim(),
+      label: m.label ? String(m.label) : null,
+      threshold: (m.threshold === '' || m.threshold == null) ? null : Math.max(0, parseInt(m.threshold, 10) || 0),
+      sort_order: parseInt(m.sort_order, 10) || 0,
+      enabled: m.enabled === false ? false : true,
+      memo: m.memo ? String(m.memo) : null,
+      created_by: createdBy,
+    }))
+    .filter(m => m.product_code);
+  if (!rows.length) return [];
+  const seen = new Set();
+  const uniq = rows.filter(r => {
+    if (seen.has(r.product_code)) return false;
+    seen.add(r.product_code);
+    return true;
+  });
+  if (USE_SUPABASE) {
+    const res = await fetch(`${REST_BASE}/bg_stock_alerts?on_conflict=product_code`, {
+      method: 'POST',
+      headers: { ...HEADERS, Prefer: 'resolution=merge-duplicates,return=representation' },
+      body: JSON.stringify(uniq),
+    });
+    if (!res.ok) throw new Error(`Supabase INSERT bg_stock_alerts [${res.status}]: ${await res.text()}`);
+    return res.json();
+  }
+  const list = readJson(FILES.stockAlerts, []).filter(m => !seen.has(m.product_code));
+  const added = uniq.map(r => ({ id: uuid(), ...r, created_at: now(), updated_at: now() }));
+  writeJson(FILES.stockAlerts, list.concat(added));
+  return added;
+}
+
+async function updateStockAlert(id, data) {
+  if (!id) throw new Error('id 필수');
+  const patch = { updated_at: now() };
+  if ('threshold' in data) patch.threshold = (data.threshold === '' || data.threshold == null) ? null : Math.max(0, parseInt(data.threshold, 10) || 0);
+  if ('enabled' in data) patch.enabled = !!data.enabled;
+  if ('sort_order' in data) patch.sort_order = parseInt(data.sort_order, 10) || 0;
+  if ('label' in data) patch.label = data.label ? String(data.label) : null;
+  if ('memo' in data) patch.memo = data.memo ? String(data.memo) : null;
+  if (USE_SUPABASE) {
+    const rows = await sbUpdate('bg_stock_alerts', `id=eq.${encodeURIComponent(id)}`, patch);
+    return rows[0] || null;
+  }
+  const list = readJson(FILES.stockAlerts, []);
+  const idx = list.findIndex(m => m.id === id);
+  if (idx < 0) return null;
+  list[idx] = { ...list[idx], ...patch };
+  writeJson(FILES.stockAlerts, list);
+  return list[idx];
+}
+
+async function removeStockAlert(id) {
+  if (!id) throw new Error('id 필수');
+  if (USE_SUPABASE) {
+    await sbDelete('bg_stock_alerts', `id=eq.${encodeURIComponent(id)}`);
+    return { ok: true };
+  }
+  writeJson(FILES.stockAlerts, readJson(FILES.stockAlerts, []).filter(m => m.id !== id));
+  return { ok: true };
+}
+
 module.exports = {
+  listStockAlerts,
+  addStockAlerts,
+  updateStockAlert,
+  removeStockAlert,
   listSalesExclusions,
   addSalesExclusions,
   removeSalesExclusion,
