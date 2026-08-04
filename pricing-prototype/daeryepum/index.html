@@ -13918,7 +13918,18 @@ async function previewStockAlert() {
     });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
-    $body.textContent = d.text || d.reason || '(내용 없음)';
+    if (!d.summaryText) { $body.textContent = d.reason || '(내용 없음)'; return; }
+    if (d.threaded) {
+      const parts = [`━━━ 채널 본문 ━━━\n${d.summaryText}`];
+      (d.detailChunks || []).forEach((c, i) => {
+        const n = (d.detailChunks.length > 1) ? ` ${i + 1}/${d.detailChunks.length}` : '';
+        parts.push(`━━━ 스레드 댓글${n} ━━━\n${c}`);
+      });
+      $body.textContent = parts.join('\n\n');
+    } else {
+      // webhook 은 스레드를 지원하지 않아 한 메시지로 나간다
+      $body.textContent = `━━━ 채널 본문 (webhook — 스레드 미지원, 합본 발송) ━━━\n${d.text}`;
+    }
   } catch (e) {
     $body.textContent = `미리보기 실패: ${e.message}`;
   }
@@ -13935,7 +13946,8 @@ async function sendStockAlertNow() {
     const d = await r.json();
     if (d.error) throw new Error(d.error);
     if (d.skipped) { alert(d.reason); return; }
-    showToast(`슬랙 발송 완료 — 대상 ${d.targetCount}건 / 확인필요 ${d.warnCount}건`);
+    const thread = d.threaded ? ` (스레드 댓글 ${d.sent?.thread_replies || 0}건)` : '';
+    showToast(`슬랙 발송 완료 — 대상 ${d.targetCount}건 / 확인필요 ${d.warnCount}건${thread}`);
   } catch (e) {
     alert(`발송 실패: ${e.message}`);
   }

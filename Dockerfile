@@ -3,9 +3,8 @@ FROM node:20-alpine
 WORKDIR /app
 
 # 의존성: mssql/mysql2/bcryptjs/xlsx 외 추가
-#   · googleapis (Google Sheets API — 주문RAW 자동 sync)
 #   · date-fns (날짜 처리)
-RUN npm init -y && npm install mssql mysql2 bcryptjs xlsx googleapis date-fns
+RUN npm init -y && npm install mssql mysql2 bcryptjs xlsx date-fns
 
 # 답례품 앱 복사
 COPY pricing-prototype/daeryepum/server.js ./

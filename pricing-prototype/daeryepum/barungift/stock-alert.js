@@ -49,12 +49,18 @@ function _postJson(urlStr, payload, headers = {}) {
   });
 }
 
-/** 슬랙 전송 — 봇 토큰이 있으면 chat.postMessage, 없으면 webhook */
-async function postToSlack(text, channelOverride = null) {
+/**
+ * 슬랙 전송 — 봇 토큰이 있으면 chat.postMessage, 없으면 webhook.
+ *   threadTs 를 주면 해당 메시지의 스레드 댓글로 달린다 (봇 토큰 경로 전용).
+ *   webhook 은 스레드를 지원하지 않는다.
+ */
+async function postToSlack(text, { channel: channelOverride = null, threadTs = null } = {}) {
   const channel = channelOverride || SLACK_CHANNEL;
   if (SLACK_TOKEN && channel) {
+    const payload = { channel, text, mrkdwn: true };
+    if (threadTs) payload.thread_ts = threadTs;
     const r = await _postJson('https://slack.com/api/chat.postMessage',
-      { channel, text, mrkdwn: true },
+      payload,
       { Authorization: `Bearer ${SLACK_TOKEN}` });
     let parsed = {};
     try { parsed = JSON.parse(r.body); } catch { /* 비-JSON 응답 */ }
@@ -62,11 +68,17 @@ async function postToSlack(text, channelOverride = null) {
     return { via: 'bot', channel, ts: parsed.ts };
   }
   if (SLACK_WEBHOOK) {
+    if (threadTs) throw new Error('webhook 은 스레드 댓글을 지원하지 않습니다');
     const r = await _postJson(SLACK_WEBHOOK, { text });
     if (r.status !== 200) throw new Error(`Slack webhook 실패 [${r.status}]: ${r.body.slice(0, 200)}`);
     return { via: 'webhook' };
   }
   throw new Error('슬랙 발송 설정 없음 — SLACK_BOT_TOKEN + BG_STOCK_SLACK_CHANNEL 또는 BG_STOCK_SLACK_WEBHOOK 필요');
+}
+
+/** 스레드 댓글(= 봇 토큰 + 채널) 사용 가능 여부 */
+function canThread(channelOverride = null) {
+  return !!(SLACK_TOKEN && (channelOverride || SLACK_CHANNEL));
 }
 
 function _fmt(n) {
@@ -80,15 +92,34 @@ function _kstDateLabel(d = new Date()) {
   return `${kst.toISOString().slice(0, 10)} (${days[kst.getUTCDay()]})`;
 }
 
+/** 상세 라인들을 슬랙 메시지 길이 제한 안쪽(3500자)으로 쪼갠다 */
+function _chunkLines(lines, limit = 3500) {
+  const chunks = [];
+  let cur = '';
+  for (const l of lines) {
+    if (cur && cur.length + l.length + 1 > limit) { chunks.push(cur); cur = ''; }
+    cur = cur ? `${cur}\n${l}` : l;
+  }
+  if (cur) chunks.push(cur);
+  return chunks;
+}
+
 /**
  * 등록된 품목의 재고 현황을 조회해 메시지 텍스트까지 만든다.
  *   baseUrl: 자기 자신 (예: http://localhost:3457) — 재고 API 재사용
- * 반환: { rows, missing, warnCount, text, targetCount }
+ *
+ * 본문/스레드 분리 (2026-08-04 요청):
+ *   summaryText  → 채널 본문. 상태 요약(건수 + 확인 필요 품목명)만.
+ *   detailChunks → 스레드 댓글. 품목별 수치 상세. 길면 여러 댓글로 쪼갠다.
+ *   text         → 스레드를 못 쓰는 webhook 용 합본.
  */
 async function buildStockReport(baseUrl) {
   const targets = await store.listStockAlerts({ enabledOnly: true });
   if (!targets.length) {
-    return { rows: [], missing: [], warnCount: 0, targetCount: 0, text: null };
+    return {
+      rows: [], missing: [], warnCount: 0, soldoutCount: 0, targetCount: 0,
+      summaryText: null, detailChunks: [], text: null,
+    };
   }
 
   // 세션 없는 내부 호출 — server.js 가 발급한 프로세스 토큰으로 auth gate 통과
@@ -141,29 +172,52 @@ async function buildStockReport(baseUrl) {
       + ` · 30일 판매 ${_fmt(r.sales_qty_30d)} (일평균 ${r.daily_avg_30d}) · ${days}`;
   };
 
-  const warnRows = rows.filter(r => r.soldout || r.warn);
+  const soldoutRows = rows.filter(r => r.soldout);
+  const warnRows = rows.filter(r => !r.soldout && r.warn);
   const okRows = rows.filter(r => !r.soldout && !r.warn);
+  const attention = [...soldoutRows, ...warnRows];
 
-  const parts = [`📦 *답례품 재고 현황* · ${_kstDateLabel()}`];
-  if (warnRows.length) {
-    parts.push(`\n*🔴 확인 필요 ${warnRows.length}건*\n` + warnRows.map(line).join('\n'));
-  }
-  if (okRows.length) {
-    parts.push(`\n*정상 ${okRows.length}건*\n` + okRows.map(line).join('\n'));
-  }
-  if (!warnRows.length && !okRows.length) {
-    parts.push('\n등록된 품목의 재고 데이터를 찾지 못했습니다.');
+  // ── 본문: 상태 요약만 ──
+  const summary = [`📦 *답례품 재고 현황* · ${_kstDateLabel()}`, ''];
+  summary.push(
+    `⛔ 소진 *${soldoutRows.length}*   ⚠️ 확인 필요 *${warnRows.length}*   ✅ 정상 *${okRows.length}*`
+    + `   〈대상 ${targets.length}건〉`
+  );
+  if (attention.length) {
+    summary.push('', '*조치가 필요한 품목*');
+    // 이름만 — 수치는 스레드에서
+    summary.push(attention
+      .map(r => `${r.soldout ? '⛔' : '⚠️'} \`${r.product_code}\` ${r.product_name || '(이름 없음)'}`)
+      .join('\n'));
+  } else if (rows.length) {
+    summary.push('', '전 품목 재고 정상입니다. 👍');
+  } else {
+    summary.push('', '등록된 품목의 재고 데이터를 찾지 못했습니다.');
   }
   if (missing.length) {
-    parts.push(`\n_⚠️ 재고 데이터에 없는 코드: ${missing.join(', ')}_`);
+    summary.push('', `_⚠️ 재고 데이터에 없는 코드: ${missing.join(', ')}_`);
   }
+  if (rows.length) summary.push('', '_품목별 상세는 스레드에서 확인하세요_ 👇');
+
+  // ── 스레드: 품목별 수치 상세 ──
+  const detailLines = [];
+  if (soldoutRows.length) detailLines.push(`*⛔ 소진 ${soldoutRows.length}건*`, ...soldoutRows.map(line), '');
+  if (warnRows.length) detailLines.push(`*⚠️ 확인 필요 ${warnRows.length}건*`, ...warnRows.map(line), '');
+  if (okRows.length) detailLines.push(`*✅ 정상 ${okRows.length}건*`, ...okRows.map(line));
+
+  const summaryText = summary.join('\n');
+  const detailChunks = detailLines.length ? _chunkLines(detailLines) : [];
 
   return {
     rows,
     missing,
-    warnCount: warnRows.length,
+    warnCount: warnRows.length + soldoutRows.length,
+    soldoutCount: soldoutRows.length,
     targetCount: targets.length,
-    text: parts.join('\n'),
+    summaryText,
+    detailChunks,
+    // 스레드를 못 쓰는 webhook 용 합본
+    text: [summaryText, ...detailChunks].join('\n\n'),
   };
 }
 
@@ -173,12 +227,24 @@ async function buildStockReport(baseUrl) {
  */
 async function sendStockAlert(baseUrl, { dryRun = false, channel = null } = {}) {
   const report = await buildStockReport(baseUrl);
-  if (!report.text) {
+  if (!report.summaryText) {
     return { ok: false, skipped: true, reason: '알림 대상 품목이 없습니다', ...report };
   }
-  if (dryRun) return { ok: true, dryRun: true, ...report };
-  const sent = await postToSlack(report.text, channel);
-  return { ok: true, sent, ...report };
+  if (dryRun) return { ok: true, dryRun: true, threaded: canThread(channel), ...report };
+
+  // 봇 토큰 + 채널이면 본문 1건 + 스레드 댓글 N건.
+  if (canThread(channel)) {
+    const parent = await postToSlack(report.summaryText, { channel });
+    let replies = 0;
+    for (const chunk of report.detailChunks) {
+      await postToSlack(chunk, { channel, threadTs: parent.ts });
+      replies++;
+    }
+    return { ok: true, threaded: true, sent: { ...parent, thread_replies: replies }, ...report };
+  }
+  // webhook 은 스레드 불가 — 요약 + 상세를 한 메시지로 합쳐 보낸다.
+  const sent = await postToSlack(report.text, { channel });
+  return { ok: true, threaded: false, sent, ...report };
 }
 
 /** 매일 KST 지정 시각 자동 발송. BG_STOCK_ALERT_ENABLED=1 일 때만 등록. */
@@ -225,6 +291,7 @@ function scheduleDailyStockAlert(baseUrl) {
 
 module.exports = {
   slackConfigured,
+  canThread,
   buildStockReport,
   sendStockAlert,
   scheduleDailyStockAlert,
