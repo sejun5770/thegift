@@ -7817,14 +7817,31 @@ const server = http.createServer(async (req, res) => {
                 canon.canonical_name AS product_name,
                 codes.Card_Div,
                 ISNULL(s.INVENTORY_CURRENT_QTY, 0) AS current_qty,
-                ISNULL(s.INVENTORY_AVAILABLE_QTY, 0) AS available_qty
+                ISNULL(s.INVENTORY_AVAILABLE_QTY, 0) AS available_qty,
+                s.BRAND_NAME,
+                CASE WHEN s.CARD_CODE IS NULL THEN 0 ELSE 1 END AS has_erp_record
               FROM (
                 SELECT Card_Code, MAX(Card_Div) AS Card_Div
                 FROM S2_Card WITH (NOLOCK)
                 WHERE Card_Div = 'D01' OR Card_Code LIKE 'COM[_]%'
                 GROUP BY Card_Code
               ) codes
-              LEFT JOIN S2_CARD_ERP_STOCK s WITH (NOLOCK) ON s.CARD_CODE = codes.Card_Code
+              -- ERP 재고는 같은 CARD_CODE 에 여러 행이 존재한다 (답례품 범위 9개 코드, 2026-08-04 확인).
+              --   ERP 연동 과정에서 CARD_CODE_ERP 가 다른 레거시/플레이스홀더 행이 함께 남는데,
+              --   그런 행은 수량이 NULL 이거나 음수다 (예: TGJBK03O1_A → -1 vs 8923).
+              --   LEFT JOIN 하면 행이 불어나 같은 품목이 두 번 보이고, 그중 0 짜리가 알림에 잡혔다.
+              -- → 유효수량(NULL/음수 아님) 우선 → MOD_DATE 최신 순으로 1행만 채택.
+              OUTER APPLY (
+                SELECT TOP 1 s2.CARD_CODE, s2.INVENTORY_CURRENT_QTY, s2.INVENTORY_AVAILABLE_QTY, s2.BRAND_NAME
+                FROM S2_CARD_ERP_STOCK s2 WITH (NOLOCK)
+                WHERE s2.CARD_CODE = codes.Card_Code
+                  -- 재고 확인 불필요 브랜드 (운영 규칙 2026-08-04): 기타 / 바른손카드 부자재
+                  AND ISNULL(s2.BRAND_NAME, '') NOT IN (N'기타', N'바른손카드')
+                ORDER BY
+                  CASE WHEN s2.INVENTORY_CURRENT_QTY IS NOT NULL
+                        AND s2.INVENTORY_CURRENT_QTY >= 0 THEN 0 ELSE 1 END,
+                  s2.MOD_DATE DESC
+              ) s
               OUTER APPLY (
                 SELECT TOP 1
                   CASE
@@ -7863,13 +7880,22 @@ const server = http.createServer(async (req, res) => {
                   AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
                   AND co.settle_date >= DATEADD(day, -30, GETDATE())
                 UNION ALL
+                -- ETC 는 card_sale_price 의 의미가 매출처마다 다르다 (앱 공통 규칙, etcAmountExpr 참조).
+                --   바른손카드 (SiteInfo 매칭)  : 이미 라인 총액 → 그대로
+                --   바른손몰   (제휴사, 미매칭) : 단가 → × 수량 / Unit_Value
+                -- 이 분기가 빠져 있어 총액에 수량을 또 곱했고, 단가가 실제의 100배 넘게 부풀었다
+                -- (알뮤터 7,899원 → 1,237,254원). 재고 자산·30일 매출액도 같이 틀어짐. 2026-08-04 수정.
                 SELECT c.Card_Code,
                        oi.order_count,
-                       CAST(oi.card_sale_price AS float) * oi.order_count
-                         / ISNULL(NULLIF(c.Unit_Value, 0), 1) AS revenue
+                       CASE WHEN si.SiteName IS NULL
+                            THEN CAST(oi.card_sale_price AS float) * oi.order_count
+                                 / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                            ELSE CAST(oi.card_sale_price AS float)
+                       END AS revenue
                 FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
                 INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
                 INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
                 WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')
                   AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
                   AND o.settle_date >= DATEADD(day, -30, GETDATE())
@@ -7908,18 +7934,28 @@ const server = http.createServer(async (req, res) => {
               sales_amount_30d: salesAmount30d,
               sales_qty_30d: qty30,
               daily_avg_30d: Math.round(dailyAvg * 100) / 100,
-              days_to_soldout: daysLeft
+              days_to_soldout: daysLeft,
+              brand_name: r.BRAND_NAME || null,
+              // '재고관리 대상' = 재고 수량이 잡혀 있거나 최근 30일 판매가 있는 코드.
+              //   품목코드에는 세트·반제·스티커·부자재·원물이 섞여 있는데 (운영 지적 2026-08-04),
+              //   ERP 의 상품구분/사용여부는 bar_shop1 에 넘어오지 않아 그 값으로 거를 수 없다.
+              //   실적(재고·판매)으로 대신 거른다 — 스티커/부자재/단종은 둘 다 0 이라 자연히 빠진다.
+              //   ERP 레코드 유무만으로 판단하면 수량 0 인 스티커가 남아 알림 대상에 섞였다.
+              is_managed: Number(r.current_qty) !== 0 || availableQty !== 0 || qty30 > 0,
             };
           }).sort((a, b) => (a.days_to_soldout ?? 99999) - (b.days_to_soldout ?? 99999));
+          const managed = items.filter(x => x.is_managed);
           data = {
             items,
             summary: {
-              total: items.length,
-              with_stock: items.filter(x => x.available_qty > 0).length,
-              soldout: items.filter(x => x.available_qty <= 0).length,
-              urgent_30d: items.filter(x => x.days_to_soldout !== null && x.days_to_soldout <= 30).length,
-              total_stock_value: items.reduce((s, x) => s + (Number(x.stock_value) || 0), 0),
-              total_sales_30d: items.reduce((s, x) => s + (Number(x.sales_amount_30d) || 0), 0)
+              total: managed.length,
+              total_all: items.length,
+              unmanaged: items.length - managed.length,
+              with_stock: managed.filter(x => x.available_qty > 0).length,
+              soldout: managed.filter(x => x.available_qty <= 0).length,
+              urgent_30d: managed.filter(x => x.days_to_soldout !== null && x.days_to_soldout <= 30).length,
+              total_stock_value: managed.reduce((s, x) => s + (Number(x.stock_value) || 0), 0),
+              total_sales_30d: managed.reduce((s, x) => s + (Number(x.sales_amount_30d) || 0), 0)
             }
           };
         } catch (e) {

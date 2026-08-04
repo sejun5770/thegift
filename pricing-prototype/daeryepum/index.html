@@ -2252,6 +2252,11 @@ nav.nav-loading a[href^="#"] {
         <option value="soldout">❌ 재고 없음</option>
         <option value="in_stock">✅ 재고 있음</option>
       </select>
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap"
+             title="ERP 재고 레코드도 없고 최근 30일 판매도 없는 코드 (스티커·부자재·단종 등) 를 숨깁니다">
+        <input type="checkbox" id="stock-managed-only" checked onchange="renderStockTable()">
+        재고관리 대상만
+      </label>
       <button class="btn" style="padding:6px 12px;font-size:12px" onclick="loadDaeryepumStock()">🔄 새로고침</button>
       <button class="btn" style="padding:6px 12px;font-size:12px" onclick="downloadStockCsv()">📥 엑셀</button>
     </div>
@@ -13711,7 +13716,8 @@ async function loadDaeryepumStock() {
     // 요약 배지
     const s = d.summary || {};
     $summary.innerHTML = `
-      <span style="padding:4px 10px;background:#e0e7ff;color:#4338ca;border-radius:4px;font-weight:600">전체 ${s.total || 0}개</span>
+      <span style="padding:4px 10px;background:#e0e7ff;color:#4338ca;border-radius:4px;font-weight:600" title="ERP 재고 레코드 또는 최근 판매가 있는 코드">재고관리 대상 ${s.total || 0}개</span>
+      <span style="padding:4px 10px;background:#f8fafc;color:#64748b;border-radius:4px" title="스티커·부자재·단종 등 재고 확인 불필요 코드">제외 ${s.unmanaged || 0}개</span>
       <span style="padding:4px 10px;background:#dcfce7;color:#166534;border-radius:4px;font-weight:600">재고 있음 ${s.with_stock || 0}개</span>
       <span style="padding:4px 10px;background:#fef3c7;color:#92400e;border-radius:4px;font-weight:600">⚠️ 30일 내 소진 ${s.urgent_30d || 0}개</span>
       <span style="padding:4px 10px;background:#fee2e2;color:#991b1b;border-radius:4px;font-weight:600">❌ 소진 ${s.soldout || 0}개</span>
@@ -13733,6 +13739,8 @@ function renderStockTable() {
   const src = document.getElementById('stock-filter-source')?.value || '';
   const status = document.getElementById('stock-filter-status')?.value || '';
   let items = _stockData;
+  // 재고관리 대상만 — ERP 재고 레코드도 없고 최근 판매도 없는 코드는 숨김 (기본 ON)
+  if (document.getElementById('stock-managed-only')?.checked) items = items.filter(it => it.is_managed);
   if (q) items = items.filter(it =>
     (it.product_code || '').toLowerCase().includes(q) ||
     (it.product_name || '').toLowerCase().includes(q)
