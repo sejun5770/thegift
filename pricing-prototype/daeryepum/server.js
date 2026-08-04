@@ -7819,6 +7819,7 @@ const server = http.createServer(async (req, res) => {
                 ISNULL(s.INVENTORY_CURRENT_QTY, 0) AS current_qty,
                 ISNULL(s.INVENTORY_AVAILABLE_QTY, 0) AS available_qty,
                 s.BRAND_NAME,
+                s.CARD_SET_PRICE AS erp_price,
                 CASE WHEN s.CARD_CODE IS NULL THEN 0 ELSE 1 END AS has_erp_record
               FROM (
                 SELECT Card_Code, MAX(Card_Div) AS Card_Div
@@ -7832,7 +7833,8 @@ const server = http.createServer(async (req, res) => {
               --   LEFT JOIN 하면 행이 불어나 같은 품목이 두 번 보이고, 그중 0 짜리가 알림에 잡혔다.
               -- → 유효수량(NULL/음수 아님) 우선 → MOD_DATE 최신 순으로 1행만 채택.
               OUTER APPLY (
-                SELECT TOP 1 s2.CARD_CODE, s2.INVENTORY_CURRENT_QTY, s2.INVENTORY_AVAILABLE_QTY, s2.BRAND_NAME
+                SELECT TOP 1 s2.CARD_CODE, s2.INVENTORY_CURRENT_QTY, s2.INVENTORY_AVAILABLE_QTY,
+                       s2.BRAND_NAME, s2.CARD_SET_PRICE
                 FROM S2_CARD_ERP_STOCK s2 WITH (NOLOCK)
                 WHERE s2.CARD_CODE = codes.Card_Code
                   -- 재고 확인 불필요 브랜드 (운영 규칙 2026-08-04): 기타 / 바른손카드 부자재
@@ -7867,7 +7869,14 @@ const server = http.createServer(async (req, res) => {
               --   D01 답례품: item_sale_price × item_count / Unit_Value (묶음 단위 가격 대응)
               --   결제완료 상태만 (CARD: status_seq NOT IN 3,5,9 / ETC: NOT IN 3,5,15)
               --   S2_CARD_ERP_STOCK.TOTAL_SALE_PRICE_30_DAY 는 갱신 이상으로 미사용.
-              SELECT card_code, SUM(qty) AS qty_30d, SUM(revenue) AS revenue_30d
+              -- qty_paid / revenue_paid: 결제금액이 0 인 라인을 뺀 집계.
+              --   세트로 팔린 건은 구성품이 0원 라인으로 들어와, 그대로 평균 내면 단가가 무너진다
+              --   (TGJBK09O7_A: 0원 + 9,900원 → 4,950원 = 정확히 절반). 실판매 단가는 이 값으로 계산.
+              SELECT card_code,
+                     SUM(qty) AS qty_30d,
+                     SUM(revenue) AS revenue_30d,
+                     SUM(CASE WHEN revenue > 0 THEN qty ELSE 0 END) AS qty_paid,
+                     SUM(CASE WHEN revenue > 0 THEN revenue ELSE 0 END) AS revenue_paid
               FROM (
                 SELECT c.Card_Code AS card_code,
                        coi.item_count AS qty,
@@ -7908,19 +7917,34 @@ const server = http.createServer(async (req, res) => {
             salesMap.set(r.card_code, {
               qty: Number(r.qty_30d) || 0,
               revenue: Math.round(Number(r.revenue_30d) || 0),
+              qtyPaid: Number(r.qty_paid) || 0,
+              revenuePaid: Math.round(Number(r.revenue_paid) || 0),
             });
           }
           const items = (stockRes.recordset || []).map(r => {
-            const salesRec = salesMap.get(r.product_code) || { qty: 0, revenue: 0 };
+            const salesRec = salesMap.get(r.product_code) || { qty: 0, revenue: 0, qtyPaid: 0, revenuePaid: 0 };
             const qty30 = salesRec.qty;
             const salesAmount30d = salesRec.revenue;
             const dailyAvg = qty30 / 30;
             const daysLeft = (dailyAvg > 0 && r.available_qty > 0)
               ? Math.round(r.available_qty / dailyAvg)
               : null;
-            // 실판매 기반 단가 — 30일 매출액 / 30일 판매수량 (프로모션/할인 반영)
             const availableQty = Number(r.available_qty) || 0;
-            const unitPrice = qty30 > 0 ? Math.round(salesAmount30d / qty30) : null;
+
+            // 단가 2종 (운영 합의 2026-08-04):
+            //   erp_price       ERP 마스터 판매가 (CARD_SET_PRICE) — 현재 시점 정가.
+            //                   판매가 변경이 즉시 반영되고, 판매가 없어도 값이 있다.
+            //   avg_sale_price  실판매 수량가중 평균 — 할인·프로모션 반영. 0원 라인 제외.
+            // 재고 자산은 erp_price 로 평가한다.
+            //   이전엔 실판매 평균만 썼는데, 30일 판매가 없으면 단가가 비어 재고 22,845개
+            //   (ERP 정가 약 9,276만원) 가 자산 합계에서 통째로 빠졌다.
+            //   ERP 정가가 없는 코드(위탁 등)만 실판매 평균으로 폴백.
+            const erpPrice = Number(r.erp_price) > 0 ? Math.round(Number(r.erp_price)) : null;
+            const avgSalePrice = salesRec.qtyPaid > 0
+              ? Math.round(salesRec.revenuePaid / salesRec.qtyPaid)
+              : null;
+            const unitPrice = erpPrice !== null ? erpPrice : avgSalePrice;
+            const priceSource = erpPrice !== null ? 'erp' : (avgSalePrice !== null ? 'sales' : null);
             const stockValue = unitPrice !== null ? Math.round(unitPrice * availableQty) : null;
             return {
               product_code: r.product_code,
@@ -7929,7 +7953,10 @@ const server = http.createServer(async (req, res) => {
               is_com: (r.product_code || '').startsWith('COM_'),
               current_qty: r.current_qty,
               available_qty: r.available_qty,
-              unit_price: unitPrice,
+              unit_price: unitPrice,          // 재고 평가에 쓰인 단가
+              price_source: priceSource,      // 'erp' | 'sales' | null
+              erp_price: erpPrice,            // ERP 마스터 정가
+              avg_sale_price: avgSalePrice,   // 실판매 수량가중 평균 (0원 라인 제외)
               stock_value: stockValue,
               sales_amount_30d: salesAmount30d,
               sales_qty_30d: qty30,

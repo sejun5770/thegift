@@ -2296,8 +2296,9 @@ nav.nav-loading a[href^="#"] {
           <th style="text-align:center;padding:8px 12px;border-bottom:1px solid var(--gray-200)">구분</th>
           <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">현 재고</th>
           <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">가용 재고</th>
-          <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="Card_Sale_Price / Unit_Value">단가</th>
-          <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="가용 재고 × 단가">재고 자산</th>
+          <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="ERP 마스터 판매가 (CARD_SET_PRICE) — 판매가 변경이 즉시 반영됩니다">정가</th>
+          <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="최근 30일 실판매 수량가중 평균 (할인·프로모션 반영, 0원 세트 구성품 라인 제외)">실판매가</th>
+          <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="가용 재고 × 정가 (정가 없으면 실판매가)">재고 자산</th>
           <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">30일 판매</th>
           <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="TOTAL_SALE_PRICE_30_DAY">30일 매출액</th>
           <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">일평균</th>
@@ -13771,8 +13772,9 @@ function renderStockTable() {
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center;font-size:10px;color:var(--gray-500)">${it.is_com ? '위탁' : '자체'}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${fmtNum(it.current_qty)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;${it.available_qty <= 0 ? 'color:#dc2626;font-weight:600' : ''}">${fmtNum(it.available_qty)}</td>
-        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;color:var(--gray-600)">${it.unit_price === null ? '<span style="color:var(--gray-400)">-</span>' : fmtNum(it.unit_price)}</td>
-        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;font-weight:600">${it.stock_value === null ? '<span style="color:var(--gray-400)">-</span>' : fmtNum(it.stock_value)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;color:var(--gray-600)">${it.erp_price === null ? '<span style="color:var(--gray-400)">-</span>' : fmtNum(it.erp_price)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;color:var(--gray-600)">${_stockSalePriceCell(it)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;font-weight:600"${it.price_source === 'sales' ? ' title="ERP 정가가 없어 실판매가로 평가"' : ''}>${it.stock_value === null ? '<span style="color:var(--gray-400)">-</span>' : fmtNum(it.stock_value)}${it.price_source === 'sales' ? '<span style="color:#d97706;font-size:10px"> *</span>' : ''}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${fmtNum(it.sales_qty_30d)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;color:var(--gray-600)">${fmtNum(it.sales_amount_30d)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;color:var(--gray-600)">${it.daily_avg_30d}</td>
@@ -13838,6 +13840,19 @@ function renderStockAlertList() {
               style="border:none;background:none;cursor:pointer;color:#dc2626;font-size:12px;padding:0">×</button>
     </span>`;
   }).join('') + '</div>';
+}
+
+/** 실판매가 셀 — 정가 대비 할인율이 3% 넘게 나면 함께 표시 */
+function _stockSalePriceCell(it) {
+  if (it.avg_sale_price === null || it.avg_sale_price === undefined) {
+    return '<span style="color:var(--gray-400)">-</span>';
+  }
+  const v = fmtNum(it.avg_sale_price);
+  if (!it.erp_price) return v;
+  const diffPct = Math.round((it.avg_sale_price / it.erp_price - 1) * 100);
+  if (Math.abs(diffPct) < 3) return v;
+  const color = diffPct < 0 ? '#dc2626' : '#059669';
+  return `${v} <span style="color:${color};font-size:10px">${diffPct > 0 ? '+' : ''}${diffPct}%</span>`;
 }
 
 /** 재고 표의 🔔 셀 */
@@ -13963,14 +13978,17 @@ async function sendStockAlertNow() {
 
 function downloadStockCsv() {
   if (!_stockData.length) { alert('데이터가 없습니다.'); return; }
-  const headers = ['품목코드', '상품명', '구분', '현 재고', '가용 재고', '단가', '재고 자산', '30일 판매', '30일 매출액', '일평균', '소진 예상일수'];
+  const headers = ['품목코드', '상품명', '구분', '재고관리 대상', '현 재고', '가용 재고',
+                   '정가(ERP)', '실판매가', '재고 자산', '평가기준', '30일 판매', '30일 매출액', '일평균', '소진 예상일수'];
   const lines = [headers.join(',')];
   for (const it of _stockData) {
     lines.push([
       it.product_code, `"${(it.product_name || '').replace(/"/g, '""')}"`,
       it.is_com ? '위탁' : '자체',
+      it.is_managed ? 'Y' : 'N',
       it.current_qty, it.available_qty,
-      it.unit_price, it.stock_value,
+      it.erp_price ?? '', it.avg_sale_price ?? '', it.stock_value,
+      it.price_source === 'erp' ? '정가' : (it.price_source === 'sales' ? '실판매가' : ''),
       it.sales_qty_30d, it.sales_amount_30d,
       it.daily_avg_30d,
       it.days_to_soldout ?? ''
