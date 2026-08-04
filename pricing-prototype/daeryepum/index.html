@@ -1910,10 +1910,14 @@ nav.nav-loading a[href^="#"] {
 
   <!-- 거래처별 매출 / 수수료 / 정산 -->
   <div class="card" style="margin-bottom:14px">
-    <h3 style="font-size:14px;font-weight:600;margin-bottom:12px">🤝 거래처별 매출 · 수수료 · 정산</h3>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h3 style="font-size:14px;font-weight:600;margin:0">🤝 매출처 · 거래처별 매출 · 수수료 · 정산</h3>
+      <button class="btn btn-sm" onclick="downloadBvdVendorExcel()" style="border-color:#10b981;color:#047857;padding:5px 12px;font-size:12px" title="현재 조회 기간의 거래처별 정산 내역을 엑셀로 다운로드">📥 엑셀</button>
+    </div>
     <div style="overflow-x:auto">
       <table class="data-table" id="bvd-vendor-table">
         <thead><tr>
+          <th>매출처</th>
           <th>거래처</th>
           <th style="text-align:center">건수</th>
           <th style="text-align:right">매출</th>
@@ -1922,7 +1926,7 @@ nav.nav-loading a[href^="#"] {
           <th style="text-align:right">미정산</th>
           <th style="text-align:right">정산완료</th>
         </tr></thead>
-        <tbody id="bvd-vendor-tbody"><tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">데이터 없음</td></tr></tbody>
+        <tbody id="bvd-vendor-tbody"><tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:16px">데이터 없음</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -12972,10 +12976,24 @@ function renderBvdTypeMix(byType, kpi) {
   `;
 }
 
+// 거래처별 표 — 엑셀 다운로드용 마지막 데이터 cache
+let _lastBvdVendorRows = [];
+
 function renderBvdVendorTable(rows) {
+  _lastBvdVendorRows = Array.isArray(rows) ? rows : [];
   const tbody = document.getElementById('bvd-vendor-tbody');
-  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">데이터 없음</td></tr>'; return; }
-  tbody.innerHTML = rows.map(r => `<tr>
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:16px">데이터 없음</td></tr>'; return; }
+  // 매출처 → 거래처 순 정렬 (같은 매출처끼리 묶여 보이도록)
+  const sorted = [...rows].sort((a, b) =>
+    String(a.site_name || '').localeCompare(String(b.site_name || '')) || (b.net_total - a.net_total));
+  let prevSite = null;
+  tbody.innerHTML = sorted.map(r => {
+    const site = r.site_name || '기타';
+    // 같은 매출처 연속 행은 매출처명 생략 (가독성)
+    const siteCell = site === prevSite ? '' : esc(site);
+    prevSite = site;
+    return `<tr>
+    <td style="font-weight:600;color:var(--gray-600);font-size:12px">${siteCell}</td>
     <td style="font-weight:600">${esc(r.vendor_name||'미상')}</td>
     <td style="text-align:center;font-size:12px">${r.total_count.toLocaleString()}</td>
     <td style="text-align:right;font-family:monospace">${fmtKRW(r.gross_total)}</td>
@@ -12983,7 +13001,36 @@ function renderBvdVendorTable(rows) {
     <td style="text-align:right;font-family:monospace;font-weight:600;color:#16a34a">${fmtKRW(r.net_total)}</td>
     <td style="text-align:right;font-family:monospace;color:#b91c1c">${fmtKRW(r.unsettled_net)}</td>
     <td style="text-align:right;font-family:monospace;color:#15803d">${fmtKRW(r.settled_net)}</td>
-  </tr>`).join('');
+  </tr>`; }).join('');
+}
+
+/** 거래처별 매출·수수료·정산 엑셀(TSV) 다운로드 — 매출처 포함, 합계 행 부착. */
+function downloadBvdVendorExcel() {
+  const rows = _lastBvdVendorRows;
+  if (!rows || !rows.length) { showToast('다운로드할 데이터가 없습니다'); return; }
+  const headers = ['매출처', '거래처', '건수', '매출', '수수료', '정산금액', '미정산', '정산완료'];
+  const sorted = [...rows].sort((a, b) =>
+    String(a.site_name || '').localeCompare(String(b.site_name || '')) || (b.net_total - a.net_total));
+  const lines = sorted.map(r => [
+    r.site_name || '기타', r.vendor_name || '미상', r.total_count || 0,
+    Math.round(r.gross_total || 0), Math.round(r.commission_total || 0), Math.round(r.net_total || 0),
+    Math.round(r.unsettled_net || 0), Math.round(r.settled_net || 0),
+  ].join('\t'));
+  const sum = sorted.reduce((a, r) => ({
+    c: a.c + (r.total_count || 0), g: a.g + (r.gross_total || 0), m: a.m + (r.commission_total || 0),
+    n: a.n + (r.net_total || 0), u: a.u + (r.unsettled_net || 0), s: a.s + (r.settled_net || 0),
+  }), { c: 0, g: 0, m: 0, n: 0, u: 0, s: 0 });
+  const footer = ['합계', '', sum.c, Math.round(sum.g), Math.round(sum.m), Math.round(sum.n), Math.round(sum.u), Math.round(sum.s)].join('\t');
+  const start = document.getElementById('bvd-start')?.value || '';
+  const end = document.getElementById('bvd-end')?.value || '';
+  const BOM = '﻿';
+  const tsv = BOM + [headers.join('\t'), ...lines, footer].join('\n');
+  const blob = new Blob([tsv], { type: 'text/tab-separated-values;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `위탁정산_거래처별_${start}_${end}.tsv`;
+  a.click();
+  showToast(`${lines.length}개 행 다운로드 완료`);
 }
 
 function renderBvdTopProducts(rows) {

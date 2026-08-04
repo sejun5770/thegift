@@ -4013,6 +4013,8 @@ async function apiVendorSettlements(query) {
         co.order_seq,
         c.Card_Code AS product_code,
         c.Card_Name AS product_name,
+        -- 매출처 (거래처 앞에 표기) — SiteInfo 미매칭(제휴사)이면 company_Seq 코드
+        ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)) AS site_name,
         CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
         ISNULL(SUM(coi.item_count), 0) AS qty,
         ISNULL(SUM(CAST(coi.item_sale_price AS float) * coi.item_count / ISNULL(NULLIF(c.Unit_Value, 0), 1)), 0) AS amount,
@@ -4020,10 +4022,13 @@ async function apiVendorSettlements(query) {
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+      LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
       LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
       WHERE ${D01_FILTER} AND co.order_seq IN (${inList})
         AND co.status_seq >= 1 AND co.status_seq NOT IN (3, 5, 9)
-      GROUP BY co.order_seq, c.Card_Code, c.Card_Name, CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
+      GROUP BY co.order_seq, c.Card_Code, c.Card_Name,
+        ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
+        CASE WHEN cp.order_seq IS NOT NULL THEN 1 ELSE 0 END
     `).then(r => r.recordset.map(row => ({ ...row, _src: 'CARD' }))));
   }
   if (ciByEtcSeq.size) {
@@ -4039,6 +4044,8 @@ async function apiVendorSettlements(query) {
         o.order_seq,
         c.Card_Code AS product_code,
         c.Card_Name AS product_name,
+        -- 매출처 (거래처 앞에 표기) — SiteInfo 미매칭(제휴사)이면 company_Seq 코드
+        ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)) AS site_name,
         CASE WHEN ecp.order_seq IS NOT NULL THEN 1 ELSE 0 END AS is_copurchase,
         ISNULL(SUM(oi.order_count), 0) AS qty,
         ISNULL(SUM(${ETC_AMOUNT_EXPR}), 0) AS amount,
@@ -4051,7 +4058,9 @@ async function apiVendorSettlements(query) {
       ${ETC_COUPON_DIVISOR_JOIN_D01}
       WHERE ${D01_FILTER} AND o.order_seq IN (${inList})
         AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
-      GROUP BY o.order_seq, c.Card_Code, c.Card_Name, CASE WHEN ecp.order_seq IS NOT NULL THEN 1 ELSE 0 END
+      GROUP BY o.order_seq, c.Card_Code, c.Card_Name,
+        ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)),
+        CASE WHEN ecp.order_seq IS NOT NULL THEN 1 ELSE 0 END
     `).then(r => r.recordset.map(row => ({ ...row, _src: 'ETC' }))));
   }
   const mssqlResults = (await Promise.all(queries)).flat();
@@ -4129,6 +4138,8 @@ async function apiVendorSettlements(query) {
       product_name: row.product_name,
       vendor_id: vendor.id,
       vendor_name: vendor.name,
+      // 매출처 — 바른손카드/바른손몰 등. SiteInfo 미매칭(제휴사)은 코드 그대로.
+      site_name: formatSiteName(row.site_name) || (row._src === 'CARD' ? '바른손카드' : '바른손몰'),
       desired_ship_date: productShipDate,            // product 단위 실제 출고일
       is_express: productIsExpress,                  // product 단위 빠른출고 여부
       is_copurchase: isCopurchase,
@@ -4279,11 +4290,13 @@ async function apiVendorDashboard(query) {
     if (it.is_copurchase) { copurchaseCount += 1; copurchaseNet += net; }
     else { standaloneCount += 1; standaloneNet += net; }
 
-    // vendor
-    const vKey = it.vendor_id || '_unknown';
+    // vendor — 매출처(site) × 거래처 단위로 분리 집계 (표에 매출처를 앞에 표기)
+    const siteName = it.site_name || '기타';
+    const vKey = `${siteName}|${it.vendor_id || '_unknown'}`;
     if (!vendorMap.has(vKey)) {
       vendorMap.set(vKey, {
         vendor_id: it.vendor_id, vendor_name: it.vendor_name || '미상',
+        site_name: siteName,
         total_count: 0, gross_total: 0, commission_total: 0, net_total: 0,
         settled_net: 0, unsettled_net: 0,
       });
