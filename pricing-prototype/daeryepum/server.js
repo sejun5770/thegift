@@ -7828,11 +7828,28 @@ const server = http.createServer(async (req, res) => {
           // 재고코드 / 매출코드 분리 (운영 결정 2026-08-05)
           //   재고는 stock_code 로만 조회하고, 매출은 sales_codes 에 적힌 품목코드만 합산한다.
           //   자동 매핑을 쓰면 ERP코드-품목코드가 1:N 이라 의도치 않은 코드까지 섞인다.
-          const regRows = regItems.map(it => ({
-            row: it,
-            stock: safe(it.stock_code),
-            sales: String(it.sales_codes || '').split(',').map(s => safe(s)).filter(Boolean),
-          })).filter(r => r.stock);
+          // 소진코드 파싱 — 'CODE*5' 형식. 비어 있으면 매출코드를 배수 1 로 사용.
+          //   한 원물이 여러 세트로도 팔려 재고가 그만큼 더 빠지고, 세트 1개에
+          //   원물이 여러 개 들어가기도 한다 (데일리너츠 = 세트 1개당 5개).
+          const parseConsume = (raw, salesList) => {
+            const list = String(raw || '').split(',').map(s => s.trim()).filter(Boolean);
+            if (!list.length) return salesList.map(c => ({ code: c, mult: 1 }));
+            return list.map(t => {
+              const m = t.match(/^(.+?)\s*\*\s*(\d+)$/);
+              const code = safe(m ? m[1] : t);
+              const mult = m ? Math.max(1, parseInt(m[2], 10) || 1) : 1;
+              return code ? { code, mult } : null;
+            }).filter(Boolean);
+          };
+          const regRows = regItems.map(it => {
+            const sales = String(it.sales_codes || '').split(',').map(s => safe(s)).filter(Boolean);
+            return {
+              row: it,
+              stock: safe(it.stock_code),
+              sales,
+              consume: parseConsume(it.consumption_codes, sales),
+            };
+          }).filter(r => r.stock);
           const valuesClause = [...new Set(regRows.map(r => r.stock))].map(c => `('${c}')`).join(',');
           if (!valuesClause) {
             data = {
@@ -7967,7 +7984,7 @@ const server = http.createServer(async (req, res) => {
           const countedCodes = new Set();
           let dedupSales30d = 0;
           const items = (stockRes.recordset || []).map(r => {
-            const regRow = regByCode.get(r.stock_code) || { row: {}, sales: [] };
+            const regRow = regByCode.get(r.stock_code) || { row: {}, sales: [], consume: [] };
             const reg = regRow.row || {};
             const cardCodes = regRow.sales || [];
             const salesRec = cardCodes.reduce((acc, cc) => {
@@ -7983,7 +8000,17 @@ const server = http.createServer(async (req, res) => {
             }, { qty: 0, revenue: 0, qtyPaid: 0, revenuePaid: 0 });
             const qty30 = salesRec.qty;
             const salesAmount30d = salesRec.revenue;
-            const dailyAvg = qty30 / 30;
+
+            // 소진 수량 — 재고가 실제로 빠지는 양. 매출과 분리해서 센다.
+            //   한 원물이 여러 세트로도 팔리고(주방세제: 단독 144 vs 실소비 329),
+            //   세트 1개에 원물이 여러 개 들어가기도 한다(데일리너츠 ×5).
+            //   일평균·소진예상은 이 값 기준. 매출액·실판매가는 매출코드 기준 유지.
+            const consumeQty30d = (regRow.consume || []).reduce((sum, c) => {
+              const s = salesMap.get(c.code);
+              return sum + (s ? s.qty * c.mult : 0);
+            }, 0);
+
+            const dailyAvg = consumeQty30d / 30;
             const daysLeft = (dailyAvg > 0 && r.available_qty > 0)
               ? Math.round(r.available_qty / dailyAvg)
               : null;
@@ -8007,6 +8034,9 @@ const server = http.createServer(async (req, res) => {
             return {
               stock_code: r.stock_code,          // 재고 조회 코드
               sales_codes: cardCodes,            // 매출 조회 코드 (등록값 그대로)
+              consumption_codes: (regRow.consume || []).map(c => (c.mult > 1 ? `${c.code}*${c.mult}` : c.code)),
+              consumption_explicit: !!reg.consumption_codes,   // false = 매출코드를 그대로 사용 중
+              consume_qty_30d: consumeQty30d,    // 재고 소진 수량 (배수 반영)
               product_name: reg.label || r.product_name || '',
               is_com: cardCodes.some(c => c.startsWith('COM_')) || String(r.stock_code || '').startsWith('COM_'),
               current_qty: r.current_qty,

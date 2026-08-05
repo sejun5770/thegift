@@ -1756,10 +1756,30 @@ function _normCodeList(v) {
   return [...new Set(list)].join(',') || null;
 }
 
+/**
+ * 소진코드 정규화 — 'A, B*5 , B*5, C * 2' → 'A,B*5,C*2'
+ *   배수 1 은 생략, 같은 코드가 두 번 나오면 첫 배수만 남긴다.
+ */
+function _normConsumptionCodes(v) {
+  const seen = new Map();
+  for (const raw of String(v ?? '').split(',')) {
+    const t = raw.trim();
+    if (!t) continue;
+    const m = t.match(/^(.+?)\s*\*\s*(\d+)$/);
+    const code = (m ? m[1] : t).trim();
+    if (!code) continue;
+    const mult = m ? Math.max(1, parseInt(m[2], 10) || 1) : 1;
+    if (!seen.has(code)) seen.set(code, mult);
+  }
+  const out = [...seen.entries()].map(([c, n]) => (n > 1 ? `${c}*${n}` : c));
+  return out.join(',') || null;
+}
+
 function _normStockItem(m, createdBy) {
   return {
     stock_code: String(m.stock_code ?? '').trim(),
     sales_codes: _normCodeList(m.sales_codes),
+    consumption_codes: _normConsumptionCodes(m.consumption_codes),
     label: m.label ? String(m.label) : null,
     threshold: (m.threshold === '' || m.threshold == null) ? null : Math.max(0, parseInt(m.threshold, 10) || 0),
     sort_order: parseInt(m.sort_order, 10) || 0,
@@ -1807,6 +1827,7 @@ async function updateStockItem(id, data) {
   if ('label' in data) patch.label = data.label ? String(data.label) : null;
   if ('memo' in data) patch.memo = data.memo ? String(data.memo) : null;
   if ('sales_codes' in data) patch.sales_codes = _normCodeList(data.sales_codes);
+  if ('consumption_codes' in data) patch.consumption_codes = _normConsumptionCodes(data.consumption_codes);
   if ('stock_code' in data) {
     const s = String(data.stock_code ?? '').trim();
     if (!s) throw new Error('재고코드는 비울 수 없습니다');
