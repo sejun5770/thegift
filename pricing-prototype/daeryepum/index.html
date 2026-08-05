@@ -2302,6 +2302,7 @@ nav.nav-loading a[href^="#"] {
           <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">일평균</th>
           <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">소진 예상</th>
           <th style="text-align:center;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="슬랙 데일리 알림 대상">🔔</th>
+          <th style="text-align:center;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="이 품목의 등록 정보를 수정하거나 목록에서 제거">관리</th>
         </tr>
       </thead>
       <tbody id="stock-tbody"></tbody>
@@ -2324,6 +2325,49 @@ nav.nav-loading a[href^="#"] {
              style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;margin-bottom:10px">
       <div id="si-results" style="max-height:340px;overflow:auto;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:12px"></div>
       <div id="si-registered" style="border-top:1px solid var(--gray-200);padding-top:10px"></div>
+    </div>
+  </div>
+
+  <!-- 등록 정보 수정 모달 -->
+  <div id="stock-edit-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;align-items:flex-start;justify-content:center;padding:60px 16px;overflow:auto">
+    <div class="card" style="max-width:520px;width:100%;padding:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <strong style="font-size:14px">✎ 등록 정보 수정</strong>
+        <button class="btn" style="padding:4px 10px;font-size:12px" onclick="closeStockEditModal()">닫기</button>
+      </div>
+
+      <div style="font-size:12px;margin-bottom:10px">
+        <div style="color:var(--gray-500);margin-bottom:3px">재고코드 <span style="color:var(--gray-400)">(변경하려면 제거 후 다시 등록)</span></div>
+        <div id="se-stock-code" style="font-family:monospace;font-weight:600;padding:6px 8px;background:var(--gray-50);border-radius:4px"></div>
+      </div>
+
+      <label style="display:block;font-size:12px;margin-bottom:10px">
+        <span style="color:var(--gray-500)">표시명</span>
+        <input type="text" id="se-label" placeholder="비우면 상품명 자동"
+               style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;margin-top:3px">
+      </label>
+
+      <label style="display:block;font-size:12px;margin-bottom:10px">
+        <span style="color:var(--gray-500)">매출코드 <span style="color:var(--gray-400)">(콤마로 여러 개 · 비우면 매출 집계 안 함)</span></span>
+        <input type="text" id="se-sales" placeholder="예: TGJSD09O1_A, TGJSD09O1_C"
+               style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;font-family:monospace;margin-top:3px">
+      </label>
+
+      <label style="display:block;font-size:12px;margin-bottom:10px">
+        <span style="color:var(--gray-500)">경고 임계치 <span style="color:var(--gray-400)">(가용재고 ≤ 값이면 ⚠️ · 비우면 소진예상 30일 기준)</span></span>
+        <input type="text" id="se-threshold" placeholder="예: 100"
+               style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;margin-top:3px">
+      </label>
+
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:14px">
+        <input type="checkbox" id="se-alert"> 슬랙 데일리 알림에 포함
+      </label>
+
+      <div id="se-msg" style="font-size:12px;color:#dc2626;margin-bottom:8px"></div>
+      <div style="display:flex;gap:6px;justify-content:flex-end">
+        <button class="btn" style="padding:6px 14px;font-size:12px" onclick="closeStockEditModal()">취소</button>
+        <button class="btn" style="padding:6px 14px;font-size:12px;background:var(--primary,#4338ca);color:#fff;border-color:transparent" onclick="saveStockEditModal()">저장</button>
+      </div>
     </div>
   </div>
 </div>
@@ -13800,6 +13844,7 @@ function renderStockTable() {
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;color:var(--gray-600)">${it.daily_avg_30d}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${daysCell}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center">${_stockBellCell(it)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center;white-space:nowrap">${_stockRowActions(it)}</td>
       </tr>
     `;
   }).join('');
@@ -14040,6 +14085,80 @@ async function editStockItemSalesCodes(id) {
     if (d.error) throw new Error(d.error);
     await Promise.all([loadStockAlerts(), loadDaeryepumStock()]);
   } catch (e) { alert(`실패: ${e.message}`); }
+}
+
+/** 재고 표의 관리 셀 — 수정 / 목록에서 제거 */
+function _stockRowActions(it) {
+  if (!it.item_id) return '<span style="color:var(--gray-400)">-</span>';
+  const id = esc(it.item_id);
+  return `
+    <button onclick="openStockEditModal('${id}')" title="등록 정보 수정"
+            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:2px 6px">✎</button>
+    <button onclick="removeStockItemRow('${id}')" title="재고 목록에서 제거"
+            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:2px 6px;color:#dc2626;margin-left:3px">🗑</button>`;
+}
+
+/** 목록에서 제거 — 등록 해제 (ERP/재고 원본 데이터는 건드리지 않음) */
+async function removeStockItemRow(id) {
+  const a = _stockAlerts.find(x => x.id === id);
+  const name = a ? `${a.stock_code}${a.label ? ' · ' + a.label : ''}` : id;
+  if (!confirm(`${name}\n\n재고 현황 목록에서 제거할까요?\n등록만 해제되며 ERP 재고 데이터에는 영향이 없습니다.`)) return;
+  try {
+    const r = await fetch(`${API}/api/bg/stock-alerts/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const d = await r.json().catch(() => ({}));
+    if (d.error) throw new Error(d.error);
+    showToast('목록에서 제거했습니다');
+    await Promise.all([loadStockAlerts(), loadDaeryepumStock()]);
+  } catch (e) { alert(`제거 실패: ${e.message}`); }
+}
+
+// ─── 등록 정보 수정 모달 ───
+let _seEditId = null;
+
+function openStockEditModal(id) {
+  const a = _stockAlerts.find(x => x.id === id);
+  if (!a) { alert('등록 정보를 찾을 수 없습니다. 새로고침 후 다시 시도하세요.'); return; }
+  _seEditId = id;
+  document.getElementById('se-stock-code').textContent = a.stock_code || '';
+  document.getElementById('se-label').value = a.label || '';
+  document.getElementById('se-sales').value = a.sales_codes || '';
+  document.getElementById('se-threshold').value = a.threshold ?? '';
+  document.getElementById('se-alert').checked = a.alert_enabled !== false;
+  document.getElementById('se-msg').textContent = '';
+  document.getElementById('stock-edit-modal').style.display = 'flex';
+}
+function closeStockEditModal() {
+  document.getElementById('stock-edit-modal').style.display = 'none';
+  _seEditId = null;
+}
+
+async function saveStockEditModal() {
+  if (!_seEditId) return;
+  const thrRaw = document.getElementById('se-threshold').value.trim();
+  if (thrRaw !== '' && !/^\d+$/.test(thrRaw)) {
+    document.getElementById('se-msg').textContent = '임계치는 0 이상의 정수만 입력하세요.';
+    return;
+  }
+  const body = {
+    label: document.getElementById('se-label').value.trim(),
+    sales_codes: document.getElementById('se-sales').value,
+    threshold: thrRaw === '' ? null : parseInt(thrRaw, 10),
+    alert_enabled: document.getElementById('se-alert').checked,
+  };
+  try {
+    const r = await fetch(`${API}/api/bg/stock-alerts/${encodeURIComponent(_seEditId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    closeStockEditModal();
+    showToast('저장했습니다');
+    await Promise.all([loadStockAlerts(), loadDaeryepumStock()]);
+  } catch (e) {
+    document.getElementById('se-msg').textContent = `저장 실패: ${e.message}`;
+  }
 }
 
 /** 재고 표의 🔔 셀 — 등록 품목의 슬랙 알림 포함 여부 토글 */
