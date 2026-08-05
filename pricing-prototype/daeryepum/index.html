@@ -2336,10 +2336,11 @@ nav.nav-loading a[href^="#"] {
         <button class="btn" style="padding:4px 10px;font-size:12px" onclick="closeStockEditModal()">닫기</button>
       </div>
 
-      <div style="font-size:12px;margin-bottom:10px">
-        <div style="color:var(--gray-500);margin-bottom:3px">재고코드 <span style="color:var(--gray-400)">(변경하려면 제거 후 다시 등록)</span></div>
-        <div id="se-stock-code" style="font-family:monospace;font-weight:600;padding:6px 8px;background:var(--gray-50);border-radius:4px"></div>
-      </div>
+      <label style="display:block;font-size:12px;margin-bottom:10px">
+        <span style="color:var(--gray-500)">재고코드 <span style="color:var(--gray-400)">(ERP코드 — 품목코드를 넣으면 재고를 찾지 못합니다)</span></span>
+        <input type="text" id="se-stock-code"
+               style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;font-family:monospace;margin-top:3px">
+      </label>
 
       <label style="display:block;font-size:12px;margin-bottom:10px">
         <span style="color:var(--gray-500)">표시명</span>
@@ -14044,12 +14045,34 @@ function _stockSalePriceCell(it) {
   return `${v} <span style="color:${color};font-size:10px">${diffPct > 0 ? '+' : ''}${diffPct}%</span>`;
 }
 
-/** 재고코드 셀 — 재고를 못 찾으면 경고 */
+/** 재고코드 셀 — 재고를 못 찾으면 경고 + 올바른 ERP코드 제안 */
 function _stockErpCodeCell(it) {
-  if (!it.stock_found) {
-    return `<span style="color:#dc2626" title="이 재고코드로 ERP 재고를 찾지 못했습니다.">${esc(it.stock_code)} ❓</span>`;
+  if (it.stock_found) {
+    return `<span title="ERP 매칭: ${esc(it.matched_erp_code || '')} (품목 ${esc(it.matched_card_code || '')})">${esc(it.stock_code)}</span>`;
   }
-  return `<span title="ERP 매칭: ${esc(it.matched_erp_code || '')} / ${esc(it.matched_card_code || '')}">${esc(it.stock_code)}</span>`;
+  const sug = it.suggested_erp_codes || [];
+  const hint = sug.length
+    ? `<div style="font-size:10px;color:#b45309;margin-top:2px">품목코드입니다 → ERP코드: ${sug.map(c =>
+        `<a href="#" onclick="fixStockCode('${esc(it.item_id)}','${esc(c)}');return false"
+            style="color:#b45309;text-decoration:underline">${esc(c)}</a>`).join(' · ')}</div>`
+    : '<div style="font-size:10px;color:#b45309;margin-top:2px">ERP 재고에 없는 코드</div>';
+  return `<span style="color:#dc2626" title="이 재고코드로 ERP 재고를 찾지 못했습니다.">${esc(it.stock_code)} ❓</span>${hint}`;
+}
+
+/** 잘못 등록된 재고코드를 제안된 ERP코드로 교체 */
+async function fixStockCode(id, code) {
+  if (!confirm(`재고코드를 ${code} 로 바꿀까요?`)) return;
+  try {
+    const r = await fetch(`${API}/api/bg/stock-alerts/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stock_code: code }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    showToast(`재고코드를 ${code} 로 변경`);
+    await Promise.all([loadStockAlerts(), loadDaeryepumStock()]);
+  } catch (e) { alert(`변경 실패: ${e.message}`); }
 }
 
 /** 매출코드 셀 — 클릭하면 편집 */
@@ -14119,7 +14142,7 @@ function openStockEditModal(id) {
   const a = _stockAlerts.find(x => x.id === id);
   if (!a) { alert('등록 정보를 찾을 수 없습니다. 새로고침 후 다시 시도하세요.'); return; }
   _seEditId = id;
-  document.getElementById('se-stock-code').textContent = a.stock_code || '';
+  document.getElementById('se-stock-code').value = a.stock_code || '';
   document.getElementById('se-label').value = a.label || '';
   document.getElementById('se-sales').value = a.sales_codes || '';
   document.getElementById('se-threshold').value = a.threshold ?? '';
@@ -14139,7 +14162,13 @@ async function saveStockEditModal() {
     document.getElementById('se-msg').textContent = '임계치는 0 이상의 정수만 입력하세요.';
     return;
   }
+  const stockCode = document.getElementById('se-stock-code').value.trim();
+  if (!stockCode) {
+    document.getElementById('se-msg').textContent = '재고코드는 비울 수 없습니다.';
+    return;
+  }
   const body = {
+    stock_code: stockCode,
     label: document.getElementById('se-label').value.trim(),
     sales_codes: document.getElementById('se-sales').value,
     threshold: thrRaw === '' ? null : parseInt(thrRaw, 10),

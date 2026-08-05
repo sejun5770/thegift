@@ -7855,23 +7855,33 @@ const server = http.createServer(async (req, res) => {
                 s.CARD_SET_PRICE AS erp_price,
                 s.CARD_CODE AS matched_card_code,
                 s.CARD_CODE_ERP AS matched_erp_code,
-                CASE WHEN s.CARD_CODE IS NULL THEN 0 ELSE 1 END AS has_erp_record
+                CASE WHEN s.CARD_CODE IS NULL THEN 0 ELSE 1 END AS has_erp_record,
+                hint.suggested
               FROM (VALUES ${valuesClause}) AS reg(stock_code)
-              -- 재고는 재고코드로만 조회한다. ERP코드(CARD_CODE_ERP) 매칭을 우선하고,
-              -- 품목코드(CARD_CODE)로 등록한 경우도 찾을 수 있게 둘 다 본다.
-              --   같은 코드에 여러 행이 남는 경우가 있고 (레거시/플레이스홀더 행은
-              --   수량이 NULL 이거나 음수) → 유효수량 우선 → MOD_DATE 최신 1행만 채택.
+              -- 재고는 ERP코드(CARD_CODE_ERP)로만 조회한다.
+              --   품목코드(CARD_CODE)까지 폴백 매칭하던 예전 로직은, 품목코드 하나에
+              --   ERP코드가 여러 개 달린 경우 임의로 한 행을 골라 재고가 크게 달라졌다
+              --   (TGJSD01O4_A → 4,466 vs 19,061). 답례품 품목코드 166개 중 29개가
+              --   ERP코드가 아니어서 조용히 틀린 값이 나올 수 있었다. 2026-08-05 제거.
+              --   같은 ERP코드에 행이 여럿이면(레거시/플레이스홀더는 수량 NULL·음수)
+              --   유효수량 우선 → MOD_DATE 최신 1행 채택.
               OUTER APPLY (
                 SELECT TOP 1 s2.CARD_CODE, s2.CARD_CODE_ERP, s2.INVENTORY_CURRENT_QTY,
                        s2.INVENTORY_AVAILABLE_QTY, s2.BRAND_NAME, s2.CARD_SET_PRICE
                 FROM S2_CARD_ERP_STOCK s2 WITH (NOLOCK)
-                WHERE s2.CARD_CODE_ERP = reg.stock_code OR s2.CARD_CODE = reg.stock_code
+                WHERE s2.CARD_CODE_ERP = reg.stock_code
                 ORDER BY
-                  CASE WHEN s2.CARD_CODE_ERP = reg.stock_code THEN 0 ELSE 1 END,
                   CASE WHEN s2.INVENTORY_CURRENT_QTY IS NOT NULL
                         AND s2.INVENTORY_CURRENT_QTY >= 0 THEN 0 ELSE 1 END,
                   s2.MOD_DATE DESC
               ) s
+              -- 못 찾았을 때: 입력값이 품목코드라면 올바른 ERP코드 후보를 알려준다.
+              OUTER APPLY (
+                SELECT STRING_AGG(CONVERT(nvarchar(max), x.CARD_CODE_ERP), ', ') AS suggested
+                FROM (SELECT DISTINCT s3.CARD_CODE_ERP FROM S2_CARD_ERP_STOCK s3 WITH (NOLOCK)
+                      WHERE s3.CARD_CODE = reg.stock_code
+                        AND ISNULL(s3.CARD_CODE_ERP, '') <> '') x
+              ) hint
               -- 상품명은 재고 매칭된 품목코드 기준 (매출코드는 여러 개일 수 있어 JS 에서 보정)
               OUTER APPLY (
                 SELECT TOP 1
@@ -8016,6 +8026,10 @@ const server = http.createServer(async (req, res) => {
               matched_card_code: r.matched_card_code || null,
               matched_erp_code: r.matched_erp_code || null,
               stock_found: !!r.has_erp_record,   // 재고코드로 재고를 못 찾으면 false
+              // 못 찾은 경우, 입력값이 품목코드였다면 올바른 ERP코드 후보
+              suggested_erp_codes: r.suggested
+                ? String(r.suggested).split(',').map(s => s.trim()).filter(Boolean)
+                : [],
               threshold: reg.threshold ?? null,
               alert_enabled: reg.alert_enabled !== false,
             };

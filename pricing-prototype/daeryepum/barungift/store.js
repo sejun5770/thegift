@@ -1807,9 +1807,30 @@ async function updateStockItem(id, data) {
   if ('label' in data) patch.label = data.label ? String(data.label) : null;
   if ('memo' in data) patch.memo = data.memo ? String(data.memo) : null;
   if ('sales_codes' in data) patch.sales_codes = _normCodeList(data.sales_codes);
+  if ('stock_code' in data) {
+    const s = String(data.stock_code ?? '').trim();
+    if (!s) throw new Error('재고코드는 비울 수 없습니다');
+    patch.stock_code = s;
+  }
   // sbUpdate 는 이미 행 객체(또는 null)를 반환한다 — 배열로 취급해 [0] 을 또 꺼내면
   // 성공해도 undefined 가 되어 API 가 404 'not found' 를 돌려준다 (2026-08-05 수정).
-  if (USE_SUPABASE) return sbUpdate('bg_stock_items', `id=eq.${encodeURIComponent(id)}`, patch);
+  if (USE_SUPABASE) {
+    try {
+      return await sbUpdate('bg_stock_items', `id=eq.${encodeURIComponent(id)}`, patch);
+    } catch (err) {
+      // stock_code UNIQUE 충돌 — 원문(23505 …) 대신 무엇을 해야 하는지 알려준다.
+      if (/duplicate key|23505/i.test(err.message || '')) {
+        throw new Error(`재고코드 '${patch.stock_code}' 는 이미 다른 품목에 등록돼 있습니다.`);
+      }
+      throw err;
+    }
+  }
+  // 파일 폴백에서도 UNIQUE 동작을 맞춘다 (개발/운영 동작 불일치 방지)
+  if (patch.stock_code) {
+    const dup = readJson(FILES.stockItems, [])
+      .find(m => m.id !== id && m.stock_code === patch.stock_code);
+    if (dup) throw new Error(`재고코드 '${patch.stock_code}' 는 이미 다른 품목에 등록돼 있습니다.`);
+  }
   const list = readJson(FILES.stockItems, []);
   const idx = list.findIndex(m => m.id === id);
   if (idx < 0) return null;
