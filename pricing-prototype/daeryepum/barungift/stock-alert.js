@@ -114,7 +114,8 @@ function _chunkLines(lines, limit = 3500) {
  *   text         → 스레드를 못 쓰는 webhook 용 합본.
  */
 async function buildStockReport(baseUrl) {
-  const targets = await store.listStockAlerts({ enabledOnly: true });
+  // 알림 대상 = 등록 품목 중 alert_enabled 인 것 (migration 044)
+  const targets = await store.listStockItems({ alertOnly: true });
   if (!targets.length) {
     return {
       rows: [], missing: [], warnCount: 0, soldoutCount: 0, targetCount: 0,

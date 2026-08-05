@@ -990,24 +990,24 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   if (pathname === '/api/bg/stock-alerts' && method === 'GET') {
     try {
       return json(res, {
-        alerts: await store.listStockAlerts(),
+        alerts: await store.listStockItems(),
         slack_configured: stockAlert.slackConfigured(),
         schedule: process.env.BG_STOCK_ALERT_ENABLED === '1'
           ? `매일 ${process.env.BG_STOCK_ALERT_TIME || '09:00'} KST`
           : null,
       });
     } catch (err) {
-      console.error('[stock-alerts GET] error:', err.message);
+      console.error('[stock-items GET] error:', err.message);
       return json(res, { error: err.message }, 500);
     }
   }
   if (pathname === '/api/bg/stock-alerts' && method === 'POST') {
     try {
       const body = await parseBody(req);
-      const added = await store.addStockAlerts(body.items || [], session?.email || null);
+      const added = await store.addStockItems(body.items || [], session?.email || null);
       return json(res, { items: added }, 201);
     } catch (err) {
-      console.error('[stock-alerts POST] error:', err.message);
+      console.error('[stock-items POST] error:', err.message);
       return json(res, { error: err.message }, 400);
     }
   }
@@ -1031,18 +1031,18 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   if (stockAlertIdMatch && method === 'PATCH') {
     try {
       const body = await parseBody(req);
-      const row = await store.updateStockAlert(decodeURIComponent(stockAlertIdMatch[1]), body);
+      const row = await store.updateStockItem(decodeURIComponent(stockAlertIdMatch[1]), body);
       return json(res, row || { error: 'not found' }, row ? 200 : 404);
     } catch (err) {
-      console.error('[stock-alerts PATCH] error:', err.message);
+      console.error('[stock-items PATCH] error:', err.message);
       return json(res, { error: err.message }, 400);
     }
   }
   if (stockAlertIdMatch && method === 'DELETE') {
     try {
-      return json(res, await store.removeStockAlert(decodeURIComponent(stockAlertIdMatch[1])));
+      return json(res, await store.removeStockItem(decodeURIComponent(stockAlertIdMatch[1])));
     } catch (err) {
-      console.error('[stock-alerts DELETE] error:', err.message);
+      console.error('[stock-items DELETE] error:', err.message);
       return json(res, { error: err.message }, 400);
     }
   }
