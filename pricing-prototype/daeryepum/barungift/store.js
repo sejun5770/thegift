@@ -103,6 +103,7 @@ const FILES = {
   salesGroupMembers: path.join(DATA_DIR, 'bg_sales_group_members.json'),
   salesExclusions: path.join(DATA_DIR, 'bg_sales_exclusions.json'),
   stockItems: path.join(DATA_DIR, 'bg_stock_items.json'),
+  stockBom: path.join(DATA_DIR, 'bg_stock_bom.json'),
 };
 
 function ensureDataDir() {
@@ -1870,7 +1871,78 @@ async function removeStockItem(id) {
   return { ok: true };
 }
 
+// ─────────────────────────────────────────────────────────────
+// BOM (migration 048) — 판매코드 1개당 재고품목 소요수량 (1단)
+// ─────────────────────────────────────────────────────────────
+
+async function listBomRows() {
+  if (USE_SUPABASE) return sbGet('bg_stock_bom', 'order=parent_code.asc,child_stock_code.asc&limit=5000');
+  return readJson(FILES.stockBom, [])
+    .sort((a, b) => String(a.parent_code).localeCompare(String(b.parent_code)));
+}
+
+/** BOM 행 일괄 등록 — (parent_code, child_stock_code) 중복은 갱신 */
+async function addBomRows(rows, createdBy = null) {
+  const norm = (Array.isArray(rows) ? rows : []).map(r => ({
+    parent_code: String(r.parent_code ?? '').trim(),
+    child_stock_code: String(r.child_stock_code ?? '').trim(),
+    qty: Math.max(1, parseInt(r.qty, 10) || 1),
+    memo: r.memo ? String(r.memo) : null,
+    created_by: createdBy,
+  })).filter(r => r.parent_code && r.child_stock_code);
+  if (!norm.length) return [];
+  const seen = new Set();
+  const uniq = norm.filter(r => {
+    const k = `${r.parent_code}|${r.child_stock_code}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  if (USE_SUPABASE) {
+    const res = await fetch(`${REST_BASE}/bg_stock_bom?on_conflict=parent_code,child_stock_code`, {
+      method: 'POST',
+      headers: { ...HEADERS, Prefer: 'resolution=merge-duplicates,return=representation' },
+      body: JSON.stringify(uniq),
+    });
+    if (!res.ok) throw new Error(`Supabase INSERT bg_stock_bom [${res.status}]: ${await res.text()}`);
+    return res.json();
+  }
+  const list = readJson(FILES.stockBom, [])
+    .filter(m => !seen.has(`${m.parent_code}|${m.child_stock_code}`));
+  const added = uniq.map(r => ({ id: uuid(), ...r, created_at: now(), updated_at: now() }));
+  writeJson(FILES.stockBom, list.concat(added));
+  return added;
+}
+
+async function updateBomRow(id, data) {
+  if (!id) throw new Error('id 필수');
+  const patch = { updated_at: now() };
+  if ('qty' in data) patch.qty = Math.max(1, parseInt(data.qty, 10) || 1);
+  if ('memo' in data) patch.memo = data.memo ? String(data.memo) : null;
+  if (USE_SUPABASE) return sbUpdate('bg_stock_bom', `id=eq.${encodeURIComponent(id)}`, patch);
+  const list = readJson(FILES.stockBom, []);
+  const idx = list.findIndex(m => m.id === id);
+  if (idx < 0) return null;
+  list[idx] = { ...list[idx], ...patch };
+  writeJson(FILES.stockBom, list);
+  return list[idx];
+}
+
+async function removeBomRow(id) {
+  if (!id) throw new Error('id 필수');
+  if (USE_SUPABASE) {
+    await sbDelete('bg_stock_bom', `id=eq.${encodeURIComponent(id)}`);
+    return { ok: true };
+  }
+  writeJson(FILES.stockBom, readJson(FILES.stockBom, []).filter(m => m.id !== id));
+  return { ok: true };
+}
+
 module.exports = {
+  listBomRows,
+  addBomRows,
+  updateBomRow,
+  removeBomRow,
   listStockItems,
   addStockItems,
   updateStockItem,

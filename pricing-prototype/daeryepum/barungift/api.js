@@ -1048,6 +1048,47 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   }
 
   // ============================================
+  // BOM (migration 048) — 판매코드 1개당 재고품목 소요수량
+  // ============================================
+  if (pathname === '/api/bg/stock-bom' && method === 'GET') {
+    try {
+      return json(res, { rows: await store.listBomRows() });
+    } catch (err) {
+      console.error('[stock-bom GET] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+  if (pathname === '/api/bg/stock-bom' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const added = await store.addBomRows(body.rows || [], session?.email || null);
+      return json(res, { rows: added }, 201);
+    } catch (err) {
+      console.error('[stock-bom POST] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  const bomIdMatch = pathname.match(/^\/api\/bg\/stock-bom\/([^/]+)$/);
+  if (bomIdMatch && method === 'PATCH') {
+    try {
+      const body = await parseBody(req);
+      const row = await store.updateBomRow(decodeURIComponent(bomIdMatch[1]), body);
+      return json(res, row || { error: 'not found' }, row ? 200 : 404);
+    } catch (err) {
+      console.error('[stock-bom PATCH] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  if (bomIdMatch && method === 'DELETE') {
+    try {
+      return json(res, await store.removeBomRow(decodeURIComponent(bomIdMatch[1])));
+    } catch (err) {
+      console.error('[stock-bom DELETE] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+
+  // ============================================
   // 매뉴얼 위키 (migration 041) — 편집 + 수정 히스토리
   //   현재 문서 = 최신 revision. 저장 시마다 revision 추가 (삭제 없음 → 히스토리 보존).
   // ============================================

@@ -7831,24 +7831,45 @@ const server = http.createServer(async (req, res) => {
           // 소진코드 파싱 — 'CODE*5' 형식. 비어 있으면 매출코드를 배수 1 로 사용.
           //   한 원물이 여러 세트로도 팔려 재고가 그만큼 더 빠지고, 세트 1개에
           //   원물이 여러 개 들어가기도 한다 (데일리너츠 = 세트 1개당 5개).
-          const parseConsume = (raw, salesList) => {
-            const list = String(raw || '').split(',').map(s => s.trim()).filter(Boolean);
-            if (!list.length) return salesList.map(c => ({ code: c, mult: 1 }));
-            return list.map(t => {
+          const parseConsume = raw => String(raw || '').split(',').map(s => s.trim()).filter(Boolean)
+            .map(t => {
               const m = t.match(/^(.+?)\s*\*\s*(\d+)$/);
               const code = safe(m ? m[1] : t);
               const mult = m ? Math.max(1, parseInt(m[2], 10) || 1) : 1;
               return code ? { code, mult } : null;
             }).filter(Boolean);
-          };
+
+          // BOM (migration 048) — 재고코드별 [판매코드 × 소요수량]
+          let bomByChild = new Map();
+          try {
+            for (const b of await bgStore.listBomRows()) {
+              const child = safe(b.child_stock_code);
+              const parent = safe(b.parent_code);
+              if (!child || !parent) continue;
+              if (!bomByChild.has(child)) bomByChild.set(child, []);
+              bomByChild.get(child).push({ code: parent, mult: Math.max(1, parseInt(b.qty, 10) || 1) });
+            }
+          } catch { /* 테이블 없으면 BOM 미적용 */ }
+
+          // 소진코드 결정 — 수동 지정 > BOM 자동 > 매출코드
+          //   BOM 자동: 매출코드를 ×1 로 깔고, BOM 에 있는 판매코드는 BOM 수량으로 덮어쓴다.
           const regRows = regItems.map(it => {
             const sales = String(it.sales_codes || '').split(',').map(s => safe(s)).filter(Boolean);
-            return {
-              row: it,
-              stock: safe(it.stock_code),
-              sales,
-              consume: parseConsume(it.consumption_codes, sales),
-            };
+            const stock = safe(it.stock_code);
+            let consume, source;
+            if (String(it.consumption_codes || '').trim()) {
+              consume = parseConsume(it.consumption_codes);
+              source = 'manual';
+            } else if (bomByChild.has(stock)) {
+              const merged = new Map(sales.map(c => [c, 1]));
+              for (const b of bomByChild.get(stock)) merged.set(b.code, b.mult);
+              consume = [...merged.entries()].map(([code, mult]) => ({ code, mult }));
+              source = 'bom';
+            } else {
+              consume = sales.map(c => ({ code: c, mult: 1 }));
+              source = 'sales';
+            }
+            return { row: it, stock, sales, consume, consumeSource: source };
           }).filter(r => r.stock);
           const valuesClause = [...new Set(regRows.map(r => r.stock))].map(c => `('${c}')`).join(',');
           if (!valuesClause) {
@@ -8006,7 +8027,7 @@ const server = http.createServer(async (req, res) => {
           const countedCodes = new Set();
           let dedupSales30d = 0;
           const items = (stockRes.recordset || []).map(r => {
-            const regRow = regByCode.get(r.stock_code) || { row: {}, sales: [], consume: [] };
+            const regRow = regByCode.get(r.stock_code) || { row: {}, sales: [], consume: [], consumeSource: 'sales' };
             const reg = regRow.row || {};
             const cardCodes = regRow.sales || [];
             const salesRec = cardCodes.reduce((acc, cc) => {
@@ -8057,7 +8078,8 @@ const server = http.createServer(async (req, res) => {
               stock_code: r.stock_code,          // 재고 조회 코드
               sales_codes: cardCodes,            // 매출 조회 코드 (등록값 그대로)
               consumption_codes: (regRow.consume || []).map(c => (c.mult > 1 ? `${c.code}*${c.mult}` : c.code)),
-              consumption_explicit: !!reg.consumption_codes,   // false = 매출코드를 그대로 사용 중
+              consumption_source: regRow.consumeSource,       // 'manual' | 'bom' | 'sales'
+              consumption_explicit: regRow.consumeSource === 'manual',
               consume_qty_30d: consumeQty30d,    // 재고 소진 수량 (배수 반영)
               // 품목코드가 아닌 값이 매출·소진코드에 들어간 경우 (조용히 0 이 되는 것 방지)
               bad_codes: [...new Set([...cardCodes, ...(regRow.consume || []).map(c => c.code)])]
