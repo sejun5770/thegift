@@ -1050,12 +1050,57 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   // ============================================
   // BOM (migration 048) — 판매코드 1개당 재고품목 소요수량
   // ============================================
+  // 코드 검증 — parent 는 판매코드(S2_Card.Card_Code), child 는 재고코드(CARD_CODE_ERP)
+  //   붙여넣기 저장 전에 어떤 줄이 매칭되는지 보여주기 위한 공용 헬퍼.
+  async function annotateBomRows(rows) {
+    const safe = c => String(c || '').trim().replace(/[^A-Za-z0-9_\-.]/g, '');
+    const codes = [...new Set(rows.flatMap(r => [safe(r.parent_code), safe(r.child_stock_code)]).filter(Boolean))];
+    if (!codes.length) return rows.map(r => ({ ...r, parent_ok: false, child_ok: false }));
+    const p = await getPool();
+    const vals = codes.map(c => `('${c}')`).join(',');
+    const r = await p.request().query(`
+      SELECT v.code,
+        CASE WHEN EXISTS (SELECT 1 FROM S2_Card c WITH (NOLOCK) WHERE c.Card_Code = v.code)
+             THEN 1 ELSE 0 END AS is_sales,
+        CASE WHEN EXISTS (SELECT 1 FROM S2_CARD_ERP_STOCK s WITH (NOLOCK) WHERE s.CARD_CODE_ERP = v.code)
+             THEN 1 ELSE 0 END AS is_stock,
+        (SELECT COUNT(DISTINCT c2.Card_Code) FROM S2_Card c2 WITH (NOLOCK)
+         WHERE c2.Card_Code LIKE v.code + '[_]%') AS variant_cnt
+      FROM (VALUES ${vals}) AS v(code)`);
+    const info = new Map((r.recordset || []).map(x => [x.code, x]));
+    return rows.map(row => {
+      const pc = info.get(safe(row.parent_code)) || {};
+      const cc = info.get(safe(row.child_stock_code)) || {};
+      return {
+        ...row,
+        parent_ok: !!pc.is_sales,
+        parent_variants: pc.is_sales ? 0 : (pc.variant_cnt || 0),   // 변형코드로만 존재
+        child_ok: !!cc.is_stock,
+      };
+    });
+  }
+
   if (pathname === '/api/bg/stock-bom' && method === 'GET') {
     try {
-      return json(res, { rows: await store.listBomRows() });
+      const rows = await store.listBomRows();
+      if (query.validate === '1') {
+        try { return json(res, { rows: await annotateBomRows(rows) }); }
+        catch (e) { return json(res, { rows, validate_error: e.message }); }
+      }
+      return json(res, { rows });
     } catch (err) {
       console.error('[stock-bom GET] error:', err.message);
       return json(res, { error: err.message }, 500);
+    }
+  }
+  // POST /api/bg/stock-bom/validate — 저장 전 미리보기
+  if (pathname === '/api/bg/stock-bom/validate' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      return json(res, { rows: await annotateBomRows(body.rows || []) });
+    } catch (err) {
+      console.error('[stock-bom validate] error:', err.message);
+      return json(res, { error: err.message }, 400);
     }
   }
   if (pathname === '/api/bg/stock-bom' && method === 'POST') {

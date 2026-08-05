@@ -2254,6 +2254,7 @@ nav.nav-loading a[href^="#"] {
         <option value="not_found">❓ 재고 못 찾음</option>
       </select>
       <button class="btn" style="padding:6px 12px;font-size:12px" onclick="openStockItemModal()">➕ 품목 등록</button>
+      <button class="btn" style="padding:6px 12px;font-size:12px" onclick="openBomModal()">🧩 BOM</button>
       <button class="btn" style="padding:6px 12px;font-size:12px" onclick="loadDaeryepumStock()">🔄 새로고침</button>
       <button class="btn" style="padding:6px 12px;font-size:12px" onclick="downloadStockCsv()">📥 엑셀</button>
     </div>
@@ -2326,6 +2327,39 @@ nav.nav-loading a[href^="#"] {
              style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;margin-bottom:10px">
       <div id="si-results" style="max-height:340px;overflow:auto;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:12px"></div>
       <div id="si-registered" style="border-top:1px solid var(--gray-200);padding-top:10px"></div>
+    </div>
+  </div>
+
+  <!-- BOM 관리 모달 -->
+  <div id="bom-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto">
+    <div class="card" style="max-width:1000px;width:100%;padding:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <strong style="font-size:14px">🧩 BOM 관리 <span style="font-weight:400;color:var(--gray-500);font-size:12px">판매코드 1개당 재고품목이 몇 개 빠지는지</span></strong>
+        <button class="btn" style="padding:4px 10px;font-size:12px" onclick="closeBomModal()">닫기</button>
+      </div>
+
+      <div style="font-size:11px;color:var(--gray-500);line-height:1.7;margin-bottom:8px">
+        한 줄에 <b>판매코드 · 재고코드 · 수량</b> 순으로 붙여넣으세요 (콤마 또는 탭 구분, 수량 생략 시 1).<br>
+        <b>판매코드</b>는 실제 주문이 잡히는 품목코드, <b>재고코드</b>는 재고 관리 품목의 ERP코드입니다.
+        BOM 이 등록된 품목은 소진코드를 따로 적지 않아도 자동 계산됩니다.
+      </div>
+
+      <textarea id="bom-paste" rows="6" placeholder="TGJBK03D1, TGJBK03O1, 1&#10;TGJSD03D2, TGJSD03O2, 5"
+        style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px;font-family:monospace"></textarea>
+      <div style="display:flex;gap:6px;margin:8px 0">
+        <button class="btn" style="padding:5px 12px;font-size:12px" onclick="previewBomPaste()">👁 미리보기</button>
+        <button class="btn" style="padding:5px 12px;font-size:12px" onclick="saveBomPaste()">💾 등록</button>
+        <span id="bom-paste-msg" style="font-size:12px;color:var(--gray-500);align-self:center"></span>
+      </div>
+      <div id="bom-preview" style="max-height:240px;overflow:auto;margin-bottom:12px"></div>
+
+      <div style="border-top:1px solid var(--gray-200);padding-top:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <strong style="font-size:13px">등록된 BOM</strong>
+          <span id="bom-count" style="font-size:11px;color:var(--gray-500)"></span>
+        </div>
+        <div id="bom-list" style="max-height:300px;overflow:auto"></div>
+      </div>
     </div>
   </div>
 
@@ -13917,6 +13951,144 @@ function renderStockAlertList() {
   }).join('') + '</div>';
 }
 
+// ─── BOM 관리 ───
+//   판매코드 1개당 재고품목 소요수량. 등록되면 소진코드를 손으로 적지 않아도 된다.
+let _bomRows = [];
+let _bomParsed = [];
+
+function openBomModal() {
+  document.getElementById('bom-modal').style.display = 'flex';
+  document.getElementById('bom-paste-msg').textContent = '';
+  document.getElementById('bom-preview').innerHTML = '';
+  loadBomRows();
+}
+function closeBomModal() { document.getElementById('bom-modal').style.display = 'none'; }
+
+/** 붙여넣기 텍스트 → [{parent_code, child_stock_code, qty}] */
+function parseBomText(text) {
+  return String(text || '').split(/\r?\n/).map(line => {
+    const t = line.trim();
+    if (!t) return null;
+    const parts = t.split(/[\t,]/).map(s => s.trim()).filter(s => s !== '');
+    if (parts.length < 2) return null;
+    const qty = parts.length >= 3 ? Math.max(1, parseInt(parts[2].replace(/[^\d]/g, ''), 10) || 1) : 1;
+    return { parent_code: parts[0], child_stock_code: parts[1], qty };
+  }).filter(Boolean);
+}
+
+async function previewBomPaste() {
+  const rows = parseBomText(document.getElementById('bom-paste').value);
+  const $p = document.getElementById('bom-preview');
+  const $m = document.getElementById('bom-paste-msg');
+  if (!rows.length) { $p.innerHTML = ''; $m.textContent = '읽을 줄이 없습니다.'; return; }
+  $m.textContent = '검증 중…';
+  try {
+    const r = await fetch(`${API}/api/bg/stock-bom/validate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    _bomParsed = d.rows || [];
+    const ok = _bomParsed.filter(x => x.parent_ok && x.child_ok).length;
+    $m.textContent = `${_bomParsed.length}줄 · 양쪽 매칭 ${ok}줄`;
+    $p.innerHTML = _bomRowsTable(_bomParsed, false);
+  } catch (e) {
+    $m.textContent = `검증 실패: ${e.message}`;
+  }
+}
+
+function _bomRowsTable(rows, withActions) {
+  const cell = (v, ok, variants) => {
+    if (ok) return `<span>${esc(v)}</span>`;
+    if (variants) return `<span style="color:#b45309" title="변형코드로만 존재합니다 (예: ${esc(v)}_A) — 실제 판매코드를 넣어주세요">${esc(v)} ⚠</span>`;
+    return `<span style="color:#dc2626" title="해당 코드를 찾지 못했습니다">${esc(v)} ❓</span>`;
+  };
+  return `<table style="width:100%;font-size:11px;border-collapse:collapse">
+    <thead><tr style="background:var(--gray-50)">
+      <th style="text-align:left;padding:5px 8px">판매코드</th>
+      <th style="text-align:left;padding:5px 8px">재고코드</th>
+      <th style="text-align:right;padding:5px 8px">수량</th>
+      ${withActions ? '<th style="text-align:center;padding:5px 8px">관리</th>' : ''}
+    </tr></thead><tbody>` + rows.map(x => `
+      <tr style="border-bottom:1px solid var(--gray-100)">
+        <td style="padding:4px 8px;font-family:monospace">${cell(x.parent_code, x.parent_ok, x.parent_variants)}</td>
+        <td style="padding:4px 8px;font-family:monospace">${cell(x.child_stock_code, x.child_ok, 0)}</td>
+        <td style="padding:4px 8px;text-align:right;${x.qty > 1 ? 'font-weight:600;color:#b45309' : ''}">${x.qty}</td>
+        ${withActions ? `<td style="padding:4px 8px;text-align:center;white-space:nowrap">
+          <button onclick="editBomQty('${esc(x.id)}')" title="수량 변경"
+            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 6px">✎</button>
+          <button onclick="removeBomRow('${esc(x.id)}')" title="삭제"
+            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 6px;color:#dc2626;margin-left:3px">🗑</button>
+        </td>` : ''}
+      </tr>`).join('') + '</tbody></table>';
+}
+
+async function saveBomPaste() {
+  const rows = parseBomText(document.getElementById('bom-paste').value);
+  const $m = document.getElementById('bom-paste-msg');
+  if (!rows.length) { $m.textContent = '읽을 줄이 없습니다.'; return; }
+  if (!confirm(`${rows.length}줄을 등록합니다.\n같은 (판매코드, 재고코드) 조합은 수량이 갱신됩니다.`)) return;
+  $m.textContent = '등록 중…';
+  try {
+    const r = await fetch(`${API}/api/bg/stock-bom`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    document.getElementById('bom-paste').value = '';
+    document.getElementById('bom-preview').innerHTML = '';
+    $m.textContent = `${(d.rows || []).length}줄 등록 완료`;
+    await loadBomRows();
+    await loadDaeryepumStock();
+  } catch (e) { $m.textContent = `등록 실패: ${e.message}`; }
+}
+
+async function loadBomRows() {
+  const $l = document.getElementById('bom-list');
+  $l.innerHTML = '<div style="color:var(--gray-500);font-size:12px;padding:10px">불러오는 중…</div>';
+  try {
+    const r = await fetch(`${API}/api/bg/stock-bom?validate=1`);
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    _bomRows = d.rows || [];
+    document.getElementById('bom-count').textContent =
+      `${_bomRows.length}줄 · 세트 ${new Set(_bomRows.map(x => x.parent_code)).size}개`;
+    $l.innerHTML = _bomRows.length
+      ? _bomRowsTable(_bomRows, true)
+      : '<div style="color:var(--gray-500);font-size:12px;padding:10px">등록된 BOM 이 없습니다.</div>';
+  } catch (e) {
+    $l.innerHTML = `<div style="color:#dc2626;font-size:12px;padding:10px">불러오기 실패: ${esc(e.message)}</div>`;
+  }
+}
+
+async function editBomQty(id) {
+  const row = _bomRows.find(x => x.id === id);
+  if (!row) return;
+  const v = prompt(`${row.parent_code} → ${row.child_stock_code}\n\n판매 1개당 소요수량`, row.qty);
+  if (v === null) return;
+  if (!/^\d+$/.test(v.trim()) || parseInt(v, 10) < 1) { alert('1 이상의 정수를 입력하세요.'); return; }
+  try {
+    const r = await fetch(`${API}/api/bg/stock-bom/${encodeURIComponent(id)}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ qty: parseInt(v, 10) }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    await Promise.all([loadBomRows(), loadDaeryepumStock()]);
+  } catch (e) { alert(`실패: ${e.message}`); }
+}
+
+async function removeBomRow(id) {
+  const row = _bomRows.find(x => x.id === id);
+  if (!confirm(`${row ? row.parent_code + ' → ' + row.child_stock_code : id}\n\n이 BOM 행을 삭제할까요?`)) return;
+  try {
+    await fetch(`${API}/api/bg/stock-bom/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await Promise.all([loadBomRows(), loadDaeryepumStock()]);
+  } catch (e) { alert(`실패: ${e.message}`); }
+}
+
 // ─── 품목 등록 ───
 //   ERP 재고 테이블(CARD_CODE / CARD_CODE_ERP)을 검색해 고른 뒤 등록한다.
 //   품목마다 재고가 잡히는 코드가 달라, 저장 전에 재고가 실제로 조회되는지 확인시켜 준다.
@@ -14087,8 +14259,9 @@ async function fixStockCode(id, code) {
 function _stockConsumeCell(it) {
   const v = Number(it.consume_qty_30d) || 0;
   const codes = (it.consumption_codes || []).join(', ') || '-';
-  const tip = it.consumption_explicit
-    ? `소진코드: ${codes}`
+  const src = it.consumption_source;
+  const tip = src === 'manual' ? `소진코드(수동): ${codes}`
+    : src === 'bom' ? `BOM 자동: ${codes}`
     : `소진코드 미지정 — 매출코드(${codes})를 그대로 사용`;
   const diff = v !== (Number(it.sales_qty_30d) || 0);
   const bad = (it.bad_codes || []).filter(b =>
@@ -14096,7 +14269,8 @@ function _stockConsumeCell(it) {
   const warn = bad.length
     ? `<span style="color:#dc2626" title="${esc(bad.map(b => b.code + (b.kind === 'erp' ? '(ERP코드)' : '(없는 코드)')).join(', '))} — 판매가 잡히지 않아 소진에서 빠집니다"> ⚠</span>`
     : '';
-  return `<span title="${esc(tip)}" style="${diff ? 'color:#b45309;font-weight:600' : ''}">${fmtNum(v)}</span>${warn}`;
+  const badge = src === 'bom' ? '<span style="font-size:9px;color:#4338ca"> BOM</span>' : '';
+  return `<span title="${esc(tip)}" style="${diff ? 'color:#b45309;font-weight:600' : ''}">${fmtNum(v)}</span>${badge}${warn}`;
 }
 
 /** 매출코드 셀 — 클릭하면 편집 */
