@@ -7825,45 +7825,42 @@ const server = http.createServer(async (req, res) => {
           }
           // SQL 인젝션 방지 — 코드에 허용되는 문자만 통과시킨다.
           const safe = c => String(c || '').trim().replace(/[^A-Za-z0-9_\-.]/g, '');
-          const regRows = regItems
-            .map(it => ({ pc: safe(it.product_code), sc: safe(it.stock_code || it.product_code) }))
-            .filter(r => r.pc);
-          const valuesClause = regRows.map(r => `('${r.pc}', '${r.sc || r.pc}')`).join(',');
+          const regCodes = [...new Set(regItems.map(it => safe(it.erp_code)).filter(Boolean))];
+          const valuesClause = regCodes.map(c => `('${c}')`).join(',');
 
           const p = await getPool();
           const [stockRes, salesRes] = await Promise.all([
             p.request().query(`
               SELECT
-                reg.product_code,
+                reg.erp_code,
                 canon.canonical_name AS product_name,
-                div.Card_Div,
                 ISNULL(s.INVENTORY_CURRENT_QTY, 0) AS current_qty,
                 ISNULL(s.INVENTORY_AVAILABLE_QTY, 0) AS available_qty,
                 s.BRAND_NAME,
                 s.CARD_SET_PRICE AS erp_price,
                 s.CARD_CODE AS matched_card_code,
-                s.CARD_CODE_ERP AS matched_erp_code,
-                CASE WHEN s.CARD_CODE IS NULL THEN 0 ELSE 1 END AS has_erp_record
-              FROM (VALUES ${valuesClause}) AS reg(product_code, stock_code)
-              -- 재고는 stock_code 로 조회한다. 품목마다 재고가 잡히는 쪽이 달라
-              -- CARD_CODE / CARD_CODE_ERP 양쪽과 대조한다 (운영 확인 2026-08-05).
-              --   같은 코드에 여러 행이 남는 경우가 있어 (레거시/플레이스홀더 행은 수량이
-              --   NULL 이거나 음수) 유효수량 우선 → MOD_DATE 최신 순으로 1행만 채택.
+                CASE WHEN s.CARD_CODE IS NULL THEN 0 ELSE 1 END AS has_erp_record,
+                codes.card_codes
+              FROM (VALUES ${valuesClause}) AS reg(erp_code)
+              -- 재고는 ERP코드에 매핑되어 있다 (운영 확인 2026-08-05).
+              --   같은 ERP코드에 여러 행이 남는 경우가 있고 (레거시/플레이스홀더 행은
+              --   수량이 NULL 이거나 음수) → 유효수량 우선 → MOD_DATE 최신 1행만 채택.
               OUTER APPLY (
-                SELECT TOP 1 s2.CARD_CODE, s2.CARD_CODE_ERP, s2.INVENTORY_CURRENT_QTY,
+                SELECT TOP 1 s2.CARD_CODE, s2.INVENTORY_CURRENT_QTY,
                        s2.INVENTORY_AVAILABLE_QTY, s2.BRAND_NAME, s2.CARD_SET_PRICE
                 FROM S2_CARD_ERP_STOCK s2 WITH (NOLOCK)
-                WHERE s2.CARD_CODE = reg.stock_code OR s2.CARD_CODE_ERP = reg.stock_code
+                WHERE s2.CARD_CODE_ERP = reg.erp_code
                 ORDER BY
-                  CASE WHEN s2.CARD_CODE = reg.stock_code THEN 0 ELSE 1 END,
                   CASE WHEN s2.INVENTORY_CURRENT_QTY IS NOT NULL
                         AND s2.INVENTORY_CURRENT_QTY >= 0 THEN 0 ELSE 1 END,
                   s2.MOD_DATE DESC
               ) s
+              -- 판매는 품목코드로 일어난다. ERP코드에 딸린 품목코드를 모두 모은다.
               OUTER APPLY (
-                SELECT TOP 1 c3.Card_Div FROM S2_Card c3 WITH (NOLOCK)
-                WHERE c3.Card_Code = reg.product_code ORDER BY c3.Card_Seq DESC
-              ) div
+                SELECT STRING_AGG(CONVERT(nvarchar(max), x.CARD_CODE), ',') AS card_codes
+                FROM (SELECT DISTINCT s3.CARD_CODE FROM S2_CARD_ERP_STOCK s3 WITH (NOLOCK)
+                      WHERE s3.CARD_CODE_ERP = reg.erp_code) x
+              ) codes
               OUTER APPLY (
                 SELECT TOP 1
                   CASE
@@ -7872,7 +7869,9 @@ const server = http.createServer(async (req, res) => {
                     ELSE c2.Card_Name
                   END AS canonical_name
                 FROM S2_Card c2 WITH (NOLOCK)
-                WHERE c2.Card_Code = reg.product_code
+                WHERE c2.Card_Code IN (
+                        SELECT s4.CARD_CODE FROM S2_CARD_ERP_STOCK s4 WITH (NOLOCK)
+                        WHERE s4.CARD_CODE_ERP = reg.erp_code)
                   AND LTRIM(RTRIM(ISNULL(c2.Card_Name, ''))) <> ''
                   AND c2.Card_Name NOT LIKE '%사용X%'
                   AND c2.Card_Name NOT LIKE '%사용안함%'
@@ -7941,10 +7940,26 @@ const server = http.createServer(async (req, res) => {
               revenuePaid: Math.round(Number(r.revenue_paid) || 0),
             });
           }
-          const regByCode = new Map(regItems.map(it => [String(it.product_code).trim(), it]));
+          const regByCode = new Map(regItems.map(it => [String(it.erp_code).trim(), it]));
+          // ERP코드에 딸린 품목코드가 여러 개면 판매를 합산한다.
+          //   같은 품목코드가 두 ERP코드에 걸리는 경우가 9건 있어, 합계(summary)는
+          //   기여한 품목코드를 dedup 해서 계산한다 (행 단위로는 각각 표시).
+          const countedCodes = new Set();
+          let dedupSales30d = 0;
           const items = (stockRes.recordset || []).map(r => {
-            const reg = regByCode.get(r.product_code) || {};
-            const salesRec = salesMap.get(r.product_code) || { qty: 0, revenue: 0, qtyPaid: 0, revenuePaid: 0 };
+            const reg = regByCode.get(r.erp_code) || {};
+            const cardCodes = String(r.card_codes || '').split(',').map(s => s.trim()).filter(Boolean);
+            const salesRec = cardCodes.reduce((acc, cc) => {
+              const s = salesMap.get(cc);
+              if (!s) return acc;
+              if (!countedCodes.has(cc)) { countedCodes.add(cc); dedupSales30d += s.revenue; }
+              return {
+                qty: acc.qty + s.qty,
+                revenue: acc.revenue + s.revenue,
+                qtyPaid: acc.qtyPaid + s.qtyPaid,
+                revenuePaid: acc.revenuePaid + s.revenuePaid,
+              };
+            }, { qty: 0, revenue: 0, qtyPaid: 0, revenuePaid: 0 });
             const qty30 = salesRec.qty;
             const salesAmount30d = salesRec.revenue;
             const dailyAvg = qty30 / 30;
@@ -7969,10 +7984,10 @@ const server = http.createServer(async (req, res) => {
             const priceSource = erpPrice !== null ? 'erp' : (avgSalePrice !== null ? 'sales' : null);
             const stockValue = unitPrice !== null ? Math.round(unitPrice * availableQty) : null;
             return {
-              product_code: r.product_code,
+              erp_code: r.erp_code,
+              card_codes: cardCodes,          // 판매를 합산한 품목코드들
               product_name: reg.label || r.product_name || '',
-              card_div: r.Card_Div,
-              is_com: (r.product_code || '').startsWith('COM_'),
+              is_com: cardCodes.some(c => c.startsWith('COM_')),
               current_qty: r.current_qty,
               available_qty: r.available_qty,
               unit_price: unitPrice,          // 재고 평가에 쓰인 단가
@@ -7987,10 +8002,8 @@ const server = http.createServer(async (req, res) => {
               brand_name: r.BRAND_NAME || null,
               // 등록 정보 — 관리 화면에서 수정/삭제할 수 있도록 함께 내려준다.
               item_id: reg.id || null,
-              stock_code: reg.stock_code || null,
               matched_card_code: r.matched_card_code || null,
-              matched_erp_code: r.matched_erp_code || null,
-              stock_found: !!r.has_erp_record,   // 등록 코드로 ERP 재고를 못 찾으면 false
+              stock_found: !!r.has_erp_record,   // 등록한 ERP코드로 재고를 못 찾으면 false
               threshold: reg.threshold ?? null,
               alert_enabled: reg.alert_enabled !== false,
             };
@@ -8005,7 +8018,8 @@ const server = http.createServer(async (req, res) => {
               soldout: items.filter(x => x.available_qty <= 0).length,
               urgent_30d: items.filter(x => x.days_to_soldout !== null && x.days_to_soldout <= 30).length,
               total_stock_value: items.reduce((s, x) => s + (Number(x.stock_value) || 0), 0),
-              total_sales_30d: items.reduce((s, x) => s + (Number(x.sales_amount_30d) || 0), 0)
+              // 품목코드 dedup 후 합계 — 한 품목코드가 두 ERP코드에 걸려도 이중계상 안 됨
+              total_sales_30d: dedupSales30d
             }
           };
         } catch (e) {
@@ -8023,33 +8037,45 @@ const server = http.createServer(async (req, res) => {
             const r = await p.request()
               .input('q', sql.NVarChar, `%${q}%`)
               .query(`
+                -- 등록 단위가 ERP코드이므로 ERP코드로 묶어서 반환한다.
                 SELECT TOP 50
-                  s.CARD_CODE       AS card_code,
-                  s.CARD_CODE_ERP   AS erp_code,
-                  s.CARD_TYPE_NAME  AS card_type,
-                  s.BRAND_NAME      AS brand,
-                  s.CARD_SET_PRICE  AS price,
-                  s.INVENTORY_CURRENT_QTY   AS current_qty,
-                  s.INVENTORY_AVAILABLE_QTY AS available_qty,
-                  CONVERT(varchar(10), s.MOD_DATE, 120) AS mod_date,
+                  m.CARD_CODE_ERP AS erp_code,
+                  m.card_codes,
+                  m.card_type, m.brand, m.price,
+                  m.current_qty, m.available_qty, m.mod_date,
                   nm.canonical_name AS product_name
-                FROM S2_CARD_ERP_STOCK s WITH (NOLOCK)
+                FROM (
+                  SELECT s.CARD_CODE_ERP,
+                         STRING_AGG(CONVERT(nvarchar(max), s.CARD_CODE), ', ') AS card_codes,
+                         MAX(s.CARD_TYPE_NAME) AS card_type,
+                         MAX(s.BRAND_NAME)     AS brand,
+                         MAX(s.CARD_SET_PRICE) AS price,
+                         MAX(s.INVENTORY_CURRENT_QTY)   AS current_qty,
+                         MAX(s.INVENTORY_AVAILABLE_QTY) AS available_qty,
+                         CONVERT(varchar(10), MAX(s.MOD_DATE), 120) AS mod_date
+                  FROM S2_CARD_ERP_STOCK s WITH (NOLOCK)
+                  WHERE ISNULL(s.CARD_CODE_ERP, '') <> ''
+                    AND ISNULL(s.BRAND_NAME, '') NOT IN (N'기타', N'바른손카드')
+                    AND (s.CARD_CODE LIKE @q OR s.CARD_CODE_ERP LIKE @q
+                         OR EXISTS (SELECT 1 FROM S2_Card c1 WITH (NOLOCK)
+                                    WHERE c1.Card_Code = s.CARD_CODE AND c1.Card_Name LIKE @q))
+                  GROUP BY s.CARD_CODE_ERP
+                ) m
                 OUTER APPLY (
                   SELECT TOP 1
                     CASE WHEN c2.Card_Name LIKE '[[]%[]]%'
                       THEN LTRIM(SUBSTRING(c2.Card_Name, CHARINDEX(']', c2.Card_Name) + 1, LEN(c2.Card_Name)))
                       ELSE c2.Card_Name END AS canonical_name
                   FROM S2_Card c2 WITH (NOLOCK)
-                  WHERE c2.Card_Code = s.CARD_CODE
+                  WHERE c2.Card_Code IN (SELECT s5.CARD_CODE FROM S2_CARD_ERP_STOCK s5 WITH (NOLOCK)
+                                         WHERE s5.CARD_CODE_ERP = m.CARD_CODE_ERP)
                     AND LTRIM(RTRIM(ISNULL(c2.Card_Name, ''))) <> ''
                   ORDER BY CASE WHEN c2.DISPLAY_YORN = 'Y' THEN 0 ELSE 1 END, c2.Card_Seq DESC
                 ) nm
-                WHERE (s.CARD_CODE LIKE @q OR s.CARD_CODE_ERP LIKE @q OR nm.canonical_name LIKE @q)
-                  AND ISNULL(s.BRAND_NAME, '') NOT IN (N'기타', N'바른손카드')
                 ORDER BY
-                  CASE WHEN s.CARD_TYPE_NAME = N'답례품' THEN 0 ELSE 1 END,
-                  CASE WHEN s.INVENTORY_AVAILABLE_QTY > 0 THEN 0 ELSE 1 END,
-                  s.CARD_CODE
+                  CASE WHEN m.card_type = N'답례품' THEN 0 ELSE 1 END,
+                  CASE WHEN m.available_qty > 0 THEN 0 ELSE 1 END,
+                  m.CARD_CODE_ERP
               `);
             data = { results: r.recordset || [] };
           }

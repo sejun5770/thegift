@@ -2288,8 +2288,8 @@ nav.nav-loading a[href^="#"] {
     <table class="data-table" id="stock-table" style="width:100%;font-size:12px;display:none">
       <thead>
         <tr>
-          <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">품목코드</th>
-          <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="재고를 읽어오는 코드 — 비어 있으면 품목코드와 동일">재고코드</th>
+          <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="재고가 매핑된 ERP코드 — 등록 단위">ERP코드</th>
+          <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="이 ERP코드에 딸린 품목코드 — 판매/매출은 이들의 합계">품목코드</th>
           <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">상품명</th>
           <th style="text-align:center;padding:8px 12px;border-bottom:1px solid var(--gray-200)">구분</th>
           <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">현 재고</th>
@@ -2317,7 +2317,8 @@ nav.nav-loading a[href^="#"] {
       </div>
       <div style="font-size:11px;color:var(--gray-500);line-height:1.6;margin-bottom:10px">
         ERP 재고 테이블을 검색해 관리할 품목을 고릅니다. 재고 화면과 슬랙 알림은 여기 등록된 품목만 사용합니다.<br>
-        품목에 따라 재고가 <b>품목코드</b> 쪽에 잡히기도 <b>ERP코드</b> 쪽에 잡히기도 해서, 등록 후 재고가 <b>❓</b> 로 나오면 ⚙ 로 재고코드를 바꿔주세요.
+        등록 단위는 <b>ERP코드</b> 입니다 — 재고가 ERP코드에 매핑돼 있기 때문입니다.
+        판매·매출은 그 ERP코드에 딸린 <b>품목코드 전체를 합산</b>해 보여줍니다.
       </div>
       <input type="text" id="si-query" oninput="onStockItemQuery()" placeholder="🔍 품목코드 · ERP코드 · 상품명 (2자 이상)"
              style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;margin-bottom:10px">
@@ -13757,7 +13758,8 @@ function renderStockTable() {
   const status = document.getElementById('stock-filter-status')?.value || '';
   let items = _stockData;
   if (q) items = items.filter(it =>
-    (it.product_code || '').toLowerCase().includes(q) ||
+    (it.erp_code || '').toLowerCase().includes(q) ||
+    (it.card_codes || []).join(' ').toLowerCase().includes(q) ||
     (it.product_name || '').toLowerCase().includes(q)
   );
   if (src === 'd01') items = items.filter(it => !it.is_com);
@@ -13784,8 +13786,8 @@ function renderStockTable() {
           : `<span>${it.days_to_soldout}일</span>`);
     return `
       <tr style="${soldoutBg}">
-        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px">${esc(it.product_code)}</td>
-        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px">${_stockCodeCell(it)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px">${_stockErpCodeCell(it)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px;color:var(--gray-500)">${(it.card_codes||[]).map(esc).join('<br>') || '-'}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100)">${esc(it.product_name || '-')}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center;font-size:10px;color:var(--gray-500)">${it.is_com ? '위탁' : '자체'}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${fmtNum(it.current_qty)}</td>
@@ -13818,7 +13820,7 @@ async function loadStockAlerts() {
     const d = await r.json();
     if (d.error) throw new Error(d.error);
     _stockAlerts = d.alerts || [];
-    _stockAlertByCode = new Map(_stockAlerts.map(a => [a.product_code, a]));
+    _stockAlertByCode = new Map(_stockAlerts.map(a => [a.erp_code, a]));
 
     if ($status) {
       const sched = d.schedule
@@ -13853,7 +13855,7 @@ function renderStockAlertList() {
     + '<div style="display:flex;flex-wrap:wrap;gap:6px">' + on.map(a => {
     const thr = a.threshold == null ? '임계 미지정' : `임계 ${fmtNum(a.threshold)}`;
     return `<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid var(--gray-300);border-radius:999px;background:#fff">
-      <span style="font-family:monospace;font-size:11px">${esc(a.product_code)}</span>
+      <span style="font-family:monospace;font-size:11px">${esc(a.erp_code)}</span>
       <span style="font-size:11px">${esc(a.label || '')}</span>
       <button title="임계치 변경" onclick="editStockAlertThreshold('${esc(a.id)}')"
               style="border:none;background:none;cursor:pointer;font-size:11px;color:var(--gray-600);padding:0">${thr}</button>
@@ -13895,21 +13897,21 @@ async function searchStockItemCodes() {
     if (d.error) throw new Error(d.error);
     _siResults = d.results || [];
     if (!_siResults.length) { $r.innerHTML = '<div style="color:var(--gray-500);font-size:12px;padding:12px">결과가 없습니다.</div>'; return; }
-    const known = new Set(_stockAlerts.map(a => a.product_code));
+    const known = new Set(_stockAlerts.map(a => a.erp_code));
     $r.innerHTML = `<table style="width:100%;font-size:11px;border-collapse:collapse">
       <thead><tr style="background:var(--gray-50)">
-        <th style="text-align:left;padding:5px 8px">품목코드</th>
         <th style="text-align:left;padding:5px 8px">ERP코드</th>
+        <th style="text-align:left;padding:5px 8px">품목코드</th>
         <th style="text-align:left;padding:5px 8px">상품명</th>
         <th style="text-align:left;padding:5px 8px">구분</th>
         <th style="text-align:right;padding:5px 8px">현재고</th>
         <th style="text-align:right;padding:5px 8px">판매가</th>
         <th style="text-align:center;padding:5px 8px">등록</th>
       </tr></thead><tbody>` + _siResults.map((x, i) => {
-        const dup = known.has(x.card_code);
+        const dup = known.has(x.erp_code);
         return `<tr style="border-bottom:1px solid var(--gray-100)">
-          <td style="padding:5px 8px;font-family:monospace">${esc(x.card_code)}</td>
-          <td style="padding:5px 8px;font-family:monospace;color:var(--gray-500)">${esc(x.erp_code || '-')}</td>
+          <td style="padding:5px 8px;font-family:monospace;font-weight:600">${esc(x.erp_code)}</td>
+          <td style="padding:5px 8px;font-family:monospace;color:var(--gray-500)">${esc(x.card_codes || '-')}</td>
           <td style="padding:5px 8px">${esc(x.product_name || '-')}</td>
           <td style="padding:5px 8px;color:var(--gray-500)">${esc(x.card_type || '')}</td>
           <td style="padding:5px 8px;text-align:right;${(x.current_qty ?? 0) > 0 ? 'font-weight:600' : 'color:var(--gray-400)'}">${x.current_qty == null ? '-' : fmtNum(x.current_qty)}</td>
@@ -13932,14 +13934,13 @@ async function addStockItemFromResult(idx) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ items: [{
-        product_code: x.card_code,
-        stock_code: x.card_code,
+        erp_code: x.erp_code,
         label: x.product_name || null,
       }] }),
     });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
-    showToast(`${x.card_code} 등록`);
+    showToast(`${x.erp_code} 등록`);
     await Promise.all([loadStockAlerts(), loadDaeryepumStock()]);
     renderStockItemRegistered();
     searchStockItemCodes();
@@ -13956,29 +13957,26 @@ function renderStockItemRegistered() {
   $el.innerHTML = `<div style="font-size:12px;font-weight:600;margin-bottom:6px">등록 품목 ${_stockAlerts.length}개</div>`
     + '<div style="display:flex;flex-wrap:wrap;gap:6px">' + _stockAlerts.map(a => `
       <span style="display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border:1px solid var(--gray-300);border-radius:999px;font-size:11px">
-        <span style="font-family:monospace">${esc(a.product_code)}</span>
-        ${a.stock_code && a.stock_code !== a.product_code ? `<span style="color:var(--gray-500)">재고:${esc(a.stock_code)}</span>` : ''}
-        <button title="재고코드 지정" onclick="editStockItemCode('${esc(a.id)}')"
-                style="border:none;background:none;cursor:pointer;font-size:11px;color:var(--gray-600);padding:0">⚙</button>
+        <span style="font-family:monospace">${esc(a.erp_code)}</span>
+        <span style="color:var(--gray-500)">${esc(a.label || '')}</span>
+        <button title="표시명 변경" onclick="editStockItemLabel('${esc(a.id)}')"
+                style="border:none;background:none;cursor:pointer;font-size:11px;color:var(--gray-600);padding:0">✎</button>
         <button title="등록 해제" onclick="removeStockAlert('${esc(a.id)}')"
                 style="border:none;background:none;cursor:pointer;color:#dc2626;font-size:12px;padding:0">×</button>
       </span>`).join('') + '</div>';
 }
 
-async function editStockItemCode(id) {
+/** 표시명 변경 — ERP코드는 등록 키라 바꾸지 않는다 (바꾸려면 삭제 후 재등록) */
+async function editStockItemLabel(id) {
   const a = _stockAlerts.find(x => x.id === id);
   if (!a) return;
-  const v = prompt(
-    `${a.product_code} 의 재고를 어느 코드에서 읽을까요?\n\n`
-    + `비우면 품목코드(${a.product_code})를 그대로 씁니다.\n`
-    + `ERP 재고 테이블의 CARD_CODE 또는 CARD_CODE_ERP 와 대조합니다.`,
-    a.stock_code || '');
+  const v = prompt(`${a.erp_code} 표시명`, a.label || '');
   if (v === null) return;
   try {
     const r = await fetch(`${API}/api/bg/stock-alerts/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stock_code: v.trim() }),
+      body: JSON.stringify({ label: v.trim() }),
     });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
@@ -14000,17 +13998,12 @@ function _stockSalePriceCell(it) {
   return `${v} <span style="color:${color};font-size:10px">${diffPct > 0 ? '+' : ''}${diffPct}%</span>`;
 }
 
-/** 재고코드 셀 — 품목코드와 다르면 표시, 재고를 못 찾으면 경고 */
-function _stockCodeCell(it) {
-  const code = it.stock_code || it.product_code;
+/** ERP코드 셀 — 재고를 못 찾으면 경고 */
+function _stockErpCodeCell(it) {
   if (!it.stock_found) {
-    return `<span style="color:#dc2626" title="이 코드로 ERP 재고를 찾지 못했습니다. 재고코드를 수정하세요.">${esc(code)} ❓</span>`;
+    return `<span style="color:#dc2626" title="이 ERP코드로 재고를 찾지 못했습니다.">${esc(it.erp_code)} ❓</span>`;
   }
-  const same = !it.stock_code || it.stock_code === it.product_code;
-  const matched = it.matched_card_code === code ? '' : ` → ${esc(it.matched_card_code || '')}`;
-  return same
-    ? `<span style="color:var(--gray-400)">동일</span>`
-    : `<span title="ERP 매칭: ${esc(it.matched_card_code || '')} / ${esc(it.matched_erp_code || '')}">${esc(code)}${matched}</span>`;
+  return esc(it.erp_code);
 }
 
 /** 재고 표의 🔔 셀 — 등록 품목의 슬랙 알림 포함 여부 토글 */
@@ -14039,7 +14032,7 @@ async function editStockAlertThreshold(id) {
   const a = _stockAlerts.find(x => x.id === id);
   if (!a) return;
   const cur = a.threshold == null ? '' : String(a.threshold);
-  const input = prompt(`${a.product_code} 경고 임계치 (가용재고 이하이면 ⚠️)\n비우면 소진예상 30일 기준으로 판정합니다.`, cur);
+  const input = prompt(`${a.erp_code} 경고 임계치 (가용재고 이하이면 ⚠️)\n비우면 소진예상 30일 기준으로 판정합니다.`, cur);
   if (input === null) return;
   const v = input.trim();
   if (v !== '' && !/^\d+$/.test(v)) { alert('0 이상의 정수를 입력하세요.'); return; }
@@ -14068,7 +14061,7 @@ async function toggleStockAlertEnabled(id, turnOn) {
 
 async function removeStockAlert(id) {
   const a = _stockAlerts.find(x => x.id === id);
-  if (!confirm(`${a ? a.product_code : id} 를 재고 관리 품목에서 제외할까요?\n(재고 화면과 슬랙 알림 양쪽에서 빠집니다)`)) return;
+  if (!confirm(`${a ? a.erp_code : id} 를 재고 관리 품목에서 제외할까요?\n(재고 화면과 슬랙 알림 양쪽에서 빠집니다)`)) return;
   try {
     await fetch(`${API}/api/bg/stock-alerts/${encodeURIComponent(id)}`, { method: 'DELETE' });
     await Promise.all([loadStockAlerts(), loadDaeryepumStock()]);
@@ -14127,14 +14120,14 @@ async function sendStockAlertNow() {
 
 function downloadStockCsv() {
   if (!_stockData.length) { alert('데이터가 없습니다.'); return; }
-  const headers = ['품목코드', '상품명', '구분', '재고코드', '재고조회 성공', '현 재고', '가용 재고',
+  const headers = ['ERP코드', '품목코드', '상품명', '구분', '재고조회 성공', '현 재고', '가용 재고',
                    '정가(ERP)', '실판매가', '재고 자산', '평가기준', '30일 판매', '30일 매출액', '일평균', '소진 예상일수'];
   const lines = [headers.join(',')];
   for (const it of _stockData) {
     lines.push([
-      it.product_code, `"${(it.product_name || '').replace(/"/g, '""')}"`,
+      it.erp_code, `"${(it.card_codes || []).join(' ')}"`,
+      `"${(it.product_name || '').replace(/"/g, '""')}"`,
       it.is_com ? '위탁' : '자체',
-      it.stock_code || it.product_code,
       it.stock_found ? 'Y' : 'N',
       it.current_qty, it.available_qty,
       it.erp_price ?? '', it.avg_sale_price ?? '', it.stock_value,
