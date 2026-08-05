@@ -7825,42 +7825,54 @@ const server = http.createServer(async (req, res) => {
           }
           // SQL 인젝션 방지 — 코드에 허용되는 문자만 통과시킨다.
           const safe = c => String(c || '').trim().replace(/[^A-Za-z0-9_\-.]/g, '');
-          const regCodes = [...new Set(regItems.map(it => safe(it.erp_code)).filter(Boolean))];
-          const valuesClause = regCodes.map(c => `('${c}')`).join(',');
+          // 재고코드 / 매출코드 분리 (운영 결정 2026-08-05)
+          //   재고는 stock_code 로만 조회하고, 매출은 sales_codes 에 적힌 품목코드만 합산한다.
+          //   자동 매핑을 쓰면 ERP코드-품목코드가 1:N 이라 의도치 않은 코드까지 섞인다.
+          const regRows = regItems.map(it => ({
+            row: it,
+            stock: safe(it.stock_code),
+            sales: String(it.sales_codes || '').split(',').map(s => safe(s)).filter(Boolean),
+          })).filter(r => r.stock);
+          const valuesClause = [...new Set(regRows.map(r => r.stock))].map(c => `('${c}')`).join(',');
+          if (!valuesClause) {
+            data = {
+              items: [], registered: regItems.length,
+              summary: { total: 0, with_stock: 0, soldout: 0, urgent_30d: 0, total_stock_value: 0, total_sales_30d: 0 },
+            };
+            res.end(JSON.stringify(data));
+            return;
+          }
 
           const p = await getPool();
           const [stockRes, salesRes] = await Promise.all([
             p.request().query(`
               SELECT
-                reg.erp_code,
+                reg.stock_code,
                 canon.canonical_name AS product_name,
                 ISNULL(s.INVENTORY_CURRENT_QTY, 0) AS current_qty,
                 ISNULL(s.INVENTORY_AVAILABLE_QTY, 0) AS available_qty,
                 s.BRAND_NAME,
                 s.CARD_SET_PRICE AS erp_price,
                 s.CARD_CODE AS matched_card_code,
-                CASE WHEN s.CARD_CODE IS NULL THEN 0 ELSE 1 END AS has_erp_record,
-                codes.card_codes
-              FROM (VALUES ${valuesClause}) AS reg(erp_code)
-              -- 재고는 ERP코드에 매핑되어 있다 (운영 확인 2026-08-05).
-              --   같은 ERP코드에 여러 행이 남는 경우가 있고 (레거시/플레이스홀더 행은
+                s.CARD_CODE_ERP AS matched_erp_code,
+                CASE WHEN s.CARD_CODE IS NULL THEN 0 ELSE 1 END AS has_erp_record
+              FROM (VALUES ${valuesClause}) AS reg(stock_code)
+              -- 재고는 재고코드로만 조회한다. ERP코드(CARD_CODE_ERP) 매칭을 우선하고,
+              -- 품목코드(CARD_CODE)로 등록한 경우도 찾을 수 있게 둘 다 본다.
+              --   같은 코드에 여러 행이 남는 경우가 있고 (레거시/플레이스홀더 행은
               --   수량이 NULL 이거나 음수) → 유효수량 우선 → MOD_DATE 최신 1행만 채택.
               OUTER APPLY (
-                SELECT TOP 1 s2.CARD_CODE, s2.INVENTORY_CURRENT_QTY,
+                SELECT TOP 1 s2.CARD_CODE, s2.CARD_CODE_ERP, s2.INVENTORY_CURRENT_QTY,
                        s2.INVENTORY_AVAILABLE_QTY, s2.BRAND_NAME, s2.CARD_SET_PRICE
                 FROM S2_CARD_ERP_STOCK s2 WITH (NOLOCK)
-                WHERE s2.CARD_CODE_ERP = reg.erp_code
+                WHERE s2.CARD_CODE_ERP = reg.stock_code OR s2.CARD_CODE = reg.stock_code
                 ORDER BY
+                  CASE WHEN s2.CARD_CODE_ERP = reg.stock_code THEN 0 ELSE 1 END,
                   CASE WHEN s2.INVENTORY_CURRENT_QTY IS NOT NULL
                         AND s2.INVENTORY_CURRENT_QTY >= 0 THEN 0 ELSE 1 END,
                   s2.MOD_DATE DESC
               ) s
-              -- 판매는 품목코드로 일어난다. ERP코드에 딸린 품목코드를 모두 모은다.
-              OUTER APPLY (
-                SELECT STRING_AGG(CONVERT(nvarchar(max), x.CARD_CODE), ',') AS card_codes
-                FROM (SELECT DISTINCT s3.CARD_CODE FROM S2_CARD_ERP_STOCK s3 WITH (NOLOCK)
-                      WHERE s3.CARD_CODE_ERP = reg.erp_code) x
-              ) codes
+              -- 상품명은 재고 매칭된 품목코드 기준 (매출코드는 여러 개일 수 있어 JS 에서 보정)
               OUTER APPLY (
                 SELECT TOP 1
                   CASE
@@ -7869,9 +7881,7 @@ const server = http.createServer(async (req, res) => {
                     ELSE c2.Card_Name
                   END AS canonical_name
                 FROM S2_Card c2 WITH (NOLOCK)
-                WHERE c2.Card_Code IN (
-                        SELECT s4.CARD_CODE FROM S2_CARD_ERP_STOCK s4 WITH (NOLOCK)
-                        WHERE s4.CARD_CODE_ERP = reg.erp_code)
+                WHERE c2.Card_Code = ISNULL(s.CARD_CODE, reg.stock_code)
                   AND LTRIM(RTRIM(ISNULL(c2.Card_Name, ''))) <> ''
                   AND c2.Card_Name NOT LIKE '%사용X%'
                   AND c2.Card_Name NOT LIKE '%사용안함%'
@@ -7940,15 +7950,16 @@ const server = http.createServer(async (req, res) => {
               revenuePaid: Math.round(Number(r.revenue_paid) || 0),
             });
           }
-          const regByCode = new Map(regItems.map(it => [String(it.erp_code).trim(), it]));
-          // ERP코드에 딸린 품목코드가 여러 개면 판매를 합산한다.
-          //   같은 품목코드가 두 ERP코드에 걸리는 경우가 9건 있어, 합계(summary)는
-          //   기여한 품목코드를 dedup 해서 계산한다 (행 단위로는 각각 표시).
+          const regByCode = new Map(regRows.map(r => [r.stock, r]));
+          // 매출은 등록된 매출코드만 합산한다.
+          //   같은 매출코드를 두 품목에 걸어 두면 합계(summary)가 이중계상되므로
+          //   합계는 코드 dedup 후 계산한다 (행 단위로는 각각 그대로 표시).
           const countedCodes = new Set();
           let dedupSales30d = 0;
           const items = (stockRes.recordset || []).map(r => {
-            const reg = regByCode.get(r.erp_code) || {};
-            const cardCodes = String(r.card_codes || '').split(',').map(s => s.trim()).filter(Boolean);
+            const regRow = regByCode.get(r.stock_code) || { row: {}, sales: [] };
+            const reg = regRow.row || {};
+            const cardCodes = regRow.sales || [];
             const salesRec = cardCodes.reduce((acc, cc) => {
               const s = salesMap.get(cc);
               if (!s) return acc;
@@ -7984,10 +7995,10 @@ const server = http.createServer(async (req, res) => {
             const priceSource = erpPrice !== null ? 'erp' : (avgSalePrice !== null ? 'sales' : null);
             const stockValue = unitPrice !== null ? Math.round(unitPrice * availableQty) : null;
             return {
-              erp_code: r.erp_code,
-              card_codes: cardCodes,          // 판매를 합산한 품목코드들
+              stock_code: r.stock_code,          // 재고 조회 코드
+              sales_codes: cardCodes,            // 매출 조회 코드 (등록값 그대로)
               product_name: reg.label || r.product_name || '',
-              is_com: cardCodes.some(c => c.startsWith('COM_')),
+              is_com: cardCodes.some(c => c.startsWith('COM_')) || String(r.stock_code || '').startsWith('COM_'),
               current_qty: r.current_qty,
               available_qty: r.available_qty,
               unit_price: unitPrice,          // 재고 평가에 쓰인 단가
@@ -8003,7 +8014,8 @@ const server = http.createServer(async (req, res) => {
               // 등록 정보 — 관리 화면에서 수정/삭제할 수 있도록 함께 내려준다.
               item_id: reg.id || null,
               matched_card_code: r.matched_card_code || null,
-              stock_found: !!r.has_erp_record,   // 등록한 ERP코드로 재고를 못 찾으면 false
+              matched_erp_code: r.matched_erp_code || null,
+              stock_found: !!r.has_erp_record,   // 재고코드로 재고를 못 찾으면 false
               threshold: reg.threshold ?? null,
               alert_enabled: reg.alert_enabled !== false,
             };

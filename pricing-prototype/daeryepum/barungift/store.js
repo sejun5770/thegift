@@ -1750,9 +1750,16 @@ async function listStockItems({ enabledOnly = false, alertOnly = false } = {}) {
   return rows;
 }
 
+/** 'A, B ,C' → 'A,B,C' (빈 항목·중복 제거) */
+function _normCodeList(v) {
+  const list = String(v ?? '').split(',').map(s => s.trim()).filter(Boolean);
+  return [...new Set(list)].join(',') || null;
+}
+
 function _normStockItem(m, createdBy) {
   return {
-    erp_code: String(m.erp_code ?? '').trim(),
+    stock_code: String(m.stock_code ?? '').trim(),
+    sales_codes: _normCodeList(m.sales_codes),
     label: m.label ? String(m.label) : null,
     threshold: (m.threshold === '' || m.threshold == null) ? null : Math.max(0, parseInt(m.threshold, 10) || 0),
     sort_order: parseInt(m.sort_order, 10) || 0,
@@ -1763,20 +1770,20 @@ function _normStockItem(m, createdBy) {
   };
 }
 
-/** 품목 등록 (bulk upsert). erp_code 중복은 갱신. */
+/** 품목 등록 (bulk upsert). stock_code 중복은 갱신. */
 async function addStockItems(items, createdBy = null) {
   const rows = (Array.isArray(items) ? items : [])
     .map(m => _normStockItem(m, createdBy))
-    .filter(m => m.erp_code);
+    .filter(m => m.stock_code);
   if (!rows.length) return [];
   const seen = new Set();
   const uniq = rows.filter(r => {
-    if (seen.has(r.erp_code)) return false;
-    seen.add(r.erp_code);
+    if (seen.has(r.stock_code)) return false;
+    seen.add(r.stock_code);
     return true;
   });
   if (USE_SUPABASE) {
-    const res = await fetch(`${REST_BASE}/bg_stock_items?on_conflict=erp_code`, {
+    const res = await fetch(`${REST_BASE}/bg_stock_items?on_conflict=stock_code`, {
       method: 'POST',
       headers: { ...HEADERS, Prefer: 'resolution=merge-duplicates,return=representation' },
       body: JSON.stringify(uniq),
@@ -1784,7 +1791,7 @@ async function addStockItems(items, createdBy = null) {
     if (!res.ok) throw new Error(`Supabase INSERT bg_stock_items [${res.status}]: ${await res.text()}`);
     return res.json();
   }
-  const list = readJson(FILES.stockItems, []).filter(m => !seen.has(m.erp_code));
+  const list = readJson(FILES.stockItems, []).filter(m => !seen.has(m.stock_code));
   const added = uniq.map(r => ({ id: uuid(), ...r, created_at: now(), updated_at: now() }));
   writeJson(FILES.stockItems, list.concat(added));
   return added;
@@ -1799,6 +1806,7 @@ async function updateStockItem(id, data) {
   if ('sort_order' in data) patch.sort_order = parseInt(data.sort_order, 10) || 0;
   if ('label' in data) patch.label = data.label ? String(data.label) : null;
   if ('memo' in data) patch.memo = data.memo ? String(data.memo) : null;
+  if ('sales_codes' in data) patch.sales_codes = _normCodeList(data.sales_codes);
   if (USE_SUPABASE) {
     const rows = await sbUpdate('bg_stock_items', `id=eq.${encodeURIComponent(id)}`, patch);
     return rows[0] || null;
