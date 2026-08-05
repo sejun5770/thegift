@@ -1807,10 +1807,9 @@ async function updateStockItem(id, data) {
   if ('label' in data) patch.label = data.label ? String(data.label) : null;
   if ('memo' in data) patch.memo = data.memo ? String(data.memo) : null;
   if ('sales_codes' in data) patch.sales_codes = _normCodeList(data.sales_codes);
-  if (USE_SUPABASE) {
-    const rows = await sbUpdate('bg_stock_items', `id=eq.${encodeURIComponent(id)}`, patch);
-    return rows[0] || null;
-  }
+  // sbUpdate 는 이미 행 객체(또는 null)를 반환한다 — 배열로 취급해 [0] 을 또 꺼내면
+  // 성공해도 undefined 가 되어 API 가 404 'not found' 를 돌려준다 (2026-08-05 수정).
+  if (USE_SUPABASE) return sbUpdate('bg_stock_items', `id=eq.${encodeURIComponent(id)}`, patch);
   const list = readJson(FILES.stockItems, []);
   const idx = list.findIndex(m => m.id === id);
   if (idx < 0) return null;
