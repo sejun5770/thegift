@@ -7968,6 +7968,28 @@ const server = http.createServer(async (req, res) => {
               GROUP BY card_code
             `)
           ]);
+          // 매출·소진코드 검증 — 이 둘은 '품목코드(S2_Card.Card_Code)' 기준인데
+          //   재고코드는 ERP코드라 헷갈리기 쉽다. ERP코드를 넣으면 매칭되는 판매가 없어
+          //   조용히 0 으로 잡히므로, 존재하지 않는 코드를 찾아 알려준다.
+          const refCodes = [...new Set(regRows.flatMap(r => [...r.sales, ...r.consume.map(c => c.code)]))];
+          const codeIssues = new Map();   // code → 'erp' | 'unknown'
+          if (refCodes.length) {
+            const inList = refCodes.map(c => `'${c}'`).join(',');
+            const chk = await p.request().query(`
+              SELECT v.code,
+                     CASE WHEN EXISTS (SELECT 1 FROM S2_Card c WITH (NOLOCK) WHERE c.Card_Code = v.code)
+                          THEN 1 ELSE 0 END AS is_card,
+                     CASE WHEN EXISTS (SELECT 1 FROM S2_CARD_ERP_STOCK s WITH (NOLOCK)
+                                       WHERE s.CARD_CODE_ERP = v.code) THEN 1 ELSE 0 END AS is_erp
+              FROM (VALUES ${refCodes.map(c => `('${c}')`).join(',')}) AS v(code)
+              WHERE v.code IN (${inList})
+            `);
+            for (const row of (chk.recordset || [])) {
+              if (row.is_card) continue;
+              codeIssues.set(row.code, row.is_erp ? 'erp' : 'unknown');
+            }
+          }
+
           const salesMap = new Map();
           for (const r of (salesRes.recordset || [])) {
             salesMap.set(r.card_code, {
@@ -8037,6 +8059,10 @@ const server = http.createServer(async (req, res) => {
               consumption_codes: (regRow.consume || []).map(c => (c.mult > 1 ? `${c.code}*${c.mult}` : c.code)),
               consumption_explicit: !!reg.consumption_codes,   // false = 매출코드를 그대로 사용 중
               consume_qty_30d: consumeQty30d,    // 재고 소진 수량 (배수 반영)
+              // 품목코드가 아닌 값이 매출·소진코드에 들어간 경우 (조용히 0 이 되는 것 방지)
+              bad_codes: [...new Set([...cardCodes, ...(regRow.consume || []).map(c => c.code)])]
+                .filter(c => codeIssues.has(c))
+                .map(c => ({ code: c, kind: codeIssues.get(c) })),
               product_name: reg.label || r.product_name || '',
               is_com: cardCodes.some(c => c.startsWith('COM_')) || String(r.stock_code || '').startsWith('COM_'),
               current_qty: r.current_qty,

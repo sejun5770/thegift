@@ -2319,7 +2319,7 @@ nav.nav-loading a[href^="#"] {
       </div>
       <div style="font-size:11px;color:var(--gray-500);line-height:1.6;margin-bottom:10px">
         ERP 재고 테이블을 검색해 관리할 품목을 고릅니다. 재고 화면과 슬랙 알림은 여기 등록된 품목만 사용합니다.<br>
-        <b>재고코드</b>(ERP코드)로 재고를 보고, <b>매출코드</b>(품목코드)로 매출을 봅니다.
+        <b>재고코드는 ERP코드</b>, <b>매출·소진코드는 품목코드</b>입니다. 서로 다른 체계라 ERP코드를 매출코드에 넣으면 판매가 잡히지 않습니다 (표에 ⚠ 로 표시).
         등록하면 매출코드는 그 ERP코드에 딸린 품목코드로 채워지며, 표에서 ✎ 로 언제든 바꿀 수 있습니다.
       </div>
       <input type="text" id="si-query" oninput="onStockItemQuery()" placeholder="🔍 품목코드 · ERP코드 · 상품명 (2자 이상)"
@@ -2350,13 +2350,13 @@ nav.nav-loading a[href^="#"] {
       </label>
 
       <label style="display:block;font-size:12px;margin-bottom:10px">
-        <span style="color:var(--gray-500)">매출코드 <span style="color:var(--gray-400)">(콤마로 여러 개 · 비우면 매출 집계 안 함)</span></span>
+        <span style="color:var(--gray-500)">매출코드 <span style="color:var(--gray-400)">(품목코드 · 콤마로 여러 개 · 비우면 매출 집계 안 함)</span></span>
         <input type="text" id="se-sales" placeholder="예: TGJSD09O1_A, TGJSD09O1_C"
                style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;font-family:monospace;margin-top:3px">
       </label>
 
       <label style="display:block;font-size:12px;margin-bottom:10px">
-        <span style="color:var(--gray-500)">소진코드 <span style="color:var(--gray-400)">(재고가 빠지는 코드 · 배수는 코드*N · 비우면 매출코드 사용)</span></span>
+        <span style="color:var(--gray-500)">소진코드 <span style="color:var(--gray-400)">(품목코드 · 배수는 코드*N · 비우면 매출코드 사용)</span></span>
         <input type="text" id="se-consume" placeholder="예: TGJBK03O1, TGJBK03D1, TGJSD03D1*5"
                style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;font-family:monospace;margin-top:3px">
       </label>
@@ -14091,14 +14091,25 @@ function _stockConsumeCell(it) {
     ? `소진코드: ${codes}`
     : `소진코드 미지정 — 매출코드(${codes})를 그대로 사용`;
   const diff = v !== (Number(it.sales_qty_30d) || 0);
-  return `<span title="${esc(tip)}" style="${diff ? 'color:#b45309;font-weight:600' : ''}">${fmtNum(v)}</span>`;
+  const bad = (it.bad_codes || []).filter(b =>
+    (it.consumption_codes || []).some(c => c.split('*')[0] === b.code));
+  const warn = bad.length
+    ? `<span style="color:#dc2626" title="${esc(bad.map(b => b.code + (b.kind === 'erp' ? '(ERP코드)' : '(없는 코드)')).join(', '))} — 판매가 잡히지 않아 소진에서 빠집니다"> ⚠</span>`
+    : '';
+  return `<span title="${esc(tip)}" style="${diff ? 'color:#b45309;font-weight:600' : ''}">${fmtNum(v)}</span>${warn}`;
 }
 
 /** 매출코드 셀 — 클릭하면 편집 */
 function _stockSalesCodeCell(it) {
+  const bad = new Map((it.bad_codes || []).map(b => [b.code, b.kind]));
+  const mark = c => bad.has(c)
+    ? `<span style="color:#dc2626" title="${bad.get(c) === 'erp'
+        ? 'ERP코드입니다 — 매출/소진코드는 품목코드를 넣어야 판매가 잡힙니다'
+        : '존재하지 않는 품목코드입니다'}">${esc(c)} ⚠</span>`
+    : esc(c);
   const codes = it.sales_codes || [];
   const body = codes.length
-    ? codes.map(esc).join('<br>')
+    ? codes.map(mark).join('<br>')
     : '<span style="color:#d97706">미지정</span>';
   return `<span style="cursor:pointer" title="클릭해서 매출코드 변경"
     onclick="editStockItemSalesCodes('${esc(it.item_id)}')">${body} ✎</span>`;
