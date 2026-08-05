@@ -13821,6 +13821,7 @@ async function loadDaeryepumStock() {
     const s = d.summary || {};
     $summary.innerHTML = `
       <span style="padding:4px 10px;background:#e0e7ff;color:#4338ca;border-radius:4px;font-weight:600" title="bg_stock_items 에 등록된 관리 품목">등록 품목 ${s.total || 0}개</span>
+      ${s.from_xerp !== undefined ? `<span style="padding:4px 10px;background:#eef2ff;color:#4338ca;border-radius:4px" title="XERP ${esc(d.stock_warehouse || '')} 창고 원본에서 조회한 품목 수">XERP 재고 ${s.from_xerp}개</span>` : ''}
       ${s.not_found ? `<span style="padding:4px 10px;background:#fee2e2;color:#991b1b;border-radius:4px;font-weight:600" title="등록한 코드로 ERP 재고를 찾지 못했습니다 — 재고코드를 바꿔보세요">❓ 재고 못 찾음 ${s.not_found}개</span>` : ''}
       <span style="padding:4px 10px;background:#dcfce7;color:#166534;border-radius:4px;font-weight:600">재고 있음 ${s.with_stock || 0}개</span>
       <span style="padding:4px 10px;background:#fef3c7;color:#92400e;border-radius:4px;font-weight:600">⚠️ 30일 내 소진 ${s.urgent_30d || 0}개</span>
@@ -14118,10 +14119,24 @@ async function searchStockItemCodes() {
   if (q.length < 2) { $r.innerHTML = '<div style="color:var(--gray-500);font-size:12px;padding:12px">2자 이상 입력하세요.</div>'; return; }
   $r.innerHTML = '<div style="color:var(--gray-500);font-size:12px;padding:12px">검색 중…</div>';
   try {
-    const res = await fetch(`${API}/api/daeryepum-stock/lookup?q=${encodeURIComponent(q)}`);
+    const [res, xres] = await Promise.all([
+      fetch(`${API}/api/daeryepum-stock/lookup?q=${encodeURIComponent(q)}`),
+      fetch(`${API}/api/daeryepum-stock/erp-items?q=${encodeURIComponent(q)}`),
+    ]);
     const d = await res.json();
     if (d.error) throw new Error(d.error);
     _siResults = d.results || [];
+    // XERP 원본에만 있는 품목(= bar_shop1 미동기화)도 등록할 수 있게 합류
+    try {
+      const xd = await xres.json();
+      const known = new Set(_siResults.map(x => x.erp_code));
+      for (const x of (xd.results || [])) {
+        if (known.has(x.item_code)) continue;
+        _siResults.push({ erp_code: x.item_code, card_codes: '', card_type: 'XERP',
+          brand: '', price: null, current_qty: x.qty, available_qty: x.qty,
+          product_name: '', xerp_only: true });
+      }
+    } catch { /* XERP 조회 실패는 무시 — 기존 결과만 사용 */ }
     if (!_siResults.length) { $r.innerHTML = '<div style="color:var(--gray-500);font-size:12px;padding:12px">결과가 없습니다.</div>'; return; }
     const known = new Set(_stockAlerts.map(a => a.stock_code));
     $r.innerHTML = `<table style="width:100%;font-size:11px;border-collapse:collapse">
@@ -14139,7 +14154,7 @@ async function searchStockItemCodes() {
           <td style="padding:5px 8px;font-family:monospace;font-weight:600">${esc(x.erp_code)}</td>
           <td style="padding:5px 8px;font-family:monospace;color:var(--gray-500)">${esc(x.card_codes || '-')}</td>
           <td style="padding:5px 8px">${esc(x.product_name || '-')}</td>
-          <td style="padding:5px 8px;color:var(--gray-500)">${esc(x.card_type || '')}</td>
+          <td style="padding:5px 8px;color:${x.xerp_only ? '#4338ca' : 'var(--gray-500)'}">${x.xerp_only ? 'XERP 전용' : esc(x.card_type || '')}</td>
           <td style="padding:5px 8px;text-align:right;${(x.current_qty ?? 0) > 0 ? 'font-weight:600' : 'color:var(--gray-400)'}">${x.current_qty == null ? '-' : fmtNum(x.current_qty)}</td>
           <td style="padding:5px 8px;text-align:right;color:var(--gray-600)">${x.price ? fmtNum(x.price) : '-'}</td>
           <td style="padding:5px 8px;text-align:center">${dup
@@ -14228,7 +14243,10 @@ function _stockSalePriceCell(it) {
 /** 재고코드 셀 — 재고를 못 찾으면 경고 + 올바른 ERP코드 제안 */
 function _stockErpCodeCell(it) {
   if (it.stock_found) {
-    return `<span title="ERP 매칭: ${esc(it.matched_erp_code || '')} (품목 ${esc(it.matched_card_code || '')})">${esc(it.stock_code)}</span>`;
+    const src = it.stock_source === 'xerp'
+    ? '<span style="font-size:9px;color:#4338ca" title="XERP mmInventory 원본에서 조회"> XERP</span>'
+    : '<span style="font-size:9px;color:#b45309" title="XERP 에 없어 bar_shop1 복제본 값 사용"> 복제</span>';
+  return `<span title="ERP 매칭: ${esc(it.matched_erp_code || '')} (품목 ${esc(it.matched_card_code || '')})">${esc(it.stock_code)}</span>${src}`;
   }
   const sug = it.suggested_erp_codes || [];
   const hint = sug.length

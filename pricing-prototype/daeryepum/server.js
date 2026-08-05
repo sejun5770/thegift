@@ -415,6 +415,34 @@ let pool = null;
 let _poolInitPromise = null; // 동시 초기화 요청 중복 방지 (race-condition 가드)
 
 // ============================================
+// XERP 풀 — ERP 원본 DB (같은 서버, database 만 다름)
+//   bar_shop1 의 S2_CARD_ERP_STOCK 은 ERP 재고의 복제본인데 적재가 누락되는 행이 있다
+//   (예: TGJSD11O1 사양벌꿀 — ERP 에는 231개, bar_shop1 에는 행 자체가 없음).
+//   readonly_user 로 XERP 에 직접 접근 가능한 것을 확인해 원본을 직접 읽는다. 2026-08-05
+//
+//   재고 원장: mmInventory (품목 25,472 / 창고 131)
+//   판매 가용 창고: MF01 (운영 확인) — ERP '스마트재고현황' 의 현재고와 일치
+// ============================================
+const XERP_WAREHOUSE = process.env.XERP_WAREHOUSE || 'MF01';
+const XERP_CONFIG = { ...DB_CONFIG, database: process.env.XERP_DB_NAME || 'XERP' };
+let _xerpPool = null;
+let _xerpInitPromise = null;
+
+async function getXerpPool() {
+  if (_xerpPool && _xerpPool.connected) return _xerpPool;
+  if (_xerpInitPromise) return _xerpInitPromise;
+  _xerpInitPromise = (async () => {
+    const p = new sql.ConnectionPool(XERP_CONFIG);
+    p.on('error', (err) => { console.error('[xerp] pool error:', err.message); _xerpPool = null; });
+    await p.connect();
+    _xerpPool = p;
+    console.log(`Connected to XERP (warehouse ${XERP_WAREHOUSE})`);
+    return p;
+  })().finally(() => { _xerpInitPromise = null; });
+  return _xerpInitPromise;
+}
+
+// ============================================
 // MySQL 풀 — 디얼디어 wedding DB (별도 서버, port 3306)
 //   환경변수: MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE
 //   미설정 시 getMysqlPool() 는 명확한 에러로 fallback (디얼디어 통합 영역에서만 호출).
@@ -8011,6 +8039,28 @@ const server = http.createServer(async (req, res) => {
             }
           }
 
+          // XERP 원본 재고 (MF01) — bar_shop1 복제본에 빠진 품목도 여기서 잡힌다.
+          //   실패해도 화면이 죽지 않도록 폴백 (bar_shop1 값 사용).
+          const xerpQty = new Map();
+          let xerpError = null;
+          try {
+            const xp = await getXerpPool();
+            const codes = [...new Set(regRows.map(r => r.stock))];
+            const xr = await xp.request()
+              .input('wh', sql.NVarChar, XERP_WAREHOUSE)
+              .query(`
+                SELECT LTRIM(RTRIM(ItemCode)) AS item_code, SUM(OhQty) AS qty
+                FROM mmInventory WITH (NOLOCK)
+                WHERE WhCode = @wh
+                  AND LTRIM(RTRIM(ItemCode)) IN (${codes.map(c => `'${c}'`).join(',')})
+                GROUP BY LTRIM(RTRIM(ItemCode))
+              `);
+            for (const row of (xr.recordset || [])) xerpQty.set(row.item_code, Number(row.qty) || 0);
+          } catch (e) {
+            xerpError = e.message;
+            console.error('[daeryepum-stock] XERP 조회 실패 — bar_shop1 값 사용:', e.message);
+          }
+
           const salesMap = new Map();
           for (const r of (salesRes.recordset || [])) {
             salesMap.set(r.card_code, {
@@ -8053,11 +8103,16 @@ const server = http.createServer(async (req, res) => {
               return sum + (s ? s.qty * c.mult : 0);
             }, 0);
 
+            // 재고는 XERP 원본(MF01) 우선, 없으면 bar_shop1 복제본
+            const hasXerp = xerpQty.has(r.stock_code);
+            const xq = hasXerp ? xerpQty.get(r.stock_code) : null;
+            const currentQty = hasXerp ? xq : (Number(r.current_qty) || 0);
+            const availableQty = hasXerp ? xq : (Number(r.available_qty) || 0);
+
             const dailyAvg = consumeQty30d / 30;
-            const daysLeft = (dailyAvg > 0 && r.available_qty > 0)
-              ? Math.round(r.available_qty / dailyAvg)
+            const daysLeft = (dailyAvg > 0 && availableQty > 0)
+              ? Math.round(availableQty / dailyAvg)
               : null;
-            const availableQty = Number(r.available_qty) || 0;
 
             // 단가 2종 (운영 합의 2026-08-04):
             //   erp_price       ERP 마스터 판매가 (CARD_SET_PRICE) — 현재 시점 정가.
@@ -8087,8 +8142,9 @@ const server = http.createServer(async (req, res) => {
                 .map(c => ({ code: c, kind: codeIssues.get(c) })),
               product_name: reg.label || r.product_name || '',
               is_com: cardCodes.some(c => c.startsWith('COM_')) || String(r.stock_code || '').startsWith('COM_'),
-              current_qty: r.current_qty,
-              available_qty: r.available_qty,
+              current_qty: currentQty,
+              available_qty: availableQty,
+              stock_source: hasXerp ? 'xerp' : 'bar_shop1',
               unit_price: unitPrice,          // 재고 평가에 쓰인 단가
               price_source: priceSource,      // 'erp' | 'sales' | null
               erp_price: erpPrice,            // ERP 마스터 정가
@@ -8103,7 +8159,7 @@ const server = http.createServer(async (req, res) => {
               item_id: reg.id || null,
               matched_card_code: r.matched_card_code || null,
               matched_erp_code: r.matched_erp_code || null,
-              stock_found: !!r.has_erp_record,   // 재고코드로 재고를 못 찾으면 false
+              stock_found: hasXerp || !!r.has_erp_record,   // 재고코드로 재고를 못 찾으면 false
               // 못 찾은 경우, 입력값이 품목코드였다면 올바른 ERP코드 후보
               suggested_erp_codes: r.suggested
                 ? String(r.suggested).split(',').map(s => s.trim()).filter(Boolean)
@@ -8115,8 +8171,11 @@ const server = http.createServer(async (req, res) => {
           data = {
             items,
             registered: regItems.length,
+            stock_warehouse: XERP_WAREHOUSE,
+            xerp_error: xerpError,
             summary: {
               total: items.length,
+              from_xerp: items.filter(x => x.stock_source === 'xerp').length,
               not_found: items.filter(x => !x.stock_found).length,
               with_stock: items.filter(x => x.available_qty > 0).length,
               soldout: items.filter(x => x.available_qty <= 0).length,
@@ -8128,6 +8187,33 @@ const server = http.createServer(async (req, res) => {
           };
         } catch (e) {
           data = { error: e.message, items: [], summary: {} };
+        }
+      } else if (pathname === '/api/daeryepum-stock/erp-items' && req.method === 'GET') {
+        // XERP 품목 검색 — BOM/품목 등록에서 ERP 원본 품목을 고르기 위한 용도.
+        //   bar_shop1 동기화에 빠진 품목도 여기서는 잡힌다.
+        try {
+          const q = String(parsed.query.q || '').trim();
+          if (q.length < 2) { data = { results: [], hint: '2자 이상 입력' }; }
+          else {
+            const xp = await getXerpPool();
+            const r = await xp.request()
+              .input('q', sql.NVarChar, `%${q}%`)
+              .input('wh', sql.NVarChar, XERP_WAREHOUSE)
+              .query(`
+                SELECT TOP 50
+                  LTRIM(RTRIM(ItemCode)) AS item_code,
+                  SUM(OhQty)   AS qty,
+                  SUM(OhAmnt)  AS amount,
+                  COUNT(*)     AS rows_
+                FROM mmInventory WITH (NOLOCK)
+                WHERE WhCode = @wh AND ItemCode LIKE @q
+                GROUP BY LTRIM(RTRIM(ItemCode))
+                ORDER BY SUM(OhQty) DESC, LTRIM(RTRIM(ItemCode))
+              `);
+            data = { results: r.recordset || [], warehouse: XERP_WAREHOUSE };
+          }
+        } catch (e) {
+          data = { error: e.message, results: [] };
         }
       } else if (pathname === '/api/daeryepum-stock/lookup' && req.method === 'GET') {
         // 품목 등록용 코드 조회 — 코드/상품명 일부로 ERP 재고 + S2_Card 상품명을 찾는다.
