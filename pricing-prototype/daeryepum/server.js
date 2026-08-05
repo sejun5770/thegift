@@ -423,7 +423,11 @@ let _poolInitPromise = null; // 동시 초기화 요청 중복 방지 (race-cond
 //   재고 원장: mmInventory (품목 25,472 / 창고 131)
 //   판매 가용 창고: MF01 (운영 확인) — ERP '스마트재고현황' 의 현재고와 일치
 // ============================================
-const XERP_WAREHOUSE = process.env.XERP_WAREHOUSE || 'MF01';
+//   창고는 콤마로 여러 개 지정 가능 (합산). MF01 만 보면 답례품 203품목 중
+//   27개가 MF24 에만 있어 0 으로 보이고, 34개가 음수로 나온다 (2026-08-05 확인).
+const XERP_WAREHOUSES = String(process.env.XERP_WAREHOUSE || 'MF01')
+  .split(',').map(s => s.trim().replace(/[^A-Za-z0-9_]/g, '')).filter(Boolean);
+const XERP_WAREHOUSE = XERP_WAREHOUSES.join(',');
 const XERP_CONFIG = { ...DB_CONFIG, database: process.env.XERP_DB_NAME || 'XERP' };
 let _xerpPool = null;
 let _xerpInitPromise = null;
@@ -8083,16 +8087,19 @@ const server = http.createServer(async (req, res) => {
           try {
             const xp = await getXerpPool();
             const codes = [...new Set(regRows.map(r => r.stock))];
-            const xr = await xp.request()
-              .input('wh', sql.NVarChar, XERP_WAREHOUSE)
-              .query(`
-                SELECT LTRIM(RTRIM(ItemCode)) AS item_code, SUM(OhQty) AS qty
+            const xr = await xp.request().query(`
+                SELECT LTRIM(RTRIM(ItemCode)) AS item_code,
+                       SUM(OhQty) AS qty,
+                       STRING_AGG(CONVERT(nvarchar(max),
+                         LTRIM(RTRIM(WhCode)) + ':' + CONVERT(varchar(20), OhQty)), ' / ') AS breakdown
                 FROM mmInventory WITH (NOLOCK)
-                WHERE WhCode = @wh
+                WHERE LTRIM(RTRIM(WhCode)) IN (${XERP_WAREHOUSES.map(w => `'${w}'`).join(',')})
                   AND LTRIM(RTRIM(ItemCode)) IN (${codes.map(c => `'${c}'`).join(',')})
                 GROUP BY LTRIM(RTRIM(ItemCode))
               `);
-            for (const row of (xr.recordset || [])) xerpQty.set(row.item_code, Number(row.qty) || 0);
+            for (const row of (xr.recordset || [])) {
+              xerpQty.set(row.item_code, { qty: Number(row.qty) || 0, breakdown: row.breakdown || '' });
+            }
           } catch (e) {
             xerpError = e.message;
             console.error('[daeryepum-stock] XERP 조회 실패 — bar_shop1 값 사용:', e.message);
@@ -8148,10 +8155,10 @@ const server = http.createServer(async (req, res) => {
             }, 0);
 
             // 재고는 XERP 원본(MF01) 우선, 없으면 bar_shop1 복제본
-            const hasXerp = xerpQty.has(r.stock_code);
-            const xq = hasXerp ? xerpQty.get(r.stock_code) : null;
-            const currentQty = hasXerp ? xq : (Number(r.current_qty) || 0);
-            const availableQty = hasXerp ? xq : (Number(r.available_qty) || 0);
+            const xrec = xerpQty.get(r.stock_code);
+            const hasXerp = !!xrec;
+            const currentQty = hasXerp ? xrec.qty : (Number(r.current_qty) || 0);
+            const availableQty = hasXerp ? xrec.qty : (Number(r.available_qty) || 0);
 
             const dailyAvg = consumeQty30d / 30;
             const daysLeft = (dailyAvg > 0 && availableQty > 0)
@@ -8188,6 +8195,7 @@ const server = http.createServer(async (req, res) => {
               current_qty: currentQty,
               available_qty: availableQty,
               stock_source: hasXerp ? 'xerp' : 'bar_shop1',
+              stock_breakdown: hasXerp ? xrec.breakdown : null,   // 창고별 내역
               sale_price: salePrice,          // 현재 판매가 = 가장 최근 실판매 단가
               sale_price_date: salePriceDate,  // 그 판매가가 적용된 최근 판매일
               stock_value: stockValue,        // 가용재고 × 현재 판매가
@@ -8239,7 +8247,6 @@ const server = http.createServer(async (req, res) => {
             const xp = await getXerpPool();
             const r = await xp.request()
               .input('q', sql.NVarChar, `%${q}%`)
-              .input('wh', sql.NVarChar, XERP_WAREHOUSE)
               .query(`
                 SELECT TOP 50
                   LTRIM(RTRIM(ItemCode)) AS item_code,
@@ -8247,7 +8254,7 @@ const server = http.createServer(async (req, res) => {
                   SUM(OhAmnt)  AS amount,
                   COUNT(*)     AS rows_
                 FROM mmInventory WITH (NOLOCK)
-                WHERE WhCode = @wh AND ItemCode LIKE @q
+                WHERE LTRIM(RTRIM(WhCode)) IN (${XERP_WAREHOUSES.map(w => `'${w}'`).join(',')}) AND ItemCode LIKE @q
                 GROUP BY LTRIM(RTRIM(ItemCode))
                 ORDER BY SUM(OhQty) DESC, LTRIM(RTRIM(ItemCode))
               `);

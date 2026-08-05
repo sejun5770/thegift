@@ -13876,7 +13876,7 @@ function renderStockTable() {
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px;color:var(--gray-500)">${_stockSalesCodeCell(it)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100)">${esc(it.product_name || '-')}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center;font-size:10px;color:var(--gray-500)">${it.is_com ? '위탁' : '자체'}</td>
-        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${fmtNum(it.current_qty)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right"${it.stock_breakdown ? ` title="창고별: ${esc(it.stock_breakdown)}"` : ''}>${fmtNum(it.current_qty)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;${it.available_qty <= 0 ? 'color:#dc2626;font-weight:600' : ''}">${fmtNum(it.available_qty)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;color:var(--gray-600)">${_stockSalePriceCell(it)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;font-weight:600">${it.stock_value === null ? '<span style="color:var(--gray-400)">-</span>' : fmtNum(it.stock_value)}</td>
