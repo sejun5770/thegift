@@ -7910,7 +7910,7 @@ const server = http.createServer(async (req, res) => {
           }
 
           const p = await getPool();
-          const [stockRes, salesRes] = await Promise.all([
+          const [stockRes, salesRes, priceRes] = await Promise.all([
             p.request().query(`
               SELECT
                 reg.stock_code,
@@ -8015,6 +8015,43 @@ const server = http.createServer(async (req, res) => {
                   AND o.settle_date >= DATEADD(day, -30, GETDATE())
               ) AS all_sales
               GROUP BY card_code
+            `),
+            // 현재 판매가 — 품목코드별 '가장 최근' 실판매 단가 (0원 라인 제외).
+            //   30일 가중평균은 판매가 변경 전후가 섞여 현재가를 못 나타낸다.
+            //   최근 1년까지 훑어 최신 1건을 취한다 (30일 54개 → 365일 68개 커버).
+            p.request().query(`
+              SELECT card_code, unit_price, settle_date
+              FROM (
+                SELECT card_code, unit_price, settle_date,
+                       ROW_NUMBER() OVER (PARTITION BY card_code ORDER BY settle_date DESC) AS rn
+                FROM (
+                  SELECT c.Card_Code AS card_code, co.settle_date,
+                         ROUND(CAST(coi.item_sale_price AS float)
+                               / ISNULL(NULLIF(c.Unit_Value, 0), 1), 0) AS unit_price
+                  FROM custom_order co WITH (NOLOCK)
+                  INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+                  WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')
+                    AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+                    AND co.settle_date >= DATEADD(day, -365, GETDATE())
+                    AND coi.item_sale_price > 0
+                  UNION ALL
+                  SELECT c.Card_Code, o.settle_date,
+                         ROUND(CASE WHEN si.SiteName IS NULL
+                                    THEN CAST(oi.card_sale_price AS float) / ISNULL(NULLIF(c.Unit_Value, 0), 1)
+                                    ELSE CAST(oi.card_sale_price AS float) / NULLIF(oi.order_count, 0)
+                               END, 0)
+                  FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                  INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
+                  INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
+                  LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+                  WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')
+                    AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+                    AND o.settle_date >= DATEADD(day, -365, GETDATE())
+                    AND oi.card_sale_price > 0
+                ) AS lines
+              ) AS ranked
+              WHERE rn = 1
             `)
           ]);
           // 매출·소진코드 검증 — 이 둘은 '품목코드(S2_Card.Card_Code)' 기준인데
@@ -8059,6 +8096,13 @@ const server = http.createServer(async (req, res) => {
           } catch (e) {
             xerpError = e.message;
             console.error('[daeryepum-stock] XERP 조회 실패 — bar_shop1 값 사용:', e.message);
+          }
+
+          // 품목코드 → 가장 최근 판매 단가
+          const latestPriceMap = new Map();
+          for (const r of (priceRes.recordset || [])) {
+            const price = Math.round(Number(r.unit_price) || 0);
+            if (price > 0) latestPriceMap.set(r.card_code, { price, date: r.settle_date });
           }
 
           const salesMap = new Map();
@@ -8114,21 +8158,20 @@ const server = http.createServer(async (req, res) => {
               ? Math.round(availableQty / dailyAvg)
               : null;
 
-            // 단가 2종 (운영 합의 2026-08-04):
-            //   erp_price       ERP 마스터 판매가 (CARD_SET_PRICE) — 현재 시점 정가.
-            //                   판매가 변경이 즉시 반영되고, 판매가 없어도 값이 있다.
-            //   avg_sale_price  실판매 수량가중 평균 — 할인·프로모션 반영. 0원 라인 제외.
-            // 재고 자산은 erp_price 로 평가한다.
-            //   이전엔 실판매 평균만 썼는데, 30일 판매가 없으면 단가가 비어 재고 22,845개
-            //   (ERP 정가 약 9,276만원) 가 자산 합계에서 통째로 빠졌다.
-            //   ERP 정가가 없는 코드(위탁 등)만 실판매 평균으로 폴백.
-            const erpPrice = Number(r.erp_price) > 0 ? Math.round(Number(r.erp_price)) : null;
-            const avgSalePrice = salesRec.qtyPaid > 0
-              ? Math.round(salesRec.revenuePaid / salesRec.qtyPaid)
-              : null;
-            const unitPrice = erpPrice !== null ? erpPrice : avgSalePrice;
-            const priceSource = erpPrice !== null ? 'erp' : (avgSalePrice !== null ? 'sales' : null);
-            const stockValue = unitPrice !== null ? Math.round(unitPrice * availableQty) : null;
+            // 판매가 = 현재 판매가 (운영 요청 2026-08-05).
+            //   정가(ERP CARD_SET_PRICE)도, 30일 가중평균도 아니다.
+            //   판매가는 하나이고 바뀔 뿐이라, 매출코드 중 '가장 최근 판매' 의 단가를 쓴다.
+            //   (평균을 쓰면 변경 전후가 섞이고, 0원 세트 라인이 끼면 반토막 났다)
+            let salePrice = null, salePriceDate = null;
+            for (const cc of cardCodes) {
+              const lp = latestPriceMap.get(cc);
+              if (!lp) continue;
+              if (!salePriceDate || lp.date > salePriceDate) {
+                salePrice = lp.price;
+                salePriceDate = lp.date;
+              }
+            }
+            const stockValue = salePrice !== null ? Math.round(salePrice * availableQty) : null;
             return {
               stock_code: r.stock_code,          // 재고 조회 코드
               sales_codes: cardCodes,            // 매출 조회 코드 (등록값 그대로)
@@ -8145,11 +8188,9 @@ const server = http.createServer(async (req, res) => {
               current_qty: currentQty,
               available_qty: availableQty,
               stock_source: hasXerp ? 'xerp' : 'bar_shop1',
-              unit_price: unitPrice,          // 재고 평가에 쓰인 단가
-              price_source: priceSource,      // 'erp' | 'sales' | null
-              erp_price: erpPrice,            // ERP 마스터 정가
-              avg_sale_price: avgSalePrice,   // 실판매 수량가중 평균 (0원 라인 제외)
-              stock_value: stockValue,
+              sale_price: salePrice,          // 현재 판매가 = 가장 최근 실판매 단가
+              sale_price_date: salePriceDate,  // 그 판매가가 적용된 최근 판매일
+              stock_value: stockValue,        // 가용재고 × 현재 판매가
               sales_amount_30d: salesAmount30d,
               sales_qty_30d: qty30,
               daily_avg_30d: Math.round(dailyAvg * 100) / 100,
