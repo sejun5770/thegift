@@ -16631,7 +16631,20 @@ function renderBgUnified() {
   filtered.forEach(order => {
     // bgFindCi: primary key 매칭 실패 시 orphan (prefix 누락) raw seq 로 fallback.
     const ci = bgFindCi(bgUnifiedCiMap, order);
-    const sels = ci?.sticker_selections || [];
+    const allSels = ci?.sticker_selections || [];
+    // MANUAL 주문의 sel 창(window) 계산 (2026-08-06)
+    //   서버는 MANUAL 주문을 items 1건당 1행(delivery_seq = 인덱스+1)으로 펼쳐 내려주는데,
+    //   ci stub 의 sticker_selections 는 주문 단위 1개에 items 전체가 들어 있다.
+    //   행마다 sels 전체를 그대로 쓰면 아래 "pm 에 없는 sel 보정" 블록이 남의 상품 행을
+    //   또 만들어 상품 2개 주문이 4행으로 보였다 (주문 2026080615453817534 사례).
+    //   delivery_seq 로 자기 몫의 sel 하나만 잘라 쓴다. gi = 원본 인덱스(PATCH 키) 보존.
+    const _manualSelPos = (order.order_type === 'MANUAL' && allSels.length > 1)
+      ? (Number(order.delivery_seq) || 1) - 1
+      : -1;
+    const selEntries = (_manualSelPos >= 0 && _manualSelPos < allSels.length)
+      ? [{ s: allSels[_manualSelPos], gi: _manualSelPos }]
+      : allSels.map((s, gi) => ({ s, gi }));
+    const sels = selEntries.map(e => e.s);
     // 배송지별 상품 매칭 — 복합키 사용 (order_seq + delivery_seq)
     const pm = bgUnifiedProductMap.get(order._composite_key || `${order.order_seq}::${order.delivery_seq||1}`);
     // MANUAL 주문 진단 (첫 케이스만 상세 로그, 나머지는 count)
@@ -16665,26 +16678,30 @@ function renderBgUnified() {
       let fallbackIter = 0;
       for (const [productCode, productInfo] of pm) {
         // 1) product_code 정확 매칭
-        let selIdx = sels.findIndex((s, i) => !usedSelIdx.has(i) && s.product_code === productCode);
+        let selPos = selEntries.findIndex((e, i) => !usedSelIdx.has(i) && e.s.product_code === productCode);
         // 2) fallback — 남은 sel 을 순서대로 (MANUAL CSV 파생 코드 전용)
-        if (selIdx < 0 && sels.length && isManualOrder) {
-          while (fallbackIter < sels.length && usedSelIdx.has(fallbackIter)) fallbackIter++;
-          if (fallbackIter < sels.length) selIdx = fallbackIter++;
+        if (selPos < 0 && selEntries.length && isManualOrder) {
+          while (fallbackIter < selEntries.length && usedSelIdx.has(fallbackIter)) fallbackIter++;
+          if (fallbackIter < selEntries.length) selPos = fallbackIter++;
         }
-        if (selIdx >= 0) usedSelIdx.add(selIdx);
-        const sel = selIdx >= 0 ? sels[selIdx] : null;
+        if (selPos >= 0) usedSelIdx.add(selPos);
+        const sel = selPos >= 0 ? selEntries[selPos].s : null;
         bgUnifiedRows.push({
-          order, ci, sel, sticker_index: selIdx,
+          order, ci, sel, sticker_index: selPos >= 0 ? selEntries[selPos].gi : -1,
           product_code: productCode,
           product_name: productInfo.card_name,
           product_qty: productInfo.item_count,
         });
       }
       // 상품코드가 없는 sticker_selection이 있으면 별도 행 추가 (비정상 데이터지만 누락 방지)
-      sels.forEach((s, idx) => {
+      //   이미 위 루프에서 소비된 sel 은 제외 — 안 그러면 코드가 파생코드라 pm.has() 가 false 인
+      //   MANUAL 주문에서 같은 상품이 두 번 나온다.
+      selEntries.forEach((e, i) => {
+        if (usedSelIdx.has(i)) return;
+        const s = e.s;
         if (s.product_code && !pm.has(s.product_code)) {
           bgUnifiedRows.push({
-            order, ci, sel: s, sticker_index: idx,
+            order, ci, sel: s, sticker_index: e.gi,
             product_code: s.product_code,
             product_name: s.product_name || s.product_code,
             product_qty: s.quantity || 0,
