@@ -306,8 +306,79 @@ async function syncRecent({ daysBack = 7, status } = {}) {
   };
 }
 
+/**
+ * 취소/반품 재확인 — 목록 API 로는 잡히지 않는 취소를 단건 조회로 메운다.
+ *
+ * 배경 (2026-08-06 진단):
+ *   · /ordersheets 목록 조회는 status 필수인데 CANCEL/RETURNS 로 부르면 에러가 난다.
+ *     (진단 결과 FINAL_DELIVERY/NONE_TRACKING/CANCEL/RETURNS 모두 error)
+ *     → 취소 건이 애초에 동기화 대상에 들어오지 못했다.
+ *   · 단건 조회 /{orderId}/ordersheets 는 취소된 주문에 대해
+ *     400 "해당 주문이 취소 또는 반품 되었습니다." 를 돌려준다.
+ *     이 에러 자체가 확실한 취소 신호라, 이를 이용해 상태를 갱신한다.
+ *
+ * 대상: DB 에 있는 최근 daysBack 일 주문 중 아직 종결(CANCEL/RETURNS) 아닌 건.
+ * 호출량 제한: 최대 maxChecks 건, 호출 사이 delayMs 대기.
+ */
+const CANCEL_HINT = /취소\s*또는\s*반품|취소되었|반품되었/;
+
+async function reconcileCancelled({ daysBack = 14, maxChecks = 300, delayMs = 120 } = {}) {
+  if (!api.isConfigured()) return { checked: 0, cancelled: 0, error: 'Coupang API 키 미설정' };
+  if (!store.USE_SUPABASE) return { checked: 0, cancelled: 0, error: 'Supabase 미설정' };
+
+  const endMs = Date.now();
+  const startMs = endMs - daysBack * 86400000;
+  const fmt = ms => new Date(ms + 9 * 3600000).toISOString().slice(0, 10);   // KST 날짜
+  let rows;
+  try {
+    rows = await store.listCoupangOrders({ startStr: fmt(startMs), endStr: fmt(endMs + 86400000) });
+  } catch (e) {
+    return { checked: 0, cancelled: 0, error: `DB 조회 실패: ${e.message}` };
+  }
+
+  const TERMINAL = new Set(['CANCEL', 'RETURNS']);
+  const pending = [...new Set((rows || [])
+    .filter(r => !TERMINAL.has(String(r.status || '').toUpperCase()))
+    .map(r => String(r.coupang_order_id)))];
+
+  const targets = pending.slice(0, maxChecks);
+  const cancelled = [];
+  const errors = [];
+  for (const id of targets) {
+    try {
+      await api.getOrderSheet(id);   // 정상 응답 = 아직 살아있는 주문
+    } catch (e) {
+      if (CANCEL_HINT.test(e.message || '')) cancelled.push(id);
+      else errors.push({ order_id: id, error: String(e.message).slice(0, 120) });
+    }
+    if (delayMs) await new Promise(r => setTimeout(r, delayMs));
+  }
+
+  let updated = 0;
+  for (const id of cancelled) {
+    try {
+      const r = await store.updateCoupangOrderStatus(id, 'CANCEL', STATUS_LABEL.CANCEL || '주문취소');
+      updated += r.updated || 0;
+    } catch (e) {
+      errors.push({ order_id: id, error: `DB 갱신 실패: ${String(e.message).slice(0, 120)}` });
+    }
+  }
+
+  return {
+    days_back: daysBack,
+    pending: pending.length,
+    checked: targets.length,
+    truncated: pending.length > targets.length,
+    cancelled: cancelled.length,
+    rows_updated: updated,
+    cancelled_order_ids: cancelled,
+    errors: errors.slice(0, 20),
+  };
+}
+
 module.exports = {
   syncRecent,
+  reconcileCancelled,
   normalizeOrderSheet, // for testing
   STATUS_LABEL,
 };

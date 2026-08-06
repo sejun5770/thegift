@@ -10863,6 +10863,30 @@ const server = http.createServer(async (req, res) => {
           daysBack: parseInt(body.days_back) || 7,
           status: body.status || undefined,
         });
+        // 취소 재확인 — 목록 API 가 CANCEL 을 못 돌려주므로 단건 조회로 보완.
+        //   skip_reconcile=1 이면 생략 (대량 동기화 시 호출량 절약).
+        if (!body.skip_reconcile) {
+          try {
+            data.reconcile = await coupangSync.reconcileCancelled({
+              daysBack: parseInt(body.reconcile_days) || 14,
+            });
+          } catch (e) {
+            data.reconcile = { error: e.message };
+          }
+        }
+      } else if (pathname === '/api/coupang/reconcile-cancelled' && req.method === 'POST') {
+        // 취소/반품 재확인 단독 실행 — 단건 조회로 DB 상태 보정.
+        //   body: { days_back: 14, max_checks: 300 }
+        logAdminAccess(session, req, 'coupang-reconcile-cancelled', {});
+        const body = await new Promise((resolve) => {
+          let raw = ''; req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(raw ? JSON.parse(raw) : {}); } catch { resolve({}); } });
+        });
+        const coupangSync = require('./coupang/sync');
+        data = await coupangSync.reconcileCancelled({
+          daysBack: parseInt(body.days_back) || 14,
+          maxChecks: parseInt(body.max_checks) || 300,
+        });
       } else if (pathname === '/api/coupang/probe-order') {
         // 특정 주문이 왜 반영 안 되는지 진단.
         //   URL: /api/coupang/probe-order?order_id=28102092215635&days_back=14
@@ -10905,7 +10929,7 @@ const server = http.createServer(async (req, res) => {
               out.found_in_statuses[st] = hit.length
                 ? hit.map(s => ({ shipmentBoxId: s.shipmentBoxId, status: s.status }))
                 : 0;
-            } catch (e) { out.found_in_statuses[st] = `error: ${e.message.slice(0, 80)}`; }
+            } catch (e) { out.found_in_statuses[st] = `error: ${String(e.message).slice(0, 400)}`; }
           }
           // ③ 우리 DB 현재 값
           try {
