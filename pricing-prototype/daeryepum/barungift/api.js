@@ -989,12 +989,14 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   // ============================================
   if (pathname === '/api/bg/stock-alerts' && method === 'GET') {
     try {
+      const cfg = await stockAlert.loadAlertConfig().catch(() => null);
       return json(res, {
         alerts: await store.listStockItems(),
         slack_configured: stockAlert.slackConfigured(),
-        schedule: process.env.BG_STOCK_ALERT_ENABLED === '1'
-          ? `매일 ${process.env.BG_STOCK_ALERT_TIME || '09:00'} KST`
-          : null,
+        schedule: cfg?.enabled ? `매일 ${cfg.time} KST` : null,
+        alert_config: cfg && {
+          channel: cfg.channel, time: cfg.time, enabled: cfg.enabled, from_db: cfg.from_db,
+        },
       });
     } catch (err) {
       console.error('[stock-items GET] error:', err.message);
@@ -1027,6 +1029,29 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       return json(res, { error: err.message }, 400);
     }
   }
+  // 알림 설정 (채널/시각/사용여부) 저장 — bg_site_settings, migration 049
+  if (pathname === '/api/bg/stock-alerts/config' && method === 'PUT') {
+    try {
+      const body = await parseBody(req);
+      const patch = {};
+      if ('channel' in body) patch.stock_alert_channel = String(body.channel || '').trim() || null;
+      if ('time' in body) {
+        const t = String(body.time || '').trim();
+        if (t && !/^([01]?\d|2[0-3]):[0-5]\d$/.test(t)) {
+          return json(res, { error: '발송 시각은 HH:MM 형식이어야 합니다 (예: 09:00)' }, 400);
+        }
+        patch.stock_alert_time = t || null;
+      }
+      if ('enabled' in body) patch.stock_alert_enabled = body.enabled == null ? null : !!body.enabled;
+      await store.updateSiteSettings(patch, session?.email || null);
+      stockAlert.invalidateAlertConfig();
+      return json(res, { ok: true, config: await stockAlert.loadAlertConfig() });
+    } catch (err) {
+      console.error('[stock-alerts config] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+
   const stockAlertIdMatch = pathname.match(/^\/api\/bg\/stock-alerts\/([^/]+)$/);
   if (stockAlertIdMatch && method === 'PATCH') {
     try {

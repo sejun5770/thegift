@@ -11,6 +11,9 @@
  * 스케줄:
  *   BG_STOCK_ALERT_ENABLED=1   자동 발송 켜기 (미설정이면 수동 발송만 가능)
  *   BG_STOCK_ALERT_TIME=09:00  KST 발송 시각 (기본 09:00)
+ *
+ * ※ 채널·시각·사용여부는 화면(설정)에서 바꿀 수 있고, DB 값이 환경변수보다 우선한다.
+ *   (migration 049 — bg_site_settings.stock_alert_*)
  */
 const https = require('https');
 const store = require('./store');
@@ -19,7 +22,33 @@ const SLACK_TOKEN = process.env.SLACK_BOT_TOKEN || '';
 const SLACK_CHANNEL = process.env.BG_STOCK_SLACK_CHANNEL || '';
 const SLACK_WEBHOOK = process.env.BG_STOCK_SLACK_WEBHOOK || '';
 
-/** 발송 수단이 설정되어 있는지 */
+// 채널/시각은 화면에서 바꿀 수 있다 (migration 049).
+//   우선순위: DB(bg_site_settings) > 환경변수.
+//   30초 캐시 — 발송/미리보기마다 설정을 다시 읽지 않도록.
+let _cfgCache = { at: 0, val: null };
+async function loadAlertConfig() {
+  if (_cfgCache.val && Date.now() - _cfgCache.at < 30000) return _cfgCache.val;
+  let row = {};
+  try { row = (await store.getSiteSettings()) || {}; } catch { /* 실패 시 환경변수만 */ }
+  const val = {
+    channel: String(row.stock_alert_channel || '').trim() || SLACK_CHANNEL,
+    time: String(row.stock_alert_time || '').trim() || (process.env.BG_STOCK_ALERT_TIME || '09:00'),
+    enabled: row.stock_alert_enabled == null
+      ? (process.env.BG_STOCK_ALERT_ENABLED === '1')
+      : !!row.stock_alert_enabled,
+    from_db: {
+      channel: !!String(row.stock_alert_channel || '').trim(),
+      time: !!String(row.stock_alert_time || '').trim(),
+      enabled: row.stock_alert_enabled != null,
+    },
+  };
+  _cfgCache = { at: Date.now(), val };
+  return val;
+}
+/** 설정 변경 직후 즉시 반영 */
+function invalidateAlertConfig() { _cfgCache = { at: 0, val: null }; }
+
+/** 발송 수단이 설정되어 있는지 (환경변수 기준 — 화면 표시용) */
 function slackConfigured() {
   return !!((SLACK_TOKEN && SLACK_CHANNEL) || SLACK_WEBHOOK);
 }
@@ -76,7 +105,8 @@ async function postToSlack(text, { channel: channelOverride = null, threadTs = n
   throw new Error('슬랙 발송 설정 없음 — SLACK_BOT_TOKEN + BG_STOCK_SLACK_CHANNEL 또는 BG_STOCK_SLACK_WEBHOOK 필요');
 }
 
-/** 스레드 댓글(= 봇 토큰 + 채널) 사용 가능 여부 */
+/** 스레드 댓글(= 봇 토큰 + 채널) 사용 가능 여부.
+ *   channelOverride 는 sendStockAlert 가 DB 설정을 해석해 넘겨준다. */
 function canThread(channelOverride = null) {
   return !!(SLACK_TOKEN && (channelOverride || SLACK_CHANNEL));
 }
@@ -134,24 +164,25 @@ async function buildStockReport(baseUrl) {
   if (data.error) throw new Error(`재고 조회 실패: ${data.error}`);
 
   const byCode = new Map();
-  for (const it of (data.items || [])) byCode.set(it.product_code, it);
+  for (const it of (data.items || [])) byCode.set(it.stock_code, it);
 
   const rows = [];
   const missing = [];
   for (const t of targets) {
-    const it = byCode.get(t.product_code);
-    if (!it) { missing.push(t.product_code); continue; }
+    const it = byCode.get(t.stock_code);
+    if (!it) { missing.push(t.stock_code); continue; }
     // 경고 판정 — threshold 가 있으면 가용재고 기준, 없으면 소진예상 30일 기준
     const warn = t.threshold != null
       ? it.available_qty <= t.threshold
       : (it.days_to_soldout !== null && it.days_to_soldout <= 30);
     rows.push({
-      product_code: it.product_code,
+      stock_code: it.stock_code,
       product_name: it.product_name || t.label || '',
       threshold: t.threshold,
       current_qty: it.current_qty,
       available_qty: it.available_qty,
       sales_qty_30d: it.sales_qty_30d,
+      consume_qty_30d: it.consume_qty_30d,
       daily_avg_30d: it.daily_avg_30d,
       days_to_soldout: it.days_to_soldout,
       soldout: it.available_qty <= 0,
@@ -168,9 +199,9 @@ async function buildStockReport(baseUrl) {
     const days = r.days_to_soldout === null ? '소진예상 -' : `소진예상 *${r.days_to_soldout}일*`;
     const thr = r.threshold != null ? ` (임계 ${_fmt(r.threshold)})` : '';
     const name = r.product_name || '(이름 없음)';
-    return `${icon} \`${r.product_code}\` ${name}\n`
+    return `${icon} \`${r.stock_code}\` ${name}\n`
       + `    가용 *${_fmt(r.available_qty)}* / 현재고 ${_fmt(r.current_qty)}${thr}`
-      + ` · 30일 판매 ${_fmt(r.sales_qty_30d)} (일평균 ${r.daily_avg_30d}) · ${days}`;
+      + ` · 30일 소진 ${_fmt(r.consume_qty_30d ?? r.sales_qty_30d)} (일평균 ${r.daily_avg_30d}) · ${days}`;
   };
 
   const soldoutRows = rows.filter(r => r.soldout);
@@ -188,7 +219,7 @@ async function buildStockReport(baseUrl) {
     summary.push('', '*조치가 필요한 품목*');
     // 이름만 — 수치는 스레드에서
     summary.push(attention
-      .map(r => `${r.soldout ? '⛔' : '⚠️'} \`${r.product_code}\` ${r.product_name || '(이름 없음)'}`)
+      .map(r => `${r.soldout ? '⛔' : '⚠️'} \`${r.stock_code}\` ${r.product_name || '(이름 없음)'}`)
       .join('\n'));
   } else if (rows.length) {
     summary.push('', '전 품목 재고 정상입니다. 👍');
@@ -227,6 +258,10 @@ async function buildStockReport(baseUrl) {
  *   dryRun=true 면 메시지만 만들고 슬랙에 보내지 않는다 (미리보기).
  */
 async function sendStockAlert(baseUrl, { dryRun = false, channel = null } = {}) {
+  // 명시 채널 > DB 설정 > 환경변수
+  if (!channel) {
+    try { channel = (await loadAlertConfig()).channel || null; } catch { /* 환경변수 폴백 */ }
+  }
   const report = await buildStockReport(baseUrl);
   if (!report.summaryText) {
     return { ok: false, skipped: true, reason: '알림 대상 품목이 없습니다', ...report };
@@ -249,49 +284,46 @@ async function sendStockAlert(baseUrl, { dryRun = false, channel = null } = {}) 
 }
 
 /** 매일 KST 지정 시각 자동 발송. BG_STOCK_ALERT_ENABLED=1 일 때만 등록. */
+/**
+ * 자동 발송 — 1분마다 설정을 확인해 지정 시각에 하루 1회 보낸다.
+ *   기동 시 한 번만 읽으면 화면에서 채널/시각을 바꿔도 재배포 전까지 반영되지 않아,
+ *   매 tick 마다 loadAlertConfig() 로 최신 설정을 본다 (30초 캐시). 2026-08-06
+ */
 function scheduleDailyStockAlert(baseUrl) {
-  if (process.env.BG_STOCK_ALERT_ENABLED !== '1') {
-    console.log('[stock-alert] 자동 발송 비활성 (BG_STOCK_ALERT_ENABLED=1 로 활성화)');
-    return;
-  }
-  if (!slackConfigured()) {
-    console.warn('[stock-alert] 슬랙 설정 없음 — 자동 발송 등록하지 않음');
-    return;
-  }
-  const [hh, mm] = String(process.env.BG_STOCK_ALERT_TIME || '09:00').split(':');
-  const kstHour = Math.min(23, Math.max(0, parseInt(hh, 10) || 9));
-  const kstMin = Math.min(59, Math.max(0, parseInt(mm, 10) || 0));
-  // KST = UTC+9 → UTC 시각으로 환산 (음수면 전날로 넘어가지만 다음 실행 계산에서 자연 보정)
-  const utcHour = ((kstHour - 9) + 24) % 24;
+  let lastSentDate = null;   // 'YYYY-MM-DD' (KST) — 같은 날 중복 발송 방지
 
-  function msUntilNextRun() {
-    const now = new Date();
-    const target = new Date();
-    target.setUTCHours(utcHour, kstMin, 0, 0);
-    if (target <= now) target.setUTCDate(target.getUTCDate() + 1);
-    return target.getTime() - now.getTime();
-  }
+  async function tick() {
+    let cfg;
+    try { cfg = await loadAlertConfig(); }
+    catch (e) { return; }                       // 설정 조회 실패 시 이번 tick 은 건너뜀
+    if (!cfg.enabled) return;
+    if (!(SLACK_TOKEN && cfg.channel) && !SLACK_WEBHOOK) return;   // 발송 수단 없음
 
-  async function runOnce() {
+    const kst = new Date(Date.now() + 9 * 3600 * 1000);
+    const today = kst.toISOString().slice(0, 10);
+    const hhmm = `${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getUTCMinutes()).padStart(2, '0')}`;
+    const [th, tm] = String(cfg.time || '09:00').split(':');
+    const target = `${String(parseInt(th, 10) || 9).padStart(2, '0')}:${String(parseInt(tm, 10) || 0).padStart(2, '0')}`;
+
+    if (hhmm !== target || lastSentDate === today) return;
+    lastSentDate = today;   // 발송 실패해도 같은 분에 재시도하지 않도록 먼저 표시
     try {
       const r = await sendStockAlert(baseUrl, {});
-      console.log('[stock-alert] 발송 완료 —',
-        `대상 ${r.targetCount}건 / 확인필요 ${r.warnCount}건`, r.sent || r.reason || '');
+      console.log(`[stock-alert] 발송 완료 (${target} KST, 채널 ${cfg.channel || 'webhook'}) —`,
+        `대상 ${r.targetCount}건 / 확인필요 ${r.warnCount}건`);
     } catch (err) {
       console.error('[stock-alert] 발송 실패:', err.message);
     }
-    setTimeout(runOnce, msUntilNextRun());
   }
 
-  const waitMs = msUntilNextRun();
-  setTimeout(runOnce, waitMs);
-  const h = Math.floor(waitMs / 3600000);
-  const m = Math.floor((waitMs % 3600000) / 60000);
-  console.log(`[stock-alert] 매일 ${String(kstHour).padStart(2, '0')}:${String(kstMin).padStart(2, '0')} KST 등록 — 첫 실행까지 ${h}시간 ${m}분`);
+  setInterval(() => { tick().catch(() => {}); }, 60000);
+  console.log('[stock-alert] 자동 발송 감시 시작 — 설정(채널/시각/사용여부)은 화면에서 변경 가능');
 }
 
 module.exports = {
   slackConfigured,
+  loadAlertConfig,
+  invalidateAlertConfig,
   canThread,
   buildStockReport,
   sendStockAlert,

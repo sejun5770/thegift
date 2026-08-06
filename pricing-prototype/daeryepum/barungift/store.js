@@ -1497,9 +1497,14 @@ async function getSiteSettings() {
 
 async function updateSiteSettings(patch, updatedBy = null) {
   if (!USE_SUPABASE) throw new Error('Supabase 미설정 — 사이트 설정 저장 불가');
-  const allowed = ['custom_guide_title', 'custom_guide_text'];
+  const allowed = ['custom_guide_title', 'custom_guide_text',
+                   'stock_alert_channel', 'stock_alert_time'];   // migration 049
   const clean = {};
   for (const k of allowed) if (k in patch) clean[k] = patch[k] == null ? null : String(patch[k]);
+  // boolean 은 문자열 변환하면 안 됨
+  if ('stock_alert_enabled' in patch) {
+    clean.stock_alert_enabled = patch.stock_alert_enabled == null ? null : !!patch.stock_alert_enabled;
+  }
   clean.updated_at = new Date().toISOString();
   if (updatedBy) clean.updated_by = updatedBy;
   const updated = await sbUpdate('bg_site_settings', 'id=eq.1', clean);

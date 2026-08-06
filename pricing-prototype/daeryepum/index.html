@@ -2268,8 +2268,32 @@ nav.nav-loading a[href^="#"] {
         <span id="stock-alert-status" style="font-size:11px;color:var(--gray-500)">확인 중…</span>
       </div>
       <div style="display:flex;gap:6px">
+        <button class="btn" style="padding:5px 10px;font-size:12px" onclick="toggleStockAlertConfig()">⚙ 설정</button>
         <button class="btn" style="padding:5px 10px;font-size:12px" onclick="previewStockAlert()">👁 미리보기</button>
         <button class="btn" style="padding:5px 10px;font-size:12px" onclick="sendStockAlertNow()">📨 지금 발송</button>
+      </div>
+    </div>
+    <div id="stock-alert-config" style="display:none;margin-bottom:10px;padding:10px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:6px">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <label style="font-size:12px">
+          <span style="color:var(--gray-500);display:block;margin-bottom:3px">슬랙 채널 ID</span>
+          <input type="text" id="sa-cfg-channel" placeholder="예: C09D0T82XU4"
+                 style="width:180px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;font-family:monospace">
+        </label>
+        <label style="font-size:12px">
+          <span style="color:var(--gray-500);display:block;margin-bottom:3px">발송 시각 (KST)</span>
+          <input type="text" id="sa-cfg-time" placeholder="09:00"
+                 style="width:90px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+        </label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;padding-bottom:6px">
+          <input type="checkbox" id="sa-cfg-enabled"> 자동 발송
+        </label>
+        <button class="btn" style="padding:5px 12px;font-size:12px;margin-bottom:1px" onclick="saveStockAlertConfig()">저장</button>
+        <span id="sa-cfg-msg" style="font-size:11px;padding-bottom:6px"></span>
+      </div>
+      <div style="font-size:11px;color:var(--gray-500);margin-top:6px;line-height:1.6">
+        채널 ID 는 슬랙에서 채널 우클릭 → 채널 세부정보 보기 → 맨 아래에서 복사합니다.
+        비워두면 서버 환경변수 값을 사용합니다. <b>봇을 해당 채널에 초대</b>해야 발송됩니다.
       </div>
     </div>
     <div id="stock-alert-list" style="font-size:12px;color:var(--gray-500)">불러오는 중…</div>
@@ -13919,6 +13943,33 @@ function renderStockTable() {
 let _stockAlerts = [];          // 서버에 등록된 알림 대상
 let _stockAlertByCode = new Map();
 
+function toggleStockAlertConfig() {
+  const el = document.getElementById('stock-alert-config');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+async function saveStockAlertConfig() {
+  const $m = document.getElementById('sa-cfg-msg');
+  $m.textContent = '저장 중…'; $m.style.color = 'var(--gray-500)';
+  try {
+    const r = await fetch(`${API}/api/bg/stock-alerts/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        channel: document.getElementById('sa-cfg-channel').value,
+        time: document.getElementById('sa-cfg-time').value,
+        enabled: document.getElementById('sa-cfg-enabled').checked,
+      }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    $m.textContent = '저장됨'; $m.style.color = '#166534';
+    await loadStockAlerts();
+  } catch (e) {
+    $m.textContent = `실패: ${e.message}`; $m.style.color = '#dc2626';
+  }
+}
+
 async function loadStockAlerts() {
   const $status = document.getElementById('stock-alert-status');
   const $list = document.getElementById('stock-alert-list');
@@ -13929,12 +13980,20 @@ async function loadStockAlerts() {
     _stockAlerts = d.alerts || [];
     _stockAlertByCode = new Map(_stockAlerts.map(a => [a.stock_code, a]));
 
+    // 설정 폼 채우기
+    const cfg = d.alert_config;
+    if (cfg) {
+      document.getElementById('sa-cfg-channel').value = cfg.from_db?.channel ? cfg.channel : '';
+      document.getElementById('sa-cfg-time').value = cfg.time || '';
+      document.getElementById('sa-cfg-enabled').checked = !!cfg.enabled;
+    }
     if ($status) {
       const sched = d.schedule
         ? `<span style="color:#166534">${esc(d.schedule)} 자동 발송</span>`
         : '<span style="color:#92400e">자동 발송 꺼짐 (수동 발송만 가능)</span>';
-      const slack = d.slack_configured
-        ? '<span style="color:#166534">슬랙 연결됨</span>'
+      const ch = d.alert_config?.channel;
+      const slack = (d.slack_configured || ch)
+        ? `<span style="color:#166534">슬랙 연결됨</span>${ch ? ` <span style="color:var(--gray-500);font-family:monospace">${esc(ch)}</span>` : ''}`
         : '<span style="color:#991b1b">슬랙 미설정</span>';
       $status.innerHTML = `${slack} · ${sched}`;
     }
