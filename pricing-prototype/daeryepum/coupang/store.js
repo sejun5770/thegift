@@ -48,6 +48,27 @@ async function upsertCoupangOrders(rows) {
 }
 
 /**
+ * 주문 단위 상태 갱신 — 취소 재확인(reconcile) 전용.
+ *   목록 API 가 취소 건을 돌려주지 않아 upsert 로는 갱신되지 않는 케이스를 메운다.
+ *   같은 coupang_order_id 의 모든 박스/품목 row 를 함께 갱신.
+ */
+async function updateCoupangOrderStatus(orderId, status, statusLabel) {
+  if (!USE_SUPABASE) return { updated: 0, reason: 'supabase_not_configured' };
+  const url = `${REST_BASE}/coupang_orders?coupang_order_id=eq.${encodeURIComponent(orderId)}`;
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { ...HEADERS, Prefer: 'return=representation' },
+    body: JSON.stringify({ status, status_label: statusLabel, synced_at: new Date().toISOString() }),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`Supabase update coupang_orders [${res.status}]: ${t.slice(0, 300)}`);
+  }
+  const rows = await res.json().catch(() => []);
+  return { updated: Array.isArray(rows) ? rows.length : 0 };
+}
+
+/**
  * 기간 조회 — 주문조회/대시보드 매출 집계 통합용.
  *   startStr / endStr: 'YYYY-MM-DD' (end exclusive)
  *   기간 차원은 ordered_at (paid_at 기준 원하면 byPaid=true)
@@ -160,6 +181,7 @@ async function updateSyncState(patch) {
 module.exports = {
   USE_SUPABASE,
   upsertCoupangOrders,
+  updateCoupangOrderStatus,
   upsertCoupangStubCustomerInfos,
   patchCoupangStubEnrichment,
   listCoupangOrders,
