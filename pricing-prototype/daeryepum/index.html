@@ -3496,8 +3496,11 @@ nav.nav-loading a[href^="#"] {
               <input type="radio" name="bg-edit-special-shipping-reason" value="other" onchange="_bgToggleSpecialReasonMemo()"> 기타
             </label>
           </div>
-          <textarea id="bg-edit-special-shipping-memo" placeholder="기타 선택 시 사유를 입력해주세요" rows="2"
-            style="display:none;width:100%;padding:6px 8px;border:1px solid #fcd34d;border-radius:4px;font-size:12px;resize:vertical;box-sizing:border-box"></textarea>
+          <label style="font-size:11px;font-weight:600;color:#92400e;display:block;margin-bottom:4px">
+            상세 사유 <span id="bg-edit-special-memo-req" style="font-weight:400;color:var(--gray-500)">(선택)</span>
+          </label>
+          <textarea id="bg-edit-special-shipping-memo" placeholder="어떤 사유든 상세 내용을 남길 수 있습니다 (예: 수량 3개 부족 → 재발송)" rows="2"
+            style="width:100%;padding:6px 8px;border:1px solid #fcd34d;border-radius:4px;font-size:12px;resize:vertical;box-sizing:border-box"></textarea>
         </div>
       </div>
 
@@ -19127,7 +19130,7 @@ async function openBgOrderEdit(info) {
   });
   const memoEl = document.getElementById('bg-edit-special-shipping-memo');
   memoEl.value = info.special_shipping_memo || '';
-  memoEl.style.display = (specialChecked && info.special_shipping_reason === 'other') ? 'block' : 'none';
+  _bgToggleSpecialReasonMemo();
 
   const stickerWrap = document.getElementById('bg-edit-stickers');
   // 주문의 원본 상품 목록(bgUnifiedProductMap) 을 기준으로 sticker_selections 를 보강.
@@ -19526,14 +19529,19 @@ function toggleBgSpecialShippingEdit(checked) {
     // 해제 시 라디오/메모 초기화
     document.querySelectorAll('input[name="bg-edit-special-shipping-reason"]').forEach(r => r.checked = false);
     document.getElementById('bg-edit-special-shipping-memo').value = '';
-    document.getElementById('bg-edit-special-shipping-memo').style.display = 'none';
   }
+  _bgToggleSpecialReasonMemo();
 }
 
-// 사유 라디오 '기타' 선택 시 텍스트 입력 노출
+// 상세 사유는 어떤 항목을 골라도 입력 가능 (운영 요청 2026-08-06).
+//   '기타' 일 때만 필수 — 라벨로 (선택)/(필수) 만 바꾼다.
 function _bgToggleSpecialReasonMemo() {
   const sel = document.querySelector('input[name="bg-edit-special-shipping-reason"]:checked')?.value;
-  document.getElementById('bg-edit-special-shipping-memo').style.display = (sel === 'other') ? 'block' : 'none';
+  const req = document.getElementById('bg-edit-special-memo-req');
+  if (req) {
+    req.textContent = (sel === 'other') ? '(필수)' : '(선택)';
+    req.style.color = (sel === 'other') ? '#dc2626' : 'var(--gray-500)';
+  }
 }
 
 function closeBgOrderEdit() {
@@ -19592,8 +19600,9 @@ async function saveBgOrderEdit() {
   const specialReason = isSpecial
     ? (document.querySelector('input[name="bg-edit-special-shipping-reason"]:checked')?.value || null)
     : null;
-  const specialMemo = isSpecial && specialReason === 'other'
-    ? (document.getElementById('bg-edit-special-shipping-memo').value || '').trim()
+  // 상세 사유는 어떤 항목이든 저장 (빈 값이면 null)
+  const specialMemo = isSpecial
+    ? ((document.getElementById('bg-edit-special-shipping-memo').value || '').trim() || null)
     : null;
   if (isSpecial && !specialReason) {
     alert('기타출고 사유를 선택해주세요.');
