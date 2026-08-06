@@ -4602,8 +4602,25 @@ async function syncCoupangOrders(btn) {
     if (data.error) {
       alert('쿠팡 동기화 실패:\n' + data.error);
     } else {
+      // 취소 재확인 결과 — 쿠팡 목록 API 가 CANCEL 을 못 돌려줘서 단건 조회로 보완한 부분.
+      const rc = data.reconcile;
+      let rcMsg = '';
+      if (rc) {
+        if (rc.error) {
+          rcMsg = `\n\n⚠️ 취소 재확인 실패: ${rc.error}`;
+        } else {
+          rcMsg = `\n\n[취소 재확인]\n확인: ${rc.checked}건 / 취소 반영: ${rc.cancelled}건`
+            + (rc.rows_updated ? ` (row ${rc.rows_updated}개)` : '')
+            + (rc.cancelled_order_ids?.length ? `\n취소 주문: ${rc.cancelled_order_ids.slice(0, 10).join(', ')}` : '')
+            + (rc.truncated ? `\n⚠️ 미확인 ${rc.pending - rc.checked}건 (한도 초과) — 다시 실행하세요.` : '')
+            + (rc.errors?.length ? `\n⚠️ 오류 ${rc.errors.length}건 (첫 건: ${rc.errors[0].error})` : '');
+        }
+      } else {
+        rcMsg = '\n\n⚠️ 취소 재확인이 실행되지 않았습니다 (구버전 배포일 수 있음).';
+      }
       const msg = `✅ 동기화 완료\n\n조회 주문: ${data.fetched}건 (페이지 ${data.pages || 1})\n저장 row: ${data.upserted}개\n필터 제외: ${data.filtered_out}개`
-        + (data.filter_disabled ? '\n\n⚠️ 카테고리 필터 미설정 — 전체 주문 저장됨. 답례품 카테고리 코드 확인 후 환경변수 설정 권장.' : '');
+        + (data.filter_disabled ? '\n\n⚠️ 카테고리 필터 미설정 — 전체 주문 저장됨. 답례품 카테고리 코드 확인 후 환경변수 설정 권장.' : '')
+        + rcMsg;
       alert(msg);
       loadOrders();
       refreshCoupangSyncMeta();

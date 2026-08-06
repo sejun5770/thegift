@@ -14,6 +14,9 @@ const BASE_PATH = process.env.BASE_PATH || '';  // 예: /c/barungift
 const INTERNAL_TOKEN = crypto.randomBytes(24).toString('hex');
 process.env.BG_INTERNAL_TOKEN = INTERNAL_TOKEN;
 
+// 프로세스 기동 시각 — /api/build-info 에서 재배포 여부 확인용
+const _serverStartedAt = new Date().toISOString();
+
 // --- 바른기프트 모듈 ---
 const { handleBarungiftApi } = require('./barungift/api');
 
@@ -10874,6 +10877,23 @@ const server = http.createServer(async (req, res) => {
             data.reconcile = { error: e.message };
           }
         }
+      } else if (pathname === '/api/build-info') {
+        // 지금 돌고 있는 빌드 확인 — "고쳤는데 안 바뀐다" 가 재배포 누락인지 구분용.
+        //   BUILD_SHA/BUILD_TIME 은 Dockerfile ARG 로 주입 (없으면 파일 mtime 으로 대체).
+        let mtime = null;
+        try { mtime = fs.statSync(path.join(__dirname, 'server.js')).mtime.toISOString(); } catch {}
+        data = {
+          build_sha: process.env.BUILD_SHA || null,
+          build_time: process.env.BUILD_TIME || null,
+          server_js_mtime: mtime,
+          started_at: _serverStartedAt,
+          // 기능 플래그 — 이 빌드에 포함된 최근 변경들 (배포 확인용)
+          features: {
+            coupang_reconcile_cancelled: true,   // 5484f66
+            xerp_direct_stock: true,             // a6a1e45
+            manual_order_row_per_item: true,     // 9076848
+          },
+        };
       } else if (pathname === '/api/coupang/reconcile-cancelled' && req.method === 'POST') {
         // 취소/반품 재확인 단독 실행 — 단건 조회로 DB 상태 보정.
         //   body: { days_back: 14, max_checks: 300 }
