@@ -200,7 +200,7 @@ async function buildStockReport(baseUrl) {
     const thr = r.threshold != null ? ` (임계 ${_fmt(r.threshold)})` : '';
     const name = r.product_name || '(이름 없음)';
     return `${icon} \`${r.stock_code}\` ${name}\n`
-      + `    가용 *${_fmt(r.available_qty)}* / 현재고 ${_fmt(r.current_qty)}${thr}`
+      + `    가용 *${_fmt(r.available_qty)}*${thr}`
       + ` · 30일 소진 ${_fmt(r.consume_qty_30d ?? r.sales_qty_30d)} (일평균 ${r.daily_avg_30d}) · ${days}`;
   };
 
