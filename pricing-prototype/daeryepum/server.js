@@ -1258,7 +1258,12 @@ async function apiOrders(query) {
               wedding_date: null,
               site_name: mo.site_name || '바른손더기프트',
               file_count: 0,
-              delivery_seq: 1,
+              // items 1건당 1행으로 보이게 delivery_seq 를 순번으로 부여 (2026-08-06).
+              //   프론트는 (order_seq, delivery_seq) 복합키로 행을 나눈다. 전에는 전부 1 이라
+              //   items 가 2개여도 첫 행만 남았고, 두 상품의 product_code 가 같으면
+              //   (수건세트: code1 = 주방세제 TGJBK03O1 공통, 옵션은 code2 로 구분)
+              //   상품 목록에서도 하나로 합쳐져 옵션이 다른 2행이 1행으로 보였다.
+              delivery_seq: idx + 1,
               source: 'manual',
               manual_order_id: mo.order_id,
               manual_source_memo: mo.source_memo || null,
