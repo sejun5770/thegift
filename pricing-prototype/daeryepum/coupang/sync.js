@@ -364,6 +364,12 @@ async function reconcileCancelled({ daysBack = 14, maxChecks = 300, delayMs = 12
     }
   }
 
+  // 크론 실행은 화면 알림이 없으니 컨테이너 로그로 남긴다.
+  console.log(`[coupang-reconcile] 확인 ${targets.length}/${pending.length}건`
+    + ` · 취소 ${cancelled.length}건 (row ${updated})`
+    + (cancelled.length ? ` — ${cancelled.join(', ')}` : '')
+    + (errors.length ? ` · 오류 ${errors.length}건: ${errors[0].error}` : ''));
+
   return {
     days_back: daysBack,
     pending: pending.length,
