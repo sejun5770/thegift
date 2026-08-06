@@ -10863,6 +10863,62 @@ const server = http.createServer(async (req, res) => {
           daysBack: parseInt(body.days_back) || 7,
           status: body.status || undefined,
         });
+      } else if (pathname === '/api/coupang/probe-order') {
+        // 특정 주문이 왜 반영 안 되는지 진단.
+        //   URL: /api/coupang/probe-order?order_id=28102092215635&days_back=14
+        //   ① 단건 조회(/{orderId}/ordersheets) — 상태 무관, 쿠팡의 현재 상태
+        //   ② 상태별 목록 조회에서 이 주문이 잡히는 상태 목록
+        //   ③ 우리 DB(coupang_orders) 에 저장된 현재 값
+        logAdminAccess(session, req, 'coupang-probe-order', parsed.query);
+        const coupangApi = require('./coupang/api');
+        const orderId = String(parsed.query.order_id || '').trim();
+        if (!coupangApi.isConfigured()) { data = { error: 'Coupang API 키 미설정' }; }
+        else if (!orderId) { data = { error: 'order_id 필수' }; }
+        else {
+          const out = { order_id: orderId };
+          // ① 단건 조회
+          try {
+            const sheets = await coupangApi.getOrderSheet(orderId);
+            out.single_lookup = sheets.map(s => ({
+              shipmentBoxId: s.shipmentBoxId,
+              status: s.status,
+              orderedAt: s.orderedAt,
+              items: (s.orderItems || []).map(i => ({
+                vendorItemId: i.vendorItemId,
+                vendorItemName: i.vendorItemName,
+                cancelCount: i.cancelCount,
+                shippingCount: i.shippingCount,
+              })),
+            }));
+          } catch (e) { out.single_lookup_error = e.message; }
+          // ② 상태별 목록에서 잡히는지
+          const daysBack = parseInt(parsed.query.days_back) || 14;
+          const endMs = Date.now();
+          const startMs = endMs - daysBack * 86400000;
+          out.days_back = daysBack;
+          out.found_in_statuses = {};
+          const all = [...coupangApi.ORDER_STATUSES, 'CANCEL', 'RETURNS'];
+          for (const st of all) {
+            try {
+              const r = await coupangApi.listOrdersForStatus({ startMs, endMs, status: st });
+              const hit = (r.items || []).filter(s => String(s.orderId) === orderId);
+              out.found_in_statuses[st] = hit.length
+                ? hit.map(s => ({ shipmentBoxId: s.shipmentBoxId, status: s.status }))
+                : 0;
+            } catch (e) { out.found_in_statuses[st] = `error: ${e.message.slice(0, 80)}`; }
+          }
+          // ③ 우리 DB 현재 값
+          try {
+            const cs = require('./coupang/store');
+            const rows = await cs.listCoupangOrders({ orderIds: [orderId] });
+            out.db_rows = (rows || []).map(r => ({
+              shipment_box_id: r.shipment_box_id, vendor_item_id: r.vendor_item_id,
+              status: r.status, status_label: r.status_label,
+              item_count: r.item_count, synced_at: r.synced_at,
+            }));
+          } catch (e) { out.db_error = e.message; }
+          data = out;
+        }
       } else if (pathname === '/api/coupang/debug-raw') {
         // 쿠팡 API raw 응답 직접 확인 — 단일 상태/기간으로 호출 후 응답 그대로 반환.
         // URL: /api/coupang/debug-raw?status=DEPARTURE&days_back=30

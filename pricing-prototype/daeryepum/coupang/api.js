@@ -209,9 +209,24 @@ async function listAllOrders({ startMs, endMs, statuses } = {}) {
   return { items, pages, totalCount: items.length, perStatus, overridden };
 }
 
+/**
+ * 주문 단건 조회 — /{orderId}/ordersheets.
+ *   목록 조회(/ordersheets)는 status 필터가 필수라 취소 건이 안 잡히는 경우가 있는데,
+ *   이 엔드포인트는 상태와 무관하게 현재 상태를 그대로 돌려준다.
+ *   반환: orderSheet 배열 (배송박스 단위)
+ */
+async function getOrderSheet(orderId) {
+  const id = String(orderId || '').trim();
+  if (!id) throw new Error('getOrderSheet: orderId 필수');
+  const path = `/v2/providers/openapi/apis/api/v4/vendors/${VENDOR_ID}/${id}/ordersheets`;
+  const res = await callCoupang('GET', path, '');
+  return Array.isArray(res?.data) ? res.data : (res?.data ? [res.data] : []);
+}
+
 module.exports = {
   isConfigured,
   buildAuthHeader,
+  getOrderSheet,
   buildDatetime,
   fmtKstDate,
   fmtKstDateTime,
