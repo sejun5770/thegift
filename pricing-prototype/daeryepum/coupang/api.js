@@ -168,31 +168,45 @@ async function listOrdersForStatus({ startMs, endMs, status, maxPerPage = 50 } =
  * 전 상태 순회 + 페이지네이션 통합 — 같은 (orderId, shipmentBoxId) 는 dedupe.
  *   options.statuses: 순회할 상태 배열 (기본 ORDER_STATUSES). 'CANCEL' 등 추가 가능.
  *   결과: { items: [...dedupe], pages: 총합, perStatus: {status: count} }
+ *
+ * dedupe 규칙 — '나중 상태가 이긴다' (2026-08-06 수정):
+ *   같은 주문이 두 상태로 조회되면 statuses 배열에서 뒤에 있는 쪽을 채택한다.
+ *   배열이 주문 생애주기 순(ACCEPT … FINAL_DELIVERY, CANCEL, RETURNS)이라
+ *   더 진행된/종료된 상태가 남는다.
+ *   이전에는 '먼저 본 것이 이긴다' 라서, 취소된 주문이 ACCEPT 로도 조회되면
+ *   CANCEL(배열 마지막)이 버려져 취소가 영영 반영되지 않았다.
  */
 async function listAllOrders({ startMs, endMs, statuses } = {}) {
   const list = Array.isArray(statuses) && statuses.length ? statuses : ORDER_STATUSES;
-  const seen = new Set(); // `${orderId}::${shipmentBoxId}`
+  const idxByKey = new Map(); // `${orderId}::${shipmentBoxId}` → items 내 위치
   const items = [];
   let pages = 0;
   const perStatus = {};
+  const overridden = {};   // 어떤 상태가 앞선 상태를 덮었는지 (진단용)
   for (const status of list) {
     try {
       const r = await listOrdersForStatus({ startMs, endMs, status });
       pages += r.pages;
       let added = 0;
+      let replaced = 0;
       for (const sheet of r.items) {
         const k = `${sheet.orderId}::${sheet.shipmentBoxId}`;
-        if (seen.has(k)) continue;
-        seen.add(k);
+        if (idxByKey.has(k)) {
+          items[idxByKey.get(k)] = sheet;   // 뒤 상태로 교체
+          replaced++;
+          continue;
+        }
+        idxByKey.set(k, items.length);
         items.push(sheet);
         added++;
       }
       perStatus[status] = added;
+      if (replaced) overridden[status] = replaced;
     } catch (e) {
       perStatus[status] = `error: ${e.message.slice(0, 100)}`;
     }
   }
-  return { items, pages, totalCount: items.length, perStatus };
+  return { items, pages, totalCount: items.length, perStatus, overridden };
 }
 
 module.exports = {
