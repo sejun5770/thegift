@@ -194,48 +194,72 @@ async function buildStockReport(baseUrl) {
   const rank = r => (r.soldout ? 0 : r.warn ? 1 : 2);
   rows.sort((a, b) => rank(a) - rank(b) || (a.days_to_soldout ?? 99999) - (b.days_to_soldout ?? 99999));
 
-  const line = r => {
-    const icon = r.soldout ? '⛔' : r.warn ? '⚠️' : '✅';
-    const days = r.days_to_soldout === null ? '소진예상 -' : `소진예상 *${r.days_to_soldout}일*`;
-    const thr = r.threshold != null ? ` (임계 ${_fmt(r.threshold)})` : '';
-    const name = r.product_name || '(이름 없음)';
-    return `${icon} \`${r.stock_code}\` ${name}\n`
-      + `    가용 *${_fmt(r.available_qty)}*${thr}`
-      + ` · 30일 소진 ${_fmt(r.consume_qty_30d ?? r.sales_qty_30d)} (일평균 ${r.daily_avg_30d}) · ${days}`;
+  /** 소진예상을 사람 말로 — 급한 정도가 바로 보이게 */
+  const urgency = r => {
+    if (r.soldout) return '재고 없음';
+    if (r.days_to_soldout === null) return '최근 소진 실적 없음';
+    return `${_fmt(r.days_to_soldout)}일 후 소진`;
   };
+
+  /**
+   * 스레드 상세 — 품목당 3줄.
+   *   고정폭 표도 시도했으나 한글 상품명이 길어 잘리고 열이 붙어 오히려 읽기 어려웠다.
+   *   이름 한 줄 / 핵심 수치 한 줄 / 코드 한 줄 로 세로로 편다.
+   */
+  const itemBlock = r => {
+    const parts = [`가용 *${_fmt(r.available_qty)}개*`];
+    const use = r.consume_qty_30d ?? r.sales_qty_30d;
+    parts.push(`30일 소진 ${_fmt(use)}개`);
+    if (r.daily_avg_30d) parts.push(`일평균 ${r.daily_avg_30d}`);
+    if (r.threshold != null) parts.push(`임계 ${_fmt(r.threshold)}`);
+    return `${r.soldout ? '⛔' : r.warn ? '⚠️' : '✅'}  *${r.product_name || r.stock_code}*  ·  ${urgency(r)}
+`
+      + `　　${parts.join('  ·  ')}
+`
+      + `　　\`${r.stock_code}\``;
+  };
+
+  const section = (title, rs) => rs.length
+    ? [title, '', ...rs.flatMap(r => [itemBlock(r), ''])]
+    : [];
 
   const soldoutRows = rows.filter(r => r.soldout);
   const warnRows = rows.filter(r => !r.soldout && r.warn);
   const okRows = rows.filter(r => !r.soldout && !r.warn);
   const attention = [...soldoutRows, ...warnRows];
 
-  // ── 본문: 상태 요약만 ──
-  const summary = [`📦 *답례품 재고 현황* · ${_kstDateLabel()}`, ''];
-  summary.push(
-    `⛔ 소진 *${soldoutRows.length}*   ⚠️ 확인 필요 *${warnRows.length}*   ✅ 정상 *${okRows.length}*`
-    + `   〈대상 ${targets.length}건〉`
-  );
+  // ── 본문: 건수 + 급한 품목(예상일 포함) ──
+  //   이름만 나열하면 무엇부터 봐야 할지 알 수 없어, 소진예상과 가용수량을 함께 적는다.
+  const summary = [
+    '📦  *답례품 재고 현황*',
+    `_${_kstDateLabel()} · 관리 품목 ${targets.length}건_`,
+    '',
+    `⛔ 소진 *${soldoutRows.length}*     ⚠️ 확인 필요 *${warnRows.length}*     ✅ 정상 *${okRows.length}*`,
+  ];
   if (attention.length) {
-    summary.push('', '*조치가 필요한 품목*');
-    // 이름만 — 수치는 스레드에서
-    summary.push(attention
-      .map(r => `${r.soldout ? '⛔' : '⚠️'} \`${r.stock_code}\` ${r.product_name || '(이름 없음)'}`)
-      .join('\n'));
+    summary.push('', '━━━━━━━━━━━━━━━━━━', '*🔴 조치 필요*', '');
+    // 항목 사이 빈 줄 — 슬랙에서 블록이 붙어 보이지 않게
+    summary.push(...attention.flatMap(r => [
+      `${r.soldout ? '⛔' : '⚠️'}  *${r.product_name || r.stock_code}*\n`
+      + `　　${urgency(r)}  ·  가용 ${_fmt(r.available_qty)}개`,
+      '',
+    ]).slice(0, -1));
   } else if (rows.length) {
-    summary.push('', '전 품목 재고 정상입니다. 👍');
+    summary.push('', '✅  전 품목 재고 정상입니다.');
   } else {
     summary.push('', '등록된 품목의 재고 데이터를 찾지 못했습니다.');
   }
   if (missing.length) {
-    summary.push('', `_⚠️ 재고 데이터에 없는 코드: ${missing.join(', ')}_`);
+    summary.push('', `_⚠️ 재고를 찾지 못한 코드 ${missing.length}건 — ${missing.join(', ')}_`);
   }
-  if (rows.length) summary.push('', '_품목별 상세는 스레드에서 확인하세요_ 👇');
+  if (rows.length) summary.push('', '_전체 목록은 스레드에서_ 👇');
 
-  // ── 스레드: 품목별 수치 상세 ──
-  const detailLines = [];
-  if (soldoutRows.length) detailLines.push(`*⛔ 소진 ${soldoutRows.length}건*`, ...soldoutRows.map(line), '');
-  if (warnRows.length) detailLines.push(`*⚠️ 확인 필요 ${warnRows.length}건*`, ...warnRows.map(line), '');
-  if (okRows.length) detailLines.push(`*✅ 정상 ${okRows.length}건*`, ...okRows.map(line));
+  // ── 스레드: 고정폭 표 (열 정렬) ──
+  const detailLines = [
+    ...section(`*⛔ 소진 ${soldoutRows.length}건*`, soldoutRows),
+    ...section(`*⚠️ 확인 필요 ${warnRows.length}건*`, warnRows),
+    ...section(`*✅ 정상 ${okRows.length}건*`, okRows),
+  ];
 
   const summaryText = summary.join('\n');
   const detailChunks = detailLines.length ? _chunkLines(detailLines) : [];
