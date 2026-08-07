@@ -1296,6 +1296,9 @@ nav.nav-loading a[href^="#"] {
     <span id="ord-cp-map" style="flex-shrink:0;display:none;padding:2px 8px;border-radius:4px;background:#fffbeb;color:#b45309;cursor:pointer"
           title="상품설정에 쿠팡 채널 상품코드가 없어 내부 상품코드로 바뀌지 않은 주문입니다. 눌러 그 주문만 봅니다."
           onclick="_ordShowUnmappedCoupang()"></span>
+    <button id="ord-cp-backfill" class="btn" style="display:none;padding:2px 10px;font-size:11px"
+            title="상품설정에 넣은 채널 코드로, 이미 들어온 쿠팡 주문의 스티커와 상품코드를 채웁니다. 먼저 미리보기로 무엇이 바뀌는지 확인합니다."
+            onclick="runCoupangStickerBackfill(true)">🩹 스티커 백필</button>
     <!-- 매출 합계 — 답례품_더기프트 카테고리 전용. 대시보드 기준과 대조 편의성. -->
     <span id="ord-revenue-summary" style="flex-shrink:0;display:none;padding:2px 8px;border-radius:4px;background:#f3f4f6;color:var(--gray-700)" title="현재 필터로 조회된 주문의 매출. 대시보드 (취소/환불/반품 제외 기준) 와 대조용.">
       <span style="color:var(--gray-500)">순매출</span> <strong id="ord-revenue-net" style="color:#047857">-</strong>
@@ -3734,8 +3737,14 @@ const API = window.location.pathname.replace(/\/+$/, '') || '';
 function _ordRenderCoupangMapStatus(rows) {
   const el = document.getElementById('ord-cp-map');
   if (!el) return;
+  const btn = document.getElementById('ord-cp-backfill');
   const cp = (rows || []).filter(r => r.order_type === 'COUPANG');
-  if (!cp.length) { el.style.display = 'none'; return; }
+  if (!cp.length) {
+    el.style.display = 'none';
+    if (btn) btn.style.display = 'none';
+    return;
+  }
+  if (btn) btn.style.display = '';
   const unmapped = cp.filter(r => !r.channel_code_mapped);
   if (!unmapped.length) {
     el.style.display = '';
@@ -3758,6 +3767,61 @@ function _ordShowUnmappedCoupang() {
     if (cb && !cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change')); }
   });
   showToast('쿠팡 등록상품ID·옵션ID 컬럼을 켰습니다 — 상품코드가 11자리이거나 비어 있는 행의 값을 상품설정 › 채널 상품코드에 넣으세요');
+}
+
+/**
+ * 쿠팡 스티커 백필 (3단계).
+ *   스티커는 수집 시점에만 붙어, 상품설정을 나중에 채우면 기존 주문은 빈 채로 남는다.
+ *   저장된 주문을 훑어 채운다 — 쿠팡 API 를 다시 부르지 않아 동기화 기간과 무관하다.
+ *   데이터를 쓰는 작업이라 반드시 미리보기를 먼저 보여주고 확인받는다.
+ */
+async function runCoupangStickerBackfill(dryRun) {
+  const btn = document.getElementById('ord-cp-backfill');
+  if (btn) { btn.disabled = true; btn.textContent = dryRun ? '확인 중…' : '적용 중…'; }
+  try {
+    const r = await fetch(`${API}/api/coupang/sticker-backfill`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dry_run: !!dryRun }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    if (!dryRun) {
+      showToast(`백필 완료 — 주문 ${fmtNum(d.patched)}건 · 스티커 ${fmtNum(d.filledStickers)}개 · 상품코드 ${fmtNum(d.fixedCodes)}개`);
+      loadOrders();
+      return;
+    }
+    if (!d.patched) {
+      alert(`바뀔 주문이 없습니다.
+
+조회 ${d.scanned}건 · 매핑 없음 ${d.unmapped}건 · 고객입력 없음 ${d.skipped}건
+`
+        + '상품설정에 쿠팡 채널 상품코드와 고정 스티커가 들어 있는지 확인해주세요.');
+      return;
+    }
+    const ex = (d.samples || []).slice(0, 5)
+      .map(x => `  ${x.order_id}: ` + (x.changes || []).map(c => `${c.product_code} → ${c.to}`).join(', '))
+      .join(String.fromCharCode(10));
+    const ok = confirm(`아래 내용으로 채웁니다.
+
+`
+      + `대상 주문 ${d.patched}건
+`
+      + `스티커 채움 ${d.filledStickers}개 · 상품코드 정정 ${d.fixedCodes}개
+`
+      + `(조회 ${d.scanned}건 · 매핑 없음 ${d.unmapped}건 · 고객입력 없음 ${d.skipped}건)
+
+`
+      + `예시
+${ex}
+
+`
+      + `이미 값이 있는 스티커는 덮지 않습니다. 진행할까요?`);
+    if (ok) await runCoupangStickerBackfill(false);
+  } catch (e) {
+    alert(`백필 실패: ${e.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🩹 스티커 백필'; }
+  }
 }
 
 function escapeHtml(s) {

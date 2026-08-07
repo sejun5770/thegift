@@ -13803,6 +13803,34 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/coupang/sticker-backfill' && req.method === 'POST') {
+        // 이미 저장된 coupang_orders 로 기존 주문의 스티커·상품코드를 채운다.
+        //   쿠팡 API 를 다시 부르지 않아 동기화 기간·상태 제한과 무관하다.
+        //   body: { dry_run, start_date, end_date }  — dry_run 기본 true (데이터를 쓰는 작업)
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const body = await new Promise((resolve) => {
+          let raw = '';
+          req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+        });
+        const dryRun = body.dry_run !== false;
+        logAdminAccess(session, req, 'coupang-sticker-backfill', {
+          dry_run: dryRun, start: body.start_date, end: body.end_date,
+        });
+        try {
+          const { backfillCoupangStickers } = require('./coupang/sticker-backfill');
+          data = await backfillCoupangStickers({
+            dryRun,
+            startDate: body.start_date || null,
+            endDate: body.end_date || null,
+          });
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
       } else if (pathname === '/api/coupang/rfm/lines/upload' && req.method === 'POST') {
         // 주문 단위 리포트 업로드 (migration 055) — 파일 종류를 헤더로 자동 판별한다.
         //   파일1 CATEGORY_TR          → 결제완료일·매출·수수료·정산대상액
