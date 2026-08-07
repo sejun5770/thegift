@@ -13912,8 +13912,8 @@ function _stockItemRow(it, bom) {
     //   그룹마다 같은 재고가 반복 표시되므로, 같은 재고 하나를 나눠 쓰는 것임을 배지로 알린다.
     //   툴팁에 어느 상품들에 얼마씩 들어가는지 적어 어디서 빠지는지 바로 보이게 한다.
     const parents = it.bom_parents || [];
-    const shared = bom && parents.length > 1
-      ? `<span style="font-size:9px;color:#b45309;margin-left:2px" title="${esc(parents.map(p => `${p.name || p.code} ×${p.qty}`).join('\n'))}&#10;&#10;${parents.length}개 상품이 같은 재고를 나눠 씁니다 — 각 그룹에 같은 수량이 반복 표시됩니다">공용 ${parents.length}</span>`
+    const shared = parents.length > 1
+      ? `<span style="font-size:9px;color:#b45309;margin-left:2px" title="${esc(parents.map(p => `${p.name || p.code} ×${p.qty}`).join('\n'))}&#10;&#10;${parents.length}개 상품이 나눠 쓰는 공용 자재입니다 — 재고는 여기 한 줄로만 두고, 각 상품 그룹에는 참조로만 적습니다">공용 ${parents.length}</span>`
       : '';
     const bomTag = bom
       ? ` ${_bomRoleBadge(bom.role)}<span style="font-size:10px;color:var(--gray-500)"> ×${bom.qty}</span>${shared}`
@@ -14043,6 +14043,17 @@ function toggleStockGroup(code) {
 
 const _daysRank = d => (d === null || d === undefined ? 99999 : d);
 
+/** 공용 자재 = BOM 상 2개 이상 판매상품에 들어가는 품목 (자동 판정) */
+const _isSharedItem = it => ((it && it.bom_parents) || []).length > 1;
+
+function _stockSectionHead(icon, title, note) {
+  return `
+    <tr><td colspan="${STOCK_GROUP_COLSPAN}" style="padding:10px 12px 6px;border-bottom:2px solid var(--gray-300);background:#fff">
+      <b style="font-size:12px">${icon} ${esc(title)}</b>
+      <span style="font-size:11px;color:var(--gray-500);margin-left:8px">${esc(note)}</span>
+    </td></tr>`;
+}
+
 function _stockGroupedRows(items) {
   const byCode = new Map(items.map(it => [it.stock_code, it]));
   const groups = [];
@@ -14064,20 +14075,34 @@ function _stockGroupedRows(items) {
       anySoldout: tracked.some(it => it.available_qty <= 0),
     });
   }
-  const grouped = new Set();
-  groups.forEach(g => g.comps.forEach(c => { if (c.item) grouped.add(c.code); }));
+  // 그룹에 흡수되는 품목 = 그 상품 전용 구성품만.
+  //   공용 자재는 여러 상품에 걸쳐 있어 한 그룹에 넣을 수 없다 → 일반 목록에 그대로 남긴다.
+  //   (그룹 안에서는 수치 없이 이름·소요수량만 참조로 적어 구성은 그대로 확인된다.)
+  const absorbed = new Set();
+  groups.forEach(g => g.comps.forEach(c => {
+    if (c.item && !_isSharedItem(c.item)) absorbed.add(c.code);
+  }));
 
-  // 그룹 헤더와 낱개 품목을 같은 축(소진예상일)으로 정렬
-  const entries = [
-    ...groups.map(g => ({ kind: 'group', sort: _daysRank(g.worst), g })),
-    ...items.filter(it => !grouped.has(it.stock_code))
-      .map(it => ({ kind: 'item', sort: _daysRank(it.days_to_soldout), it })),
-  ].sort((a, b) => a.sort - b.sort);
+  const plain = items.filter(it => !absorbed.has(it.stock_code))
+    .sort((a, b) => _daysRank(a.days_to_soldout) - _daysRank(b.days_to_soldout));
+  groups.sort((a, b) => _daysRank(a.worst) - _daysRank(b.worst));
 
   const out = [];
-  for (const e of entries) {
-    if (e.kind === 'item') { out.push(_stockItemRow(e.it, null)); continue; }
-    const g = e.g;
+
+  // ── 1. 일반 재고 (BOM 미구성 + 공용 자재) ─────────────────
+  if (plain.length) {
+    const sharedCnt = plain.filter(_isSharedItem).length;
+    out.push(_stockSectionHead('📦', '일반 재고',
+      `${plain.length}건${sharedCnt ? ` · 공용 자재 ${sharedCnt}건 포함` : ''}`));
+    plain.forEach(it => out.push(_stockItemRow(it, null)));
+  }
+
+  // ── 2. BOM 구성 상품 ──────────────────────────────────────
+  if (groups.length) {
+    out.push(_stockSectionHead('🧩', 'BOM 구성 상품',
+      `${groups.length}개 · 상품을 펼치면 전용 구성품이 나옵니다`));
+  }
+  for (const g of groups) {
     const open = _stockGroupOpen.has(g.code);
     const headBg = g.anySoldout ? 'background:#fef2f2'
       : (g.worst !== null && g.worst <= 30 ? 'background:#fef3c7' : 'background:var(--gray-50)');
@@ -14101,7 +14126,9 @@ function _stockGroupedRows(items) {
     if (!open) continue;
     for (const c of g.comps) {
       out.push(c.item
-        ? _stockItemRow(c.item, { id: c.id, qty: c.qty, role: c.role })
+        ? (_isSharedItem(c.item)
+            ? _stockSharedRefRow(c)          // 공용 자재 — 일반 목록에 있으므로 참조만
+            : _stockItemRow(c.item, { id: c.id, qty: c.qty, role: c.role }))
         : _stockUnregisteredRow(g.code, c));
     }
   }
@@ -14191,6 +14218,33 @@ async function ungroupStockGroup(parentCode) {
     showToast(`${parentCode} 그룹 해제`);
     await loadDaeryepumStock();
   } catch (e) { alert(`해제 실패: ${e.message}`); }
+}
+
+/**
+ * 공용 자재 참조 줄 — 실제 재고 행은 위쪽 '일반 재고' 에 한 번만 두고,
+ * 상품 그룹 안에서는 구성이 비어 보이지 않게 이름·소요수량만 얇게 적는다.
+ * 수치를 반복하지 않아 같은 재고가 여러 개로 읽히지 않는다.
+ */
+function _stockSharedRefRow(c) {
+  const it = c.item;
+  const n = (it.bom_parents || []).length;
+  return `
+    <tr style="color:var(--gray-500)">
+      <td style="padding:5px 6px;border-bottom:1px solid var(--gray-100)"></td>
+      <td colspan="${STOCK_GROUP_COLSPAN - 2}" style="padding:5px 12px 5px 30px;border-bottom:1px solid var(--gray-100);font-size:11px">
+        <span style="font-family:monospace">${esc(c.code)}</span>
+        ${_bomRoleBadge(c.role)}
+        <span>×${c.qty}</span>
+        <span style="margin-left:6px">${esc(it.product_name || '')}</span>
+        <span style="font-size:9px;color:#b45309;margin-left:6px" title="${esc((it.bom_parents || []).map(p => `${p.name || p.code} ×${p.qty}`).join('\n'))}&#10;&#10;${n}개 상품이 나눠 쓰는 공용 자재라 재고는 위쪽 '일반 재고' 에 한 줄로만 둡니다">공용 ${n}</span>
+      </td>
+      <td style="padding:5px 12px;border-bottom:1px solid var(--gray-100);text-align:center;white-space:nowrap">
+        <button onclick="editBomComponent('${esc(c.id)}')" title="이 상품에서의 소요수량·역할 수정"
+          style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 6px">×${c.qty}</button>
+        <button onclick="removeBomComponent('${esc(c.id)}')" title="이 그룹에서 빼기"
+          style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 6px;color:#b45309;margin-left:3px">⤴</button>
+      </td>
+    </tr>`;
 }
 
 /** BOM 에는 있지만 재고관리 미등록인 구성품 — 그 자리에서 등록할 수 있게 ＋ 버튼을 둔다 */
