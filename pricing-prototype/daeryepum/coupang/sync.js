@@ -226,6 +226,7 @@ async function syncRecent({ daysBack = 7, status } = {}) {
           productName: r.product_name,
           quantity: r.item_count,
           modelNo: r.external_vendor_sku, // 쿠팡 셀러센터의 '모델번호'
+          optionId: r.vendor_item_id,     // 채널 고정 스티커 조회용 (056/057)
           stickers,
           productSettings,
         });

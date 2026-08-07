@@ -47,6 +47,29 @@ function matchModelNo(stickers, productSettings, productCode, modelNo) {
 }
 
 /**
+ * 채널 고정 스티커 코드 찾기 (056 + 057).
+ *   채널 상품코드로 내부 상품설정을 찾는다 — 옵션ID 매핑이 등록상품ID보다 우선.
+ *   매핑이 없으면 상품코드 자체가 내부코드인 경우도 있어 product_id 직접 일치도 본다.
+ */
+function findChannelSticker(productSettings, channel, productCode, optionId) {
+  if (!Array.isArray(productSettings)) return null;
+  const pc = String(productCode ?? '').trim();
+  const oid = String(optionId ?? '').trim();
+  const codesOf = (ps, kind) => {
+    const m = ps.channel_product_codes?.[channel];
+    if (!m) return [];
+    if (Array.isArray(m)) return kind === 'product_ids' ? m : [];   // 구형(배열) = 등록상품ID
+    return m[kind] || [];
+  };
+  const hit =
+    (oid && productSettings.find(ps => codesOf(ps, 'option_ids').some(c => String(c).trim() === oid)))
+    || (pc && productSettings.find(ps => codesOf(ps, 'product_ids').some(c => String(c).trim() === pc)))
+    || (pc && productSettings.find(ps => ps.product_id === pc));
+  const code = hit?.channel_stickers?.[channel];
+  return code ? String(code).trim() || null : null;
+}
+
+/**
  * 한 쿠팡 orderItem → sticker_selection 1개.
  *   modelNo 필드는 externalVendorSku 우선, 부재시 vendorItemPackageId 등 폴백.
  */
@@ -55,15 +78,27 @@ function enrichOrderItem({
   productName,
   quantity,
   modelNo,
+  optionId,
   stickers = [],
   productSettings = [],
 }) {
-  const { sticker, box } = matchModelNo(stickers, productSettings, productCode, modelNo);
+  let { sticker, box } = matchModelNo(stickers, productSettings, productCode, modelNo);
+  // 채널 고정 스티커 (migration 056) — 쿠팡은 고객이 고르지 않고 정해진 스티커가 반드시 붙는다.
+  //   모델번호로 못 찾았을 때만 쓴다 (모델번호가 있으면 그쪽이 더 구체적인 지정이다).
+  //   상품설정의 채널 상품코드(057)로 내부 상품을 먼저 찾고, 그 상품의 고정 스티커를 본다.
+  if (!sticker) {
+    const fixedCode = findChannelSticker(productSettings, 'coupang', productCode, optionId);
+    if (fixedCode) {
+      const found = (stickers || []).find(x => x && x.sticker_code === fixedCode);
+      // bg_stickers 에 없는 코드여도 코드 자체는 남긴다 — 인쇄팀은 코드로 작업한다
+      sticker = found || { id: null, sticker_code: fixedCode };
+    }
+  }
   return {
     product_code: productCode || null,
     product_name: productName || null,
     quantity: Number(quantity) || 0,
-    sticker_id: sticker ? sticker.id : null,
+    sticker_id: sticker ? (sticker.id || null) : null,
     sticker_code: sticker ? sticker.sticker_code : null,
     // sticker_name: 네이버와 일관 — 미표시 정책
     sticker_name: null,
@@ -93,6 +128,7 @@ function calcCoupangShipDate(orderedAt) {
 
 module.exports = {
   matchModelNo,
+  findChannelSticker,
   enrichOrderItem,
   calcCoupangShipDate,
 };
