@@ -13932,7 +13932,7 @@ const server = http.createServer(async (req, res) => {
           const path = `/v2/providers/rg_open_api/apis/api/v1/vendors/${cpApi.VENDOR_ID}/rg/orders`;
           try {
             const raw = await cpApi.listRgOrders({ paidDateFrom: ymd(from), paidDateTo: ymd(to) });
-            const list = Array.isArray(raw?.data) ? raw.data : [];
+            const list = cpApi.pickList(raw);
             data = {
               ok: true, path, range: [from, to],
               top_level_keys: Object.keys(raw || {}),
@@ -13943,7 +13943,9 @@ const server = http.createServer(async (req, res) => {
               first_items: list.slice(0, 3),
               // data 가 배열이 아니면 무엇이 왔는지 잘라서 보여준다
               data_type: Array.isArray(raw?.data) ? 'array' : typeof raw?.data,
-              raw_preview: list.length ? null : JSON.stringify(raw).slice(0, 1500),
+              data_keys: (raw?.data && !Array.isArray(raw.data) && typeof raw.data === 'object')
+                ? Object.keys(raw.data) : null,
+              raw_preview: list.length ? null : JSON.stringify(raw).slice(0, 2000),
             };
           } catch (e) {
             data = { ok: false, path, range: [from, to], error: e.message, status: e.status || null, body: e.body || null };

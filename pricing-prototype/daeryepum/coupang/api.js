@@ -243,6 +243,27 @@ async function listRgOrders({ paidDateFrom, paidDateTo, nextToken } = {}) {
   return callCoupang('GET', path, params.toString());
 }
 
+/**
+ * 응답에서 목록을 꺼낸다 — rg_open_api 계열은 data 가 배열일 때도, 한 겹 더 감쌀 때도 있다.
+ *   배열이 아닌 모양에서 조용히 0건으로 떨어지면 '주문이 없다' 와 구분이 안 된다.
+ */
+function pickList(res) {
+  if (Array.isArray(res)) return res;
+  const d = res?.data;
+  if (Array.isArray(d)) return d;
+  for (const k of ['content', 'items', 'orders', 'list', 'summaries', 'inventories']) {
+    if (Array.isArray(d?.[k])) return d[k];
+    if (Array.isArray(res?.[k])) return res[k];
+  }
+  return [];
+}
+
+/** nextToken 도 한 겹 안쪽에 오는 경우가 있다 */
+function pickNextToken(res) {
+  const t = res?.nextToken ?? res?.data?.nextToken ?? null;
+  return t ? String(t) : null;
+}
+
 /** 'YYYY-MM-DD' → 'YYYYMMDD' */
 function toYmd(d) { return String(d || '').replace(/-/g, '').slice(0, 8); }
 
@@ -269,8 +290,8 @@ async function listAllRgOrders({ startDate, endDate, maxPagesPerWindow = 100 } =
     while (p < maxPagesPerWindow) {
       const res = await listRgOrders({ paidDateFrom: toYmd(from), paidDateTo: toYmd(to), nextToken });
       p++; pages++;
-      if (Array.isArray(res.data)) items.push(...res.data);
-      const t = res.nextToken ? String(res.nextToken) : null;
+      items.push(...pickList(res));
+      const t = pickNextToken(res);
       if (!t || seen.has(t)) break;
       seen.add(t); nextToken = t;
       await new Promise(r => setTimeout(r, 1300));
@@ -312,8 +333,8 @@ async function listAllRgInventory({ maxPages = 100 } = {}) {
   while (pages < maxPages) {
     const res = await listRgInventory({ nextToken });
     pages++;
-    if (Array.isArray(res.data)) items.push(...res.data);
-    const t = res.nextToken ? String(res.nextToken) : null;
+    items.push(...pickList(res));
+    const t = pickNextToken(res);
     if (!t || seenTokens.has(t)) break;
     seenTokens.add(t);
     nextToken = t;
@@ -324,6 +345,7 @@ async function listAllRgInventory({ maxPages = 100 } = {}) {
 
 module.exports = {
   isConfigured,
+  pickList,
   listRgOrders,
   listAllRgOrders,
   listRgInventory,
