@@ -2776,8 +2776,8 @@ nav.nav-loading a[href^="#"] {
             </div>
             <div id="bg-p-ch-sticker-rows" style="display:flex;gap:8px;flex-wrap:wrap"></div>
             <div style="font-size:11px;color:var(--gray-500);margin:10px 0 6px">
-              <b>채널 상품코드</b> — 그 채널이 쓰는 코드입니다. 쿠팡은 등록상품ID(11자리 숫자)를 넣으면
-              주문조회에서 이 내부 코드로 보입니다. 콤마로 여러 개 넣을 수 있습니다.
+              <b>채널 상품코드</b> — 그 채널이 쓰는 코드입니다. 주문조회에서 이 내부 코드로 보입니다. 콤마로 여러 개 넣을 수 있습니다.<br>
+              같은 <b>등록상품</b> 안에서 옵션마다 내부코드가 갈리면 <b>옵션ID</b> 로 넣으세요 — 옵션ID 매핑이 등록상품ID보다 우선합니다.
             </div>
             <div id="bg-p-ch-code-rows" style="display:flex;gap:8px;flex-wrap:wrap"></div>
           </div>
@@ -12198,11 +12198,19 @@ function _bgRenderChannelStickerRows(preserve = true) {
   wrap.style.display = '';
   if (codeRows) {
     codeRows.innerHTML = on.map(ch => `
-      <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px">
-        <span style="color:var(--gray-600)">${PRODUCT_CHANNEL_ICON[ch]} ${PRODUCT_CHANNEL_LABEL[ch]}</span>
-        <input type="text" data-ch-code="${ch}" value="${esc((_bgChannelProductCodes[ch] || []).join(', '))}" placeholder="예: 16281105078"
-          style="width:210px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px;font-family:monospace">
-      </label>`).join('');
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px;flex-wrap:wrap;width:100%">
+        <span style="color:var(--gray-600);min-width:70px">${PRODUCT_CHANNEL_ICON[ch]} ${PRODUCT_CHANNEL_LABEL[ch]}</span>
+        <label style="display:inline-flex;align-items:center;gap:4px">
+          <span style="color:var(--gray-500);font-size:11px">등록상품ID</span>
+          <input type="text" data-ch-code="${ch}" data-ch-kind="product" value="${esc(_bgChCodes(ch, 'product_ids'))}" placeholder="16281105078"
+            style="width:190px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px;font-family:monospace">
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:4px">
+          <span style="color:var(--gray-500);font-size:11px">옵션ID</span>
+          <input type="text" data-ch-code="${ch}" data-ch-kind="option" value="${esc(_bgChCodes(ch, 'option_ids'))}" placeholder="95408060495"
+            style="width:190px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px;font-family:monospace">
+        </label>
+      </div>`).join('');
   }
   rows.innerHTML = on.map(ch => `
     <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px">
@@ -12217,10 +12225,22 @@ let _bgChannelProductCodes = {};
 function _bgCollectChannelProductCodes() {
   const out = {};
   document.querySelectorAll('#bg-p-ch-code-rows input[data-ch-code]').forEach(el => {
-    const codes = el.value.split(',').map(x => x.trim()).filter(Boolean);
-    if (codes.length) out[el.dataset.chCode] = [...new Set(codes)];
+    const codes = [...new Set(el.value.split(',').map(x => x.trim()).filter(Boolean))];
+    if (!codes.length) return;
+    const ch = el.dataset.chCode;
+    const kind = el.dataset.chKind === 'option' ? 'option_ids' : 'product_ids';
+    if (!out[ch]) out[ch] = {};
+    out[ch][kind] = codes;
   });
   return out;
+}
+
+/** 구형(배열만) 값도 읽어준다 — 057 초기 형태 */
+function _bgChCodes(ch, kind) {
+  const v = _bgChannelProductCodes[ch];
+  if (!v) return '';
+  if (Array.isArray(v)) return kind === 'product_ids' ? v.join(', ') : '';
+  return (v[kind] || []).join(', ');
 }
 
 function _bgCollectChannelStickers() {
@@ -14243,6 +14263,11 @@ function bgShPreviewNextMonth() { bgShPreviewMonth.setMonth(bgShPreviewMonth.get
 // ============================================
 let _stockData = [];
 let _stockLoaded = false;
+// 채널 원본코드 별칭 (057) — 쿠팡 코드가 내부코드로 치환되면서, 예전에 저장된
+//   sticker_selections.product_code(원본 쿠팡 코드)와 매칭이 깨져 행이 중복되는 것을 막는다.
+let _bgCodeAlias = new Map();   // 내부코드 → Set(원본 채널코드)
+const _bgAliasHas = (internal, code) => !!_bgCodeAlias.get(internal)?.has(String(code || '').trim());
+
 let _stockBomParents = [];   // 상품 그룹 보기용 — /api/bg/stock-bom?group=parent
 
 async function initDaeryepumStock() {
@@ -17592,6 +17617,7 @@ async function loadBgUnified() {
       .then(v => Array.isArray(v) ? v : []);
     // 사고건은 주문 조회와 독립이라 실패해도 화면이 죽지 않게 따로 띄운다 (탭 카운트/목록용).
     loadIncidents();
+    _bgCodeAlias = new Map();
     const [ordersRes, ciRes, psRes] = await Promise.allSettled([
       Promise.all([
         fetchOrdersForCategory('daeryepum'),
@@ -17644,6 +17670,7 @@ async function loadBgUnified() {
           pm.set(r.card_code, { card_name: r.card_name, item_count: 0 });
         }
         pm.get(r.card_code).item_count += (r.item_count || 0);
+        _bgRegisterCodeAlias(r);
       }
     });
     bgUnifiedOrders = [...orderMap.values()];
@@ -17720,6 +17747,7 @@ async function loadBgUnified() {
                 pm.set(r.card_code, { card_name: r.card_name, item_count: 0 });
               }
               pm.get(r.card_code).item_count += (r.item_count || 0);
+              _bgRegisterCodeAlias(r);
             }
           });
         }
@@ -17885,6 +17913,18 @@ function bgFindCi(ciMap, order) {
   return null;
 }
 
+/** 주문 행에서 내부코드 ↔ 원본 채널코드 별칭을 모은다 (057) */
+function _bgRegisterCodeAlias(r) {
+  const internal = String(r.card_code || '').trim();
+  if (!internal) return;
+  for (const raw of [r.channel_product_code, r.channel_option_id]) {
+    const c = String(raw || '').trim();
+    if (!c || c === internal) continue;
+    if (!_bgCodeAlias.has(internal)) _bgCodeAlias.set(internal, new Set());
+    _bgCodeAlias.get(internal).add(c);
+  }
+}
+
 function renderBgUnified() {
   const hideCancel = document.getElementById('uni-hide-cancel')?.checked;
   const hidePending = document.getElementById('uni-hide-pending')?.checked;
@@ -17995,7 +18035,9 @@ function renderBgUnified() {
       let fallbackIter = 0;
       for (const [productCode, productInfo] of pm) {
         // 1) product_code 정확 매칭
-        let selPos = selEntries.findIndex((e, i) => !usedSelIdx.has(i) && e.s.product_code === productCode);
+        // 옛 ci 는 원본 쿠팡 코드로 저장돼 있다 — 별칭도 같은 상품으로 인정한다 (057)
+        let selPos = selEntries.findIndex((e, i) => !usedSelIdx.has(i)
+          && (e.s.product_code === productCode || _bgAliasHas(productCode, e.s.product_code)));
         // 2) fallback — 남은 sel 을 순서대로 (MANUAL CSV 파생 코드 전용)
         if (selPos < 0 && selEntries.length && isManualOrder) {
           while (fallbackIter < selEntries.length && usedSelIdx.has(fallbackIter)) fallbackIter++;
@@ -18016,7 +18058,7 @@ function renderBgUnified() {
       selEntries.forEach((e, i) => {
         if (usedSelIdx.has(i)) return;
         const s = e.s;
-        if (s.product_code && !pm.has(s.product_code)) {
+        if (s.product_code && !pm.has(s.product_code) && ![...pm.keys()].some(k => _bgAliasHas(k, s.product_code))) {
           bgUnifiedRows.push({
             order, ci, sel: s, sticker_index: e.gi,
             product_code: s.product_code,

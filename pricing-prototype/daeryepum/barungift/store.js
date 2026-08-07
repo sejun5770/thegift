@@ -245,16 +245,29 @@ function _normChannelStickers(v) {
   return out;
 }
 
-/** 채널 상품코드 매핑 {"coupang":["16281105078"]} 정규화 (057). */
+/**
+ * 채널 상품코드 매핑 정규화 (057).
+ *   {"coupang": {"product_ids": ["16281105078"], "option_ids": ["95408060495"]}}
+ *
+ *   등록상품ID 는 옵션 여러 개를 묶는 상위 코드라, 같은 등록상품 안에서 옵션마다
+ *   내부코드가 갈리는 경우가 있다. 그때는 option_ids 로 잡아야 구분된다.
+ *   조회 시 옵션ID 매핑을 먼저 보고, 없으면 등록상품ID 매핑을 본다.
+ *
+ *   구형(배열만) 값도 받아 product_ids 로 승계한다.
+ */
 function _normChannelProductCodes(v) {
   const out = {};
-  if (v && typeof v === 'object' && !Array.isArray(v)) {
-    for (const [k, list] of Object.entries(v)) {
-      if (!PRODUCT_CHANNELS.includes(k)) continue;
-      const codes = (Array.isArray(list) ? list : [list])
-        .map(c => String(c ?? '').trim()).filter(Boolean);
-      if (codes.length) out[k] = [...new Set(codes)];
-    }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return out;
+  const clean = list => [...new Set((Array.isArray(list) ? list : [list])
+    .map(c => String(c ?? '').trim()).filter(Boolean))];
+  for (const [k, val] of Object.entries(v)) {
+    if (!PRODUCT_CHANNELS.includes(k)) continue;
+    const productIds = Array.isArray(val) ? clean(val) : clean(val?.product_ids);
+    const optionIds = Array.isArray(val) ? [] : clean(val?.option_ids);
+    if (!productIds.length && !optionIds.length) continue;
+    out[k] = {};
+    if (productIds.length) out[k].product_ids = productIds;
+    if (optionIds.length) out[k].option_ids = optionIds;
   }
   return out;
 }
