@@ -16915,6 +16915,20 @@ function renderRgLines() {
     }).join('') + '</tbody></table>';
 }
 
+/** 기간을 달 단위로 쪼갠다 — [['2026-05-01','2026-05-31'], ...] */
+function _monthChunks(from, to) {
+  const out = [];
+  const end = new Date(`${to}T00:00:00Z`);
+  let cur = new Date(`${from}T00:00:00Z`);
+  while (cur <= end) {
+    const last = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 0));
+    const stop = last < end ? last : end;
+    out.push([cur.toISOString().slice(0, 10), stop.toISOString().slice(0, 10)]);
+    cur = new Date(stop.getTime() + 86400000);
+  }
+  return out;
+}
+
 /**
  * 옵션ID ↔ 등록상품ID 맵 갱신 (063).
  *   로켓그로스 주문 API 는 옵션ID 만 준다. 상품설정에는 등록상품ID 만 넣어 둔 상품이
@@ -16969,12 +16983,23 @@ async function syncRgOrders() {
   const btn = document.getElementById('rgl-order-sync');
   if (btn) { btn.disabled = true; btn.textContent = '가져오는 중…'; }
   try {
-    const r = await fetch(`${API}/api/coupang/rg-orders/sync`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ start_date: from, end_date: to }),
-    });
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
+    // 한 번에 몇 달치를 요청하면 쿠팡 페이징이 길어져 응답 전에 프록시가 끊는다.
+    //   달 단위로 끊어 부르고 합산한다 — 중간에 실패해도 앞선 달은 이미 저장돼 있다.
+    const chunks = _monthChunks(from, to);
+    const d = { fetched: 0, lines: 0, orders: 0, rows: 0, newOrders: 0, preserved: 0,
+      delivered: 0, cancelled: 0, withSellerProductId: 0, linesCreated: 0,
+      cancelUnknown: 0, windows: 0, pages: 0 };
+    for (let i = 0; i < chunks.length; i++) {
+      const [cs, ce] = chunks[i];
+      if (btn) btn.textContent = `가져오는 중… (${i + 1}/${chunks.length}) ${cs.slice(0, 7)}`;
+      const r = await fetch(`${API}/api/coupang/rg-orders/sync`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start_date: cs, end_date: ce }),
+      });
+      const part = await r.json();
+      if (part.error) throw new Error(`${cs}~${ce}: ${part.error}`);
+      for (const k of Object.keys(d)) d[k] += Number(part[k]) || 0;
+    }
     if (!d.fetched) {
       // 0건이면 대개 필드명이나 API 권한 문제다 — 원인을 볼 수 있는 곳을 알려준다
       alert([
