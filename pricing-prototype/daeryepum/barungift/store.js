@@ -231,12 +231,20 @@ async function getProductSettings(productId) {
 //   여기서 먼저 걸러 'own' 으로 떨어뜨린다.
 const PRODUCT_CHANNELS = ['own', 'coupang', 'naver', 'cafe24', 'thegift', 'etc'];
 
+/** 채널 배열 정규화 — 알 수 없는 값은 버리고, 비면 'own'.
+ *  빈 배열이면 DB CHECK 에 걸려 저장이 통째로 실패하므로 여기서 반드시 하나는 남긴다. */
+function _normChannels(v) {
+  const list = (Array.isArray(v) ? v : [v]).map(c => String(c ?? '').trim())
+    .filter(c => PRODUCT_CHANNELS.includes(c));
+  return [...new Set(list)].length ? [...new Set(list)] : ['own'];
+}
+
 async function upsertProductSettings(productId, data) {
   const existing = await getProductSettings(productId);
   // 채널은 넘어온 경우에만 손댄다 — 안 보낸 필드를 임의로 'own' 으로 덮으면
   // 다른 화면에서 부분 저장할 때 쿠팡 상품이 조용히 자사로 바뀐다.
-  if ('sales_channel' in data && !PRODUCT_CHANNELS.includes(data.sales_channel)) {
-    data = { ...data, sales_channel: 'own' };
+  if ('sales_channels' in data) {
+    data = { ...data, sales_channels: _normChannels(data.sales_channels) };
   }
 
   if (existing) {
@@ -288,7 +296,7 @@ async function upsertProductSettings(productId, data) {
     canonical_display_name: data.canonical_display_name ?? null, // NULL 이면 product_name 사용
     custom_guide_text: data.custom_guide_text ?? null,           // 고객 order-info STEP1 안내 (migration 034)
     custom_guide_title: data.custom_guide_title ?? null,         // 안내 박스 타이틀 (migration 035)
-    sales_channel: PRODUCT_CHANNELS.includes(data.sales_channel) ? data.sales_channel : 'own', // migration 053
+    sales_channels: _normChannels(data.sales_channels),   // migration 054 (복수 채널)
   };
 
   if (USE_SUPABASE) return sbInsert('bg_product_settings', newSetting);
