@@ -14907,11 +14907,66 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+/**
+ * 쿠팡 자동 동기화 — 컨테이너 안에서 돈다.
+ *
+ * /api/coupang/sync 는 외부 크론이 부를 수 있게 열려 있지만(EXPORT_API_KEY),
+ * 실제로 그 크론을 걸어 둔 곳이 없어 사람이 버튼을 눌러야만 수집됐다.
+ * 로켓그로스 주문·옵션맵까지 같은 핸들러에 얹혀 있으니 여기서 주기적으로 부른다.
+ * 재고 알림 스케줄러와 같은 방식(자기 자신에게 내부 토큰으로 호출).
+ *
+ * 외부 크론을 따로 걸었다면 COUPANG_AUTO_SYNC_DISABLED=1 로 끄면 된다.
+ */
+function scheduleCoupangSync(baseUrl) {
+  if (process.env.COUPANG_AUTO_SYNC_DISABLED === '1') {
+    console.log('[coupang auto-sync] 비활성 (COUPANG_AUTO_SYNC_DISABLED=1)');
+    return;
+  }
+  if (!require('./coupang/api').isConfigured()) {
+    console.log('[coupang auto-sync] 쿠팡 API 키 미설정 — 자동 동기화 건너뜀');
+    return;
+  }
+  const minutes = Math.min(Math.max(parseInt(process.env.COUPANG_SYNC_INTERVAL_MIN, 10) || 15, 5), 1440);
+  const daysBack = Math.min(Math.max(parseInt(process.env.COUPANG_SYNC_DAYS_BACK, 10) || 7, 1), 30);
+  let running = false;
+
+  async function tick() {
+    // 앞 회차가 길어지면 겹쳐 돌지 않게 한다 — 쿠팡 호출량이 두 배가 된다
+    if (running) return;
+    running = true;
+    try {
+      const res = await fetch(`${baseUrl}/api/coupang/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-internal-token': INTERNAL_TOKEN },
+        body: JSON.stringify({ days_back: daysBack }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (d.error) {
+        console.warn('[coupang auto-sync] 실패:', d.error);
+      } else {
+        console.log(`[coupang auto-sync] 마켓플레이스 ${d.fetched ?? '?'}건`
+          + ` · 로켓그로스 ${d.rocket_growth?.orders ?? (d.rocket_growth?.error ? 'ERR' : '-')}건`
+          + ` · 옵션맵 ${d.option_map?.options ?? (d.option_map?.error ? 'ERR' : '-')}개`);
+      }
+    } catch (e) {
+      console.warn('[coupang auto-sync] 오류:', e.message);
+    } finally {
+      running = false;
+    }
+  }
+
+  // 기동 직후는 피한다 — 부팅 중 DB/네트워크가 아직 안 붙었을 수 있다
+  setTimeout(() => { tick().catch(() => {}); }, 60000);
+  setInterval(() => { tick().catch(() => {}); }, minutes * 60000);
+  console.log(`[coupang auto-sync] ${minutes}분 주기 시작 (최근 ${daysBack}일 · 끄려면 COUPANG_AUTO_SYNC_DISABLED=1)`);
+}
+
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`답례품 관리 서버: http://localhost:${PORT}${BASE_PATH || ''}`);
   // 재고 데일리 슬랙 알림 — BG_STOCK_ALERT_ENABLED=1 일 때만 등록
   require('./barungift/stock-alert')
     .scheduleDailyStockAlert(`http://localhost:${PORT}${BASE_PATH || ''}`);
+  scheduleCoupangSync(`http://localhost:${PORT}${BASE_PATH || ''}`);
 });
 
 // 서버 크래시 방지
