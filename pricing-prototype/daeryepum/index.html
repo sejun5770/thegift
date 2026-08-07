@@ -16932,9 +16932,23 @@ async function syncRgOrders() {
     });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
+    if (!d.fetched) {
+      // 0건이면 대개 필드명이나 API 권한 문제다 — 원인을 볼 수 있는 곳을 알려준다
+      alert([
+        '쿠팡에서 받은 주문이 0건입니다.',
+        '',
+        `조회 기간: ${from} ~ ${to} (결제일 기준)`,
+        `호출한 창: ${fmtNum(d.windows)}개 / 페이지 ${fmtNum(d.pages)}회`,
+        '',
+        '아래 주소를 새 탭에서 열어 응답 원본을 확인해 주세요.',
+        `${API}/api/coupang/rg-orders/probe?start_date=${from}&end_date=${to}`,
+      ].join(NL));
+      return;
+    }
     alert([
       '로켓그로스 주문을 가져왔습니다.',
       '',
+      `· 쿠팡 응답 ${fmtNum(d.fetched)}행`,
       `· 주문 ${fmtNum(d.orders)}건 / 상품 ${fmtNum(d.rows)}행`,
       `· 새로 만든 주문 ${fmtNum(d.newOrders || 0)}건`,
       `· 이미 있던 주문 ${fmtNum(d.preserved || 0)}건 (그대로 둠)`,

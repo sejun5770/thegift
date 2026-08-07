@@ -13912,6 +13912,43 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/coupang/rg-orders/probe' && req.method === 'GET') {
+        // 진단용 — RG 주문 API 응답 원본을 그대로 보여준다.
+        //   문서만 보고 맞춘 필드명(orderId/vendorItemId/salesQuantity)이 실제와 다르거나,
+        //   API 키에 로켓그로스 권한이 없으면 '0건' 으로만 보여 원인을 알 수 없다.
+        //   브라우저 주소창으로 바로 열어볼 수 있게 GET 으로 둔다.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const cpApi = require('./coupang/api');
+        const from = String(parsed.query.start_date || '').trim();
+        const to = String(parsed.query.end_date || '').trim();
+        if (!from || !to) {
+          data = { error: 'start_date, end_date 를 YYYY-MM-DD 로 지정하세요 (최대 30일)' };
+        } else if (!cpApi.isConfigured()) {
+          data = { error: 'Coupang API 키 미설정 (COUPANG_VENDOR_ID/ACCESS_KEY/SECRET_KEY)' };
+        } else {
+          const ymd = d => d.replace(/-/g, '');
+          const path = `/v2/providers/rg_open_api/apis/api/v1/vendors/${cpApi.VENDOR_ID}/rg/orders`;
+          try {
+            const raw = await cpApi.listRgOrders({ paidDateFrom: ymd(from), paidDateTo: ymd(to) });
+            const list = Array.isArray(raw?.data) ? raw.data : [];
+            data = {
+              ok: true, path, range: [from, to],
+              top_level_keys: Object.keys(raw || {}),
+              code: raw?.code ?? null, message: raw?.message ?? null,
+              count: list.length,
+              next_token: raw?.nextToken ?? null,
+              item_keys: list[0] ? Object.keys(list[0]) : [],
+              first_items: list.slice(0, 3),
+              // data 가 배열이 아니면 무엇이 왔는지 잘라서 보여준다
+              data_type: Array.isArray(raw?.data) ? 'array' : typeof raw?.data,
+              raw_preview: list.length ? null : JSON.stringify(raw).slice(0, 1500),
+            };
+          } catch (e) {
+            data = { ok: false, path, range: [from, to], error: e.message, status: e.status || null, body: e.body || null };
+          }
+        }
       } else if (pathname === '/api/coupang/rg-orders/sync' && req.method === 'POST') {
         // 로켓그로스 주문 수집 (062) — 마켓플레이스 주문 API 로는 안 나오는 계열.
         //   30일 창을 쪼개 순회하므로 기간이 길면 오래 걸린다. 수동 실행만 한다.
