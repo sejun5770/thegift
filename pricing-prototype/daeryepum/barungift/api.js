@@ -1073,14 +1073,21 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   }
 
   // ============================================
-  // BOM (migration 048) — 판매코드 1개당 재고품목 소요수량
+  // BOM (migration 048 → 050 재구성) — 판매상품 1개의 구성품 목록
   // ============================================
-  // 코드 검증 — parent 는 판매코드(S2_Card.Card_Code), child 는 재고코드(CARD_CODE_ERP)
-  //   붙여넣기 저장 전에 어떤 줄이 매칭되는지 보여주기 위한 공용 헬퍼.
+  // 코드 검증 — parent 는 판매코드(S2_Card.Card_Code).
+  //   구성품은 재고관리 대상이 아니어도 되므로(부자재/포장재) "재고코드로 존재하는가" 는
+  //   오류가 아니라 정보로만 표시한다. 대신 이름을 함께 내려 화면에서 확인할 수 있게 한다.
   async function annotateBomRows(rows) {
     const safe = c => String(c || '').trim().replace(/[^A-Za-z0-9_\-.]/g, '');
-    const codes = [...new Set(rows.flatMap(r => [safe(r.parent_code), safe(r.child_stock_code)]).filter(Boolean))];
-    if (!codes.length) return rows.map(r => ({ ...r, parent_ok: false, child_ok: false }));
+    const codes = [...new Set(rows.flatMap(r => [safe(r.parent_code), safe(r.component_code)]).filter(Boolean))];
+    if (!codes.length) return rows.map(r => ({ ...r, parent_ok: false, component_in_erp: false }));
+    // 재고관리 품목으로 등록돼 있는지 (= 소진 계산에 실제 반영되는지)
+    let registered = new Set();
+    try {
+      registered = new Set((await store.listStockItems())
+        .map(i => String(i.stock_code || '').trim()).filter(Boolean));
+    } catch { /* 등록 목록을 못 읽어도 검증 자체는 진행 */ }
     const p = await getPool();
     const vals = codes.map(c => `('${c}')`).join(',');
     const r = await p.request().query(`
@@ -1089,28 +1096,68 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
              THEN 1 ELSE 0 END AS is_sales,
         CASE WHEN EXISTS (SELECT 1 FROM S2_CARD_ERP_STOCK s WITH (NOLOCK) WHERE s.CARD_CODE_ERP = v.code)
              THEN 1 ELSE 0 END AS is_stock,
+        (SELECT TOP 1 c3.Card_Name FROM S2_Card c3 WITH (NOLOCK) WHERE c3.Card_Code = v.code) AS card_name,
         (SELECT COUNT(DISTINCT c2.Card_Code) FROM S2_Card c2 WITH (NOLOCK)
          WHERE c2.Card_Code LIKE v.code + '[_]%') AS variant_cnt
       FROM (VALUES ${vals}) AS v(code)`);
     const info = new Map((r.recordset || []).map(x => [x.code, x]));
     return rows.map(row => {
-      const pc = info.get(safe(row.parent_code)) || {};
-      const cc = info.get(safe(row.child_stock_code)) || {};
+      const pKey = safe(row.parent_code);
+      const cKey = safe(row.component_code);
+      const pc = info.get(pKey) || {};
+      const cc = info.get(cKey) || {};
       return {
         ...row,
         parent_ok: !!pc.is_sales,
+        parent_name: pc.card_name || null,
         parent_variants: pc.is_sales ? 0 : (pc.variant_cnt || 0),   // 변형코드로만 존재
-        child_ok: !!cc.is_stock,
+        component_name: cc.card_name || null,
+        component_in_erp: !!cc.is_stock,          // ERP 재고코드로 존재 (참고)
+        component_registered: registered.has(cKey),  // 재고관리 품목 등록 = 소진 반영됨
       };
     });
+  }
+
+  /** 판매상품(parent) 기준으로 묶어 내려준다 — BOM 화면이 상품 단위로 열리도록. */
+  function groupBomByParent(rows) {
+    const byParent = new Map();
+    for (const row of rows) {
+      const key = String(row.parent_code || '').trim();
+      if (!key) continue;
+      if (!byParent.has(key)) {
+        byParent.set(key, { parent_code: key, parent_name: row.parent_name || null, parent_ok: row.parent_ok !== false, components: [] });
+      }
+      const g = byParent.get(key);
+      if (!g.parent_name && row.parent_name) g.parent_name = row.parent_name;
+      g.components.push(row);
+    }
+    const ROLE_ORDER = { product: 0, material: 1, package: 2, etc: 3 };
+    return [...byParent.values()].map(g => ({
+      ...g,
+      components: g.components.sort((a, b) =>
+        (ROLE_ORDER[a.component_role] ?? 9) - (ROLE_ORDER[b.component_role] ?? 9)
+        || String(a.component_code).localeCompare(String(b.component_code))),
+      component_count: g.components.length,
+      // 구성품 중 재고관리 품목이 하나도 없으면 소진 계산에 아무 영향이 없다 (화면 경고용)
+      tracked_count: g.components.filter(c => c.component_registered).length,
+    })).sort((a, b) => String(a.parent_code).localeCompare(String(b.parent_code)));
   }
 
   if (pathname === '/api/bg/stock-bom' && method === 'GET') {
     try {
       const rows = await store.listBomRows();
-      if (query.validate === '1') {
-        try { return json(res, { rows: await annotateBomRows(rows) }); }
-        catch (e) { return json(res, { rows, validate_error: e.message }); }
+      const wantGroup = query.group === 'parent';
+      if (query.validate === '1' || wantGroup) {
+        try {
+          const annotated = await annotateBomRows(rows);
+          return json(res, wantGroup
+            ? { parents: groupBomByParent(annotated), total_rows: annotated.length }
+            : { rows: annotated });
+        } catch (e) {
+          return json(res, wantGroup
+            ? { parents: groupBomByParent(rows), total_rows: rows.length, validate_error: e.message }
+            : { rows, validate_error: e.message });
+        }
       }
       return json(res, { rows });
     } catch (err) {

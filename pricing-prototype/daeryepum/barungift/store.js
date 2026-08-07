@@ -1762,30 +1762,13 @@ function _normCodeList(v) {
   return [...new Set(list)].join(',') || null;
 }
 
-/**
- * 소진코드 정규화 — 'A, B*5 , B*5, C * 2' → 'A,B*5,C*2'
- *   배수 1 은 생략, 같은 코드가 두 번 나오면 첫 배수만 남긴다.
- */
-function _normConsumptionCodes(v) {
-  const seen = new Map();
-  for (const raw of String(v ?? '').split(',')) {
-    const t = raw.trim();
-    if (!t) continue;
-    const m = t.match(/^(.+?)\s*\*\s*(\d+)$/);
-    const code = (m ? m[1] : t).trim();
-    if (!code) continue;
-    const mult = m ? Math.max(1, parseInt(m[2], 10) || 1) : 1;
-    if (!seen.has(code)) seen.set(code, mult);
-  }
-  const out = [...seen.entries()].map(([c, n]) => (n > 1 ? `${c}*${n}` : c));
-  return out.join(',') || null;
-}
+// 소진코드(consumption_codes) 는 050 에서 폐기됐다. 구성·소요수량은 bg_stock_bom 이
+//   유일한 기준이며, 재고품목에는 더 이상 같은 의미의 필드를 두지 않는다.
 
 function _normStockItem(m, createdBy) {
   return {
     stock_code: String(m.stock_code ?? '').trim(),
     sales_codes: _normCodeList(m.sales_codes),
-    consumption_codes: _normConsumptionCodes(m.consumption_codes),
     label: m.label ? String(m.label) : null,
     threshold: (m.threshold === '' || m.threshold == null) ? null : Math.max(0, parseInt(m.threshold, 10) || 0),
     sort_order: parseInt(m.sort_order, 10) || 0,
@@ -1833,7 +1816,6 @@ async function updateStockItem(id, data) {
   if ('label' in data) patch.label = data.label ? String(data.label) : null;
   if ('memo' in data) patch.memo = data.memo ? String(data.memo) : null;
   if ('sales_codes' in data) patch.sales_codes = _normCodeList(data.sales_codes);
-  if ('consumption_codes' in data) patch.consumption_codes = _normConsumptionCodes(data.consumption_codes);
   if ('stock_code' in data) {
     const s = String(data.stock_code ?? '').trim();
     if (!s) throw new Error('재고코드는 비울 수 없습니다');
@@ -1877,34 +1859,42 @@ async function removeStockItem(id) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// BOM (migration 048) — 판매코드 1개당 재고품목 소요수량 (1단)
+// BOM (migration 048 → 050 재구성) — 판매상품 1개의 구성품 목록
+//   parent_code    판매가 일어나는 품목코드
+//   component_code 구성품 코드. 재고관리 품목이 아니어도 등록할 수 있다 (부자재/포장재).
+//   component_role product=원물 / material=부자재 / package=포장재 / etc=기타
 // ─────────────────────────────────────────────────────────────
 
+const BOM_ROLES = ['product', 'material', 'package', 'etc'];
+const _normRole = v => (BOM_ROLES.includes(String(v || '').trim()) ? String(v).trim() : 'material');
+
 async function listBomRows() {
-  if (USE_SUPABASE) return sbGet('bg_stock_bom', 'order=parent_code.asc,child_stock_code.asc&limit=5000');
+  if (USE_SUPABASE) return sbGet('bg_stock_bom', 'order=parent_code.asc,component_code.asc&limit=5000');
   return readJson(FILES.stockBom, [])
-    .sort((a, b) => String(a.parent_code).localeCompare(String(b.parent_code)));
+    .sort((a, b) => String(a.parent_code).localeCompare(String(b.parent_code))
+      || String(a.component_code).localeCompare(String(b.component_code)));
 }
 
-/** BOM 행 일괄 등록 — (parent_code, child_stock_code) 중복은 갱신 */
+/** BOM 행 일괄 등록 — (parent_code, component_code) 중복은 갱신 */
 async function addBomRows(rows, createdBy = null) {
   const norm = (Array.isArray(rows) ? rows : []).map(r => ({
     parent_code: String(r.parent_code ?? '').trim(),
-    child_stock_code: String(r.child_stock_code ?? '').trim(),
+    component_code: String(r.component_code ?? '').trim(),
     qty: Math.max(1, parseInt(r.qty, 10) || 1),
+    component_role: _normRole(r.component_role),
     memo: r.memo ? String(r.memo) : null,
     created_by: createdBy,
-  })).filter(r => r.parent_code && r.child_stock_code);
+  })).filter(r => r.parent_code && r.component_code);
   if (!norm.length) return [];
   const seen = new Set();
   const uniq = norm.filter(r => {
-    const k = `${r.parent_code}|${r.child_stock_code}`;
+    const k = `${r.parent_code}|${r.component_code}`;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
   });
   if (USE_SUPABASE) {
-    const res = await fetch(`${REST_BASE}/bg_stock_bom?on_conflict=parent_code,child_stock_code`, {
+    const res = await fetch(`${REST_BASE}/bg_stock_bom?on_conflict=parent_code,component_code`, {
       method: 'POST',
       headers: { ...HEADERS, Prefer: 'resolution=merge-duplicates,return=representation' },
       body: JSON.stringify(uniq),
@@ -1913,7 +1903,7 @@ async function addBomRows(rows, createdBy = null) {
     return res.json();
   }
   const list = readJson(FILES.stockBom, [])
-    .filter(m => !seen.has(`${m.parent_code}|${m.child_stock_code}`));
+    .filter(m => !seen.has(`${m.parent_code}|${m.component_code}`));
   const added = uniq.map(r => ({ id: uuid(), ...r, created_at: now(), updated_at: now() }));
   writeJson(FILES.stockBom, list.concat(added));
   return added;
@@ -1924,6 +1914,12 @@ async function updateBomRow(id, data) {
   const patch = { updated_at: now() };
   if ('qty' in data) patch.qty = Math.max(1, parseInt(data.qty, 10) || 1);
   if ('memo' in data) patch.memo = data.memo ? String(data.memo) : null;
+  if ('component_role' in data) patch.component_role = _normRole(data.component_role);
+  if ('component_code' in data) {
+    const c = String(data.component_code ?? '').trim();
+    if (!c) throw new Error('구성품 코드는 비울 수 없습니다');
+    patch.component_code = c;
+  }
   if (USE_SUPABASE) return sbUpdate('bg_stock_bom', `id=eq.${encodeURIComponent(id)}`, patch);
   const list = readJson(FILES.stockBom, []);
   const idx = list.findIndex(m => m.id === id);
@@ -1944,6 +1940,7 @@ async function removeBomRow(id) {
 }
 
 module.exports = {
+  BOM_ROLES,
   listBomRows,
   addBomRows,
   updateBomRow,

@@ -7868,48 +7868,35 @@ const server = http.createServer(async (req, res) => {
           // 재고코드 / 매출코드 분리 (운영 결정 2026-08-05)
           //   재고는 stock_code 로만 조회하고, 매출은 sales_codes 에 적힌 품목코드만 합산한다.
           //   자동 매핑을 쓰면 ERP코드-품목코드가 1:N 이라 의도치 않은 코드까지 섞인다.
-          // 소진코드 파싱 — 'CODE*5' 형식. 비어 있으면 매출코드를 배수 1 로 사용.
-          //   한 원물이 여러 세트로도 팔려 재고가 그만큼 더 빠지고, 세트 1개에
-          //   원물이 여러 개 들어가기도 한다 (데일리너츠 = 세트 1개당 5개).
-          const parseConsume = raw => String(raw || '').split(',').map(s => s.trim()).filter(Boolean)
-            .map(t => {
-              const m = t.match(/^(.+?)\s*\*\s*(\d+)$/);
-              const code = safe(m ? m[1] : t);
-              const mult = m ? Math.max(1, parseInt(m[2], 10) || 1) : 1;
-              return code ? { code, mult } : null;
-            }).filter(Boolean);
-
-          // BOM (migration 048) — 재고코드별 [판매코드 × 소요수량]
-          let bomByChild = new Map();
+          // BOM (migration 050) — 구성품코드별 [판매코드 × 소요수량].
+          //   BOM 은 "판매상품 1개가 무엇으로 구성되나" 를 정의하고, 재고 소진은 거기서 파생된다.
+          //   050 이전의 소진코드(bg_stock_items.consumption_codes)는 폐기 — BOM 이 유일한 기준.
+          let bomByComponent = new Map();
           try {
             for (const b of await bgStore.listBomRows()) {
-              const child = safe(b.child_stock_code);
+              const comp = safe(b.component_code);
               const parent = safe(b.parent_code);
-              if (!child || !parent) continue;
-              if (!bomByChild.has(child)) bomByChild.set(child, []);
-              bomByChild.get(child).push({ code: parent, mult: Math.max(1, parseInt(b.qty, 10) || 1) });
+              if (!comp || !parent) continue;
+              if (!bomByComponent.has(comp)) bomByComponent.set(comp, []);
+              bomByComponent.get(comp).push({ code: parent, mult: Math.max(1, parseInt(b.qty, 10) || 1) });
             }
           } catch { /* 테이블 없으면 BOM 미적용 */ }
 
-          // 소진코드 결정 — 수동 지정 > BOM 자동 > 매출코드
-          //   BOM 자동: 매출코드를 ×1 로 깔고, BOM 에 있는 판매코드는 BOM 수량으로 덮어쓴다.
+          // 소진 대상 = BOM 구성 + 직접판매.
+          //   · BOM: 이 재고코드를 구성품으로 쓰는 판매코드 × 소요수량
+          //   · 직접판매: BOM parent 에 없는 매출코드 × 1 (원물이 단독으로도 팔리는 경우)
+          //   매출코드가 BOM parent 와 겹치면 BOM 수량을 쓴다 — 같은 판매를 두 번 세지 않는다.
           const regRows = regItems.map(it => {
             const sales = String(it.sales_codes || '').split(',').map(s => safe(s)).filter(Boolean);
             const stock = safe(it.stock_code);
-            let consume, source;
-            if (String(it.consumption_codes || '').trim()) {
-              consume = parseConsume(it.consumption_codes);
-              source = 'manual';
-            } else if (bomByChild.has(stock)) {
-              const merged = new Map(sales.map(c => [c, 1]));
-              for (const b of bomByChild.get(stock)) merged.set(b.code, b.mult);
-              consume = [...merged.entries()].map(([code, mult]) => ({ code, mult }));
-              source = 'bom';
-            } else {
-              consume = sales.map(c => ({ code: c, mult: 1 }));
-              source = 'sales';
-            }
-            return { row: it, stock, sales, consume, consumeSource: source };
+            const bomRows = bomByComponent.get(stock) || [];
+            const merged = new Map(bomRows.map(b => [b.code, b.mult]));
+            for (const c of sales) if (!merged.has(c)) merged.set(c, 1);
+            return {
+              row: it, stock, sales,
+              consume: [...merged.entries()].map(([code, mult]) => ({ code, mult })),
+              consumeSource: bomRows.length ? 'bom' : 'sales',
+            };
           }).filter(r => r.stock);
           const valuesClause = [...new Set(regRows.map(r => r.stock))].map(c => `('${c}')`).join(',');
           if (!valuesClause) {
@@ -8190,9 +8177,9 @@ const server = http.createServer(async (req, res) => {
             return {
               stock_code: r.stock_code,          // 재고 조회 코드
               sales_codes: cardCodes,            // 매출 조회 코드 (등록값 그대로)
-              consumption_codes: (regRow.consume || []).map(c => (c.mult > 1 ? `${c.code}*${c.mult}` : c.code)),
-              consumption_source: regRow.consumeSource,       // 'manual' | 'bom' | 'sales'
-              consumption_explicit: regRow.consumeSource === 'manual',
+              // 소진 기준 — 저장값이 아니라 BOM + 매출코드에서 파생된 결과 (050)
+              consume_codes: (regRow.consume || []).map(c => ({ code: c.code, mult: c.mult })),
+              consume_source: regRow.consumeSource,           // 'bom' | 'sales'
               consume_qty_30d: consumeQty30d,    // 재고 소진 수량 (배수 반영)
               // 품목코드가 아닌 값이 매출·소진코드에 들어간 경우 (조용히 0 이 되는 것 방지)
               bad_codes: [...new Set([...cardCodes, ...(regRow.consume || []).map(c => c.code)])]
