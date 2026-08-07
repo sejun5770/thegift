@@ -2297,7 +2297,8 @@ nav.nav-loading a[href^="#"] {
     </div>
     <div id="stock-alert-list" style="font-size:12px;color:var(--gray-500)">불러오는 중…</div>
     <div style="margin-top:8px;font-size:11px;color:var(--gray-500);line-height:1.6">
-      아래 표의 🔔 버튼으로 알림 대상을 추가/제외합니다.
+      아래 표의 🔔 버튼으로 알림 대상을 추가/제외합니다. <b>대상 보기</b> 를 열면 칩을 눌러 여러 개를 골라
+      임계치를 한 번에 지정하거나 알림을 해제할 수 있습니다.
       임계치를 지정하면 <b>가용재고 ≤ 임계치</b>일 때 경고로 표시되고, 미지정이면 <b>소진예상 30일 이하</b>가 경고 기준입니다.
     </div>
   </div>
@@ -14348,6 +14349,30 @@ async function loadStockAlerts() {
   }
 }
 
+// 알림 대상 목록 — 기본은 접어둔다. 품목이 수십 개면 설정 영역이 화면을 다 먹는다.
+let _alertListOpen = false;
+let _alertSelected = new Set();   // 선택된 등록 id
+
+function toggleStockAlertList() {
+  _alertListOpen = !_alertListOpen;
+  if (!_alertListOpen) _alertSelected.clear();
+  renderStockAlertList();
+}
+
+function toggleAlertSelect(id) {
+  if (_alertSelected.has(id)) _alertSelected.delete(id); else _alertSelected.add(id);
+  renderStockAlertList();
+}
+
+function clearAlertSelection() { _alertSelected.clear(); renderStockAlertList(); }
+
+function selectAllAlerts() {
+  const on = _stockAlerts.filter(a => a.enabled !== false && a.alert_enabled !== false);
+  const all = on.length && on.every(a => _alertSelected.has(a.id));
+  _alertSelected = all ? new Set() : new Set(on.map(a => a.id));
+  renderStockAlertList();
+}
+
 function renderStockAlertList() {
   const $list = document.getElementById('stock-alert-list');
   if (!$list) return;
@@ -14360,16 +14385,97 @@ function renderStockAlertList() {
     $list.innerHTML = `<span style="color:var(--gray-500)">등록 품목 ${_stockAlerts.length}개 중 알림 대상이 없습니다. 표의 🔔 을 켜세요.</span>`;
     return;
   }
-  $list.innerHTML = `<div style="margin-bottom:6px;color:var(--gray-500)">등록 ${_stockAlerts.length}개 중 <b>${on.length}개</b> 발송</div>`
-    + '<div style="display:flex;flex-wrap:wrap;gap:6px">' + on.map(a => {
-    const thr = a.threshold == null ? '임계 미지정' : `임계 ${fmtNum(a.threshold)}`;
-    return `<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid var(--gray-300);border-radius:999px;background:#fff">
+  // 선택은 화면에 보이는 대상만 유효 — 알림이 꺼진 품목이 선택에 남지 않게 정리
+  const onIds = new Set(on.map(a => a.id));
+  [..._alertSelected].forEach(id => { if (!onIds.has(id)) _alertSelected.delete(id); });
+
+  const head = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--gray-500)">
+      <span>등록 ${_stockAlerts.length}개 중 <b>${on.length}개</b> 발송</span>
+      <button onclick="toggleStockAlertList()" style="border:1px solid var(--gray-300);background:#fff;border-radius:6px;cursor:pointer;font-size:11px;padding:2px 8px">
+        ${_alertListOpen ? '▾ 접기' : '▸ 대상 보기'}
+      </button>
+    </div>`;
+  if (!_alertListOpen) { $list.innerHTML = head; return; }
+
+  const sel = _alertSelected.size;
+  const bar = `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0;padding:${sel ? '7px 10px' : '0'};background:${sel ? '#eef2ff' : 'transparent'};border:${sel ? '1px solid #c7d2fe' : 'none'};border-radius:8px">
+      <button onclick="selectAllAlerts()" style="border:1px solid var(--gray-300);background:#fff;border-radius:6px;cursor:pointer;font-size:11px;padding:3px 10px">
+        ${sel === on.length ? '전체 해제' : '전체 선택'}
+      </button>
+      ${sel ? `<b style="font-size:11px;color:#3730a3">${sel}개 선택</b>
+        <button onclick="bulkSetAlertThreshold()" style="border:1px solid var(--gray-300);background:#fff;border-radius:6px;cursor:pointer;font-size:11px;padding:3px 10px">임계치 설정</button>
+        <button onclick="bulkDisableAlerts()" style="border:1px solid var(--gray-300);background:#fff;border-radius:6px;cursor:pointer;font-size:11px;padding:3px 10px;color:#b45309">알림 해제</button>
+        <button onclick="clearAlertSelection()" style="border:1px solid var(--gray-300);background:#fff;border-radius:6px;cursor:pointer;font-size:11px;padding:3px 10px">선택 해제</button>`
+        : '<span style="font-size:11px;color:var(--gray-400)">칩을 눌러 선택하면 임계치를 한 번에 지정하거나 알림을 해제할 수 있습니다</span>'}
+    </div>`;
+
+  const chips = on.map(a => {
+    const picked = _alertSelected.has(a.id);
+    // 임계치는 지정된 것만 적는다 — '미지정' 을 일일이 쓰면 눈에 걸리기만 한다.
+    const thr = a.threshold == null ? ''
+      : `<span style="font-size:11px;color:var(--gray-600)">임계 ${fmtNum(a.threshold)}</span>`;
+    return `<span onclick="toggleAlertSelect('${esc(a.id)}')" title="클릭해서 선택"
+      style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid ${picked ? '#6366f1' : 'var(--gray-300)'};border-radius:999px;background:${picked ? '#eef2ff' : '#fff'};cursor:pointer">
+      <span style="font-size:10px;color:${picked ? '#4338ca' : 'var(--gray-300)'}">${picked ? '✔' : '○'}</span>
       <span style="font-family:monospace;font-size:11px">${esc(a.stock_code)}</span>
       <span style="font-size:11px">${esc(a.label || '')}</span>
-      <button title="임계치 변경" onclick="editStockAlertThreshold('${esc(a.id)}')"
-              style="border:none;background:none;cursor:pointer;font-size:11px;color:var(--gray-600);padding:0">${thr}</button>
+      ${thr}
     </span>`;
-  }).join('') + '</div>';
+  }).join('');
+
+  $list.innerHTML = head + bar + `<div style="display:flex;flex-wrap:wrap;gap:6px">${chips}</div>`;
+}
+
+/** 선택한 품목의 임계치를 한 번에 지정 (빈 값이면 미지정 = 소진예상 30일 기준) */
+async function bulkSetAlertThreshold() {
+  const ids = [..._alertSelected];
+  if (!ids.length) return;
+  const input = prompt(
+    `선택한 ${ids.length}개 품목의 경고 임계치를 지정합니다.\n\n`
+    + `가용재고가 이 값 이하이면 ⚠️ 로 표시됩니다.\n`
+    + `비우면 미지정 — 소진예상 30일 기준으로 판정합니다.`, '');
+  if (input === null) return;
+  const v = input.trim();
+  if (v !== '' && !/^\d+$/.test(v)) { alert('0 이상의 정수를 입력하세요.'); return; }
+  const threshold = v === '' ? null : parseInt(v, 10);
+  try {
+    await _patchAlerts(ids, { threshold });
+    _alertSelected.clear();
+    showToast(`${ids.length}개 품목 임계치 ${threshold === null ? '미지정' : fmtNum(threshold)}`);
+    await Promise.all([loadStockAlerts(), loadDaeryepumStock()]);
+  } catch (e) { alert(`설정 실패: ${e.message}`); }
+}
+
+/** 선택한 품목을 데일리 알림에서 제외 (표의 🔔 끄기와 같은 동작) */
+async function bulkDisableAlerts() {
+  const ids = [..._alertSelected];
+  if (!ids.length) return;
+  if (!confirm(`선택한 ${ids.length}개 품목을 슬랙 데일리 알림에서 제외합니다.\n\n재고 목록에는 그대로 남고, 표의 🔔 로 언제든 다시 켤 수 있습니다.`)) return;
+  try {
+    await _patchAlerts(ids, { alert_enabled: false });
+    _alertSelected.clear();
+    showToast(`${ids.length}개 품목 알림 해제`);
+    await Promise.all([loadStockAlerts(), loadDaeryepumStock()]);
+  } catch (e) { alert(`해제 실패: ${e.message}`); }
+}
+
+/** 여러 등록 건에 같은 patch 적용 — 하나라도 실패하면 어떤 코드가 실패했는지 알려준다 */
+async function _patchAlerts(ids, patch) {
+  const failed = [];
+  for (const id of ids) {
+    try {
+      const r = await fetch(`${API}/api/bg/stock-alerts/${encodeURIComponent(id)}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+    } catch (e) {
+      const a = _stockAlerts.find(x => x.id === id);
+      failed.push(`${a ? a.stock_code : id}: ${e.message}`);
+    }
+  }
+  if (failed.length) throw new Error(`${failed.length}건 실패\n${failed.join('\n')}`);
 }
 
 // ─── 품목 등록 ───
@@ -14746,25 +14852,8 @@ async function toggleStockItemAlert(id, turnOn) {
   } catch (e) { alert(`실패: ${e.message}`); }
 }
 
-async function editStockAlertThreshold(id) {
-  const a = _stockAlerts.find(x => x.id === id);
-  if (!a) return;
-  const cur = a.threshold == null ? '' : String(a.threshold);
-  const input = prompt(`${a.stock_code} 경고 임계치 (가용재고 이하이면 ⚠️)\n비우면 소진예상 30일 기준으로 판정합니다.`, cur);
-  if (input === null) return;
-  const v = input.trim();
-  if (v !== '' && !/^\d+$/.test(v)) { alert('0 이상의 정수를 입력하세요.'); return; }
-  try {
-    const r = await fetch(`${API}/api/bg/stock-alerts/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ threshold: v === '' ? null : parseInt(v, 10) }),
-    });
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    await loadStockAlerts();
-  } catch (e) { alert(`실패: ${e.message}`); }
-}
+// 단건 임계치 변경은 표의 ✎ (등록 정보 수정) 과 칩 다중선택 > 임계치 설정 으로 한다.
+//   칩마다 있던 임계치 버튼은 제거 — '임계 미지정' 문구가 목록 전체에 깔려 읽기만 방해했다.
 
 async function toggleStockAlertEnabled(id, turnOn) {
   try {
