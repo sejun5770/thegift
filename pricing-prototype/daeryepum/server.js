@@ -13861,7 +13861,44 @@ const server = http.createServer(async (req, res) => {
               ok: true, kind: parsed.kind, upserted: up.upserted,
               dates: parsed.dates, summary: parsed.summary, skipped: parsed.skipped,
             };
+            // 업로드된 내용이 곧 실제 진행 상태 — 정보입력현황 단계를 바로 맞춘다.
+            //   실패해도 업로드 자체는 성공으로 둔다 (연동은 버튼으로 다시 돌릴 수 있다).
+            try {
+              const { syncRocketGrowthWorkflow } = require('./coupang/rg-workflow');
+              data.workflow = await syncRocketGrowthWorkflow({
+                dryRun: false, by: `rg-upload:${session?.email || 'system'}`,
+              });
+            } catch (e) {
+              console.warn('[rfm/lines upload] 워크플로우 연동 실패:', e.message);
+              data.workflow_error = e.message;
+            }
           }
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/coupang/rfm/workflow-sync' && req.method === 'POST') {
+        // 로켓그로스 리포트 → 정보입력현황 단계 반영 (배송완료 → 출고완료 / 미배송 → 포장완료).
+        //   업로드 시 자동으로 한 번 돌지만, 상품설정을 나중에 고친 경우 등 수동 재실행용.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const body = await new Promise((resolve) => {
+          let raw = '';
+          req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+        });
+        const dryRun = body.dry_run !== false;   // 기본은 미리보기
+        logAdminAccess(session, req, 'coupang-rg-workflow-sync', { dry_run: dryRun });
+        try {
+          const { syncRocketGrowthWorkflow } = require('./coupang/rg-workflow');
+          data = await syncRocketGrowthWorkflow({
+            dryRun,
+            startDate: body.start_date || null,
+            endDate: body.end_date || null,
+            by: `rg-sync:${session?.email || 'system'}`,
+          });
         } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: e.message }));

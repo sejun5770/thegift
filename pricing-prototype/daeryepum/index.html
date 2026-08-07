@@ -1150,6 +1150,8 @@ nav.nav-loading a[href^="#"] {
       <input type="date" id="rgl-to" onchange="loadRgLines()" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
       <button class="btn" style="padding:5px 12px;font-size:12px" onclick="loadRgLines()">🔄 조회</button>
       <button class="btn" style="padding:5px 12px;font-size:12px" onclick="downloadRgLinesXlsx()">📥 엑셀</button>
+      <button class="btn" id="rgl-wf-sync" style="padding:5px 12px;font-size:12px" onclick="syncRgWorkflow()"
+        title="배송완료일이 있는 건은 출고완료, 아직 없는 건은 포장완료로 정보입력현황 단계를 맞춥니다. 이미 더 진행된 건은 그대로 둡니다.">🔗 정보입력현황 연동</button>
       <div style="flex:1"></div>
       <span id="rgl-summary" style="font-size:12px;color:var(--gray-600)"></span>
     </div>
@@ -16731,6 +16733,8 @@ async function rglConfirmUpload() {
   const done = [];
   const failed = [];
   let lastKind = null, from = null, to = null;
+  // 업로드 직후 서버가 정보입력현황 단계까지 맞춘다 — 몇 건이 옮겨갔는지 보여준다
+  let wfShipped = 0, wfPacked = 0;
   for (let i = 0; i < _rglFiles.length; i++) {
     const f = _rglFiles[i];
     $st.style.color = 'var(--gray-500)';
@@ -16743,6 +16747,7 @@ async function rglConfirmUpload() {
       const d = await r.json();
       if (d.error) throw new Error(d.error);
       done.push(`${f.name} ${fmtNum(d.upserted)}건`);
+      if (d.workflow) { wfShipped += d.workflow.toShipped || 0; wfPacked += d.workflow.toPacked || 0; }
       lastKind = d.kind;
       if (d.dates?.from && (!from || d.dates.from < from)) from = d.dates.from;
       if (d.dates?.to && (!to || d.dates.to > to)) to = d.dates.to;
@@ -16754,7 +16759,8 @@ async function rglConfirmUpload() {
     $st.innerHTML = `${done.length}개 등록 · <b>${failed.length}개 실패</b><br>`
       + failed.map(x => `<span style="font-size:11px">${esc(x)}</span>`).join('<br>');
   } else {
-    showToast(`${done.length}개 파일 등록 — ${done.join(' · ')}`);
+    showToast(`${done.length}개 파일 등록 — ${done.join(' · ')}`
+      + (wfShipped || wfPacked ? ` / 정보입력현황 출고완료 ${fmtNum(wfShipped)}건 · 포장완료 ${fmtNum(wfPacked)}건 반영` : ''));
   }
   // 방금 올린 범위로 맞춰 결과가 바로 보이게 한다
   const sel = document.getElementById('rgl-basis');
@@ -16834,6 +16840,47 @@ function renderRgLines() {
         ${cell(r.sales_qty)}${cell(r.item_qty ?? r.sales_qty, (r.sales_unit > 1 ? 'font-weight:600' : 'color:var(--gray-400)'))}${cell(r.sales_amount)}${cell(r.commission)}${cell(r.inout_fee)}${cell(r.shipping_fee)}${cell(r.settlement_amount, 'font-weight:600')}
       </tr>`;
     }).join('') + '</tbody></table>';
+}
+
+/**
+ * 로켓그로스 리포트 → 정보입력현황 단계 반영.
+ *   미리보기(dry run)로 무엇이 바뀌는지 먼저 보여주고, 확인을 받은 뒤에만 반영한다.
+ *   업로드 시에도 자동으로 한 번 돌지만, 상품설정을 나중에 고친 경우 여기서 다시 돌린다.
+ */
+async function syncRgWorkflow() {
+  const btn = document.getElementById('rgl-wf-sync');
+  const call = async (dryRun) => {
+    const r = await fetch(`${API}/api/coupang/rfm/workflow-sync`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dry_run: dryRun }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    return d;
+  };
+  if (btn) { btn.disabled = true; btn.textContent = '확인 중...'; }
+  try {
+    const dry = await call(true);
+    if (!dry.patchedOrders) {
+      showToast(`바뀔 것이 없습니다 (주문 ${fmtNum(dry.scanned)}건 확인, 이미 반영 ${fmtNum(dry.alreadyDone)}건)`);
+      return;
+    }
+    const msg = `주문 ${fmtNum(dry.scanned)}건 중 ${fmtNum(dry.patchedOrders)}건을 반영합니다.`
+      + `\n\n· 출고완료 ${fmtNum(dry.toShipped)}건 (배송완료일 있음)`
+      + `\n· 포장완료 ${fmtNum(dry.toPacked)}건 (배송완료일 아직 없음)`
+      + `\n· 이미 반영됨 ${fmtNum(dry.alreadyDone)}건`
+      + (dry.noCustomerInfo ? `\n· 주문정보 없음 ${fmtNum(dry.noCustomerInfo)}건 (건너뜀)` : '')
+      + `\n\n이미 더 진행된 건은 그대로 둡니다. 계속할까요?`;
+    if (!confirm(msg)) return;
+    if (btn) btn.textContent = '반영 중...';
+    const run = await call(false);
+    showToast(`연동 완료 — 출고완료 ${fmtNum(run.toShipped)}건 · 포장완료 ${fmtNum(run.toPacked)}건`
+      + (run.failed ? ` (실패 ${fmtNum(run.failed)}건)` : ''));
+  } catch (e) {
+    alert(`연동 실패: ${e.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔗 정보입력현황 연동'; }
+  }
 }
 
 function downloadRgLinesXlsx() {

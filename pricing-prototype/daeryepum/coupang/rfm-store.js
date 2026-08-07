@@ -240,9 +240,31 @@ async function listOrderLines({ basis = 'paid', startDate, endDate } = {}) {
   return res.json();
 }
 
+/**
+ * 날짜 축을 가리지 않고 전부 — 워크플로우 연동용.
+ *   listOrderLines 는 basis 컬럼이 NULL 인 행을 잘라내는데,
+ *   여기서는 배송완료일이 아직 없는 행(= 포장완료 대상)이 바로 그 대상이라 쓸 수 없다.
+ *   기간을 주면 두 날짜 중 하나라도 범위에 들면 가져온다.
+ */
+async function listAllOrderLines({ startDate, endDate, limit = 20000 } = {}) {
+  if (!USE) return [];
+  const f = [`order=paid_date.desc.nullslast`, `limit=${limit}`];
+  const range = (col) => {
+    const parts = [];
+    if (startDate) parts.push(`${col}.gte.${startDate}`);
+    if (endDate) parts.push(`${col}.lte.${endDate}`);
+    return parts.length > 1 ? `and(${parts.join(',')})` : parts[0];
+  };
+  if (startDate || endDate) f.push(`or=(${range('paid_date')},${range('delivered_date')})`);
+  const res = await fetch(`${REST}/coupang_rg_order_lines?${f.join('&')}`, { headers: HDR });
+  if (!res.ok) throw new Error(`Supabase rg_order_lines [${res.status}]: ${(await res.text()).slice(0, 200)}`);
+  return res.json();
+}
+
 module.exports = {
   upsertOrderLines,
   listOrderLines,
+  listAllOrderLines,
   USE,
   upsertSales,
   upsertManualSale,
