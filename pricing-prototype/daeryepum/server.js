@@ -13977,7 +13977,30 @@ const server = http.createServer(async (req, res) => {
         const cpApi = require('./coupang/api');
         const from = String(parsed.query.start_date || '').trim();
         const to = String(parsed.query.end_date || '').trim();
-        if (!from || !to) {
+        const probeOrderId = String(parsed.query.order_id || '').trim();
+        if (probeOrderId) {
+          // 단건 조회 계열이 로켓그로스 주문에도 먹히는지 확인한다.
+          //   먹히면 취소·배송완료를 정산 리포트 없이 크론으로 찍을 수 있다.
+          //   두 경로를 다 때려 보고 어느 쪽이 상태를 주는지 그대로 보여준다.
+          const tryCall = async (label, fn) => {
+            try {
+              const r = await fn();
+              return { label, ok: true, preview: JSON.stringify(r).slice(0, 1200) };
+            } catch (e) {
+              return { label, ok: false, status: e.status || null, error: String(e.message).slice(0, 400) };
+            }
+          };
+          data = {
+            order_id: probeOrderId,
+            results: [
+              await tryCall('marketplace /{orderId}/ordersheets', () => cpApi.getOrderSheet(probeOrderId)),
+              await tryCall('rg_open_api /rg/orders/{orderId}', () => cpApi.callCoupang(
+                'GET',
+                `/v2/providers/rg_open_api/apis/api/v1/vendors/${cpApi.VENDOR_ID}/rg/orders/${probeOrderId}`,
+                '')),
+            ],
+          };
+        } else if (!from || !to) {
           data = { error: 'start_date, end_date 를 YYYY-MM-DD 로 지정하세요 (최대 30일)' };
         } else if (!cpApi.isConfigured()) {
           data = { error: 'Coupang API 키 미설정 (COUPANG_VENDOR_ID/ACCESS_KEY/SECRET_KEY)' };
