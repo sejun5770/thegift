@@ -20,6 +20,7 @@ const api = require('./api');
 const store = require('./store');
 const bgStore = require('../barungift/store');
 const rfmStore = require('./rfm-store');
+const optionMap = require('./option-map');
 const { enrichOrderItem, calcCoupangShipDate } = require('./option-mapper');
 
 /** 'YYYY-MM-DD' → 그 날 정오(KST) ISO. 자정으로 잡으면 UTC 변환에서 하루 밀린다. */
@@ -69,12 +70,14 @@ async function syncRgOrders({ startDate, endDate, dryRun = false } = {}) {
   if (!api.isConfigured()) throw new Error('Coupang API 키 미설정 (COUPANG_VENDOR_ID/ACCESS_KEY/SECRET_KEY)');
   if (!startDate || !endDate) throw new Error('조회 기간(startDate/endDate)이 필요합니다');
 
-  const [fetched, productSettings, stickers, reportLines] = await Promise.all([
+  const [fetched, productSettings, stickers, reportLines, optToProduct] = await Promise.all([
     api.listAllRgOrders({ startDate, endDate }),
     bgStore.getAllProductSettings().catch(() => []),
     bgStore.getAllStickers(true).catch(() => []),
     // 등록상품ID·배송완료일 보강용. 없으면 없는 대로 진행한다.
     rfmStore.listAllOrderLines({ startDate, endDate }).catch(() => []),
+    // 옵션ID → 등록상품ID (063). 리포트가 없는 기간의 상품코드를 여기서 잇는다.
+    optionMap.getOptionToProduct().catch(() => new Map()),
   ]);
 
   const byKey = new Map();
@@ -104,7 +107,10 @@ async function syncRgOrders({ startDate, endDate, dryRun = false } = {}) {
       seen.add(key);
 
       const line = byKey.get(key);
-      const sellerProductId = line?.seller_product_id ? String(line.seller_product_id) : null;
+      // 등록상품ID 는 API 가 안 준다 — 리포트 > 옵션맵 순으로 메운다.
+      const sellerProductId = (line?.seller_product_id && String(line.seller_product_id))
+        || optToProduct.get(vid)
+        || null;
       const qty = Number(it.salesQuantity) || 0;
       const unit = byOption.get(vid) || (sellerProductId ? byProduct.get(sellerProductId) : null) || 1;
       // unitSalesPrice 는 "30990.0" 같은 문자열로 온다
@@ -153,6 +159,7 @@ async function syncRgOrders({ startDate, endDate, dryRun = false } = {}) {
     orders: new Set(rows.map(r => r.coupang_order_id)).size,
     rows: rows.length, skipped,
     withSellerProductId: rows.filter(r => r.product_code).length,
+    optionMapSize: optToProduct.size,
     delivered: rows.filter(r => r.status === 'FINAL_DELIVERY').length,
     cancelled: rows.filter(r => r.status === 'CANCEL').length,
     // 리포트에 대응 라인이 없어 취소 여부를 판단할 수 없는 행 — 리포트를 올리면 줄어든다
@@ -182,6 +189,7 @@ async function syncRgOrders({ startDate, endDate, dryRun = false } = {}) {
         paid_date: new Date(new Date(r.paid_at).getTime() + 9 * 3600 * 1000)
           .toISOString().slice(0, 10),
         product_name: r.product_name,
+        seller_product_id: r.product_code || null,   // 옵션맵으로 이었으면 여기서 상품코드가 잡힌다
         sales_qty: r.raw_payload._cart_qty,
         is_cancel: r.status === 'CANCEL',
       }));

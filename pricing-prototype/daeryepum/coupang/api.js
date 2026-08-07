@@ -224,6 +224,43 @@ async function getOrderSheet(orderId) {
 }
 
 /**
+ * 등록상품 목록 — 옵션ID ↔ 등록상품ID 를 잇기 위해 쓴다.
+ *   GET /v2/providers/seller_api/apis/api/v1/marketplace/seller-products
+ *   businessTypes='rocketGrowth' 면 로켓그로스 상품만.
+ *
+ *   응답 data[]: { sellerProductId, sellerProductName,
+ *                  items: [{ itemName, marketPlaceItem:{vendorItemId},
+ *                            rocketGrowthItem:{vendorItemId} }] }
+ */
+async function listSellerProducts({ businessTypes, nextToken, maxPerPage = 100 } = {}) {
+  const params = new URLSearchParams();
+  params.set('vendorId', VENDOR_ID);
+  if (businessTypes) params.set('businessTypes', String(businessTypes));
+  params.set('maxPerPage', String(Math.min(Math.max(parseInt(maxPerPage, 10) || 100, 1), 100)));
+  if (nextToken) params.set('nextToken', String(nextToken));
+  const path = '/v2/providers/seller_api/apis/api/v1/marketplace/seller-products';
+  return callCoupang('GET', path, params.toString());
+}
+
+/** 전체 페이지 순회 (분당 호출 제한 고려해 페이지 사이 대기) */
+async function listAllSellerProducts({ businessTypes, maxPages = 100 } = {}) {
+  const items = [];
+  const seen = new Set();
+  let nextToken = null;
+  let pages = 0;
+  while (pages < maxPages) {
+    const res = await listSellerProducts({ businessTypes, nextToken });
+    pages++;
+    items.push(...pickList(res));
+    const t = pickNextToken(res);
+    if (!t || seen.has(t)) break;
+    seen.add(t); nextToken = t;
+    await new Promise(r => setTimeout(r, 1300));
+  }
+  return { items, pages, truncated: pages >= maxPages };
+}
+
+/**
  * 로켓그로스 주문 목록 — 마켓플레이스 주문 API 로는 안 나오는 별도 계열.
  *   GET /v2/providers/rg_open_api/apis/api/v1/vendors/{vendorId}/rg/orders
  *   paidDateFrom / paidDateTo 는 yyyymmdd, 한 번에 최대 30일.
@@ -346,6 +383,8 @@ async function listAllRgInventory({ maxPages = 100 } = {}) {
 module.exports = {
   isConfigured,
   pickList,
+  listSellerProducts,
+  listAllSellerProducts,
   listRgOrders,
   listAllRgOrders,
   listRgInventory,

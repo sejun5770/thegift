@@ -1110,12 +1110,19 @@ async function apiOrders(query) {
             }
           }
         } catch (e) { console.warn('[apiOrders] 쿠팡 코드 매핑 로드 실패 (원본 코드 사용):', e.message); }
+        // 옵션ID → 등록상품ID (063). 로켓그로스 주문은 등록상품ID 가 비어 있어
+        //   이 다리가 없으면 상품설정에 옵션ID 를 일일이 넣기 전까진 계속 미매핑이다.
+        let cpOptToProduct = new Map();
+        try { cpOptToProduct = await require('./coupang/option-map').getOptionToProduct(); }
+        catch (e) { console.warn('[apiOrders] 옵션맵 로드 실패:', e.message); }
+        const cpSpid = (code, optionId) =>
+          String(code || '').trim() || cpOptToProduct.get(String(optionId || '').trim()) || '';
         const mapCp = (code, optionId) =>
           cpByOption.get(String(optionId || '').trim())
-          || cpByProduct.get(String(code || '').trim())
+          || cpByProduct.get(cpSpid(code, optionId))
           || code || '';
         const isMapped = (code, optionId) =>
-          cpByOption.has(String(optionId || '').trim()) || cpByProduct.has(String(code || '').trim());
+          cpByOption.has(String(optionId || '').trim()) || cpByProduct.has(cpSpid(code, optionId));
         const normalized = coupangRows.map(r => ({
           order_seq: r.coupang_order_id, // 쿠팡 orderId (BIGINT)
           member_id: null,
@@ -10991,6 +10998,13 @@ const server = http.createServer(async (req, res) => {
         //   이게 없으면 정산 리포트를 올릴 때마다 사람이 '주문 가져오기' 를 눌러야 한다.
         //   실패해도 마켓플레이스 동기화 결과는 그대로 돌려준다.
         if (process.env.COUPANG_RG_SYNC_DISABLED !== '1' && !body.skip_rocket_growth) {
+          // 옵션ID → 등록상품ID 맵 먼저 (063). 이게 최신이어야 새 상품의 주문도 코드가 붙는다.
+          try {
+            data.option_map = await require('./coupang/option-map').syncOptionMap({});
+          } catch (e) {
+            console.warn('[coupang sync] 옵션맵 갱신 실패:', e.message);
+            data.option_map = { error: e.message };
+          }
           try {
             const days = Math.min(Math.max(parseInt(body.rg_days_back, 10) || 7, 1), 30);
             const kstYmd = ms => new Date(ms + 9 * 3600 * 1000).toISOString().slice(0, 10);
@@ -13929,6 +13943,28 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/coupang/option-map/sync' && req.method === 'POST') {
+        // 옵션ID → 등록상품ID 맵 갱신 (063).
+        //   상품 구성이 자주 바뀌지 않아 크론에서도 함께 돌지만, 신상품 등록 직후엔 수동 실행.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const body = await new Promise((resolve) => {
+          let raw = '';
+          req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+        });
+        logAdminAccess(session, req, 'coupang-option-map-sync', { types: body.business_types || null });
+        try {
+          data = await require('./coupang/option-map').syncOptionMap({
+            // 기본은 전체 — 판매자배송 상품도 옵션ID 로 조회될 수 있다
+            businessTypes: body.business_types || null,
+          });
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
       } else if (pathname === '/api/coupang/rg-orders/probe' && req.method === 'GET') {
         // 진단용 — RG 주문 API 응답 원본을 그대로 보여준다.
         //   문서만 보고 맞춘 필드명(orderId/vendorItemId/salesQuantity)이 실제와 다르거나,
@@ -14077,9 +14113,15 @@ const server = http.createServer(async (req, res) => {
                 byOption.set(String(c).trim(), info);
               }
             }
+            // 옵션ID → 등록상품ID (063) — 정산 전 주문은 등록상품ID 가 비어 있다
+            let optToProduct = new Map();
+            try { optToProduct = await require('./coupang/option-map').getOptionToProduct(); }
+            catch (e) { console.warn('[rfm/lines] 옵션맵 로드 실패:', e.message); }
             for (const r of rows) {
-              const hit = byOption.get(String(r.vendor_item_id || '').trim())
-                || byProduct.get(String(r.seller_product_id || '').trim());
+              const vid = String(r.vendor_item_id || '').trim();
+              const spid = String(r.seller_product_id || '').trim() || optToProduct.get(vid) || '';
+              if (!r.seller_product_id && spid) r.seller_product_id = spid;   // 화면에 근거를 남긴다
+              const hit = byOption.get(vid) || byProduct.get(spid);
               r.internal_product_code = hit?.code || null;
               r.sticker_code = hit?.sticker || null;
               // 주문수량(엑셀 그대로) × 판매단위 = 상품수량(실제 출고 개수).
