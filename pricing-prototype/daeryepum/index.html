@@ -16948,7 +16948,7 @@ async function syncRgOrders() {
     alert([
       '로켓그로스 주문을 가져왔습니다.',
       '',
-      `· 쿠팡 응답 ${fmtNum(d.fetched)}행`,
+      `· 쿠팡 응답 ${fmtNum(d.fetched)}주문 / ${fmtNum(d.lines)}행`,
       `· 주문 ${fmtNum(d.orders)}건 / 상품 ${fmtNum(d.rows)}행`,
       `· 새로 만든 주문 ${fmtNum(d.newOrders || 0)}건`,
       `· 이미 있던 주문 ${fmtNum(d.preserved || 0)}건 (그대로 둠)`,

@@ -30,6 +30,12 @@ function kstNoon(dateStr) {
 
 function parseDate(v) {
   if (!v) return null;
+  // RG 주문 API 의 paidAt 은 epoch 밀리초로 온다 (예: 1782899908000).
+  //   문자열로 바꿔 파싱하면 그대로 실패해 결제일이 통째로 비었다.
+  if (typeof v === 'number' || /^\d{12,14}$/.test(String(v).trim())) {
+    const d = new Date(Number(v));
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
   let s = String(v).trim();
   if (!s) return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return kstNoon(s);
@@ -77,53 +83,64 @@ async function syncRgOrders({ startDate, endDate, dryRun = false } = {}) {
   }
   const { byOption, byProduct } = buildUnitMap(productSettings);
 
+  // 응답은 주문 단위이고 상품은 orderItems 안에 또 들어 있다 (2026-08-07 실응답 확인).
+  //   최상위에서 vendorItemId 를 찾으면 전부 걸러져 0건이 된다.
   const seen = new Set();
   const rows = [];
   let skipped = 0;
-  for (const it of (fetched.items || [])) {
-    const orderId = String(it.orderId ?? '').trim();
-    const vid = String(it.vendorItemId ?? '').trim();
-    if (!orderId || !vid) { skipped++; continue; }
-    // 같은 (주문, 옵션) 이 두 번 오면 upsert 가 통째로 실패한다 (ON CONFLICT 중복 키)
-    const key = `${orderId}|${vid}`;
-    if (seen.has(key)) { skipped++; continue; }
-    seen.add(key);
+  let lines = 0;
+  for (const o of (fetched.items || [])) {
+    const orderId = String(o.orderId ?? '').trim();
+    // orderItems 가 없는 모양이면 주문 자체를 한 줄로 본다 (방어적)
+    const orderItems = Array.isArray(o.orderItems) ? o.orderItems : [o];
+    const orderPaidAt = parseDate(o.paidAt);
+    for (const it of orderItems) {
+      lines++;
+      const vid = String(it.vendorItemId ?? '').trim();
+      if (!orderId || !vid) { skipped++; continue; }
+      // 같은 (주문, 옵션) 이 두 번 오면 upsert 가 통째로 실패한다 (ON CONFLICT 중복 키)
+      const key = `${orderId}|${vid}`;
+      if (seen.has(key)) { skipped++; continue; }
+      seen.add(key);
 
-    const line = byKey.get(key);
-    const sellerProductId = line?.seller_product_id ? String(line.seller_product_id) : null;
-    const qty = Number(it.salesQuantity) || 0;
-    const unit = byOption.get(vid) || (sellerProductId ? byProduct.get(sellerProductId) : null) || 1;
-    const price = Math.round(Number(it.unitSalesPrice) || 0);
-    const paidAt = parseDate(it.paidAt) || kstNoon(line?.paid_date);
-    // 배송완료일이 리포트에 있으면 배송완료로 본다. 없으면 아직 쿠팡 창고에 있는 것.
-    const delivered = !!line?.delivered_date;
-    rows.push({
-      coupang_order_id: orderId,
-      shipment_box_id: 0,            // RG 는 배송박스 개념이 없다 — 고정값으로 unique 키를 채운다
-      vendor_item_id: vid,
-      vendor_item_package_id: null,
-      ordered_at: paidAt || new Date().toISOString(),
-      paid_at: paidAt,
-      product_name: it.productName || '로켓그로스 답례품',
-      product_code: sellerProductId,
-      external_vendor_sku: null,
-      item_count: qty * unit,        // 실제 개수 (채널 판매단위 반영)
-      item_sale_price: price,
-      item_total_price: price * qty,
-      recv_name: null, recv_hphone: null, recv_address: null,
-      recv_postal_code: null, recv_message: null,
-      settle_price: price * qty,
-      settle_method: null,
-      status: delivered ? 'FINAL_DELIVERY' : 'INSTRUCT',
-      status_label: delivered ? '배송완료' : '상품준비중',
-      is_rocket_growth: true,
-      raw_payload: { source: 'rg_open_api', item: it, _cart_qty: qty, _sales_unit: unit },
-      synced_at: new Date().toISOString(),
-    });
+      const line = byKey.get(key);
+      const sellerProductId = line?.seller_product_id ? String(line.seller_product_id) : null;
+      const qty = Number(it.salesQuantity) || 0;
+      const unit = byOption.get(vid) || (sellerProductId ? byProduct.get(sellerProductId) : null) || 1;
+      // unitSalesPrice 는 "30990.0" 같은 문자열로 온다
+      const price = Math.round(Number(it.unitSalesPrice) || 0);
+      const paidAt = orderPaidAt || parseDate(it.paidAt) || kstNoon(line?.paid_date);
+      // 배송완료일이 리포트에 있으면 배송완료로 본다. 없으면 아직 쿠팡 창고에 있는 것.
+      const delivered = !!line?.delivered_date;
+      rows.push({
+        coupang_order_id: orderId,
+        shipment_box_id: 0,          // RG 는 배송박스 개념이 없다 — 고정값으로 unique 키를 채운다
+        vendor_item_id: vid,
+        vendor_item_package_id: null,
+        ordered_at: paidAt || new Date().toISOString(),
+        paid_at: paidAt,
+        product_name: it.productName || '로켓그로스 답례품',
+        product_code: sellerProductId,
+        external_vendor_sku: null,
+        item_count: qty * unit,      // 실제 개수 (채널 판매단위 반영)
+        item_sale_price: price,
+        item_total_price: price * qty,
+        recv_name: null, recv_hphone: null, recv_address: null,
+        recv_postal_code: null, recv_message: null,
+        settle_price: price * qty,
+        settle_method: null,
+        status: delivered ? 'FINAL_DELIVERY' : 'INSTRUCT',
+        status_label: delivered ? '배송완료' : '상품준비중',
+        is_rocket_growth: true,
+        raw_payload: { source: 'rg_open_api', item: it, _cart_qty: qty, _sales_unit: unit },
+        synced_at: new Date().toISOString(),
+      });
+    }
   }
 
   const out = {
     fetched: (fetched.items || []).length,
+    lines,
     windows: fetched.windows, pages: fetched.pages,
     orders: new Set(rows.map(r => r.coupang_order_id)).size,
     rows: rows.length, skipped,
