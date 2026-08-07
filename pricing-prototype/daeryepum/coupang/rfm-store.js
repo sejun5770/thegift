@@ -144,7 +144,15 @@ async function listSales({ startDate, endDate } = {}) {
       a.sales_amount += amt;
     }
   }
-  return [...agg.values()].sort((x, y) => String(y.sale_date).localeCompare(String(x.sale_date)));
+  // net_amount / net_qty — 옛 테이블의 파생 필드. 대시보드가 이 이름으로 읽는다.
+  //   빠뜨리면 건수·수량은 나오는데 매출만 0 으로 뜬다 (2026-08-07 수정).
+  return [...agg.values()]
+    .map(a => ({
+      ...a,
+      net_amount: a.sales_amount - a.refund_amount,
+      net_qty: a.sales_qty - a.refund_qty,
+    }))
+    .sort((x, y) => String(y.sale_date).localeCompare(String(x.sale_date)));
 }
 
 async function getSyncState() {
