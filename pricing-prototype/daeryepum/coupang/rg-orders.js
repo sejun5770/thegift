@@ -223,7 +223,10 @@ async function syncRgOrders({ startDate, endDate, dryRun = false } = {}) {
     order_id,
     is_express: false,
     express_fee: 0,
-    desired_ship_date: calcCoupangShipDate(row.ordered_at),
+    // 희망출고일을 넣지 않는다 — 로켓그로스는 쿠팡 물류센터가 출고한다.
+    //   우리가 맞춰야 할 날짜가 없는데 값을 넣으면 지켜야 할 기한처럼 읽힌다.
+    //   (판매자배송은 우리가 출고하므로 그쪽 stub 에는 그대로 들어간다)
+    desired_ship_date: null,
     sticker_selections: selections,
     cash_receipt_yn: false,
     receipt_type: null,
@@ -262,7 +265,6 @@ async function syncRgOrders({ startDate, endDate, dryRun = false } = {}) {
       try {
         await store.patchCoupangStubEnrichment(s.order_id, {
           sticker_selections: s.sticker_selections,
-          desired_ship_date: s.desired_ship_date,
         });
         patched++;
       } catch (e) {
@@ -271,6 +273,27 @@ async function syncRgOrders({ startDate, endDate, dryRun = false } = {}) {
     }));
   }
   out.enriched = patched;
+
+  // 앞선 버전이 넣어 둔 희망출고일 청소.
+  //   우리가 계산해 넣은 값과 정확히 같을 때만 지운다 — 사람이 손으로 넣은 값은 남긴다.
+  let cleared = 0;
+  const stale = stubs.filter(s => {
+    const cur = existing.get(s.order_id);
+    if (!cur?.desired_ship_date) return false;
+    const row = grouped.get(s.order_id)?.row;
+    return row && cur.desired_ship_date === calcCoupangShipDate(row.ordered_at);
+  });
+  for (let i = 0; i < stale.length; i += 8) {
+    await Promise.all(stale.slice(i, i + 8).map(async (s) => {
+      try {
+        await store.patchCoupangStubEnrichment(s.order_id, { desired_ship_date: null });
+        cleared++;
+      } catch (e) {
+        console.warn(`[rg-orders] 희망출고일 정리 실패 ${s.order_id}: ${e.message}`);
+      }
+    }));
+  }
+  out.shipDateCleared = cleared;
 
   // 방금 로켓그로스 플래그가 생겼다 — 정산 리포트 라인의 판매 방식을 다시 가른다 (064).
   //   리포트에 판매자배송 주문이 섞여 있어, 가르지 않으면 그 매출이 로켓그로스로도 잡힌다.
