@@ -14556,15 +14556,49 @@ async function editStockItemSalesCodes(id) {
   } catch (e) { alert(`실패: ${e.message}`); }
 }
 
-/** 재고 표의 관리 셀 — 수정 / 목록에서 제거 */
+/** 재고 표의 관리 셀 — 개별 발송 / 수정 / 목록에서 제거 */
 function _stockRowActions(it) {
   if (!it.item_id) return '<span style="color:var(--gray-400)">-</span>';
   const id = esc(it.item_id);
+  const code = esc(it.stock_code);
   return `
+    <button onclick="sendStockItemToSlack('${code}')" title="이 품목만 슬랙으로 발송"
+            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:2px 6px">📤</button>
     <button onclick="openStockEditModal('${id}')" title="등록 정보 수정"
-            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:2px 6px">✎</button>
+            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:2px 6px;margin-left:3px">✎</button>
     <button onclick="removeStockItemRow('${id}')" title="재고 목록에서 제거"
             style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:2px 6px;color:#dc2626;margin-left:3px">🗑</button>`;
+}
+
+/**
+ * 개별 발송 — 이 품목의 재고 현황만 슬랙으로 보낸다.
+ *   데일리 알림 대상(알림 체크)이 아니어도 보낼 수 있다. "지금 이것만 공유" 용도.
+ *   보내기 전에 실제 나갈 메시지를 그대로 보여주고 확인받는다 (오발송 방지).
+ */
+async function sendStockItemToSlack(stockCode) {
+  const it = _stockData.find(x => x.stock_code === stockCode);
+  const name = it ? (it.product_name || stockCode) : stockCode;
+  try {
+    const pv = await fetch(`${API}/api/bg/stock-alerts/send`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dry_run: true, codes: [stockCode] }),
+    });
+    const p = await pv.json();
+    if (p.error) throw new Error(p.error);
+    if (!p.summaryText) { alert(p.reason || '보낼 내용이 없습니다.'); return; }
+    if (!confirm(`아래 내용을 슬랙으로 보냅니다.\n\n${'─'.repeat(28)}\n${p.text}\n${'─'.repeat(28)}\n\n진행할까요?`)) return;
+
+    const r = await fetch(`${API}/api/bg/stock-alerts/send`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ codes: [stockCode] }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    if (d.skipped) { alert(d.reason); return; }
+    showToast(`슬랙 발송 완료 — ${name}`);
+  } catch (e) {
+    alert(`발송 실패: ${e.message}`);
+  }
 }
 
 /** 목록에서 제거 — 등록 해제 (ERP/재고 원본 데이터는 건드리지 않음) */

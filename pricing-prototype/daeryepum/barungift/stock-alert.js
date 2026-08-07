@@ -143,13 +143,32 @@ function _chunkLines(lines, limit = 3500) {
  *   detailChunks → 스레드 댓글. 품목별 수치 상세. 길면 여러 댓글로 쪼갠다.
  *   text         → 스레드를 못 쓰는 webhook 용 합본.
  */
-async function buildStockReport(baseUrl) {
-  // 알림 대상 = 등록 품목 중 alert_enabled 인 것 (migration 044)
-  const targets = await store.listStockItems({ alertOnly: true });
+async function buildStockReport(baseUrl, { codes = null } = {}) {
+  // 대상 선정
+  //   codes 지정(개별 발송) → 그 재고코드만. 데일리 알림에서 빠져 있는(alert_enabled=false)
+  //     품목도 보낼 수 있어야 하므로 alert_enabled 는 보지 않는다. 지금 이것만 보고 싶다는 뜻.
+  //   codes 없음(데일리)   → 등록 품목 중 alert_enabled 인 것 (migration 044)
+  const wanted = Array.isArray(codes)
+    ? [...new Set(codes.map(c => String(c || '').trim()).filter(Boolean))]
+    : null;
+  const selected = !!(wanted && wanted.length);
+  let targets;
+  if (selected) {
+    const want = new Set(wanted);
+    targets = (await store.listStockItems({ enabledOnly: true })).filter(t => want.has(t.stock_code));
+    const found = new Set(targets.map(t => t.stock_code));
+    const unknown = wanted.filter(c => !found.has(c));
+    if (!targets.length) {
+      throw new Error(`등록되지 않은 재고코드입니다: ${unknown.join(', ')}`);
+    }
+    if (unknown.length) console.warn('[stock-alert] 개별 발송 — 등록되지 않은 코드 무시:', unknown.join(', '));
+  } else {
+    targets = await store.listStockItems({ alertOnly: true });
+  }
   if (!targets.length) {
     return {
       rows: [], missing: [], warnCount: 0, soldoutCount: 0, targetCount: 0,
-      summaryText: null, detailChunks: [], text: null,
+      selected, summaryText: null, detailChunks: [], text: null,
     };
   }
 
@@ -228,6 +247,33 @@ async function buildStockReport(baseUrl) {
   const okRows = rows.filter(r => !r.soldout && !r.warn);
   const attention = [...soldoutRows, ...warnRows];
 
+  // ── 개별 발송: 요약/스레드로 나누지 않고 요청한 품목 상세만 한 메시지로 ──
+  //   "지금 이 품목 상태"를 공유하려는 것이라, 건수 요약과 스레드 분리는 방해만 된다.
+  //   품목이 많아 길어지면 아래 공통 경로처럼 스레드로 이어 붙인다.
+  if (selected) {
+    const head = [
+      '📦  *답례품 재고 현황*  _(개별 조회)_',
+      `_${_kstDateLabel()} · 요청 품목 ${rows.length}건_`,
+      '',
+    ];
+    const body = rows.flatMap(r => [itemBlock(r), '']);
+    if (missing.length) body.push(`_⚠️ 재고를 찾지 못한 코드 — ${missing.join(', ')}_`);
+    const chunks = _chunkLines([...head, ...body]);
+    const selSummary = chunks[0];
+    const selDetails = chunks.slice(1);
+    return {
+      rows,
+      missing,
+      selected: true,
+      warnCount: rows.filter(r => r.warn || r.soldout).length,
+      soldoutCount: rows.filter(r => r.soldout).length,
+      targetCount: targets.length,
+      summaryText: selSummary,
+      detailChunks: selDetails,
+      text: [selSummary, ...selDetails].join('\n\n'),
+    };
+  }
+
   // ── 본문: 건수 + 급한 품목(예상일 포함) ──
   //   이름만 나열하면 무엇부터 봐야 할지 알 수 없어, 소진예상과 가용수량을 함께 적는다.
   const summary = [
@@ -267,6 +313,7 @@ async function buildStockReport(baseUrl) {
   return {
     rows,
     missing,
+    selected: false,
     warnCount: warnRows.length + soldoutRows.length,
     soldoutCount: soldoutRows.length,
     targetCount: targets.length,
@@ -280,13 +327,14 @@ async function buildStockReport(baseUrl) {
 /**
  * 리포트 생성 + 발송.
  *   dryRun=true 면 메시지만 만들고 슬랙에 보내지 않는다 (미리보기).
+ *   codes  를 주면 그 재고코드만 담은 개별 발송이 된다 (데일리 알림 대상이 아니어도 발송).
  */
-async function sendStockAlert(baseUrl, { dryRun = false, channel = null } = {}) {
+async function sendStockAlert(baseUrl, { dryRun = false, channel = null, codes = null } = {}) {
   // 명시 채널 > DB 설정 > 환경변수
   if (!channel) {
     try { channel = (await loadAlertConfig()).channel || null; } catch { /* 환경변수 폴백 */ }
   }
-  const report = await buildStockReport(baseUrl);
+  const report = await buildStockReport(baseUrl, { codes });
   if (!report.summaryText) {
     return { ok: false, skipped: true, reason: '알림 대상 품목이 없습니다', ...report };
   }

@@ -1013,15 +1013,19 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       return json(res, { error: err.message }, 400);
     }
   }
-  // POST /api/bg/stock-alerts/send  { dry_run?: true, channel?: 'C…' }
+  // POST /api/bg/stock-alerts/send  { dry_run?: true, channel?: 'C…', codes?: ['TGJBK03O1'] }
   //   dry_run 이면 메시지만 만들어 돌려주고 슬랙에는 보내지 않는다.
+  //   codes 를 주면 그 품목만 보내는 개별 발송 (데일리 알림 대상이 아니어도 발송).
   if (pathname === '/api/bg/stock-alerts/send' && method === 'POST') {
     try {
       const body = await parseBody(req);
       const base = `http://localhost:${process.env.PORT || '3457'}${process.env.BASE_PATH || ''}`;
+      const codes = Array.isArray(body.codes) ? body.codes
+        : (body.code ? [body.code] : null);
       const out = await stockAlert.sendStockAlert(base, {
         dryRun: !!body.dry_run,
         channel: body.channel || null,
+        codes,
       });
       return json(res, out);
     } catch (err) {
