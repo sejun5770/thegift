@@ -231,6 +231,20 @@ async function getProductSettings(productId) {
 //   여기서 먼저 걸러 'own' 으로 떨어뜨린다.
 const PRODUCT_CHANNELS = ['own', 'coupang', 'naver', 'cafe24', 'thegift', 'etc'];
 
+/** 채널별 고정 스티커 {"coupang":"TGCP01S1"} 정규화 (056).
+ *  고객 선택 목록(available_sticker_ids)과 분리된 값 — 자사 화면에 다른 채널 스티커가 새지 않게 한다. */
+function _normChannelStickers(v) {
+  const out = {};
+  if (v && typeof v === 'object' && !Array.isArray(v)) {
+    for (const [k, code] of Object.entries(v)) {
+      if (!PRODUCT_CHANNELS.includes(k)) continue;
+      const c = String(code ?? '').trim();
+      if (c) out[k] = c;
+    }
+  }
+  return out;
+}
+
 /** 채널 배열 정규화 — 알 수 없는 값은 버리고, 비면 'own'.
  *  빈 배열이면 DB CHECK 에 걸려 저장이 통째로 실패하므로 여기서 반드시 하나는 남긴다. */
 function _normChannels(v) {
@@ -245,6 +259,9 @@ async function upsertProductSettings(productId, data) {
   // 다른 화면에서 부분 저장할 때 쿠팡 상품이 조용히 자사로 바뀐다.
   if ('sales_channels' in data) {
     data = { ...data, sales_channels: _normChannels(data.sales_channels) };
+  }
+  if ('channel_stickers' in data) {
+    data = { ...data, channel_stickers: _normChannelStickers(data.channel_stickers) };
   }
 
   if (existing) {
@@ -297,6 +314,7 @@ async function upsertProductSettings(productId, data) {
     custom_guide_text: data.custom_guide_text ?? null,           // 고객 order-info STEP1 안내 (migration 034)
     custom_guide_title: data.custom_guide_title ?? null,         // 안내 박스 타이틀 (migration 035)
     sales_channels: _normChannels(data.sales_channels),   // migration 054 (복수 채널)
+    channel_stickers: _normChannelStickers(data.channel_stickers), // migration 056
   };
 
   if (USE_SUPABASE) return sbInsert('bg_product_settings', newSetting);

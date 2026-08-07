@@ -2769,6 +2769,13 @@ nav.nav-loading a[href^="#"] {
             <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer"><input type="checkbox" value="thegift"> 더기프트</label>
             <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer"><input type="checkbox" value="etc"> 기타</label>
           </div>
+          <div id="bg-p-ch-stickers" style="display:none;margin-top:8px;padding:8px 10px;background:var(--gray-50);border-radius:8px">
+            <div style="font-size:11px;color:var(--gray-500);margin-bottom:6px">
+              <b>채널 고정 스티커</b> — 고객이 고르지 않고 반드시 붙는 스티커 코드입니다.
+              아래 <b>선택 가능 스티커</b>(고객 화면 목록)와는 별개라, 여기 넣어도 자사 주문화면에는 나오지 않습니다.
+            </div>
+            <div id="bg-p-ch-sticker-rows" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+          </div>
         </div>
         <div>
           <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:4px" title="고객 화면에 표시될 장식 형태 명칭 (스티커/띠지/라벨 등). 비워두면 '스티커' 가 적용됩니다.">장식 명칭</label>
@@ -12158,6 +12165,38 @@ async function bulkSetProductChannel(add) {
   else showToast(`${ids.length}개 상품 ${label} 채널 ${add ? '추가' : '해제'}`);
 }
 
+// 채널 고정 스티커 (056) — {"coupang":"TGCP01S1"}.
+//   고객 선택 목록(available_sticker_ids)과 분리돼 있어 자사 주문화면에는 노출되지 않는다.
+let _bgChannelStickers = {};
+
+/** 자사 외 채널이 켜져 있을 때만 고정 스티커 입력을 보여준다 */
+function _bgRenderChannelStickerRows() {
+  const wrap = document.getElementById('bg-p-ch-stickers');
+  const rows = document.getElementById('bg-p-ch-sticker-rows');
+  if (!wrap || !rows) return;
+  // 화면에 보이는 입력값을 먼저 거둬 채널을 껐다 켜도 값이 날아가지 않게 한다
+  Object.assign(_bgChannelStickers, _bgCollectChannelStickers());
+  const on = [...document.querySelectorAll('#bg-p-meta-channels input[type=checkbox]')]
+    .filter(cb => cb.checked && cb.value !== 'own').map(cb => cb.value);
+  if (!on.length) { wrap.style.display = 'none'; rows.innerHTML = ''; return; }
+  wrap.style.display = '';
+  rows.innerHTML = on.map(ch => `
+    <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px">
+      <span style="color:var(--gray-600)">${PRODUCT_CHANNEL_ICON[ch]} ${PRODUCT_CHANNEL_LABEL[ch]}</span>
+      <input type="text" data-ch-sticker="${ch}" value="${esc(_bgChannelStickers[ch] || '')}" placeholder="예: TGCP01S1"
+        style="width:150px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px;font-family:monospace">
+    </label>`).join('');
+}
+
+function _bgCollectChannelStickers() {
+  const out = {};
+  document.querySelectorAll('#bg-p-ch-sticker-rows input[data-ch-sticker]').forEach(el => {
+    const v = el.value.trim();
+    if (v) out[el.dataset.chSticker] = v;
+  });
+  return out;
+}
+
 /** 채널 탭 — 등록된 상품이 있는 채널만 만든다 (자사만 쓰면 아예 안 뜬다) */
 function _bgRenderChannelTabs() {
   const wrap = document.getElementById('bg-p-tab-channels');
@@ -12331,6 +12370,10 @@ async function openBgProductForm(productId) {
     const chSet = new Set(s ? _psChannels(s) : (_bgProductTab.startsWith('ch:') ? [_bgProductTab.slice(3)] : ['own']));
     document.querySelectorAll('#bg-p-meta-channels input[type=checkbox]')
       .forEach(cb => { cb.checked = chSet.has(cb.value); });
+    document.querySelectorAll('#bg-p-meta-channels input[type=checkbox]')
+      .forEach(cb => { cb.onchange = _bgRenderChannelStickerRows; });
+    _bgChannelStickers = (s && s.channel_stickers && typeof s.channel_stickers === 'object') ? { ...s.channel_stickers } : {};
+    _bgRenderChannelStickerRows();
     // 장식 명칭 (decoration_label) — 비어있으면 placeholder '스티커' 그대로 보임
     const decoInput = document.getElementById('bg-p-meta-deco-label');
     if (decoInput) decoInput.value = s?.decoration_label || '';
@@ -12927,6 +12970,7 @@ async function saveBgProduct() {
     brand: brand || null,
     product_name: productName || null,
     sales_channels: salesChannels,         // migration 054 (복수)
+    channel_stickers: _bgCollectChannelStickers(),  // migration 056 (채널 고정 스티커)
     available_sticker_ids: stickerIds,
     available_box_options: boxOptions,
     custom_options: customOptions,
