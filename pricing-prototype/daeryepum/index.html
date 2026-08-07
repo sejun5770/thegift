@@ -20590,7 +20590,10 @@ async function openBgOrderEdit(info) {
     const usedExisting = new Set();
     const merged = [];
     for (const [code, pinfo] of _pm.entries()) {
-      const matches = existingSels.filter((s, i) => s.product_code === code && !usedExisting.has(i));
+      // 옛 ci 는 원본 채널코드로 저장돼 있다 — 별칭도 같은 상품으로 인정해야
+      //   매핑된 내부코드와 옛 코드가 따로 한 줄씩 만들어지지 않는다 (057).
+      const matches = existingSels.filter((s, i) =>
+        !usedExisting.has(i) && (s.product_code === code || _bgAliasHas(code, s.product_code)));
       if (matches.length > 0) {
         // 같은 상품에 복수 row 가 있을 수 있음 (멀티 스티커 수집 등) → 모두 보존
         matches.forEach(m => {
