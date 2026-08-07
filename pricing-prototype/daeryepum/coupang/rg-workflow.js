@@ -69,15 +69,33 @@ async function syncRocketGrowthWorkflow({
   const out = {
     scanned: byOrder.size, noCustomerInfo: 0, alreadyDone: 0,
     toShipped: 0, toPacked: 0, patchedOrders: 0, failed: 0,
-    samples: [],
+    samples: [], missing_samples: [],
   };
 
+  // 주문정보를 한 번에 가져온다.
+  //   주문마다 조회하면 리포트 전체(수백~수천 건)에 대해 요청이 그만큼 나가
+  //   프록시 타임아웃에 걸린다. 실제로 쓰는 건 바뀔 주문뿐이라 읽기는 묶는다.
+  const ciByOrder = new Map();
+  const keys = [...byOrder.keys()];
+  for (let i = 0; i < keys.length; i += 200) {
+    const chunk = keys.slice(i, i + 200);
+    let rows = [];
+    try { rows = await bgStore.getCustomerInfoBatch(chunk); }
+    catch (e) {
+      out.failed += chunk.length;
+      console.warn('[rg-workflow] 주문정보 조회 실패:', e.message);
+      continue;
+    }
+    for (const r of (rows || [])) ciByOrder.set(r.order_id, r);
+  }
+
+  const pending = [];
   for (const [orderId, items] of byOrder) {
-    let ci;
-    try { ci = await wf.getCustomerInfoForUpdate(orderId); }
-    catch { out.failed++; continue; }
+    const ci = ciByOrder.get(orderId);
     if (!ci || !Array.isArray(ci.sticker_selections) || !ci.sticker_selections.length) {
-      out.noCustomerInfo++; continue;
+      out.noCustomerInfo++;
+      if (out.missing_samples.length < 10) out.missing_samples.push(orderId);
+      continue;
     }
 
     // 라인마다 목표 단계 — 배송완료일이 있으면 출고완료, 없으면 포장완료
@@ -121,12 +139,21 @@ async function syncRocketGrowthWorkflow({
     if (!changed) { out.alreadyDone++; continue; }
     out.patchedOrders++;
     if (out.samples.length < 20) out.samples.push({ order_id: orderId, changes });
-    if (!dryRun) {
-      try { await wf.updateCustomerInfo(ci._resolvedOrderId || orderId, { sticker_selections: sels }); }
-      catch (e) {
-        out.patchedOrders--; out.failed++;
-        out.samples.push({ order_id: orderId, error: e.message });
-      }
+    pending.push({ orderId, sels });
+  }
+
+  // 쓰기도 묶는다 — 첫 실행은 수백 건이라 한 건씩 기다리면 요청이 먼저 끊긴다.
+  //   동시 8개면 Supabase 쪽에 부담 없이 충분히 빠르다.
+  if (!dryRun) {
+    for (let i = 0; i < pending.length; i += 8) {
+      const chunk = pending.slice(i, i + 8);
+      await Promise.all(chunk.map(async ({ orderId, sels }) => {
+        try { await wf.updateCustomerInfo(orderId, { sticker_selections: sels }); }
+        catch (e) {
+          out.patchedOrders--; out.failed++;
+          if (out.samples.length < 30) out.samples.push({ order_id: orderId, error: e.message });
+        }
+      }));
     }
   }
   return { ...out, dry_run: dryRun };

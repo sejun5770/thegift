@@ -16918,16 +16918,31 @@ async function syncRgWorkflow() {
   if (btn) { btn.disabled = true; btn.textContent = '확인 중...'; }
   try {
     const dry = await call(true);
+    // 아무것도 안 바뀔 때야말로 이유가 보여야 한다 — 내역을 그대로 펼쳐 준다.
+    const NL = String.fromCharCode(10);
+    const breakdown = [
+      `· 리포트 주문 ${fmtNum(dry.scanned)}건`,
+      `· 출고완료 대상 ${fmtNum(dry.toShipped)}건 (배송완료일 있음)`,
+      `· 포장완료 대상 ${fmtNum(dry.toPacked)}건 (배송완료일 아직 없음)`,
+      `· 이미 반영됨 ${fmtNum(dry.alreadyDone)}건`,
+      `· 주문정보 없음 ${fmtNum(dry.noCustomerInfo)}건`,
+      ...(dry.failed ? [`· 조회 실패 ${fmtNum(dry.failed)}건`] : []),
+    ].join(NL);
     if (!dry.patchedOrders) {
-      showToast(`바뀔 것이 없습니다 (주문 ${fmtNum(dry.scanned)}건 확인, 이미 반영 ${fmtNum(dry.alreadyDone)}건)`);
+      const why = dry.noCustomerInfo ? [
+        '',
+        `'주문정보 없음' 은 그 주문이 정보입력현황에 아직 없다는 뜻입니다.`,
+        '쿠팡 주문 동기화가 닿지 않은 옛 주문일 수 있습니다.',
+        `예: ${(dry.missing_samples || []).slice(0, 5).join(', ') || '-'}`,
+      ].join(NL) : '';
+      alert(['반영할 것이 없습니다.', '', breakdown, why].join(NL));
       return;
     }
-    const msg = `주문 ${fmtNum(dry.scanned)}건 중 ${fmtNum(dry.patchedOrders)}건을 반영합니다.`
-      + `\n\n· 출고완료 ${fmtNum(dry.toShipped)}건 (배송완료일 있음)`
-      + `\n· 포장완료 ${fmtNum(dry.toPacked)}건 (배송완료일 아직 없음)`
-      + `\n· 이미 반영됨 ${fmtNum(dry.alreadyDone)}건`
-      + (dry.noCustomerInfo ? `\n· 주문정보 없음 ${fmtNum(dry.noCustomerInfo)}건 (건너뜀)` : '')
-      + `\n\n이미 더 진행된 건은 그대로 둡니다. 계속할까요?`;
+    const msg = [
+      `주문 ${fmtNum(dry.scanned)}건 중 ${fmtNum(dry.patchedOrders)}건을 반영합니다.`,
+      '', breakdown, '',
+      '이미 더 진행된 건은 그대로 둡니다. 계속할까요?',
+    ].join(NL);
     if (!confirm(msg)) return;
     if (btn) btn.textContent = '반영 중...';
     const run = await call(false);
