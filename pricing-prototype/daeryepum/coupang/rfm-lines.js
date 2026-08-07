@@ -147,6 +147,24 @@ function parseCategoryTr(rows) {
   return { kind: 'category_tr', rows: out, skipped };
 }
 
+/**
+ * 비용 서브헤더에서 '실제 부담액' 열을 고른다.
+ *   우선순위: 최종비용 > 할인적용가(A-B) > (없으면 null → 호출측이 발생비용으로 폴백)
+ *   발생비용(A)은 할인 전 금액이다. 쿠팡이 전액 할인해 주는 달에는 A 가 그대로 남아 있어
+ *   이걸 더하면 실제로 나가지 않은 돈이 물류비로 잡힌다.
+ */
+function pickFeeColumn(subHeader) {
+  if (!Array.isArray(subHeader)) return null;
+  let discounted = null;
+  for (let i = 0; i < subHeader.length; i++) {
+    const s = norm(subHeader[i]);
+    if (!s) continue;
+    if (s.includes('최종비용')) return i;
+    if (discounted === null && s.includes('할인적용가')) discounted = i;
+  }
+  return discounted;
+}
+
 /** 파일2 — WAREHOUSING_SHIPPING (CFS). 시트별로 비용 항목이 다르다. */
 function parseCfs(sheets) {
   const merged = new Map();   // `${order}|${option}` → row
@@ -154,6 +172,10 @@ function parseCfs(sheets) {
   for (const sh of sheets) {
     const hi = findHeader(sh.rows);
     if (hi < 0) continue;
+    // 비용 열은 서브헤더로 갈린다: 발생비용(A) · 할인가(B) · 할인적용가(A-B) · 추가비용 · 최종비용.
+    //   실제 부담액은 최종비용이고, 없으면 할인적용가(A-B) 다. 발생비용은 할인 전 금액이라
+    //   그대로 더하면 전액 할인된 달의 물류비가 통째로 부풀려진다 (2026-07 실제 부담 0원).
+    const feeCol = pickFeeColumn(sh.rows[hi + 1]);
     const col = mapCols(sh.rows[hi], {
       date: s => s.startsWith('발생일'),
       orderId: s => s === '주문ID',
@@ -187,8 +209,12 @@ function parseCfs(sheets) {
       }
       const m = merged.get(key);
       // 같은 (주문, 옵션) 이 두 시트에 다 있다 — 배송완료일은 같으므로 먼저 온 값을 유지
-      if (col.inout !== undefined) m.inout_fee += num(r[col.inout]);
-      if (col.shipping !== undefined) m.shipping_fee += num(r[col.shipping]);
+      // 서브헤더로 고른 최종 부담액 열을 쓴다. 못 찾으면 그룹 헤더 열(=발생비용)로 폴백.
+      const isInout = col.inout !== undefined;
+      const idx = feeCol !== null ? feeCol : (isInout ? col.inout : col.shipping);
+      if (idx === undefined || idx === null) continue;
+      if (isInout) m.inout_fee += num(r[idx]);
+      else m.shipping_fee += num(r[idx]);
     }
   }
   return { kind: 'cfs', rows: [...merged.values()], skipped };
