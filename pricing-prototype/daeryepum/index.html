@@ -4874,9 +4874,16 @@ async function syncCoupangOrders(btn) {
       } else {
         rcMsg = '\n\n⚠️ 취소 재확인이 실행되지 않았습니다 (구버전 배포일 수 있음).';
       }
+      // 로켓그로스는 별도 API 라 같은 동기화에 얹어 함께 가져온다
+      const rg = data.rocket_growth;
+      const rgMsg = !rg ? ''
+        : (rg.error
+          ? `\n\n⚠️ 로켓그로스 주문 수집 실패: ${rg.error}`
+          : `\n\n[로켓그로스]\n주문 ${rg.orders}건 / 상품 ${rg.rows}행`
+            + ` (신규 ${rg.newOrders || 0}건 · 취소 ${rg.cancelled || 0}행)`);
       const msg = `✅ 동기화 완료\n\n조회 주문: ${data.fetched}건 (페이지 ${data.pages || 1})\n저장 row: ${data.upserted}개\n필터 제외: ${data.filtered_out}개`
         + (data.filter_disabled ? '\n\n⚠️ 카테고리 필터 미설정 — 전체 주문 저장됨. 답례품 카테고리 코드 확인 후 환경변수 설정 권장.' : '')
-        + rcMsg;
+        + rcMsg + rgMsg;
       alert(msg);
       loadOrders();
       refreshCoupangSyncMeta();

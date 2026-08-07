@@ -10987,6 +10987,23 @@ const server = http.createServer(async (req, res) => {
             data.reconcile = { error: e.message };
           }
         }
+        // 로켓그로스 주문은 별도 API 라 위 동기화에 안 잡힌다 — 같은 크론 주기에 함께 가져온다.
+        //   이게 없으면 정산 리포트를 올릴 때마다 사람이 '주문 가져오기' 를 눌러야 한다.
+        //   실패해도 마켓플레이스 동기화 결과는 그대로 돌려준다.
+        if (process.env.COUPANG_RG_SYNC_DISABLED !== '1' && !body.skip_rocket_growth) {
+          try {
+            const days = Math.min(Math.max(parseInt(body.rg_days_back, 10) || 7, 1), 30);
+            const kstYmd = ms => new Date(ms + 9 * 3600 * 1000).toISOString().slice(0, 10);
+            const nowMs = Date.now();
+            data.rocket_growth = await require('./coupang/rg-orders').syncRgOrders({
+              startDate: kstYmd(nowMs - days * 86400000),
+              endDate: kstYmd(nowMs),
+            });
+          } catch (e) {
+            console.warn('[coupang sync] 로켓그로스 주문 수집 실패:', e.message);
+            data.rocket_growth = { error: e.message };
+          }
+        }
       } else if (pathname === '/api/build-info') {
         // 지금 돌고 있는 빌드 확인 — "고쳤는데 안 바뀐다" 가 재배포 누락인지 구분용.
         //   BUILD_SHA/BUILD_TIME 은 Dockerfile ARG 로 주입 (없으면 파일 mtime 으로 대체).
