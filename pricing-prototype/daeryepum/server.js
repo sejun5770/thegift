@@ -411,8 +411,45 @@ const DB_CONFIG = {
     acquireTimeoutMillis: 30000,
   },
   requestTimeout: 60000,
-  connectionTimeout: 15000,
+  // Azure SQL 은 유휴 후 재개될 때 첫 핸드셰이크가 15초를 넘기는 일이 있다.
+  //   ("Failed to connect ... in 15000ms" 로 화면이 통째로 실패했다.) 25초로 늘리고,
+  //   그래도 실패하면 _connectPool() 이 한 번 더 시도한다 — 재개가 이미 진행 중이라 대개 붙는다.
+  connectionTimeout: 25000,
 };
+
+/**
+ * 커넥션 풀 생성 + 1회 재시도.
+ *   실패한 ConnectionPool 은 재사용하지 않고 새로 만든다 (mssql 이 내부 상태를 남긴다).
+ *   timeout 계열 오류만 재시도한다 — 자격증명·방화벽 오류는 기다려도 달라지지 않으므로
+ *   바로 올려서 원인을 빨리 드러낸다.
+ */
+//   주의: 연결 timeout 의 실제 메시지는 "Failed to connect to <host>:1433 in 15000ms" 로
+//   'timeout' 이라는 단어가 없다. 문구만 보면 정작 재시도해야 할 케이스를 놓친다.
+//   err.code(ETIMEOUT 등) 를 우선 보고, 문구는 보조로 쓴다.
+const _RETRYABLE_CONN_CODE = new Set(['ETIMEOUT', 'ESOCKET', 'ECONNRESET', 'ECONNCLOSED', 'ETIMEDOUT']);
+const _RETRYABLE_CONN_MSG = /Failed to connect|timeout|timed out|ETIMEOUT|ESOCKET|ECONNRESET|ECONNCLOSED|socket hang up/i;
+const _isRetryableConnErr = e =>
+  _RETRYABLE_CONN_CODE.has(e?.code) || _RETRYABLE_CONN_MSG.test(e?.message || '');
+
+async function _connectPool(config, label, onError) {
+  let lastErr;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const p = new sql.ConnectionPool(config);
+    p.on('error', onError);
+    try {
+      await p.connect();
+      if (attempt > 1) console.log(`[${label}] 재시도 연결 성공`);
+      return p;
+    } catch (e) {
+      lastErr = e;
+      try { await p.close(); } catch { /* 이미 끊긴 풀 */ }
+      if (attempt === 2 || !_isRetryableConnErr(e)) break;
+      console.warn(`[${label}] 연결 실패 (1/2) — 3초 후 재시도: ${e.message}`);
+      await new Promise(r => setTimeout(r, 3000));
+    }
+  }
+  throw lastErr;
+}
 
 let pool = null;
 let _poolInitPromise = null; // 동시 초기화 요청 중복 방지 (race-condition 가드)
@@ -439,9 +476,8 @@ async function getXerpPool() {
   if (_xerpPool && _xerpPool.connected) return _xerpPool;
   if (_xerpInitPromise) return _xerpInitPromise;
   _xerpInitPromise = (async () => {
-    const p = new sql.ConnectionPool(XERP_CONFIG);
-    p.on('error', (err) => { console.error('[xerp] pool error:', err.message); _xerpPool = null; });
-    await p.connect();
+    const p = await _connectPool(XERP_CONFIG, 'xerp',
+      (err) => { console.error('[xerp] pool error:', err.message); _xerpPool = null; });
     _xerpPool = p;
     console.log(`Connected to XERP (warehouse ${XERP_WAREHOUSE})`);
     return p;
@@ -498,9 +534,8 @@ async function getPool() {
   // 초기화 중복 방지 — 이미 초기화 진행 중이면 그 Promise 공유
   if (_poolInitPromise) return _poolInitPromise;
   _poolInitPromise = (async () => {
-    const p = new sql.ConnectionPool(DB_CONFIG);
-    p.on('error', (err) => { console.error('Pool error:', err.message); pool = null; });
-    await p.connect();
+    const p = await _connectPool(DB_CONFIG, 'bar_shop1',
+      (err) => { console.error('Pool error:', err.message); pool = null; });
     pool = p;
     console.log('Connected to Barunson DB');
     // 제휴사명 캐시 로드 (최초 1회만)

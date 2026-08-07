@@ -13859,7 +13859,21 @@ async function loadDaeryepumStock() {
     `;
     renderStockTable();
   } catch (e) {
-    if ($loading) $loading.textContent = `로드 실패: ${e.message}`;
+    if (!$loading) return;
+    // DB 연결 실패는 화면 문제가 아니다 — 다시 시도하면 대개 붙으므로 재시도 버튼을 준다.
+    //   (Azure SQL 이 유휴 후 재개될 때 첫 연결이 늦어 timeout 나는 경우)
+    const isConn = /Failed to connect|ETIMEOUT|ESOCKET|ECONNRESET|socket hang up/i.test(e.message || '');
+    $loading.style.display = '';
+    $loading.innerHTML = isConn
+      ? `<div style="color:#b45309">데이터베이스에 연결하지 못했습니다.</div>
+         <div style="font-size:12px;color:var(--gray-500);margin-top:6px">
+           DB 가 절전에서 깨어나는 중일 수 있습니다. 잠시 후 다시 시도해 주세요.<br>
+           계속 실패하면 DB 방화벽에 서버 IP 가 등록돼 있는지 확인이 필요합니다.
+         </div>
+         <div style="font-size:11px;color:var(--gray-400);margin-top:6px">${esc(e.message)}</div>
+         <button class="btn" style="margin-top:10px;padding:6px 14px;font-size:12px" onclick="loadDaeryepumStock()">🔄 다시 시도</button>`
+      : `<div>로드 실패: ${esc(e.message)}</div>
+         <button class="btn" style="margin-top:10px;padding:6px 14px;font-size:12px" onclick="loadDaeryepumStock()">🔄 다시 시도</button>`;
   }
 }
 
