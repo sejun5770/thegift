@@ -313,6 +313,20 @@ async function sendStockAlert(baseUrl, { dryRun = false, channel = null } = {}) 
  *   기동 시 한 번만 읽으면 화면에서 채널/시각을 바꿔도 재배포 전까지 반영되지 않아,
  *   매 tick 마다 loadAlertConfig() 로 최신 설정을 본다 (30초 캐시). 2026-08-06
  */
+/** 발송 시각을 "자정 이후 분" 으로 변환. 형식이 이상하면 null.
+ *  주의: parseInt(h) || 9 같은 falsy 폴백을 쓰면 '00:01' 의 0시가 9시로 바뀐다.
+ *  (2026-08-06 자정 발송 누락 원인 — 20:27 은 정상 동작해 더 늦게 발견됐다.) */
+function _parseHhmm(s) {
+  const m = /^\s*(\d{1,2})\s*:\s*(\d{1,2})\s*$/.exec(String(s || ''));
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2]);
+  if (!(h >= 0 && h <= 23 && mi >= 0 && mi <= 59)) return null;
+  return h * 60 + mi;
+}
+
+/** 지정 시각을 놓쳤을 때 따라잡기 허용 범위(분). */
+const CATCHUP_WINDOW_MIN = 5;
+
 function scheduleDailyStockAlert(baseUrl) {
   let lastSentDate = null;   // 'YYYY-MM-DD' (KST) — 같은 날 중복 발송 방지
 
@@ -325,15 +339,22 @@ function scheduleDailyStockAlert(baseUrl) {
 
     const kst = new Date(Date.now() + 9 * 3600 * 1000);
     const today = kst.toISOString().slice(0, 10);
-    const hhmm = `${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getUTCMinutes()).padStart(2, '0')}`;
-    const [th, tm] = String(cfg.time || '09:00').split(':');
-    const target = `${String(parseInt(th, 10) || 9).padStart(2, '0')}:${String(parseInt(tm, 10) || 0).padStart(2, '0')}`;
+    const target = _parseHhmm(cfg.time);
+    if (target == null) return;                 // 형식 이상 — 발송하지 않음
+    if (lastSentDate === today) return;
 
-    if (hhmm !== target || lastSentDate === today) return;
-    lastSentDate = today;   // 발송 실패해도 같은 분에 재시도하지 않도록 먼저 표시
+    // 정각 tick 이 밀려도 그날 발송이 통째로 사라지지 않도록 창(window)으로 판정.
+    //   setInterval 60s 는 이벤트루프 지연으로 특정 분을 건너뛸 수 있어 '=== 같은 분' 은 취약했다.
+    //   창을 벗어난 늦은 기동(재배포 등)에는 발송하지 않는다 — 엉뚱한 시각 발송 방지.
+    const nowMin = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+    const delta = nowMin - target;
+    if (delta < 0 || delta > CATCHUP_WINDOW_MIN) return;
+
+    lastSentDate = today;   // 발송 실패해도 같은 날 재시도하지 않도록 먼저 표시
+    const targetLabel = `${String(Math.floor(target / 60)).padStart(2, '0')}:${String(target % 60).padStart(2, '0')}`;
     try {
       const r = await sendStockAlert(baseUrl, {});
-      console.log(`[stock-alert] 발송 완료 (${target} KST, 채널 ${cfg.channel || 'webhook'}) —`,
+      console.log(`[stock-alert] 발송 완료 (${targetLabel} KST, 채널 ${cfg.channel || 'webhook'}) —`,
         `대상 ${r.targetCount}건 / 확인필요 ${r.warnCount}건`);
     } catch (err) {
       console.error('[stock-alert] 발송 실패:', err.message);
