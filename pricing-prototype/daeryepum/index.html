@@ -12721,6 +12721,24 @@ async function saveBgProduct() {
   const productName = (document.getElementById('bg-p-meta-name')?.value || '').trim();
   const salesChannel = document.getElementById('bg-p-meta-channel')?.value || 'own';
 
+  // 채널 전용 상품은 코드를 따로 판다 (운영 규칙 2026-08-07).
+  //   product_id 가 PK 라 한 코드에 한 행뿐이다. 이미 있는 코드로 '신규 등록' 하면
+  //   저장이 조용히 기존 행을 덮어써, 자사 설정이 사라져도 아무도 모른다. 여기서 막는다.
+  if (isNewProduct) {
+    const dup = (bgProductSettings || []).find(s => s.product_id === productId);
+    if (dup) {
+      const dupCh = PRODUCT_CHANNEL_LABEL[_psChannel(dup)] || '자사';
+      const newCh = PRODUCT_CHANNEL_LABEL[salesChannel] || '자사';
+      if (_psChannel(dup) !== salesChannel) {
+        alert(`${productId} 는 이미 ${dupCh} 채널로 등록돼 있습니다.\n\n`
+          + `한 코드에 채널별 설정을 따로 둘 수 없습니다.\n`
+          + `${newCh} 용은 전용 코드를 새로 만들어 등록해주세요 (예: TGCP01D1).`);
+        return;
+      }
+      if (!confirm(`${productId} 설정이 이미 있습니다.\n\n덮어쓸까요? 기존 스티커·박스·옵션 설정이 지금 화면 값으로 바뀝니다.`)) return;
+    }
+  }
+
   const stickerIds = [..._bgSelectedStickerIds];
 
   // 박스 옵션 검증 — code 는 필수, 빈 code 는 무시
