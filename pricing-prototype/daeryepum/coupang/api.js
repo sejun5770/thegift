@@ -223,8 +223,53 @@ async function getOrderSheet(orderId) {
   return Array.isArray(res?.data) ? res.data : (res?.data ? [res.data] : []);
 }
 
+/**
+ * 로켓창고 재고 — 쿠팡 물류센터의 주문가능 수량.
+ *   GET /v2/providers/rg_open_api/apis/api/v1/vendors/{vendorId}/rg/inventory/summaries
+ *   vendorItemId 를 주면 그 옵션만, 생략하면 전체(페이징).
+ *   쿠팡 안내: 분당 50회 이하로 호출할 것.
+ *
+ *   응답 data[]: { vendorId, vendorItemId, externalSkuId,
+ *                  inventoryDetails: { totalOrderableQuantity },
+ *                  salesCountMap: { SALES_COUNT_LAST_THIRTY_DAYS } }
+ *
+ *   주의: 입고수량은 제공되지 않는다. 로켓그로스 API 에 입고 관련 엔드포인트 자체가 없다.
+ */
+async function listRgInventory({ vendorItemId, nextToken } = {}) {
+  const params = new URLSearchParams();
+  if (vendorItemId) params.set('vendorItemId', String(vendorItemId));
+  if (nextToken) params.set('nextToken', String(nextToken));
+  const path = `/v2/providers/rg_open_api/apis/api/v1/vendors/${VENDOR_ID}/rg/inventory/summaries`;
+  return callCoupang('GET', path, params.toString());
+}
+
+/**
+ * 전체 재고 페이지네이션 자동 처리.
+ *   분당 50회 제한이 있어 페이지 사이에 잠깐 쉰다 (1.3초 → 분당 약 46회).
+ *   nextToken 이 같은 값으로 되돌아오면 멈춘다 — 무한 루프 방지.
+ */
+async function listAllRgInventory({ maxPages = 100 } = {}) {
+  const items = [];
+  const seenTokens = new Set();
+  let nextToken = null;
+  let pages = 0;
+  while (pages < maxPages) {
+    const res = await listRgInventory({ nextToken });
+    pages++;
+    if (Array.isArray(res.data)) items.push(...res.data);
+    const t = res.nextToken ? String(res.nextToken) : null;
+    if (!t || seenTokens.has(t)) break;
+    seenTokens.add(t);
+    nextToken = t;
+    await new Promise(r => setTimeout(r, 1300));
+  }
+  return { items, pages, truncated: pages >= maxPages };
+}
+
 module.exports = {
   isConfigured,
+  listRgInventory,
+  listAllRgInventory,
   buildAuthHeader,
   getOrderSheet,
   buildDatetime,

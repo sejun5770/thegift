@@ -8198,6 +8198,15 @@ const server = http.createServer(async (req, res) => {
           //   합계는 코드 dedup 후 계산한다 (행 단위로는 각각 그대로 표시).
           const countedCodes = new Set();
           let dedupSales30d = 0;
+          // 로켓창고(쿠팡 물류센터) 재고 — 저장된 스냅샷을 판매코드 단위로 붙인다 (061).
+          //   API 를 여기서 부르지 않는다: 페이징 + 분당 50회 제한이라 화면 로드마다 때리면 막힌다.
+          //   스냅샷이 없거나 실패해도 재고 화면은 그대로 떠야 한다.
+          let cpInvByCode = new Map();
+          try {
+            cpInvByCode = await require('./coupang/rg-inventory').getInventoryByProductCode();
+          } catch (e) {
+            console.warn('[stock] 로켓창고 재고 조회 실패 (자사 재고만 표시):', e.message);
+          }
           const items = (stockRes.recordset || []).map(r => {
             const regRow = regByCode.get(r.stock_code) || { row: {}, sales: [], consume: [], consumeSource: 'sales' };
             const reg = regRow.row || {};
@@ -8279,6 +8288,23 @@ const server = http.createServer(async (req, res) => {
               current_qty: currentQty,
               available_qty: availableQty,
               stock_source: hasXerp ? 'xerp' : 'bar_shop1',
+              // 로켓창고 재고 — 이 품목이 소진되는 판매코드들의 쿠팡 창고 수량 합 (061).
+              //   coupang_qty 는 판매코드 개수(= 옵션수량 × 채널 판매단위).
+              //   구성품 행이면 소요수량(mult)을 곱해 '원물 상당량' 도 함께 낸다.
+              coupang_stock: (() => {
+                const codes = (regRow.consume || []).length ? regRow.consume : cardCodes.map(c => ({ code: c, mult: 1 }));
+                const detail = [];
+                let qty = 0, componentQty = 0, syncedAt = null;
+                for (const c of codes) {
+                  const inv = cpInvByCode.get(c.code);
+                  if (!inv) continue;
+                  qty += inv.item_qty;
+                  componentQty += inv.item_qty * (c.mult || 1);
+                  if (!syncedAt || (inv.synced_at && inv.synced_at > syncedAt)) syncedAt = inv.synced_at;
+                  detail.push({ code: c.code, qty: inv.item_qty, options: inv.options, unit: inv.unit, mult: c.mult || 1 });
+                }
+                return detail.length ? { qty, component_qty: componentQty, synced_at: syncedAt, detail } : null;
+              })(),
               stock_breakdown: hasXerp ? xrec.breakdown : null,   // 창고별 내역
               sale_price: salePrice,          // 현재 판매가 = 가장 최근 실판매 단가
               sale_price_date: salePriceDate,  // 그 판매가가 적용된 최근 판매일
@@ -8315,7 +8341,13 @@ const server = http.createServer(async (req, res) => {
               urgent_30d: items.filter(x => x.days_to_soldout !== null && x.days_to_soldout <= 30).length,
               total_stock_value: items.reduce((s, x) => s + (Number(x.stock_value) || 0), 0),
               // 품목코드 dedup 후 합계 — 한 품목코드가 두 ERP코드에 걸려도 이중계상 안 됨
-              total_sales_30d: dedupSales30d
+              total_sales_30d: dedupSales30d,
+              // 로켓창고 재고가 붙은 품목 수 — 0 이면 아직 동기화 전이거나 매핑이 없다
+              coupang_tracked: items.filter(x => x.coupang_stock).length,
+              coupang_synced_at: items.reduce((a, x) => {
+                const t = x.coupang_stock?.synced_at;
+                return (t && (!a || t > a)) ? t : a;
+              }, null)
             }
           };
         } catch (e) {
@@ -13873,6 +13905,32 @@ const server = http.createServer(async (req, res) => {
               data.workflow_error = e.message;
             }
           }
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/coupang/rg-inventory' && req.method === 'GET') {
+        // 로켓창고 재고 스냅샷 조회 (061) — 저장된 값만. 갱신은 sync 로.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          const rows = await require('./coupang/rg-inventory').listInventory();
+          data = { items: rows, count: rows.length };
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/coupang/rg-inventory/sync' && req.method === 'POST') {
+        // 쿠팡 재고 API → 스냅샷 갱신. 페이징 + 분당 50회 제한이라 수동/주기 실행만 한다.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        logAdminAccess(session, req, 'coupang-rg-inventory-sync', {});
+        try {
+          data = await require('./coupang/rg-inventory').syncRgInventory();
         } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: e.message }));
