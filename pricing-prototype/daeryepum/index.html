@@ -2253,11 +2253,7 @@ nav.nav-loading a[href^="#"] {
         <option value="in_stock">✅ 재고 있음</option>
         <option value="not_found">❓ 재고 못 찾음</option>
       </select>
-      <label style="display:flex;align-items:center;gap:5px;font-size:12px;padding:0 4px" title="BOM 에 등록된 판매상품 단위로 묶어서 봅니다 — 상품을 펼치면 그 구성품 재고가 나옵니다">
-        <input type="checkbox" id="stock-group-mode" onchange="renderStockTable()"> 상품 그룹
-      </label>
       <button class="btn" style="padding:6px 12px;font-size:12px" onclick="openStockItemModal()">➕ 품목 등록</button>
-      <button class="btn" style="padding:6px 12px;font-size:12px" onclick="openBomModal()">🧩 BOM</button>
       <button class="btn" style="padding:6px 12px;font-size:12px" onclick="loadDaeryepumStock()">🔄 새로고침</button>
       <button class="btn" style="padding:6px 12px;font-size:12px" onclick="downloadStockCsv()">📥 엑셀</button>
     </div>
@@ -2310,12 +2306,23 @@ nav.nav-loading a[href^="#"] {
     <pre id="stock-alert-preview-body" style="margin:0;white-space:pre-wrap;word-break:break-all;font-size:12px;font-family:inherit;background:var(--gray-50);padding:10px;border-radius:6px;max-height:400px;overflow:auto"></pre>
   </div>
 
+  <!-- 선택 액션 바 — 행을 체크하면 나타난다 -->
+  <div id="stock-selection-bar" style="display:none;position:sticky;top:0;z-index:20;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:8px 12px;margin-bottom:8px;align-items:center;gap:10px;flex-wrap:wrap">
+    <b style="font-size:12px;color:#3730a3"><span id="stock-selection-count">0</span>개 선택</b>
+    <span id="stock-selection-codes" style="font-size:11px;color:#4338ca;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+    <button class="btn" style="padding:5px 12px;font-size:12px" onclick="groupSelectedStockItems()">🧩 그룹으로 묶기</button>
+    <button class="btn" style="padding:5px 12px;font-size:12px" onclick="clearStockSelection()">선택 해제</button>
+  </div>
+
   <!-- 테이블 -->
   <div class="card" style="padding:0;margin-bottom:16px;overflow:hidden">
     <div id="stock-loading" style="text-align:center;padding:40px;color:var(--gray-500);font-size:13px">불러오는 중…</div>
     <table class="data-table" id="stock-table" style="width:100%;font-size:12px;display:none">
       <thead>
         <tr>
+          <th style="text-align:center;padding:8px 6px;border-bottom:1px solid var(--gray-200);width:28px" title="여러 품목을 골라 판매상품 그룹(BOM)으로 묶습니다">
+            <input type="checkbox" id="stock-select-all" onchange="toggleStockSelectAll(this.checked)">
+          </th>
           <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="재고를 조회하는 코드 (ERP코드) — 등록 단위">재고코드</th>
           <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="매출을 조회하는 품목코드 — 여기 적힌 코드만 합산합니다">매출코드</th>
           <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">상품명</th>
@@ -2352,52 +2359,6 @@ nav.nav-loading a[href^="#"] {
              style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;margin-bottom:10px">
       <div id="si-results" style="max-height:340px;overflow:auto;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:12px"></div>
       <div id="si-registered" style="border-top:1px solid var(--gray-200);padding-top:10px"></div>
-    </div>
-  </div>
-
-  <!-- BOM 관리 모달 -->
-  <div id="bom-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto">
-    <div class="card" style="max-width:1000px;width:100%;padding:16px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <strong style="font-size:14px">🧩 BOM 관리 <span style="font-weight:400;color:var(--gray-500);font-size:12px">판매상품 1개가 무엇으로 구성되는지</span></strong>
-        <button class="btn" style="padding:4px 10px;font-size:12px" onclick="closeBomModal()">닫기</button>
-      </div>
-
-      <div style="font-size:11px;color:var(--gray-500);line-height:1.7;margin-bottom:10px;background:var(--gray-50);padding:8px 10px;border-radius:6px">
-        상품 하나를 고르고 그 <b>구성품</b>을 등록합니다. 예) 핸드워시 기프트 = 핸드워시 원물 1 + 패키지 1 + 띠지 1.<br>
-        구성품은 <b>재고관리 품목이 아니어도 등록</b>할 수 있습니다 (부자재·포장재). 재고관리로 등록된 구성품만 소진 계산에 반영되고,
-        나머지는 구성 정보로만 보관됐다가 나중에 재고관리에 넣으면 자동으로 반영됩니다.
-      </div>
-
-      <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-        <input type="text" id="bom-parent-new" placeholder="판매코드 (예: TGJBK09D1)"
-          style="flex:1;min-width:200px;padding:7px 9px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px;font-family:monospace">
-        <button class="btn" style="padding:6px 14px;font-size:12px" onclick="bomOpenParent()">＋ 상품 열기</button>
-        <button class="btn" style="padding:6px 12px;font-size:12px" onclick="bomTogglePaste()">📋 일괄 붙여넣기</button>
-      </div>
-
-      <div id="bom-paste-wrap" style="display:none;margin-bottom:12px">
-        <div style="font-size:11px;color:var(--gray-500);line-height:1.6;margin-bottom:6px">
-          한 줄에 <b>판매코드 · 구성품코드 · 수량 · 역할</b> (콤마/탭 구분). 수량 생략 시 1, 역할 생략 시 부자재.<br>
-          역할은 <code>원물 / 부자재 / 포장재 / 기타</code> 중 하나로 적으면 됩니다.
-        </div>
-        <textarea id="bom-paste" rows="5" placeholder="TGJBK03D1, TGJBK03O1, 1, 원물&#10;TGJBK03D1, TGJBK03P1, 1, 포장재&#10;TGJSD03D2, TGJSD03O2, 5, 원물"
-          style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px;font-family:monospace"></textarea>
-        <div style="display:flex;gap:6px;margin:8px 0">
-          <button class="btn" style="padding:5px 12px;font-size:12px" onclick="previewBomPaste()">👁 미리보기</button>
-          <button class="btn" style="padding:5px 12px;font-size:12px" onclick="saveBomPaste()">💾 등록</button>
-          <span id="bom-paste-msg" style="font-size:12px;color:var(--gray-500);align-self:center"></span>
-        </div>
-        <div id="bom-preview" style="max-height:220px;overflow:auto"></div>
-      </div>
-
-      <div style="border-top:1px solid var(--gray-200);padding-top:10px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <strong style="font-size:13px">등록된 상품</strong>
-          <span id="bom-count" style="font-size:11px;color:var(--gray-500)"></span>
-        </div>
-        <div id="bom-list" style="max-height:420px;overflow:auto"></div>
-      </div>
     </div>
   </div>
 
@@ -13929,13 +13890,8 @@ function renderStockTable() {
     $table.style.display = 'none';
     return;
   }
-  if (document.getElementById('stock-group-mode')?.checked) {
-    $tbody.innerHTML = _stockGroupedRows(items);
-    $loading.style.display = 'none';
-    $table.style.display = '';
-    return;
-  }
-  $tbody.innerHTML = items.map(it => _stockItemRow(it, null)).join('');
+  $tbody.innerHTML = _stockGroupedRows(items);
+  _syncStockSelectionBar();
   $loading.style.display = 'none';
   $table.style.display = '';
 }
@@ -13959,8 +13915,11 @@ function _stockItemRow(it, bom) {
     const bomTag = bom
       ? ` ${_bomRoleBadge(bom.role)}<span style="font-size:10px;color:var(--gray-500)"> ×${bom.qty}</span>${shared}`
       : '';
+    const checked = _stockSelected.has(it.stock_code) ? ' checked' : '';
     return `
       <tr style="${soldoutBg}">
+        <td style="padding:6px 6px;border-bottom:1px solid var(--gray-100);text-align:center">
+          <input type="checkbox"${checked} onchange="toggleStockSelect('${esc(it.stock_code)}', this.checked)"></td>
         <td style="padding:6px 12px${bom ? ' 6px 30px' : ''};border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px">${_stockErpCodeCell(it)}${bomTag}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px;color:var(--gray-500)">${_stockSalesCodeCell(it)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100)">${esc(it.product_name || '-')}</td>
@@ -13974,106 +13933,272 @@ function _stockItemRow(it, bom) {
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;color:var(--gray-600)">${it.daily_avg_30d}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${daysCell}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center">${_stockBellCell(it)}</td>
-        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center;white-space:nowrap">${_stockRowActions(it)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center;white-space:nowrap">${_stockRowActions(it, bom)}</td>
       </tr>
     `;
 }
 
-// ─── 상품 그룹 보기 ───
-//   대시보드의 매출 그룹처럼, 재고 목록을 판매상품(BOM parent) 단위로 묶는다.
-//   그룹 = BOM 의 판매상품, 멤버 = 그 상품의 구성품 재고.
-//   한 원물이 여러 세트에 쓰이면 각 그룹에 모두 나타난다 (재고 자체는 하나).
+// ─── BOM 구성 헬퍼 ───
+//   별도 BOM 관리 화면은 없앴다 (2026-08-07). 구성은 재고 목록에서만 만지고,
+//   여기 있는 것은 목록이 쓰는 최소 도구뿐이다.
+const BOM_ROLE_LABEL = { product: '원물', material: '부자재', package: '포장재', etc: '기타' };
+const BOM_ROLE_COLOR = { product: '#4338ca', material: '#0f766e', package: '#b45309', etc: '#6b7280' };
+
+/** '원물'/'product' 등 사용자 입력 → 저장 값 */
+function _bomRoleFromText(v) {
+  const t = String(v || '').trim().toLowerCase();
+  if (!t) return 'material';
+  if (BOM_ROLE_LABEL[t]) return t;
+  if (/원물|본품|내용물/.test(t)) return 'product';
+  if (/포장|박스|쇼핑백/.test(t)) return 'package';
+  if (/기타/.test(t)) return 'etc';
+  return 'material';
+}
+
+function _bomRoleBadge(role) {
+  const r = BOM_ROLE_LABEL[role] ? role : 'material';
+  return `<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--gray-100);color:${BOM_ROLE_COLOR[r]}">${BOM_ROLE_LABEL[r]}</span>`;
+}
+
+function _bomFindComponent(id) {
+  for (const p of (_stockBomParents || [])) {
+    const c = (p.components || []).find(x => x.id === id);
+    if (c) return { parent: p, comp: c };
+  }
+  return null;
+}
+
+/** 그룹에 구성품 추가 — 이미 재고 목록에 있는 코드도, 아직 없는 부자재 코드도 넣을 수 있다. */
+async function addBomComponent(parentCode) {
+  const code = prompt(`${parentCode} 에 넣을 구성품 코드\n\n원물·부자재·포장재 모두 가능합니다.`, '');
+  if (code === null || !code.trim()) return;
+  const qtyRaw = prompt(`${parentCode} 1개당 ${code.trim()} 소요수량`, '1');
+  if (qtyRaw === null) return;
+  if (!/^\d+$/.test(qtyRaw.trim()) || parseInt(qtyRaw, 10) < 1) { alert('1 이상의 정수를 입력하세요.'); return; }
+  try {
+    const r = await fetch(`${API}/api/bg/stock-bom`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows: [{
+        parent_code: parentCode,
+        component_code: code.trim(),
+        qty: parseInt(qtyRaw, 10),
+        component_role: _guessBomRole(code.trim()),
+      }] }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    _stockGroupOpen.add(parentCode);
+    await loadDaeryepumStock();
+  } catch (e) { alert(`추가 실패: ${e.message}`); }
+}
+
+/** 소요수량·역할 수정 */
+async function editBomComponent(id) {
+  const found = _bomFindComponent(id);
+  if (!found) return;
+  const { parent, comp } = found;
+  const v = prompt(`${parent.parent_code} 1개당 ${comp.component_code} 소요수량`, comp.qty);
+  if (v === null) return;
+  if (!/^\d+$/.test(v.trim()) || parseInt(v, 10) < 1) { alert('1 이상의 정수를 입력하세요.'); return; }
+  const roleRaw = prompt('역할 — 원물 / 부자재 / 포장재 / 기타', BOM_ROLE_LABEL[comp.component_role] || '부자재');
+  if (roleRaw === null) return;
+  try {
+    const r = await fetch(`${API}/api/bg/stock-bom/${encodeURIComponent(id)}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ qty: parseInt(v, 10), component_role: _bomRoleFromText(roleRaw) }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    await loadDaeryepumStock();
+  } catch (e) { alert(`실패: ${e.message}`); }
+}
+
+/** 그룹에서 이 구성품만 빼기 (재고 등록 자체는 유지) */
+async function removeBomComponent(id) {
+  const found = _bomFindComponent(id);
+  const label = found ? `${found.parent.parent_code} 에서 ${found.comp.component_code}` : id;
+  if (!confirm(`${label}\n\n이 구성품을 그룹에서 뺄까요?\n재고 목록에는 낱개로 남습니다.`)) return;
+  try {
+    await fetch(`${API}/api/bg/stock-bom/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await loadDaeryepumStock();
+  } catch (e) { alert(`실패: ${e.message}`); }
+}
+
+// ─── 상품 그룹 ───
+//   목록에는 부자재까지 모든 등록 품목이 그대로 나오고, 행을 체크해 판매상품 그룹(BOM)으로 묶는다.
+//   묶인 품목은 그룹 헤더 아래로 들어가고, 안 묶인 품목은 지금처럼 한 줄씩 그대로 남는다.
+//   그룹과 낱개 품목을 소진예상일 한 축으로 함께 정렬해, 묶었다고 급한 것이 뒤로 밀리지 않게 한다.
 //   BOM 에 있지만 재고관리 미등록인 구성품은 회색 줄로 자리를 남기고 그 자리에서 등록할 수 있다.
-const STOCK_GROUP_COLSPAN = 14;
+const STOCK_GROUP_COLSPAN = 15;
 let _stockGroupOpen = new Set();
+let _stockSelected = new Set();   // 체크된 재고코드
 
 function toggleStockGroup(code) {
   if (_stockGroupOpen.has(code)) _stockGroupOpen.delete(code); else _stockGroupOpen.add(code);
   renderStockTable();
 }
 
+const _daysRank = d => (d === null || d === undefined ? 99999 : d);
+
 function _stockGroupedRows(items) {
   const byCode = new Map(items.map(it => [it.stock_code, it]));
-  // 필터 적용 후에도 그룹 구조는 BOM 기준을 그대로 쓴다 — 필터로 걸러진 구성품은 숨긴다.
-  const groups = new Map();   // parent_code → {code, name, comps:[{code, qty, role, item|null}]}
+  const groups = [];
   for (const p of (_stockBomParents || [])) {
-    groups.set(p.parent_code, {
+    const comps = (p.components || []).map(c => ({
+      id: c.id, code: c.component_code, qty: c.qty, role: c.component_role,
+      registered: !!c.component_registered,
+      item: byCode.get(c.component_code) || null,
+    })).filter(c => c.item || !c.registered);   // 필터로 걸러진 구성품은 숨긴다
+    if (!comps.length) continue;
+    const tracked = comps.filter(c => c.item).map(c => c.item);
+    groups.push({
       code: p.parent_code,
       name: p.parent_name || '',
       parent_ok: p.parent_ok !== false,
-      comps: (p.components || []).map(c => ({
-        code: c.component_code, qty: c.qty, role: c.component_role,
-        registered: !!c.component_registered,
-        item: byCode.get(c.component_code) || null,
-      })),
+      comps,
+      worst: tracked.reduce((a, it) =>
+        (it.days_to_soldout !== null && (a === null || it.days_to_soldout < a)) ? it.days_to_soldout : a, null),
+      anySoldout: tracked.some(it => it.available_qty <= 0),
     });
   }
-  // 어느 그룹에도 안 들어간 재고품목 → 미분류
   const grouped = new Set();
-  for (const g of groups.values()) g.comps.forEach(c => { if (c.item) grouped.add(c.code); });
-  const loose = items.filter(it => !grouped.has(it.stock_code));
+  groups.forEach(g => g.comps.forEach(c => { if (c.item) grouped.add(c.code); }));
+
+  // 그룹 헤더와 낱개 품목을 같은 축(소진예상일)으로 정렬
+  const entries = [
+    ...groups.map(g => ({ kind: 'group', sort: _daysRank(g.worst), g })),
+    ...items.filter(it => !grouped.has(it.stock_code))
+      .map(it => ({ kind: 'item', sort: _daysRank(it.days_to_soldout), it })),
+  ].sort((a, b) => a.sort - b.sort);
 
   const out = [];
-  const list = [...groups.values()]
-    // 표시할 구성품(필터 통과 or 미등록)이 하나도 없는 그룹은 접어둔 채로도 의미가 없어 제외
-    .filter(g => g.comps.some(c => c.item || !c.registered))
-    .sort((a, b) => String(a.name || a.code).localeCompare(String(b.name || b.code)));
-
-  for (const g of list) {
+  for (const e of entries) {
+    if (e.kind === 'item') { out.push(_stockItemRow(e.it, null)); continue; }
+    const g = e.g;
     const open = _stockGroupOpen.has(g.code);
-    const shown = g.comps.filter(c => c.item || !c.registered);
-    const trackedItems = shown.filter(c => c.item).map(c => c.item);
-    const worst = trackedItems.reduce((a, it) =>
-      (it.days_to_soldout !== null && (a === null || it.days_to_soldout < a)) ? it.days_to_soldout : a, null);
-    const anySoldout = trackedItems.some(it => it.available_qty <= 0);
-    const headBg = anySoldout ? 'background:#fef2f2'
-      : (worst !== null && worst <= 30 ? 'background:#fef3c7' : 'background:var(--gray-50)');
+    const headBg = g.anySoldout ? 'background:#fef2f2'
+      : (g.worst !== null && g.worst <= 30 ? 'background:#fef3c7' : 'background:var(--gray-50)');
     const nameCell = g.parent_ok
       ? esc(g.name || '(이름 없음)')
-      : `<span style="color:#b45309" title="S2_Card 에서 이 판매코드를 찾지 못했습니다 — 판매수량이 0 이라 소진이 계산되지 않습니다">${esc(g.name || '(이름 없음)')} ⚠</span>`;
+      : `<span style="color:#b45309" title="S2_Card 에서 이 판매코드를 찾지 못했습니다 — 판매수량이 0 이라 소진이 계산되지 않습니다">${esc(g.name || g.code)} ⚠</span>`;
     out.push(`
       <tr style="${headBg};cursor:pointer" onclick="toggleStockGroup('${esc(g.code)}')">
         <td colspan="${STOCK_GROUP_COLSPAN}" style="padding:7px 12px;border-bottom:1px solid var(--gray-200)">
           <span style="font-size:10px;color:var(--gray-400);margin-right:6px">${open ? '▾' : '▸'}</span>
           <span style="font-family:monospace;font-size:11px;color:var(--gray-600)">${esc(g.code)}</span>
           <span style="font-weight:600;margin-left:8px">${nameCell}</span>
-          <span style="font-size:11px;color:var(--gray-500);margin-left:10px">구성품 ${shown.length}</span>
-          ${worst !== null && worst <= 30 ? `<span style="font-size:11px;color:#dc2626;margin-left:8px">최단 ${worst}일</span>` : ''}
+          <span style="font-size:11px;color:var(--gray-500);margin-left:10px">구성품 ${g.comps.length}</span>
+          ${g.worst !== null && g.worst <= 30 ? `<span style="font-size:11px;color:#dc2626;margin-left:8px">최단 ${g.worst}일</span>` : ''}
           <button onclick="event.stopPropagation();addBomComponent('${esc(g.code)}')" title="이 상품에 구성품 추가"
             style="float:right;border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 8px">＋ 구성품</button>
+          <button onclick="event.stopPropagation();ungroupStockGroup('${esc(g.code)}')" title="이 그룹을 해제 — BOM 구성이 삭제되고 품목은 낱개로 돌아갑니다"
+            style="float:right;border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 8px;margin-right:4px;color:#dc2626">해제</button>
         </td>
       </tr>`);
     if (!open) continue;
-    for (const c of shown) {
+    for (const c of g.comps) {
       out.push(c.item
-        ? _stockItemRow(c.item, { qty: c.qty, role: c.role })
+        ? _stockItemRow(c.item, { id: c.id, qty: c.qty, role: c.role })
         : _stockUnregisteredRow(g.code, c));
     }
   }
-
-  if (loose.length) {
-    const open = _stockGroupOpen.has('__loose__');
-    out.push(`
-      <tr style="background:var(--gray-50);cursor:pointer" onclick="toggleStockGroup('__loose__')">
-        <td colspan="${STOCK_GROUP_COLSPAN}" style="padding:7px 12px;border-bottom:1px solid var(--gray-200)">
-          <span style="font-size:10px;color:var(--gray-400);margin-right:6px">${open ? '▾' : '▸'}</span>
-          <span style="font-weight:600">미분류</span>
-          <span style="font-size:11px;color:var(--gray-500);margin-left:8px">BOM 에 묶이지 않은 품목 ${loose.length}</span>
-        </td>
-      </tr>`);
-    if (open) loose.forEach(it => out.push(_stockItemRow(it, null)));
-  }
   return out.join('');
+}
+
+// ─── 행 선택 → 그룹으로 묶기 ───
+function toggleStockSelect(code, on) {
+  if (on) _stockSelected.add(code); else _stockSelected.delete(code);
+  _syncStockSelectionBar();
+}
+
+function toggleStockSelectAll(on) {
+  // 화면에 실제로 보이는 행만 대상 — 접힌 그룹 안의 품목까지 잡히면 의도와 달라진다.
+  document.querySelectorAll('#stock-tbody input[type=checkbox]').forEach(cb => {
+    const m = /toggleStockSelect\('([^']+)'/.exec(cb.getAttribute('onchange') || '');
+    if (!m) return;
+    cb.checked = on;
+    if (on) _stockSelected.add(m[1]); else _stockSelected.delete(m[1]);
+  });
+  _syncStockSelectionBar();
+}
+
+function clearStockSelection() {
+  _stockSelected.clear();
+  const all = document.getElementById('stock-select-all');
+  if (all) all.checked = false;
+  renderStockTable();
+}
+
+function _syncStockSelectionBar() {
+  const bar = document.getElementById('stock-selection-bar');
+  if (!bar) return;
+  const codes = [..._stockSelected];
+  bar.style.display = codes.length ? 'flex' : 'none';
+  if (!codes.length) return;
+  document.getElementById('stock-selection-count').textContent = codes.length;
+  document.getElementById('stock-selection-codes').textContent =
+    codes.slice(0, 6).join(', ') + (codes.length > 6 ? ` 외 ${codes.length - 6}` : '');
+}
+
+/** 코드 접미로 역할 추정 — O 계열은 원물, 나머지는 부자재. 등록 후 화면에서 바꿀 수 있다. */
+function _guessBomRole(code) {
+  return /^[A-Z]+\d+O/i.test(String(code || '')) ? 'product' : 'material';
+}
+
+/** 선택한 품목들을 판매상품 그룹(BOM)으로 묶는다 */
+async function groupSelectedStockItems() {
+  const codes = [..._stockSelected];
+  if (!codes.length) return;
+  const parent = prompt(
+    `선택한 ${codes.length}개 품목을 하나의 판매상품으로 묶습니다.\n\n`
+    + `${codes.join(', ')}\n\n`
+    + `이 구성품들이 들어가는 판매코드를 입력하세요.\n`
+    + `(이미 있는 판매코드면 그 그룹에 추가됩니다)`, '');
+  if (parent === null || !parent.trim()) return;
+  const rows = codes.map(c => ({
+    parent_code: parent.trim(),
+    component_code: c,
+    qty: 1,
+    component_role: _guessBomRole(c),
+  }));
+  try {
+    const r = await fetch(`${API}/api/bg/stock-bom`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    _stockGroupOpen.add(parent.trim());
+    _stockSelected.clear();
+    showToast(`${codes.length}개 품목을 ${parent.trim()} 으로 묶었습니다 — 소요수량이 1이 아니면 행에서 수정하세요`);
+    await loadDaeryepumStock();
+  } catch (e) { alert(`묶기 실패: ${e.message}`); }
+}
+
+/** 그룹 해제 — BOM 구성을 지우고 품목들을 낱개로 되돌린다 (재고 등록은 유지) */
+async function ungroupStockGroup(parentCode) {
+  const g = (_stockBomParents || []).find(p => p.parent_code === parentCode);
+  const n = g ? (g.components || []).length : 0;
+  if (!confirm(`${parentCode} 그룹을 해제합니다.\n\n구성품 ${n}건의 BOM 이 삭제되고 품목은 낱개로 돌아갑니다.\n재고 등록 자체는 유지됩니다.`)) return;
+  try {
+    for (const c of (g?.components || [])) {
+      await fetch(`${API}/api/bg/stock-bom/${encodeURIComponent(c.id)}`, { method: 'DELETE' });
+    }
+    _stockGroupOpen.delete(parentCode);
+    showToast(`${parentCode} 그룹 해제`);
+    await loadDaeryepumStock();
+  } catch (e) { alert(`해제 실패: ${e.message}`); }
 }
 
 /** BOM 에는 있지만 재고관리 미등록인 구성품 — 그 자리에서 등록할 수 있게 ＋ 버튼을 둔다 */
 function _stockUnregisteredRow(parentCode, c) {
   return `
     <tr style="color:var(--gray-400)">
+      <td style="padding:6px 6px;border-bottom:1px solid var(--gray-100)"></td>
       <td style="padding:6px 12px 6px 30px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px">${esc(c.code)}</td>
       <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100)"></td>
       <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100)">${_bomRoleBadge(c.role)} <span style="font-size:11px">×${c.qty}</span></td>
-      <td colspan="${STOCK_GROUP_COLSPAN - 4}" style="padding:6px 12px;border-bottom:1px solid var(--gray-100);font-size:11px">
+      <td colspan="${STOCK_GROUP_COLSPAN - 5}" style="padding:6px 12px;border-bottom:1px solid var(--gray-100);font-size:11px">
         재고관리 미등록 — 구성 정보로만 보관됩니다
       </td>
       <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center;white-space:nowrap">
@@ -14193,286 +14318,6 @@ function renderStockAlertList() {
               style="border:none;background:none;cursor:pointer;font-size:11px;color:var(--gray-600);padding:0">${thr}</button>
     </span>`;
   }).join('') + '</div>';
-}
-
-// ─── BOM 관리 (050 재구성) ───
-//   판매상품 1개의 구성품 목록을 상품 단위로 편집한다.
-//   구성품은 재고관리 품목이 아니어도 등록할 수 있고 (부자재/포장재),
-//   재고관리로 등록된 구성품만 소진 계산에 반영된다.
-let _bomParents = [];      // [{parent_code, parent_name, components:[...], ...}]
-let _bomOpen = new Set();  // 펼쳐진 판매코드
-
-const BOM_ROLE_LABEL = { product: '원물', material: '부자재', package: '포장재', etc: '기타' };
-const BOM_ROLE_COLOR = { product: '#4338ca', material: '#0f766e', package: '#b45309', etc: '#6b7280' };
-/** '원물'/'product' 등 사용자 입력 → 저장 값 */
-function _bomRoleFromText(v) {
-  const t = String(v || '').trim().toLowerCase();
-  if (!t) return 'material';
-  if (BOM_ROLE_LABEL[t]) return t;
-  if (/원물|본품|내용물/.test(t)) return 'product';
-  if (/포장|박스|쇼핑백/.test(t)) return 'package';
-  if (/기타/.test(t)) return 'etc';
-  return 'material';
-}
-
-function openBomModal() {
-  document.getElementById('bom-modal').style.display = 'flex';
-  document.getElementById('bom-paste-msg').textContent = '';
-  document.getElementById('bom-preview').innerHTML = '';
-  loadBomRows();
-}
-function closeBomModal() { document.getElementById('bom-modal').style.display = 'none'; }
-
-function bomTogglePaste() {
-  const el = document.getElementById('bom-paste-wrap');
-  el.style.display = el.style.display === 'none' ? 'block' : 'none';
-}
-
-/** 상품 열기 — 아직 BOM 이 없는 판매코드도 빈 상품으로 펼쳐 구성품을 추가할 수 있게 한다. */
-function bomOpenParent() {
-  const $i = document.getElementById('bom-parent-new');
-  const code = $i.value.trim();
-  if (!code) { $i.focus(); return; }
-  _bomOpen.add(code);
-  if (!_bomParents.some(p => p.parent_code === code)) {
-    _bomParents = [{ parent_code: code, parent_name: null, parent_ok: true, components: [], component_count: 0, tracked_count: 0, _isNew: true }, ..._bomParents];
-  }
-  $i.value = '';
-  renderBomList();
-}
-
-function bomToggleParent(code) {
-  if (_bomOpen.has(code)) _bomOpen.delete(code); else _bomOpen.add(code);
-  renderBomList();
-}
-
-/** 붙여넣기 텍스트 → [{parent_code, component_code, qty, component_role}] */
-function parseBomText(text) {
-  return String(text || '').split(/\r?\n/).map(line => {
-    const t = line.trim();
-    if (!t) return null;
-    const parts = t.split(/[\t,]/).map(s => s.trim()).filter(s => s !== '');
-    if (parts.length < 2) return null;
-    const qty = parts.length >= 3 ? Math.max(1, parseInt(parts[2].replace(/[^\d]/g, ''), 10) || 1) : 1;
-    return {
-      parent_code: parts[0],
-      component_code: parts[1],
-      qty,
-      component_role: parts.length >= 4 ? _bomRoleFromText(parts[3]) : 'material',
-    };
-  }).filter(Boolean);
-}
-
-async function previewBomPaste() {
-  const rows = parseBomText(document.getElementById('bom-paste').value);
-  const $p = document.getElementById('bom-preview');
-  const $m = document.getElementById('bom-paste-msg');
-  if (!rows.length) { $p.innerHTML = ''; $m.textContent = '읽을 줄이 없습니다.'; return; }
-  $m.textContent = '검증 중…';
-  try {
-    const r = await fetch(`${API}/api/bg/stock-bom/validate`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows }),
-    });
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    const parsed = d.rows || [];
-    const okParent = parsed.filter(x => x.parent_ok).length;
-    const tracked = parsed.filter(x => x.component_registered).length;
-    $m.textContent = `${parsed.length}줄 · 판매코드 확인 ${okParent}줄 · 소진 반영 ${tracked}줄`;
-    $p.innerHTML = `<table style="width:100%;font-size:11px;border-collapse:collapse">
-      <thead><tr style="background:var(--gray-50)">
-        <th style="text-align:left;padding:5px 8px">판매코드</th>
-        <th style="text-align:left;padding:5px 8px">구성품</th>
-        <th style="text-align:left;padding:5px 8px">역할</th>
-        <th style="text-align:right;padding:5px 8px">수량</th>
-      </tr></thead><tbody>` + parsed.map(x => `
-        <tr style="border-bottom:1px solid var(--gray-100)">
-          <td style="padding:4px 8px;font-family:monospace">${_bomParentCodeCell(x)}</td>
-          <td style="padding:4px 8px;font-family:monospace">${_bomComponentCodeCell(x)}</td>
-          <td style="padding:4px 8px">${_bomRoleBadge(x.component_role)}</td>
-          <td style="padding:4px 8px;text-align:right;${x.qty > 1 ? 'font-weight:600;color:#b45309' : ''}">${x.qty}</td>
-        </tr>`).join('') + '</tbody></table>';
-  } catch (e) {
-    $m.textContent = `검증 실패: ${e.message}`;
-  }
-}
-
-function _bomRoleBadge(role) {
-  const r = BOM_ROLE_LABEL[role] ? role : 'material';
-  return `<span style="font-size:10px;padding:1px 6px;border-radius:3px;background:var(--gray-100);color:${BOM_ROLE_COLOR[r]}">${BOM_ROLE_LABEL[r]}</span>`;
-}
-
-function _bomParentCodeCell(x) {
-  if (x.parent_ok) return esc(x.parent_code);
-  if (x.parent_variants) {
-    return `<span style="color:#b45309" title="변형코드로만 존재합니다 (예: ${esc(x.parent_code)}_A) — 실제 판매코드를 넣어주세요">${esc(x.parent_code)} ⚠</span>`;
-  }
-  return `<span style="color:#dc2626" title="S2_Card 에서 이 판매코드를 찾지 못했습니다 — 판매수량이 0 이라 소진이 계산되지 않습니다">${esc(x.parent_code)} ❓</span>`;
-}
-
-/** 구성품 코드 — 재고관리 미등록은 오류가 아니라 '소진 미반영' 정보로 표시 */
-function _bomComponentCodeCell(x) {
-  if (x.component_registered) return esc(x.component_code);
-  const tip = x.component_in_erp
-    ? 'ERP 재고코드로는 존재하지만 재고관리 품목으로 등록돼 있지 않습니다 — 구성 정보로만 보관되고 소진 계산에는 반영되지 않습니다'
-    : '재고관리 품목이 아닙니다 — 구성 정보로만 보관됩니다 (부자재/포장재라면 정상)';
-  return `<span style="color:var(--gray-500)" title="${esc(tip)}">${esc(x.component_code)} <span style="font-size:9px">◦</span></span>`;
-}
-
-async function saveBomPaste() {
-  const rows = parseBomText(document.getElementById('bom-paste').value);
-  const $m = document.getElementById('bom-paste-msg');
-  if (!rows.length) { $m.textContent = '읽을 줄이 없습니다.'; return; }
-  if (!confirm(`${rows.length}줄을 등록합니다.\n같은 (판매코드, 구성품코드) 조합은 수량·역할이 갱신됩니다.`)) return;
-  $m.textContent = '등록 중…';
-  try {
-    const r = await fetch(`${API}/api/bg/stock-bom`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows }),
-    });
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    document.getElementById('bom-paste').value = '';
-    document.getElementById('bom-preview').innerHTML = '';
-    $m.textContent = `${(d.rows || []).length}줄 등록 완료`;
-    rows.forEach(x => _bomOpen.add(x.parent_code));
-    await loadBomRows();
-    await loadDaeryepumStock();
-  } catch (e) { $m.textContent = `등록 실패: ${e.message}`; }
-}
-
-async function loadBomRows() {
-  const $l = document.getElementById('bom-list');
-  $l.innerHTML = '<div style="color:var(--gray-500);font-size:12px;padding:10px">불러오는 중…</div>';
-  try {
-    const r = await fetch(`${API}/api/bg/stock-bom?group=parent`);
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    _bomParents = d.parents || [];
-    renderBomList();
-  } catch (e) {
-    $l.innerHTML = `<div style="color:#dc2626;font-size:12px;padding:10px">불러오기 실패: ${esc(e.message)}</div>`;
-  }
-}
-
-function renderBomList() {
-  const $l = document.getElementById('bom-list');
-  const totalRows = _bomParents.reduce((s, p) => s + p.components.length, 0);
-  document.getElementById('bom-count').textContent =
-    `상품 ${_bomParents.length}개 · 구성품 ${totalRows}줄`;
-  if (!_bomParents.length) {
-    $l.innerHTML = '<div style="color:var(--gray-500);font-size:12px;padding:10px">등록된 BOM 이 없습니다. 위에 판매코드를 넣고 <b>상품 열기</b> 를 누르세요.</div>';
-    return;
-  }
-  $l.innerHTML = _bomParents.map(p => {
-    const open = _bomOpen.has(p.parent_code);
-    // 구성품은 있는데 재고관리 등록된 게 하나도 없으면 소진 계산에 아무 영향이 없다.
-    const noTrack = p.components.length > 0 && p.tracked_count === 0;
-    const head = `
-      <div onclick="bomToggleParent('${esc(p.parent_code)}')"
-           style="display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;background:${open ? 'var(--gray-50)' : '#fff'};border-bottom:1px solid var(--gray-100)">
-        <span style="font-size:10px;color:var(--gray-400);width:10px">${open ? '▾' : '▸'}</span>
-        <span style="font-family:monospace;font-size:12px">${_bomParentCodeCell(p)}</span>
-        <span style="font-size:12px;color:var(--gray-600);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.parent_name || '')}</span>
-        <span style="font-size:11px;color:var(--gray-500)">구성품 ${p.components.length}</span>
-        ${noTrack ? '<span style="font-size:10px;color:#b45309" title="재고관리로 등록된 구성품이 없어 소진 계산에 반영되지 않습니다">소진 미반영</span>' : ''}
-      </div>`;
-    if (!open) return `<div style="border:1px solid var(--gray-200);border-radius:6px;margin-bottom:6px;overflow:hidden">${head}</div>`;
-    const body = `
-      <div style="padding:8px 10px">
-        <table style="width:100%;font-size:11px;border-collapse:collapse">
-          <thead><tr style="background:var(--gray-50)">
-            <th style="text-align:left;padding:5px 8px">구성품 코드</th>
-            <th style="text-align:left;padding:5px 8px">이름</th>
-            <th style="text-align:left;padding:5px 8px">역할</th>
-            <th style="text-align:right;padding:5px 8px" title="이 상품 1개를 만들 때 들어가는 수량">수량</th>
-            <th style="text-align:center;padding:5px 8px">관리</th>
-          </tr></thead><tbody>
-          ${p.components.length ? p.components.map(c => `
-            <tr style="border-bottom:1px solid var(--gray-100)">
-              <td style="padding:4px 8px;font-family:monospace">${_bomComponentCodeCell(c)}</td>
-              <td style="padding:4px 8px;color:var(--gray-600)">${esc(c.component_name || '-')}</td>
-              <td style="padding:4px 8px">${_bomRoleBadge(c.component_role)}</td>
-              <td style="padding:4px 8px;text-align:right;${c.qty > 1 ? 'font-weight:600;color:#b45309' : ''}">${c.qty}</td>
-              <td style="padding:4px 8px;text-align:center;white-space:nowrap">
-                <button onclick="editBomComponent('${esc(c.id)}')" title="수량·역할 변경"
-                  style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 6px">✎</button>
-                <button onclick="removeBomComponent('${esc(c.id)}')" title="구성품 제거"
-                  style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 6px;color:#dc2626;margin-left:3px">🗑</button>
-              </td>
-            </tr>`).join('')
-            : '<tr><td colspan="5" style="padding:8px;color:var(--gray-500)">구성품이 없습니다.</td></tr>'}
-          </tbody>
-        </table>
-        <button class="btn" style="padding:4px 10px;font-size:11px;margin-top:8px"
-          onclick="addBomComponent('${esc(p.parent_code)}')">＋ 구성품 추가</button>
-      </div>`;
-    return `<div style="border:1px solid var(--gray-200);border-radius:6px;margin-bottom:6px;overflow:hidden">${head}${body}</div>`;
-  }).join('');
-}
-
-function _bomFindComponent(id) {
-  for (const p of _bomParents) {
-    const c = p.components.find(x => x.id === id);
-    if (c) return { parent: p, comp: c };
-  }
-  return null;
-}
-
-async function addBomComponent(parentCode) {
-  const code = prompt(`${parentCode} 에 넣을 구성품 코드\n\n원물·부자재·포장재 모두 가능합니다.`, '');
-  if (code === null || !code.trim()) return;
-  const qtyRaw = prompt(`${parentCode} 1개당 ${code.trim()} 소요수량`, '1');
-  if (qtyRaw === null) return;
-  if (!/^\d+$/.test(qtyRaw.trim()) || parseInt(qtyRaw, 10) < 1) { alert('1 이상의 정수를 입력하세요.'); return; }
-  const roleRaw = prompt('역할 — 원물 / 부자재 / 포장재 / 기타', '부자재');
-  if (roleRaw === null) return;
-  try {
-    const r = await fetch(`${API}/api/bg/stock-bom`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows: [{
-        parent_code: parentCode,
-        component_code: code.trim(),
-        qty: parseInt(qtyRaw, 10),
-        component_role: _bomRoleFromText(roleRaw),
-      }] }),
-    });
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    _bomOpen.add(parentCode);
-    await Promise.all([loadBomRows(), loadDaeryepumStock()]);
-  } catch (e) { alert(`추가 실패: ${e.message}`); }
-}
-
-async function editBomComponent(id) {
-  const found = _bomFindComponent(id);
-  if (!found) return;
-  const { parent, comp } = found;
-  const v = prompt(`${parent.parent_code} 1개당 ${comp.component_code} 소요수량`, comp.qty);
-  if (v === null) return;
-  if (!/^\d+$/.test(v.trim()) || parseInt(v, 10) < 1) { alert('1 이상의 정수를 입력하세요.'); return; }
-  const roleRaw = prompt('역할 — 원물 / 부자재 / 포장재 / 기타', BOM_ROLE_LABEL[comp.component_role] || '부자재');
-  if (roleRaw === null) return;
-  try {
-    const r = await fetch(`${API}/api/bg/stock-bom/${encodeURIComponent(id)}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ qty: parseInt(v, 10), component_role: _bomRoleFromText(roleRaw) }),
-    });
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    await Promise.all([loadBomRows(), loadDaeryepumStock()]);
-  } catch (e) { alert(`실패: ${e.message}`); }
-}
-
-async function removeBomComponent(id) {
-  const found = _bomFindComponent(id);
-  const label = found ? `${found.parent.parent_code} 의 구성품 ${found.comp.component_code}` : id;
-  if (!confirm(`${label}\n\n이 구성품을 BOM 에서 제거할까요?`)) return;
-  try {
-    await fetch(`${API}/api/bg/stock-bom/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    await Promise.all([loadBomRows(), loadDaeryepumStock()]);
-  } catch (e) { alert(`실패: ${e.message}`); }
 }
 
 // ─── 품목 등록 ───
@@ -14712,12 +14557,17 @@ async function editStockItemSalesCodes(id) {
   } catch (e) { alert(`실패: ${e.message}`); }
 }
 
-/** 재고 표의 관리 셀 — 개별 발송 / 수정 / 목록에서 제거 */
-function _stockRowActions(it) {
+/** 재고 표의 관리 셀 — (그룹 안이면) 구성 수정·빼기 / 개별 발송 / 수정 / 목록에서 제거 */
+function _stockRowActions(it, bom) {
   if (!it.item_id) return '<span style="color:var(--gray-400)">-</span>';
   const id = esc(it.item_id);
   const code = esc(it.stock_code);
-  return `
+  const bomBtns = bom && bom.id ? `
+    <button onclick="editBomComponent('${esc(bom.id)}')" title="이 상품에서의 소요수량·역할 수정"
+            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:2px 6px">×${bom.qty}</button>
+    <button onclick="removeBomComponent('${esc(bom.id)}')" title="이 그룹에서 빼기 (재고 등록은 유지)"
+            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:2px 6px;color:#b45309;margin-left:3px">⤴</button>` : '';
+  return `${bomBtns}
     <button onclick="sendStockItemToSlack('${code}')" title="이 품목만 슬랙으로 발송"
             style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:2px 6px">📤</button>
     <button onclick="openStockEditModal('${id}')" title="등록 정보 수정"
