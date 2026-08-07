@@ -110,6 +110,11 @@ async function syncRgOrders({ startDate, endDate, dryRun = false } = {}) {
       // unitSalesPrice 는 "30990.0" 같은 문자열로 온다
       const price = Math.round(Number(it.unitSalesPrice) || 0);
       const paidAt = orderPaidAt || parseDate(it.paidAt) || kstNoon(line?.paid_date);
+      // 취소 판정 — RG 주문 API 는 상태를 안 준다. 정산 리포트의 취소 표시로만 알 수 있다.
+      //   부분취소는 순액이 남으므로, 수량·금액이 0 이하로 상계된 것만 전체취소로 본다.
+      //   리포트가 아직 안 올라온 기간은 취소를 알 길이 없다 (아래 out.cancelUnknown 로 알린다).
+      const cancelled = !!line?.is_cancel
+        && (Number(line.sales_qty) || 0) <= 0 && (Number(line.sales_amount) || 0) <= 0;
       // 배송완료일이 리포트에 있으면 배송완료로 본다. 없으면 아직 쿠팡 창고에 있는 것.
       const delivered = !!line?.delivered_date;
       rows.push({
@@ -129,10 +134,13 @@ async function syncRgOrders({ startDate, endDate, dryRun = false } = {}) {
         recv_postal_code: null, recv_message: null,
         settle_price: price * qty,
         settle_method: null,
-        status: delivered ? 'FINAL_DELIVERY' : 'INSTRUCT',
-        status_label: delivered ? '배송완료' : '상품준비중',
+        status: cancelled ? 'CANCEL' : (delivered ? 'FINAL_DELIVERY' : 'INSTRUCT'),
+        status_label: cancelled ? '주문취소' : (delivered ? '배송완료' : '상품준비중'),
         is_rocket_growth: true,
-        raw_payload: { source: 'rg_open_api', item: it, _cart_qty: qty, _sales_unit: unit },
+        raw_payload: {
+          source: 'rg_open_api', item: it,
+          _cart_qty: qty, _sales_unit: unit, _has_report_line: !!line,
+        },
         synced_at: new Date().toISOString(),
       });
     }
@@ -146,6 +154,9 @@ async function syncRgOrders({ startDate, endDate, dryRun = false } = {}) {
     rows: rows.length, skipped,
     withSellerProductId: rows.filter(r => r.product_code).length,
     delivered: rows.filter(r => r.status === 'FINAL_DELIVERY').length,
+    cancelled: rows.filter(r => r.status === 'CANCEL').length,
+    // 리포트에 대응 라인이 없어 취소 여부를 판단할 수 없는 행 — 리포트를 올리면 줄어든다
+    cancelUnknown: rows.filter(r => !r.raw_payload._has_report_line).length,
     upserted: 0, stubs: 0,
     dry_run: dryRun,
   };
@@ -161,6 +172,7 @@ async function syncRgOrders({ startDate, endDate, dryRun = false } = {}) {
   //   이미 있으면 건드리지 않는다 (ignore-duplicates) — 운영이 손댄 상태를 지우지 않기 위해.
   const grouped = new Map();
   for (const r of rows) {
+    if (r.status === 'CANCEL') continue;   // 취소건은 작업 대기열에 올릴 이유가 없다
     const orderId = `CP-${r.coupang_order_id}`;
     const sel = enrichOrderItem({
       productCode: r.product_code,

@@ -16952,8 +16952,12 @@ async function syncRgOrders() {
       `· 주문 ${fmtNum(d.orders)}건 / 상품 ${fmtNum(d.rows)}행`,
       `· 새로 만든 주문 ${fmtNum(d.newOrders || 0)}건`,
       `· 이미 있던 주문 ${fmtNum(d.preserved || 0)}건 (그대로 둠)`,
-      `· 배송완료 ${fmtNum(d.delivered)}건`,
+      `· 배송완료 ${fmtNum(d.delivered)}행 / 취소 ${fmtNum(d.cancelled || 0)}행`,
       `· 등록상품ID 확보 ${fmtNum(d.withSellerProductId)}행 (리포트에서 보강)`,
+      ...(d.cancelUnknown
+        ? ['', `⚠️ ${fmtNum(d.cancelUnknown)}행은 정산 리포트에 대응 라인이 없어`,
+           '   취소 여부를 확인할 수 없습니다. 그 기간 리포트를 올리면 정정됩니다.']
+        : []),
       '',
       '이어서 [정보입력현황 연동] 을 눌러 단계를 맞추세요.',
     ].join(NL));
@@ -18391,7 +18395,11 @@ function renderBgUnified() {
     })();
     const hasInput = !!ci;
     const inputBadge = orderIsCoupang
-      ? '<span style="color:#dc2626;font-size:11px;font-weight:600;white-space:nowrap" title="쿠팡 주문은 고객 정보입력 불필요 — 동기화 시 자동 입력완료 처리">✅ 쿠팡 자동</span>'
+      ? (order.is_rocket_growth
+        // 같은 쿠팡이라도 판매자배송과 로켓그로스는 우리 손이 닿는 범위가 다르다.
+        //   로켓그로스는 포장·출고까지 쿠팡이 하므로 한눈에 갈라 보여야 한다.
+        ? '<span style="color:#0369a1;font-size:11px;font-weight:600;white-space:nowrap" title="로켓그로스 — 쿠팡 물류센터가 보관·포장·출고합니다. 우리 쪽 작업은 없습니다.">🏬 쿠팡 로켓그로스</span>'
+        : '<span style="color:#dc2626;font-size:11px;font-weight:600;white-space:nowrap" title="쿠팡 판매자배송 — 고객 정보입력 불필요, 동기화 시 자동 입력완료 처리">✅ 쿠팡 자동</span>')
       : (orderIsNaver
         ? '<span style="color:#03c75a;font-size:11px;font-weight:600;white-space:nowrap" title="네이버 스마트스토어 주문은 고객 정보입력 불필요 — 동기화 시 자동 입력완료 처리">✅ 네이버 자동</span>'
         : (hasInput
