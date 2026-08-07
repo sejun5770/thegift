@@ -1141,6 +1141,38 @@ nav.nav-loading a[href^="#"] {
     <div id="rfm-upload-preview" style="margin-top:10px"></div>
   </div>
 
+  <!-- 주문 단위 통합 (migration 055) — 두 리포트를 (주문ID, 옵션ID) 로 합쳐 한 줄로 본다 -->
+  <div class="card" style="margin-bottom:16px;padding:16px;border:1px solid #fde68a;background:#fffbeb">
+    <div style="font-weight:700;font-size:14px;margin-bottom:6px">🧾 주문 단위 통합 <span style="font-weight:400;font-size:11px;color:var(--gray-500)">(결제완료일 / 배송완료일 · 매출 · 수수료 · 물류비 · 정산금액)</span></div>
+    <div style="font-size:11px;color:var(--gray-500);margin-bottom:10px;line-height:1.6">
+      두 리포트를 각각 올리면 <b>주문ID + 옵션ID</b> 로 같은 줄에 합쳐집니다. 순서는 상관없고, 파일 종류는 자동으로 구분합니다.<br>
+      · <b>판매 수수료 리포트</b> (CATEGORY_TR) → 결제완료일 · 매출 · 수수료 · 정산금액<br>
+      · <b>입출고비·배송비 정산 내역</b> (WAREHOUSING_SHIPPING) → 배송완료일 · 입출고비 · 배송비
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input type="file" id="rgl-upload-file" accept=".xlsx" onchange="rglPreviewUpload()" style="font-size:12px">
+      <button class="btn btn-primary" id="rgl-upload-btn" onclick="rglConfirmUpload()" style="display:none">✅ 등록</button>
+      <button class="btn" id="rgl-upload-cancel" onclick="rglResetUpload()" style="display:none">취소</button>
+    </div>
+    <div id="rgl-upload-status" style="font-size:12px;margin-top:8px"></div>
+
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid #fde68a">
+      <span style="font-size:12px;font-weight:600;color:var(--gray-600)">매출 기준</span>
+      <select id="rgl-basis" onchange="loadRgLines()" style="padding:5px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
+        <option value="paid">결제완료일</option>
+        <option value="delivered">배송완료일</option>
+      </select>
+      <input type="date" id="rgl-from" onchange="loadRgLines()" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
+      <span style="color:var(--gray-400);font-size:12px">~</span>
+      <input type="date" id="rgl-to" onchange="loadRgLines()" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
+      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="loadRgLines()">🔄 조회</button>
+      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="downloadRgLinesXlsx()">📥 엑셀</button>
+      <div style="flex:1"></div>
+      <span id="rgl-summary" style="font-size:12px;color:var(--gray-600)"></span>
+    </div>
+    <div id="rgl-table-wrap" style="margin-top:10px;overflow-x:auto"></div>
+  </div>
+
   <!-- 입력 폼 -->
   <div class="card" style="margin-bottom:16px;padding:16px">
     <div style="font-weight:700;font-size:14px;margin-bottom:10px">📝 매출 입력 / 수정 <span style="font-weight:400;font-size:11px;color:var(--gray-500)">(리포트가 없는 기간 임시 입력용)</span></div>
@@ -16461,6 +16493,159 @@ function renderWcTrend(data) {
       },
     },
   });
+}
+
+// ============================================
+// ── 로켓그로스 주문 단위 통합 (migration 055) ────────────────────────
+//   두 리포트를 (주문ID, 옵션ID) 로 합쳐 한 줄로 본다. 파일 종류는 서버가 헤더로 판별한다.
+//     파일1 CATEGORY_TR          → 결제완료일 · 매출 · 수수료 · 정산금액
+//     파일2 WAREHOUSING_SHIPPING → 배송완료일 · 입출고비 · 배송비
+let _rglB64 = null, _rglName = '';
+const RGL_KIND_LABEL = { category_tr: '판매 수수료 리포트', cfs: '입출고비·배송비 정산 내역' };
+
+function rglResetUpload() {
+  _rglB64 = null; _rglName = '';
+  const f = document.getElementById('rgl-upload-file'); if (f) f.value = '';
+  ['rgl-upload-btn', 'rgl-upload-cancel'].forEach(id => { const b = document.getElementById(id); if (b) b.style.display = 'none'; });
+  const st = document.getElementById('rgl-upload-status'); if (st) st.innerHTML = '';
+}
+
+async function rglPreviewUpload() {
+  const f = document.getElementById('rgl-upload-file')?.files?.[0];
+  const $st = document.getElementById('rgl-upload-status');
+  if (!f) { rglResetUpload(); return; }
+  $st.style.color = 'var(--gray-500)';
+  $st.textContent = '파일 읽는 중…';
+  try {
+    const buf = await f.arrayBuffer();
+    let bin = '';
+    const bytes = new Uint8Array(buf);
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    _rglB64 = btoa(bin); _rglName = f.name;
+    const r = await fetch(`${API}/api/coupang/rfm/lines/upload`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_base64: _rglB64, filename: _rglName, dry_run: true }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    const s = d.summary || {};
+    const isPaid = d.kind === 'category_tr';
+    $st.style.color = 'var(--gray-700)';
+    $st.innerHTML = `<b>${esc(RGL_KIND_LABEL[d.kind] || d.kind)}</b> 로 인식했습니다 · ${d.rows_total ?? d.rows?.length ?? 0}건 미리보기`
+      + `<br><span style="color:var(--gray-500)">기간 ${esc(d.dates?.from || '-')} ~ ${esc(d.dates?.to || '-')}`
+      + (isPaid
+        ? ` · 매출 ${fmtNum(Math.round(s.sales_amount || 0))}원 · 수수료 ${fmtNum(Math.round(s.commission || 0))}원 · 정산 ${fmtNum(Math.round(s.settlement_amount || 0))}원`
+        : ` · 입출고비 ${fmtNum(Math.round(s.inout_fee || 0))}원 · 배송비 ${fmtNum(Math.round(s.shipping_fee || 0))}원`)
+      + `${d.skipped ? ` · 건너뜀 ${d.skipped}행` : ''}</span>`;
+    ['rgl-upload-btn', 'rgl-upload-cancel'].forEach(id => { document.getElementById(id).style.display = ''; });
+  } catch (e) {
+    $st.style.color = '#dc2626';
+    $st.textContent = `읽기 실패: ${e.message}`;
+    _rglB64 = null;
+  }
+}
+
+async function rglConfirmUpload() {
+  if (!_rglB64) return;
+  const $st = document.getElementById('rgl-upload-status');
+  $st.style.color = 'var(--gray-500)'; $st.textContent = '등록 중…';
+  try {
+    const r = await fetch(`${API}/api/coupang/rfm/lines/upload`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_base64: _rglB64, filename: _rglName }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    rglResetUpload();
+    showToast(`${RGL_KIND_LABEL[d.kind] || ''} ${fmtNum(d.upserted)}건 등록`);
+    // 방금 올린 파일의 축으로 맞춰 결과가 바로 보이게 한다
+    const sel = document.getElementById('rgl-basis');
+    if (sel) sel.value = d.kind === 'cfs' ? 'delivered' : 'paid';
+    if (d.dates?.from) document.getElementById('rgl-from').value = d.dates.from;
+    if (d.dates?.to) document.getElementById('rgl-to').value = d.dates.to;
+    loadRgLines();
+  } catch (e) {
+    $st.style.color = '#dc2626';
+    $st.textContent = `등록 실패: ${e.message}`;
+  }
+}
+
+let _rgLines = [];
+
+async function loadRgLines() {
+  const $w = document.getElementById('rgl-table-wrap');
+  if (!$w) return;
+  const basis = document.getElementById('rgl-basis')?.value || 'paid';
+  const from = document.getElementById('rgl-from')?.value || '';
+  const to = document.getElementById('rgl-to')?.value || '';
+  $w.innerHTML = '<div style="padding:16px;color:var(--gray-400);font-size:12px">불러오는 중…</div>';
+  try {
+    const p = new URLSearchParams({ basis });
+    if (from) p.set('start_date', from);
+    if (to) p.set('end_date', to);
+    const r = await fetch(`${API}/api/coupang/rfm/lines?${p}`);
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    _rgLines = d.lines || [];
+    renderRgLines();
+  } catch (e) {
+    $w.innerHTML = `<div style="padding:16px;color:#dc2626;font-size:12px">조회 실패: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderRgLines() {
+  const $w = document.getElementById('rgl-table-wrap');
+  const $sum = document.getElementById('rgl-summary');
+  if (!_rgLines.length) {
+    $w.innerHTML = '<div style="padding:16px;color:var(--gray-400);font-size:12px">해당 기간에 등록된 주문이 없습니다. 리포트를 올려주세요.</div>';
+    if ($sum) $sum.textContent = '';
+    return;
+  }
+  const n = (v) => Number(v) || 0;
+  const t = _rgLines.reduce((a, r) => ({
+    sales: a.sales + n(r.sales_amount), fee: a.fee + n(r.commission),
+    inout: a.inout + n(r.inout_fee), ship: a.ship + n(r.shipping_fee),
+    settle: a.settle + n(r.settlement_amount),
+  }), { sales: 0, fee: 0, inout: 0, ship: 0, settle: 0 });
+  // 순액 = 정산금액 − 물류비. 재무가 실제로 남는 돈을 보는 값.
+  const net = t.settle - t.inout - t.ship;
+  if ($sum) {
+    $sum.innerHTML = `${fmtNum(_rgLines.length)}건 · 매출 <b>${fmtNum(Math.round(t.sales))}</b>`
+      + ` · 수수료 ${fmtNum(Math.round(t.fee))} · 물류비 ${fmtNum(Math.round(t.inout + t.ship))}`
+      + ` · 정산 ${fmtNum(Math.round(t.settle))} · <b style="color:#047857">순액 ${fmtNum(Math.round(net))}</b>`;
+  }
+  const cell = (v, style = '') => `<td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);text-align:right;${style}">${v === null || v === undefined ? '<span style="color:var(--gray-300)">-</span>' : fmtNum(Math.round(Number(v)))}</td>`;
+  $w.innerHTML = `<table class="data-table" style="font-size:12px;min-width:960px">
+    <thead><tr>
+      <th>결제완료일</th><th>배송완료일</th><th>상품명</th>
+      <th style="text-align:right">수량</th><th style="text-align:right">매출</th>
+      <th style="text-align:right">수수료</th><th style="text-align:right">입출고비</th>
+      <th style="text-align:right">배송비</th><th style="text-align:right">정산금액</th>
+    </tr></thead><tbody>` + _rgLines.map(r => {
+      // 한쪽 리포트만 올라온 행은 반대쪽 날짜가 비어 있다 — 어느 파일이 빠졌는지 바로 보이게 한다
+      const miss = 'color:#b45309';
+      return `<tr${r.is_cancel ? ' style="background:#fef2f2"' : ''}>
+        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);white-space:nowrap">${r.paid_date ? esc(r.paid_date) : `<span style="${miss}">미등록</span>`}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);white-space:nowrap">${r.delivered_date ? esc(r.delivered_date) : `<span style="${miss}">미등록</span>`}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.product_name || '')}">${esc(r.product_name || '-')}${r.is_cancel ? ' <span style="color:#dc2626;font-size:10px">취소</span>' : ''}</td>
+        ${cell(r.sales_qty)}${cell(r.sales_amount)}${cell(r.commission)}${cell(r.inout_fee)}${cell(r.shipping_fee)}${cell(r.settlement_amount, 'font-weight:600')}
+      </tr>`;
+    }).join('') + '</tbody></table>';
+}
+
+function downloadRgLinesXlsx() {
+  if (!_rgLines.length) { alert('내려받을 데이터가 없습니다.'); return; }
+  const header = ['결제완료일', '배송완료일', '주문ID', '옵션ID', '상품명', '수량', '매출', '수수료', '입출고비', '배송비', '정산금액', '취소'];
+  const body = _rgLines.map(r => [
+    r.paid_date || '', r.delivered_date || '', r.order_id, r.vendor_item_id, r.product_name || '',
+    Number(r.sales_qty) || 0, Number(r.sales_amount) || 0, Number(r.commission) || 0,
+    Number(r.inout_fee) || 0, Number(r.shipping_fee) || 0, Number(r.settlement_amount) || 0,
+    r.is_cancel ? 'Y' : '',
+  ]);
+  const basis = document.getElementById('rgl-basis')?.value === 'delivered' ? '배송완료일' : '결제완료일';
+  downloadXlsxRows([header, ...body], `로켓그로스_주문단위_${basis}_${new Date().toISOString().slice(0, 10)}`, '주문단위');
 }
 
 // ============================================

@@ -149,7 +149,50 @@ async function getDailySalesMap({ startDate, endDate } = {}) {
   return m;
 }
 
+
+// ─────────────────────────────────────────────────────────────
+// 주문 단위 라인 (migration 055) — 두 리포트를 (주문ID, 옵션ID) 로 합친다.
+//   파일1 은 매출/수수료/정산 컬럼만, 파일2 는 배송완료일/물류비 컬럼만 담아 보낸다.
+//   merge-duplicates 는 payload 에 있는 컬럼만 갱신하므로 상대 파일 값이 지워지지 않는다.
+// ─────────────────────────────────────────────────────────────
+
+async function upsertOrderLines(rows) {
+  if (!USE) throw new Error('Supabase 미설정 — 주문 라인 저장 불가');
+  if (!rows.length) return { upserted: 0 };
+  const url = `${REST}/coupang_rg_order_lines?on_conflict=order_id,vendor_item_id`;
+  // 한 번에 너무 크면 요청이 막힌다 — 500 행씩 끊는다
+  let upserted = 0;
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500).map(r => ({ ...r, updated_at: new Date().toISOString() }));
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { ...HDR, Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(chunk),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`Supabase upsert rg_order_lines [${res.status}]: ${t.slice(0, 300)}`);
+    }
+    upserted += chunk.length;
+  }
+  return { upserted };
+}
+
+/** basis: 'paid'(결제완료일) | 'delivered'(배송완료일) */
+async function listOrderLines({ basis = 'paid', startDate, endDate } = {}) {
+  if (!USE) return [];
+  const col = basis === 'delivered' ? 'delivered_date' : 'paid_date';
+  const f = [`${col}=not.is.null`, `order=${col}.desc`, 'limit=5000'];
+  if (startDate) f.push(`${col}=gte.${startDate}`);
+  if (endDate) f.push(`${col}=lte.${endDate}`);
+  const res = await fetch(`${REST}/coupang_rg_order_lines?${f.join('&')}`, { headers: HDR });
+  if (!res.ok) throw new Error(`Supabase rg_order_lines [${res.status}]: ${(await res.text()).slice(0, 200)}`);
+  return res.json();
+}
+
 module.exports = {
+  upsertOrderLines,
+  listOrderLines,
   USE,
   upsertSales,
   upsertManualSale,

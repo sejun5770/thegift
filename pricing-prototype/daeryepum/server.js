@@ -13774,6 +13774,59 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/coupang/rfm/lines/upload' && req.method === 'POST') {
+        // 주문 단위 리포트 업로드 (migration 055) — 파일 종류를 헤더로 자동 판별한다.
+        //   파일1 CATEGORY_TR          → 결제완료일·매출·수수료·정산대상액
+        //   파일2 WAREHOUSING_SHIPPING → 배송완료일·입출고비·배송비
+        //   같은 (주문ID, 옵션ID) 행을 두 파일이 각자 채우므로 업로드 순서는 상관없다.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const body = await new Promise((resolve) => {
+          let raw = '';
+          req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+        });
+        const dryRun = body.dry_run === true || body.dry_run === '1';
+        logAdminAccess(session, req, 'coupang-rfm-lines-upload', { filename: body.filename, dry_run: dryRun });
+        try {
+          if (!body.file_base64) throw new Error('파일이 없습니다');
+          const buf = Buffer.from(String(body.file_base64), 'base64');
+          if (!buf.length) throw new Error('빈 파일입니다');
+          const { parseRgLinesXlsx } = require('./coupang/rfm-lines');
+          const parsed = parseRgLinesXlsx(buf);
+          if (!parsed.rows.length) throw new Error('등록할 행이 없습니다 (파일 내용을 확인해주세요)');
+          if (dryRun) {
+            data = { ok: true, dry_run: true, ...parsed, rows: parsed.rows.slice(0, 50) };
+          } else {
+            const up = await require('./coupang/rfm-store').upsertOrderLines(parsed.rows);
+            data = {
+              ok: true, kind: parsed.kind, upserted: up.upserted,
+              dates: parsed.dates, summary: parsed.summary, skipped: parsed.skipped,
+            };
+          }
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/coupang/rfm/lines' && req.method === 'GET') {
+        // 주문 단위 목록 — basis 로 날짜 축 전환 (paid=결제완료일 / delivered=배송완료일)
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          const rows = await require('./coupang/rfm-store').listOrderLines({
+            basis: parsed.query.basis === 'delivered' ? 'delivered' : 'paid',
+            startDate: parsed.query.start_date || null,
+            endDate: parsed.query.end_date || null,
+          });
+          data = { lines: rows };
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
       } else if (pathname.match(/^\/api\/coupang\/rfm\/sales\/[^/]+$/) && req.method === 'DELETE') {
         // 단일 row 삭제 (잘못 입력 정정용)
         if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
