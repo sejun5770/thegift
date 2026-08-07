@@ -2775,6 +2775,11 @@ nav.nav-loading a[href^="#"] {
               아래 <b>선택 가능 스티커</b>(고객 화면 목록)와는 별개라, 여기 넣어도 자사 주문화면에는 나오지 않습니다.
             </div>
             <div id="bg-p-ch-sticker-rows" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+            <div style="font-size:11px;color:var(--gray-500);margin:10px 0 6px">
+              <b>채널 상품코드</b> — 그 채널이 쓰는 코드입니다. 쿠팡은 등록상품ID(11자리 숫자)를 넣으면
+              주문조회에서 이 내부 코드로 보입니다. 콤마로 여러 개 넣을 수 있습니다.
+            </div>
+            <div id="bg-p-ch-code-rows" style="display:flex;gap:8px;flex-wrap:wrap"></div>
           </div>
         </div>
         <div>
@@ -12170,22 +12175,52 @@ async function bulkSetProductChannel(add) {
 let _bgChannelStickers = {};
 
 /** 자사 외 채널이 켜져 있을 때만 고정 스티커 입력을 보여준다 */
-function _bgRenderChannelStickerRows() {
+/**
+ * @param {boolean} preserve 화면에 남아 있는 입력값을 거둬 합칠지.
+ *   채널 체크박스를 껐다 켤 때는 true (입력 중이던 값 보존).
+ *   폼을 새로 열 때는 반드시 false — 이전 상품의 DOM 이 아직 남아 있어,
+ *   거두면 앞 상품 코드가 다음 상품으로 새어 들어간다 (2026-08-07 수정).
+ */
+function _bgRenderChannelStickerRows(preserve = true) {
   const wrap = document.getElementById('bg-p-ch-stickers');
   const rows = document.getElementById('bg-p-ch-sticker-rows');
   if (!wrap || !rows) return;
-  // 화면에 보이는 입력값을 먼저 거둬 채널을 껐다 켜도 값이 날아가지 않게 한다
-  Object.assign(_bgChannelStickers, _bgCollectChannelStickers());
+  if (preserve) Object.assign(_bgChannelStickers, _bgCollectChannelStickers());
   const on = [...document.querySelectorAll('#bg-p-meta-channels input[type=checkbox]')]
     .filter(cb => cb.checked && cb.value !== 'own').map(cb => cb.value);
-  if (!on.length) { wrap.style.display = 'none'; rows.innerHTML = ''; return; }
+  const codeRows = document.getElementById('bg-p-ch-code-rows');
+  if (preserve) Object.assign(_bgChannelProductCodes, _bgCollectChannelProductCodes());
+  if (!on.length) {
+    wrap.style.display = 'none'; rows.innerHTML = '';
+    if (codeRows) codeRows.innerHTML = '';
+    return;
+  }
   wrap.style.display = '';
+  if (codeRows) {
+    codeRows.innerHTML = on.map(ch => `
+      <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px">
+        <span style="color:var(--gray-600)">${PRODUCT_CHANNEL_ICON[ch]} ${PRODUCT_CHANNEL_LABEL[ch]}</span>
+        <input type="text" data-ch-code="${ch}" value="${esc((_bgChannelProductCodes[ch] || []).join(', '))}" placeholder="예: 16281105078"
+          style="width:210px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px;font-family:monospace">
+      </label>`).join('');
+  }
   rows.innerHTML = on.map(ch => `
     <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px">
       <span style="color:var(--gray-600)">${PRODUCT_CHANNEL_ICON[ch]} ${PRODUCT_CHANNEL_LABEL[ch]}</span>
       <input type="text" data-ch-sticker="${ch}" value="${esc(_bgChannelStickers[ch] || '')}" placeholder="예: TGCP01S1"
         style="width:150px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px;font-family:monospace">
     </label>`).join('');
+}
+
+let _bgChannelProductCodes = {};
+
+function _bgCollectChannelProductCodes() {
+  const out = {};
+  document.querySelectorAll('#bg-p-ch-code-rows input[data-ch-code]').forEach(el => {
+    const codes = el.value.split(',').map(x => x.trim()).filter(Boolean);
+    if (codes.length) out[el.dataset.chCode] = [...new Set(codes)];
+  });
+  return out;
 }
 
 function _bgCollectChannelStickers() {
@@ -12371,9 +12406,14 @@ async function openBgProductForm(productId) {
     document.querySelectorAll('#bg-p-meta-channels input[type=checkbox]')
       .forEach(cb => { cb.checked = chSet.has(cb.value); });
     document.querySelectorAll('#bg-p-meta-channels input[type=checkbox]')
-      .forEach(cb => { cb.onchange = _bgRenderChannelStickerRows; });
+      .forEach(cb => { cb.onchange = () => _bgRenderChannelStickerRows(true); });
     _bgChannelStickers = (s && s.channel_stickers && typeof s.channel_stickers === 'object') ? { ...s.channel_stickers } : {};
-    _bgRenderChannelStickerRows();
+    _bgChannelProductCodes = (s && s.channel_product_codes && typeof s.channel_product_codes === 'object') ? { ...s.channel_product_codes } : {};
+    // 이전 상품의 입력이 남아 있으면 다음 상품으로 새므로 먼저 비운다
+    ['bg-p-ch-sticker-rows', 'bg-p-ch-code-rows'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.innerHTML = '';
+    });
+    _bgRenderChannelStickerRows(false);
     // 장식 명칭 (decoration_label) — 비어있으면 placeholder '스티커' 그대로 보임
     const decoInput = document.getElementById('bg-p-meta-deco-label');
     if (decoInput) decoInput.value = s?.decoration_label || '';
@@ -12971,6 +13011,7 @@ async function saveBgProduct() {
     product_name: productName || null,
     sales_channels: salesChannels,         // migration 054 (복수)
     channel_stickers: _bgCollectChannelStickers(),  // migration 056 (채널 고정 스티커)
+    channel_product_codes: _bgCollectChannelProductCodes(), // migration 057 (채널 상품코드)
     available_sticker_ids: stickerIds,
     available_box_options: boxOptions,
     custom_options: customOptions,

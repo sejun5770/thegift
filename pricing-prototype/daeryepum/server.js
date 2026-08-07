@@ -1092,6 +1092,18 @@ async function apiOrders(query) {
         orderIds: coupangIdsList.length ? coupangIdsList : undefined,
       });
       if (coupangRows && coupangRows.length) {
+        // 쿠팡 등록상품ID(11자리) → 내부 상품코드 역맵 (migration 057).
+        //   조회 시점에 치환하므로 이미 쌓인 주문도 재동기화 없이 내부코드로 보인다.
+        //   실패해도 원본 코드로 그대로 보여준다 — 목록이 비는 것보다 낫다.
+        const cpCodeMap = new Map();
+        try {
+          for (const ps of (await require('./barungift/store').getAllProductSettings()) || []) {
+            for (const c of (ps.channel_product_codes?.coupang || [])) {
+              cpCodeMap.set(String(c).trim(), ps.product_id);
+            }
+          }
+        } catch (e) { console.warn('[apiOrders] 쿠팡 코드 매핑 로드 실패 (원본 코드 사용):', e.message); }
+        const mapCp = code => cpCodeMap.get(String(code || '').trim()) || code || '';
         const normalized = coupangRows.map(r => ({
           order_seq: r.coupang_order_id, // 쿠팡 orderId (BIGINT)
           member_id: null,
@@ -1106,7 +1118,11 @@ async function apiOrders(query) {
           recv_address: r.recv_address || '',
           recv_msg: r.recv_message || '',
           card_name: r.product_name || '',
-          card_code: r.product_code || '',
+          // 내부 상품코드로 치환 (057). 매핑이 없으면 쿠팡 코드 그대로.
+          card_code: mapCp(r.product_code),
+          // 원본은 지우지 않는다 — 매핑이 틀렸을 때 추적이 끊기면 안 된다
+          channel_product_code: r.product_code || '',
+          channel_code_mapped: !!cpCodeMap.get(String(r.product_code || '').trim()),
           unit_value: 1,  // 쿠팡은 unit_value 개념 없음 (1:1)
           item_count: r.item_count || 0,
           item_amount: r.item_total_price || 0,
