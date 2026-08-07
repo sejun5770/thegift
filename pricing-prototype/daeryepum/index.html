@@ -16884,11 +16884,16 @@ function renderRgLines() {
   const net = t.settle - t.inout - t.ship;
   // 상품설정에 채널 코드가 안 들어간 건 — 이게 남아 있으면 상품코드·스티커가 빈다
   const unmapped = _rgLines.filter(r => !r.internal_product_code).length;
+  // 리포트엔 판매자배송도 섞여 있다 — 그쪽은 쿠팡 채널에서 집계되므로 여기 매출에서 빠진다 (064)
+  const sellerCnt = _rgLines.filter(r => r.fulfillment === 'seller').length;
+  const unknownCnt = _rgLines.filter(r => !r.fulfillment).length;
   if ($sum) {
     $sum.innerHTML = `${fmtNum(_rgLines.length)}건 · 매출 <b>${fmtNum(Math.round(t.sales))}</b>`
       + ` · 수수료 ${fmtNum(Math.round(t.fee))} · 물류비 ${fmtNum(Math.round(t.inout + t.ship))}`
       + ` · 정산 ${fmtNum(Math.round(t.settle))} · <b style="color:#047857">순액 ${fmtNum(Math.round(net))}</b>`
-      + (unmapped ? ` · <span style="color:#b45309">미매핑 ${fmtNum(unmapped)}건</span>` : '');
+      + (unmapped ? ` · <span style="color:#b45309">미매핑 ${fmtNum(unmapped)}건</span>` : '')
+      + (sellerCnt ? ` · <span style="color:var(--gray-500)" title="판매자배송 주문 — 쿠팡 채널에서 집계되므로 로켓그로스 매출에서는 빠집니다">판매자배송 ${fmtNum(sellerCnt)}건</span>` : '')
+      + (unknownCnt ? ` · <span style="color:#b45309" title="쿠팡 주문 정보가 없어 판매 방식을 확정하지 못했습니다. 그 기간까지 '주문 가져오기' 를 돌리면 채워집니다. 지금은 로켓그로스 매출에 포함됩니다">방식 미확인 ${fmtNum(unknownCnt)}건</span>` : '');
   }
   const cell = (v, style = '') => `<td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);text-align:right;${style}">${v === null || v === undefined ? '<span style="color:var(--gray-300)">-</span>' : fmtNum(Math.round(Number(v)))}</td>`;
   $w.innerHTML = `<table class="data-table" style="font-size:12px;min-width:1220px">
@@ -16909,7 +16914,10 @@ function renderRgLines() {
             : `<span style="${miss}">미매핑</span>`}</td>
         <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px;white-space:nowrap">${
           r.sticker_code ? esc(r.sticker_code) : '<span style="color:var(--gray-300)">-</span>'}</td>
-        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.product_name || '')}">${esc(r.product_name || '-')}${r.is_cancel ? ' <span style="color:#dc2626;font-size:10px">취소</span>' : ''}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.product_name || '')}">${
+          r.fulfillment === 'seller'
+            ? '<span style="font-size:10px;color:var(--gray-500);border:1px solid var(--gray-300);border-radius:3px;padding:0 3px;margin-right:4px" title="판매자배송 — 로켓그로스 매출에서 제외">판매자</span>'
+            : ''}${esc(r.product_name || '-')}${r.is_cancel ? ' <span style="color:#dc2626;font-size:10px">취소</span>' : ''}</td>
         ${cell(r.sales_qty)}${cell(r.item_qty ?? r.sales_qty, (r.sales_unit > 1 ? 'font-weight:600' : 'color:var(--gray-400)'))}${cell(r.sales_amount)}${cell(r.commission)}${cell(r.inout_fee)}${cell(r.shipping_fee)}${cell(r.settlement_amount, 'font-weight:600')}
       </tr>`;
     }).join('') + '</tbody></table>';

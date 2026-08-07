@@ -115,7 +115,10 @@ async function listSales({ startDate, endDate } = {}) {
   const url = `${REST}/coupang_rg_order_lines?select=*&${params.join('&')}`;
   const res = await fetch(url, { headers: HDR });
   if (!res.ok) return [];
-  const rows = await res.json();
+  // 판매자배송 라인 제외 (064) — 그쪽은 coupang_orders 로 쿠팡 채널에 이미 집계된다.
+  //   미확인(NULL)은 그대로 둔다. 빼면 그 매출이 어디에서도 안 잡힌다.
+  //   서버 필터가 아니라 여기서 거른다 — 064 전이면 컬럼이 없어 PostgREST 가 400 을 낸다.
+  const rows = (await res.json()).filter(r => r.fulfillment !== 'seller');
 
   // (결제완료일, 옵션ID) 로 합쳐 옛 집계 단위와 같게 만든다 — 대시보드가 그 단위를 전제한다.
   const agg = new Map();
@@ -229,6 +232,68 @@ async function upsertOrderLines(rows) {
 }
 
 /**
+ * 리포트 라인의 판매 방식 채우기 (064).
+ *
+ * 리포트에는 판매자배송 주문도 섞여 있는데 전체를 로켓그로스 매출로 집계해 왔다.
+ * 판매자배송은 coupang_orders 로도 집계되므로 같은 매출이 두 번 잡힌다.
+ * coupang_orders 의 is_rocket_growth 를 근거로 라인을 가른다.
+ *
+ * coupang_orders 에 없는 주문은 판단하지 않고 NULL 로 둔다 — 'seller' 로 찍으면
+ * 그 매출이 어디에서도 안 잡혀 통째로 사라진다.
+ *
+ * @returns {{scanned, rocketGrowth, seller, unknown, updated}}
+ */
+async function classifyOrderLines({ startDate = null, endDate = null } = {}) {
+  if (!USE) return { scanned: 0, rocketGrowth: 0, seller: 0, unknown: 0, updated: 0 };
+  const lines = await listAllOrderLines({ startDate, endDate });
+  if (!lines.length) return { scanned: 0, rocketGrowth: 0, seller: 0, unknown: 0, updated: 0 };
+
+  // 주문ID → 로켓그로스 여부. 리포트에 있는 주문만 골라 조회한다.
+  const ids = [...new Set(lines.map(l => String(l.order_id).trim()).filter(Boolean))];
+  const flagById = new Map();
+  for (let i = 0; i < ids.length; i += 200) {
+    const inList = ids.slice(i, i + 200).join(',');
+    const url = `${REST}/coupang_orders`
+      + `?select=coupang_order_id,is_rocket_growth&coupang_order_id=in.(${inList})&limit=20000`;
+    const res = await fetch(url, { headers: HDR });
+    if (!res.ok) {
+      // 062 마이그레이션 전이면 컬럼이 없어 400 — 분류를 건너뛴다 (기존 동작 유지)
+      console.warn('[rfm-store] 판매방식 분류 조회 실패:', (await res.text()).slice(0, 200));
+      return { scanned: lines.length, rocketGrowth: 0, seller: 0, unknown: lines.length, updated: 0 };
+    }
+    for (const r of await res.json()) {
+      flagById.set(String(r.coupang_order_id), !!r.is_rocket_growth);
+    }
+  }
+
+  const out = { scanned: lines.length, rocketGrowth: 0, seller: 0, unknown: 0, updated: 0 };
+  const patch = [];
+  for (const l of lines) {
+    const flag = flagById.get(String(l.order_id).trim());
+    const want = flag === undefined ? null : (flag ? 'rocket_growth' : 'seller');
+    if (want === null) { out.unknown++; continue; }
+    if (want === 'rocket_growth') out.rocketGrowth++; else out.seller++;
+    if (l.fulfillment !== want) {
+      patch.push({ order_id: l.order_id, vendor_item_id: l.vendor_item_id, fulfillment: want });
+    }
+  }
+  // merge-duplicates 는 payload 에 있는 컬럼만 갱신한다 — 금액 컬럼은 건드리지 않는다
+  for (let i = 0; i < patch.length; i += 500) {
+    const chunk = patch.slice(i, i + 500);
+    const res = await fetch(`${REST}/coupang_rg_order_lines?on_conflict=order_id,vendor_item_id`, {
+      method: 'POST',
+      headers: { ...HDR, Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(chunk),
+    });
+    if (!res.ok) {
+      throw new Error(`Supabase classify rg_order_lines [${res.status}]: ${(await res.text()).slice(0, 300)}`);
+    }
+    out.updated += chunk.length;
+  }
+  return out;
+}
+
+/**
  * 없는 행만 만든다 — 크론이 API 로 모은 주문을 목록에 미리 띄우기 위한 용도.
  *   ignore-duplicates 인 게 핵심이다. 리포트가 오면 그쪽이 정산 금액과 순수량(취소 상계 후)을
  *   갖고 있으므로 리포트가 이긴다. merge 로 쓰면 크론이 나중에 돌면서 원주문 수량으로
@@ -290,6 +355,7 @@ async function listAllOrderLines({ startDate, endDate, limit = 20000 } = {}) {
 module.exports = {
   upsertOrderLines,
   insertOrderLinesIfMissing,
+  classifyOrderLines,
   listOrderLines,
   listAllOrderLines,
   USE,

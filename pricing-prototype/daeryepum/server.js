@@ -13927,6 +13927,15 @@ const server = http.createServer(async (req, res) => {
               ok: true, kind: parsed.kind, upserted: up.upserted,
               dates: parsed.dates, summary: parsed.summary, skipped: parsed.skipped,
             };
+            // 새로 들어온 라인의 판매 방식을 가른다 (064) — 리포트엔 판매자배송도 섞여 있다.
+            try {
+              data.classified = await require('./coupang/rfm-store').classifyOrderLines({
+                startDate: parsed.dates?.from || null,
+                endDate: parsed.dates?.to || null,
+              });
+            } catch (e) {
+              console.warn('[rfm/lines upload] 판매방식 분류 실패:', e.message);
+            }
             // 업로드된 내용이 곧 실제 진행 상태 — 정보입력현황 단계를 바로 맞춘다.
             //   실패해도 업로드 자체는 성공으로 둔다 (연동은 버튼으로 다시 돌릴 수 있다).
             try {

@@ -271,6 +271,14 @@ async function syncRgOrders({ startDate, endDate, dryRun = false } = {}) {
     }));
   }
   out.enriched = patched;
+
+  // 방금 로켓그로스 플래그가 생겼다 — 정산 리포트 라인의 판매 방식을 다시 가른다 (064).
+  //   리포트에 판매자배송 주문이 섞여 있어, 가르지 않으면 그 매출이 로켓그로스로도 잡힌다.
+  try {
+    out.classified = await rfmStore.classifyOrderLines({ startDate, endDate });
+  } catch (e) {
+    console.warn('[rg-orders] 판매방식 분류 실패:', e.message);
+  }
   return out;
 }
 
