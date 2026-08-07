@@ -16961,6 +16961,7 @@ async function syncRgOrders() {
       `· 이미 있던 주문 ${fmtNum(d.preserved || 0)}건 (그대로 둠)`,
       `· 배송완료 ${fmtNum(d.delivered)}행 / 취소 ${fmtNum(d.cancelled || 0)}행`,
       `· 등록상품ID 확보 ${fmtNum(d.withSellerProductId)}행 (리포트에서 보강)`,
+      `· 매출 목록에 선반영 ${fmtNum(d.linesCreated || 0)}행 (정산 전이라 금액은 비어 있음)`,
       ...(d.cancelUnknown
         ? ['', `⚠️ ${fmtNum(d.cancelUnknown)}행은 정산 리포트에 대응 라인이 없어`,
            '   취소 여부를 확인할 수 없습니다. 그 기간 리포트를 올리면 정정됩니다.']

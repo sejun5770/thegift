@@ -168,6 +168,30 @@ async function syncRgOrders({ startDate, endDate, dryRun = false } = {}) {
   const up = await store.upsertCoupangOrders(rows);
   out.upserted = up.upserted || rows.length;
 
+  // 로켓그로스 목록(coupang_rg_order_lines)에도 미리 띄운다 — 정산파일을 올리기 전에도
+  //   "주문은 들어왔고 배송완료일은 아직 없다" 가 보여야 한다.
+  //   금액·수수료·물류비는 리포트에만 있는 값이라 비워 둔다.
+  //   없는 행만 만든다(ignore-duplicates) — 리포트가 이미 넣은 값을 되돌리면 안 된다.
+  try {
+    const missing = rows
+      .filter(r => !r.raw_payload._has_report_line && r.paid_at)
+      .map(r => ({
+        order_id: r.coupang_order_id,
+        vendor_item_id: r.vendor_item_id,
+        // 결제일은 KST 기준 — UTC 문자열을 그대로 자르면 밤 주문이 하루 앞으로 밀린다
+        paid_date: new Date(new Date(r.paid_at).getTime() + 9 * 3600 * 1000)
+          .toISOString().slice(0, 10),
+        product_name: r.product_name,
+        sales_qty: r.raw_payload._cart_qty,
+        is_cancel: r.status === 'CANCEL',
+      }));
+    const ins = await rfmStore.insertOrderLinesIfMissing(missing);
+    out.linesCreated = ins.inserted || 0;
+  } catch (e) {
+    console.warn('[rg-orders] 매출 목록 선반영 실패:', e.message);
+    out.linesCreated = 0;
+  }
+
   // 정보입력현황 stub — 마켓플레이스 동기화와 같은 규칙 (CP-{주문ID}, 주문 단위 1행).
   //   이미 있으면 건드리지 않는다 (ignore-duplicates) — 운영이 손댄 상태를 지우지 않기 위해.
   const grouped = new Map();

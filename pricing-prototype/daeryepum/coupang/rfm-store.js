@@ -228,6 +228,32 @@ async function upsertOrderLines(rows) {
   return { upserted };
 }
 
+/**
+ * 없는 행만 만든다 — 크론이 API 로 모은 주문을 목록에 미리 띄우기 위한 용도.
+ *   ignore-duplicates 인 게 핵심이다. 리포트가 오면 그쪽이 정산 금액과 순수량(취소 상계 후)을
+ *   갖고 있으므로 리포트가 이긴다. merge 로 쓰면 크론이 나중에 돌면서 원주문 수량으로
+ *   되돌려 취소가 지워진다.
+ */
+async function insertOrderLinesIfMissing(rows) {
+  if (!USE || !rows.length) return { inserted: 0 };
+  const url = `${REST}/coupang_rg_order_lines?on_conflict=order_id,vendor_item_id`;
+  let n = 0;
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { ...HDR, Prefer: 'resolution=ignore-duplicates,return=minimal' },
+      body: JSON.stringify(chunk),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`Supabase insert rg_order_lines [${res.status}]: ${t.slice(0, 300)}`);
+    }
+    n += chunk.length;
+  }
+  return { inserted: n };
+}
+
 /** basis: 'paid'(결제완료일) | 'delivered'(배송완료일) */
 async function listOrderLines({ basis = 'paid', startDate, endDate } = {}) {
   if (!USE) return [];
@@ -263,6 +289,7 @@ async function listAllOrderLines({ startDate, endDate, limit = 20000 } = {}) {
 
 module.exports = {
   upsertOrderLines,
+  insertOrderLinesIfMissing,
   listOrderLines,
   listAllOrderLines,
   USE,
