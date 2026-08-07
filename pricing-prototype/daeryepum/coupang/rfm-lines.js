@@ -161,6 +161,11 @@ function parseCfs(sheets) {
       // 비용 열은 시트마다 이름이 다르다 — '입출고비' / '배송비' 로 구분
       inout: s => s.includes('입출고비'),
       shipping: s => s.includes('배송비') && !s.includes('입출고'),
+      // 파일2 만 올린 상태에서도 목록에 상품이 보이도록 이름을 함께 담는다.
+      //   파일1 이 나중에 올라오면 그쪽 이름으로 덮인다 (수수료 리포트가 원본에 가깝다).
+      productName: s => s.includes('등록상품명'),
+      optionName: s => s === '옵션명',
+      qty: s => s.startsWith('판매수량'),
     });
     if (col.date === undefined || col.orderId === undefined || col.optionId === undefined) continue;
     for (const r of sh.rows.slice(hi + 1)) {
@@ -171,7 +176,14 @@ function parseCfs(sheets) {
       if (!d || !oid || !vid) { skipped++; continue; }
       const key = `${oid}|${vid}`;
       if (!merged.has(key)) {
-        merged.set(key, { order_id: oid, vendor_item_id: vid, delivered_date: d, inout_fee: 0, shipping_fee: 0 });
+        const pName = String(r[col.productName] ?? '').trim();
+        const oName = String(r[col.optionName] ?? '').trim();
+        merged.set(key, {
+          order_id: oid, vendor_item_id: vid, delivered_date: d,
+          inout_fee: 0, shipping_fee: 0,
+          product_name: [pName, oName].filter(Boolean).join(' / ') || null,
+          sales_qty: Math.round(num(r[col.qty])) || null,
+        });
       }
       const m = merged.get(key);
       // 같은 (주문, 옵션) 이 두 시트에 다 있다 — 배송완료일은 같으므로 먼저 온 값을 유지
