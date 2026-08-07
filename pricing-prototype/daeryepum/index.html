@@ -13900,7 +13900,7 @@ function renderStockTable() {
  * 재고 표의 품목 행. 평면 보기와 상품 그룹 보기가 같은 행을 쓴다.
  *   bom: 그룹 보기에서 {qty, role} — 이 상품 1개당 몇 개 들어가는지 재고코드 옆에 붙인다.
  */
-function _stockItemRow(it, bom) {
+function _stockItemRow(it) {
     const soldoutBg = it.available_qty <= 0 ? 'background:#fef2f2' :
       (it.days_to_soldout !== null && it.days_to_soldout <= 30 ? 'background:#fef3c7' : '');
     const daysCell = it.days_to_soldout === null
@@ -13908,22 +13908,18 @@ function _stockItemRow(it, bom) {
       : (it.days_to_soldout <= 30
           ? `<span style="color:#dc2626;font-weight:600">${it.days_to_soldout}일</span>`
           : `<span>${it.days_to_soldout}일</span>`);
-    // 공용 자재 — BOM 상 2개 이상 판매상품에 들어가면 자동 판정 (별도 지정 없음).
-    //   그룹마다 같은 재고가 반복 표시되므로, 같은 재고 하나를 나눠 쓰는 것임을 배지로 알린다.
-    //   툴팁에 어느 상품들에 얼마씩 들어가는지 적어 어디서 빠지는지 바로 보이게 한다.
+    // 어느 상품에 쓰이는지 — BOM 이 있으면 배지로 알린다. 2개 이상이면 공용 자재.
+    //   툴팁에 상품별 소요수량을 적어 어디서 얼마씩 빠지는지 바로 보이게 한다.
     const parents = it.bom_parents || [];
-    const shared = parents.length > 1
-      ? `<span style="font-size:9px;color:#b45309;margin-left:2px" title="${esc(parents.map(p => `${p.name || p.code} ×${p.qty}`).join('\n'))}&#10;&#10;${parents.length}개 상품이 나눠 쓰는 공용 자재입니다 — 재고는 여기 한 줄로만 두고, 각 상품 그룹에는 참조로만 적습니다">공용 ${parents.length}</span>`
-      : '';
-    const bomTag = bom
-      ? ` ${_bomRoleBadge(bom.role)}<span style="font-size:10px;color:var(--gray-500)"> ×${bom.qty}</span>${shared}`
+    const usedIn = parents.length
+      ? `<span style="font-size:9px;margin-left:3px;color:${parents.length > 1 ? '#b45309' : 'var(--gray-500)'}" title="${esc(parents.map(p => `${p.name || p.code} ×${p.qty}`).join('\n'))}&#10;&#10;${parents.length > 1 ? `${parents.length}개 상품이 나눠 쓰는 공용 자재입니다` : '이 상품의 구성품입니다'}">${parents.length > 1 ? `공용 ${parents.length}` : 'BOM'}</span>`
       : '';
     const checked = _stockSelected.has(it.stock_code) ? ' checked' : '';
     return `
       <tr style="${soldoutBg}">
         <td style="padding:6px 6px;border-bottom:1px solid var(--gray-100);text-align:center">
           <input type="checkbox"${checked} onchange="toggleStockSelect('${esc(it.stock_code)}', this.checked)"></td>
-        <td style="padding:6px 12px${bom ? ' 6px 30px' : ''};border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px">${_stockErpCodeCell(it)}${bomTag}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px">${_stockErpCodeCell(it)}${usedIn}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px;color:var(--gray-500)">${_stockSalesCodeCell(it)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100)">${esc(it.product_name || '-')}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center;font-size:10px;color:var(--gray-500)">${it.is_com ? '위탁' : '자체'}</td>
@@ -13936,7 +13932,7 @@ function _stockItemRow(it, bom) {
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;color:var(--gray-600)">${it.daily_avg_30d}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${daysCell}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center">${_stockBellCell(it)}</td>
-        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center;white-space:nowrap">${_stockRowActions(it, bom)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center;white-space:nowrap">${_stockRowActions(it)}</td>
       </tr>
     `;
 }
@@ -14075,32 +14071,27 @@ function _stockGroupedRows(items) {
       anySoldout: tracked.some(it => it.available_qty <= 0),
     });
   }
-  // 그룹에 흡수되는 품목 = 그 상품 전용 구성품만.
-  //   공용 자재는 여러 상품에 걸쳐 있어 한 그룹에 넣을 수 없다 → 일반 목록에 그대로 남긴다.
-  //   (그룹 안에서는 수치 없이 이름·소요수량만 참조로 적어 구성은 그대로 확인된다.)
-  const absorbed = new Set();
-  groups.forEach(g => g.comps.forEach(c => {
-    if (c.item && !_isSharedItem(c.item)) absorbed.add(c.code);
-  }));
-
-  const plain = items.filter(it => !absorbed.has(it.stock_code))
+  // 일반 재고에는 모든 등록 품목이 남는다 — BOM 에 묶였다고 목록에서 빼지 않는다.
+  //   재고 수치는 여기 한 줄에만 두고, 상품 그룹은 '무엇으로 구성되는지'만 보여준다.
+  //   (그룹에서도 수치를 반복하면 같은 재고가 여러 개로 읽힌다.)
+  const plain = items.slice()
     .sort((a, b) => _daysRank(a.days_to_soldout) - _daysRank(b.days_to_soldout));
   groups.sort((a, b) => _daysRank(a.worst) - _daysRank(b.worst));
 
   const out = [];
 
-  // ── 1. 일반 재고 (BOM 미구성 + 공용 자재) ─────────────────
+  // ── 1. 일반 재고 (모든 등록 품목) ─────────────────────────
   if (plain.length) {
     const sharedCnt = plain.filter(_isSharedItem).length;
     out.push(_stockSectionHead('📦', '일반 재고',
       `${plain.length}건${sharedCnt ? ` · 공용 자재 ${sharedCnt}건 포함` : ''}`));
-    plain.forEach(it => out.push(_stockItemRow(it, null)));
+    plain.forEach(it => out.push(_stockItemRow(it)));
   }
 
   // ── 2. BOM 구성 상품 ──────────────────────────────────────
   if (groups.length) {
     out.push(_stockSectionHead('🧩', 'BOM 구성 상품',
-      `${groups.length}개 · 상품을 펼치면 전용 구성품이 나옵니다`));
+      `${groups.length}개 · 재고 수치는 위 일반 재고에서 봅니다`));
   }
   for (const g of groups) {
     const open = _stockGroupOpen.has(g.code);
@@ -14125,11 +14116,8 @@ function _stockGroupedRows(items) {
       </tr>`);
     if (!open) continue;
     for (const c of g.comps) {
-      out.push(c.item
-        ? (_isSharedItem(c.item)
-            ? _stockSharedRefRow(c)          // 공용 자재 — 일반 목록에 있으므로 참조만
-            : _stockItemRow(c.item, { id: c.id, qty: c.qty, role: c.role }))
-        : _stockUnregisteredRow(g.code, c));
+      // 등록 품목은 위 일반 재고에 재고 행이 있으므로 여기서는 구성 참조만 적는다.
+      out.push(c.item ? _stockBomRefRow(c) : _stockUnregisteredRow(g.code, c));
     }
   }
   return out.join('');
@@ -14221,13 +14209,19 @@ async function ungroupStockGroup(parentCode) {
 }
 
 /**
- * 공용 자재 참조 줄 — 실제 재고 행은 위쪽 '일반 재고' 에 한 번만 두고,
- * 상품 그룹 안에서는 구성이 비어 보이지 않게 이름·소요수량만 얇게 적는다.
+ * 구성 참조 줄 — 재고 행은 위쪽 '일반 재고' 에 한 번만 두고,
+ * 상품 그룹 안에서는 이름·소요수량·역할만 얇게 적는다.
  * 수치를 반복하지 않아 같은 재고가 여러 개로 읽히지 않는다.
+ * 소진예상 등 급한 정보는 요약해 붙여, 펼쳐 보면 위험한 구성품이 바로 보인다.
  */
-function _stockSharedRefRow(c) {
+function _stockBomRefRow(c) {
   const it = c.item;
   const n = (it.bom_parents || []).length;
+  const days = it.days_to_soldout;
+  const urgent = it.available_qty <= 0
+    ? '<span style="color:#dc2626;font-weight:600;margin-left:6px">재고 없음</span>'
+    : (days !== null && days <= 30
+        ? `<span style="color:#dc2626;font-weight:600;margin-left:6px">${days}일 후 소진</span>` : '');
   return `
     <tr style="color:var(--gray-500)">
       <td style="padding:5px 6px;border-bottom:1px solid var(--gray-100)"></td>
@@ -14236,7 +14230,8 @@ function _stockSharedRefRow(c) {
         ${_bomRoleBadge(c.role)}
         <span>×${c.qty}</span>
         <span style="margin-left:6px">${esc(it.product_name || '')}</span>
-        <span style="font-size:9px;color:#b45309;margin-left:6px" title="${esc((it.bom_parents || []).map(p => `${p.name || p.code} ×${p.qty}`).join('\n'))}&#10;&#10;${n}개 상품이 나눠 쓰는 공용 자재라 재고는 위쪽 '일반 재고' 에 한 줄로만 둡니다">공용 ${n}</span>
+        ${n > 1 ? `<span style="font-size:9px;color:#b45309;margin-left:6px" title="${esc((it.bom_parents || []).map(p => `${p.name || p.code} ×${p.qty}`).join('\n'))}&#10;&#10;${n}개 상품이 나눠 쓰는 공용 자재입니다">공용 ${n}</span>` : ''}
+        ${urgent}
       </td>
       <td style="padding:5px 12px;border-bottom:1px solid var(--gray-100);text-align:center;white-space:nowrap">
         <button onclick="editBomComponent('${esc(c.id)}')" title="이 상품에서의 소요수량·역할 수정"
@@ -14614,17 +14609,13 @@ async function editStockItemSalesCodes(id) {
   } catch (e) { alert(`실패: ${e.message}`); }
 }
 
-/** 재고 표의 관리 셀 — (그룹 안이면) 구성 수정·빼기 / 개별 발송 / 수정 / 목록에서 제거 */
-function _stockRowActions(it, bom) {
+/** 재고 표의 관리 셀 — 개별 발송 / 수정 / 목록에서 제거.
+ *  BOM 소요수량·구성 제거는 아래 'BOM 구성 상품' 영역의 참조 줄에서 한다. */
+function _stockRowActions(it) {
   if (!it.item_id) return '<span style="color:var(--gray-400)">-</span>';
   const id = esc(it.item_id);
   const code = esc(it.stock_code);
-  const bomBtns = bom && bom.id ? `
-    <button onclick="editBomComponent('${esc(bom.id)}')" title="이 상품에서의 소요수량·역할 수정"
-            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:2px 6px">×${bom.qty}</button>
-    <button onclick="removeBomComponent('${esc(bom.id)}')" title="이 그룹에서 빼기 (재고 등록은 유지)"
-            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:2px 6px;color:#b45309;margin-left:3px">⤴</button>` : '';
-  return `${bomBtns}
+  return `
     <button onclick="sendStockItemToSlack('${code}')" title="이 품목만 슬랙으로 발송"
             style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:2px 6px">📤</button>
     <button onclick="openStockEditModal('${id}')" title="등록 정보 수정"
