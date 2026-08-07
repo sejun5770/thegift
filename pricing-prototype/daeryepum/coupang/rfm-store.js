@@ -93,16 +93,58 @@ async function deleteSaleById(id) {
   return { ok: true };
 }
 
+/**
+ * 대시보드용 매출 목록 — 주문 단위 라인(coupang_rg_order_lines)에서 만든다.
+ *
+ *   소스 일원화 (운영 결정 2026-08-07). 예전엔 coupang_rocket_growth_sales
+ *   (일자×옵션 집계) 를 읽었는데, 업로드 리포트와 소스가 둘로 갈려 어긋났다.
+ *   날짜 기준은 결제완료일(paid_date) — 파일1 의 '발생일(결제완료일)'.
+ *
+ *   반환 shape 은 옛 테이블과 동일하게 맞춘다 (호출측 3곳을 그대로 두기 위함):
+ *     { sale_date, vendor_item_id, product_id, product_name,
+ *       sales_qty, sales_amount, refund_qty, refund_amount }
+ *
+ *   취소 라인(is_cancel)은 금액·수량이 음수로 합산돼 있어 환불로 분리해 내려준다.
+ */
 async function listSales({ startDate, endDate } = {}) {
   if (!USE) return [];
-  const params = [];
-  if (startDate) params.push(`sale_date=gte.${startDate}`);
-  if (endDate) params.push(`sale_date=lte.${endDate}`);
-  params.push('order=sale_date.desc');
-  const url = `${REST}/coupang_rocket_growth_sales?select=*&${params.join('&')}`;
+  const params = ['paid_date=not.is.null'];
+  if (startDate) params.push(`paid_date=gte.${startDate}`);
+  if (endDate) params.push(`paid_date=lte.${endDate}`);
+  params.push('order=paid_date.desc', 'limit=20000');
+  const url = `${REST}/coupang_rg_order_lines?select=*&${params.join('&')}`;
   const res = await fetch(url, { headers: HDR });
   if (!res.ok) return [];
-  return res.json();
+  const rows = await res.json();
+
+  // (결제완료일, 옵션ID) 로 합쳐 옛 집계 단위와 같게 만든다 — 대시보드가 그 단위를 전제한다.
+  const agg = new Map();
+  for (const r of rows) {
+    const key = `${r.paid_date}|${r.vendor_item_id}`;
+    if (!agg.has(key)) {
+      agg.set(key, {
+        sale_date: r.paid_date,
+        vendor_item_id: r.vendor_item_id,
+        // 상품별 통계가 코드로 묶으므로 내부코드가 있으면 그걸 쓴다 (없으면 쿠팡 등록상품ID)
+        product_id: r.seller_product_id || r.vendor_item_id || null,
+        product_name: r.product_name || null,
+        sales_qty: 0, sales_amount: 0, refund_qty: 0, refund_amount: 0,
+      });
+    }
+    const a = agg.get(key);
+    if (!a.product_name && r.product_name) a.product_name = r.product_name;
+    const qty = Number(r.sales_qty) || 0;
+    const amt = Number(r.sales_amount) || 0;
+    // 취소분은 음수로 들어와 있다 — 환불로 분리해야 대시보드의 순매출 계산이 맞는다
+    if (r.is_cancel || qty < 0 || amt < 0) {
+      a.refund_qty += Math.abs(qty);
+      a.refund_amount += Math.abs(amt);
+    } else {
+      a.sales_qty += qty;
+      a.sales_amount += amt;
+    }
+  }
+  return [...agg.values()].sort((x, y) => String(y.sale_date).localeCompare(String(x.sale_date)));
 }
 
 async function getSyncState() {
