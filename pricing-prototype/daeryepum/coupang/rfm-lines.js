@@ -122,7 +122,12 @@ function parseCategoryTr(rows) {
   for (const k of ['date', 'orderId', 'optionId']) {
     if (col[k] === undefined) throw new Error(`파일1 필수 컬럼 누락: ${k} (발생일/주문ID/옵션ID)`);
   }
-  const out = [];
+  // (주문ID, 옵션ID) 로 합친다.
+  //   한 주문의 같은 옵션이 '주문 정산' + '주문 정산취소' 로 여러 줄 오는 경우가 있어,
+  //   그대로 보내면 같은 배치에 중복 키가 생겨 upsert 가 통째로 실패한다
+  //   (ON CONFLICT DO UPDATE command cannot affect row a second time).
+  //   취소 줄은 금액·수량이 음수로 와서 더하면 순액이 된다.
+  const merged = new Map();
   let skipped = 0;
   for (const r of rows.slice(hi + 1)) {
     if (!r) { skipped++; continue; }
@@ -130,21 +135,29 @@ function parseCategoryTr(rows) {
     const oid = String(r[col.orderId] ?? '').trim();
     const vid = String(r[col.optionId] ?? '').trim();
     if (!d || !oid || !vid) { skipped++; continue; }
-    const pName = String(r[col.productName] ?? '').trim();
-    const oName = String(r[col.optionName] ?? '').trim();
-    out.push({
-      order_id: oid,
-      vendor_item_id: vid,
-      paid_date: d,
-      product_name: [pName, oName].filter(Boolean).join(' / ') || null,
-      sales_qty: Math.round(num(r[col.qty])),
-      sales_amount: num(r[col.amount]),
-      commission: num(r[col.fee]) + num(r[col.feeVat]),
-      settlement_amount: num(r[col.settle]),
-      is_cancel: String(r[col.type] ?? '').includes('취소'),
-    });
+    const key = `${oid}|${vid}`;
+    if (!merged.has(key)) {
+      const pName = String(r[col.productName] ?? '').trim();
+      const oName = String(r[col.optionName] ?? '').trim();
+      merged.set(key, {
+        order_id: oid,
+        vendor_item_id: vid,
+        paid_date: d,
+        product_name: [pName, oName].filter(Boolean).join(' / ') || null,
+        sales_qty: 0, sales_amount: 0, commission: 0, settlement_amount: 0,
+        is_cancel: false,
+      });
+    }
+    const m = merged.get(key);
+    // 날짜가 갈리면 이른 쪽(원 결제일)을 남긴다 — 취소 줄이 뒤 날짜로 오는 경우 대비
+    if (d < m.paid_date) m.paid_date = d;
+    m.sales_qty += Math.round(num(r[col.qty]));
+    m.sales_amount += num(r[col.amount]);
+    m.commission += num(r[col.fee]) + num(r[col.feeVat]);
+    m.settlement_amount += num(r[col.settle]);
+    if (String(r[col.type] ?? '').includes('취소')) m.is_cancel = true;
   }
-  return { kind: 'category_tr', rows: out, skipped };
+  return { kind: 'category_tr', rows: [...merged.values()], skipped };
 }
 
 /**
