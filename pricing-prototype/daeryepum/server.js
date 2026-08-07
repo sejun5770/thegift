@@ -7878,7 +7878,12 @@ const server = http.createServer(async (req, res) => {
               const parent = safe(b.parent_code);
               if (!comp || !parent) continue;
               if (!bomByComponent.has(comp)) bomByComponent.set(comp, []);
-              bomByComponent.get(comp).push({ code: parent, mult: Math.max(1, parseInt(b.qty, 10) || 1) });
+              bomByComponent.get(comp).push({
+                code: parent,
+                mult: Math.max(1, parseInt(b.qty, 10) || 1),
+                role: b.component_role || 'material',
+                bom_id: b.id || null,
+              });
             }
           } catch { /* 테이블 없으면 BOM 미적용 */ }
 
@@ -8058,6 +8063,7 @@ const server = http.createServer(async (req, res) => {
           //   조용히 0 으로 잡히므로, 존재하지 않는 코드를 찾아 알려준다.
           const refCodes = [...new Set(regRows.flatMap(r => [...r.sales, ...r.consume.map(c => c.code)]))];
           const codeIssues = new Map();   // code → 'erp' | 'unknown'
+          const codeNames = new Map();    // code → Card_Name (그룹 헤더에 상품명 표시용)
           if (refCodes.length) {
             const inList = refCodes.map(c => `'${c}'`).join(',');
             const chk = await p.request().query(`
@@ -8065,11 +8071,14 @@ const server = http.createServer(async (req, res) => {
                      CASE WHEN EXISTS (SELECT 1 FROM S2_Card c WITH (NOLOCK) WHERE c.Card_Code = v.code)
                           THEN 1 ELSE 0 END AS is_card,
                      CASE WHEN EXISTS (SELECT 1 FROM S2_CARD_ERP_STOCK s WITH (NOLOCK)
-                                       WHERE s.CARD_CODE_ERP = v.code) THEN 1 ELSE 0 END AS is_erp
+                                       WHERE s.CARD_CODE_ERP = v.code) THEN 1 ELSE 0 END AS is_erp,
+                     (SELECT TOP 1 c2.Card_Name FROM S2_Card c2 WITH (NOLOCK)
+                      WHERE c2.Card_Code = v.code) AS card_name
               FROM (VALUES ${refCodes.map(c => `('${c}')`).join(',')}) AS v(code)
               WHERE v.code IN (${inList})
             `);
             for (const row of (chk.recordset || [])) {
+              if (row.card_name) codeNames.set(row.code, row.card_name);
               if (row.is_card) continue;
               codeIssues.set(row.code, row.is_erp ? 'erp' : 'unknown');
             }
@@ -8180,6 +8189,16 @@ const server = http.createServer(async (req, res) => {
               // 소진 기준 — 저장값이 아니라 BOM + 매출코드에서 파생된 결과 (050)
               consume_codes: (regRow.consume || []).map(c => ({ code: c.code, mult: c.mult })),
               consume_source: regRow.consumeSource,           // 'bom' | 'sales'
+              // 이 재고품목이 구성품으로 들어가는 판매상품들 — 재고 목록의 상품 그룹 헤더용.
+              //   한 원물이 여러 세트에 쓰이면 그룹이 여러 개가 되고, 목록에서 각 그룹에 표시된다.
+              bom_parents: (bomByComponent.get(r.stock_code) || []).map(b => ({
+                code: b.code,
+                name: codeNames.get(b.code) || null,
+                qty: b.mult,
+                role: b.role,
+                bom_id: b.bom_id,
+                sales_qty_30d: salesMap.get(b.code)?.qty || 0,
+              })),
               consume_qty_30d: consumeQty30d,    // 재고 소진 수량 (배수 반영)
               // 품목코드가 아닌 값이 매출·소진코드에 들어간 경우 (조용히 0 이 되는 것 방지)
               bad_codes: [...new Set([...cardCodes, ...(regRow.consume || []).map(c => c.code)])]
