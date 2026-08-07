@@ -1292,6 +1292,10 @@ nav.nav-loading a[href^="#"] {
     <span style="flex-shrink:0">선택 <strong id="order-selected-count" style="color:var(--gray-800)">0</strong>건</span>
     <span style="flex-shrink:0;color:#16a34a">수집완료 <strong id="order-collected-count">0</strong>건</span>
     <span style="flex-shrink:0;color:#dc2626">취소주의 <strong id="order-cancel-count">0</strong>건</span>
+    <!-- 쿠팡 코드 매핑 현황 (057) — 상품설정에 채널 상품코드를 넣어야 할 대상을 드러낸다 -->
+    <span id="ord-cp-map" style="flex-shrink:0;display:none;padding:2px 8px;border-radius:4px;background:#fffbeb;color:#b45309;cursor:pointer"
+          title="상품설정에 쿠팡 채널 상품코드가 없어 내부 상품코드로 바뀌지 않은 주문입니다. 눌러 그 주문만 봅니다."
+          onclick="_ordShowUnmappedCoupang()"></span>
     <!-- 매출 합계 — 답례품_더기프트 카테고리 전용. 대시보드 기준과 대조 편의성. -->
     <span id="ord-revenue-summary" style="flex-shrink:0;display:none;padding:2px 8px;border-radius:4px;background:#f3f4f6;color:var(--gray-700)" title="현재 필터로 조회된 주문의 매출. 대시보드 (취소/환불/반품 제외 기준) 와 대조용.">
       <span style="color:var(--gray-500)">순매출</span> <strong id="ord-revenue-net" style="color:#047857">-</strong>
@@ -3721,6 +3725,41 @@ const API = window.location.pathname.replace(/\/+$/, '') || '';
  * XSS 방지용 HTML escape. innerHTML/템플릿 리터럴 에 사용자 입력을 삽입할 때 사용.
  * - 주문자명, 주소, 스티커 문구 등은 고객/외부 DB 에서 오는 값이라 XSS 위험.
  */
+/**
+ * 쿠팡 코드 매핑 현황 (057).
+ *   내부 상품코드로 치환되지 않은 쿠팡 주문이 몇 건인지, 그중 등록상품ID 가 아예
+ *   비어 있는(= 옵션ID 로만 매핑 가능한) 건이 몇 건인지 보여준다.
+ *   등록상품ID 가 있으면 그것 하나로 그 상품의 옵션 전부가 잡히므로 등록 부담이 작다.
+ */
+function _ordRenderCoupangMapStatus(rows) {
+  const el = document.getElementById('ord-cp-map');
+  if (!el) return;
+  const cp = (rows || []).filter(r => r.order_type === 'COUPANG');
+  if (!cp.length) { el.style.display = 'none'; return; }
+  const unmapped = cp.filter(r => !r.channel_code_mapped);
+  if (!unmapped.length) {
+    el.style.display = '';
+    el.style.background = '#f0fdf4'; el.style.color = '#047857';
+    el.textContent = `쿠팡 코드 매핑 완료 (${cp.length}건)`;
+    return;
+  }
+  const noProductId = unmapped.filter(r => !String(r.channel_product_code || '').trim()).length;
+  el.style.display = '';
+  el.style.background = '#fffbeb'; el.style.color = '#b45309';
+  el.textContent = `쿠팡 미매핑 ${unmapped.length}/${cp.length}건`
+    + (noProductId ? ` (등록상품ID 없음 ${noProductId}건 → 옵션ID 필요)` : '');
+}
+
+/** 미매핑 쿠팡 주문만 보도록 컬럼을 켜고 검색어를 비운다 */
+function _ordShowUnmappedCoupang() {
+  ['channel_product_code', 'channel_option_id', 'card_code'].forEach(k => {
+    // 컬럼 셀렉터의 체크박스는 data-key 로 식별한다 (buildColSelector)
+    const cb = document.querySelector(`#col-selector input[data-key="${k}"]`);
+    if (cb && !cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change')); }
+  });
+  showToast('쿠팡 등록상품ID·옵션ID 컬럼을 켰습니다 — 상품코드가 11자리이거나 비어 있는 행의 값을 상품설정 › 채널 상품코드에 넣으세요');
+}
+
 function escapeHtml(s) {
   if (s == null) return '';
   return String(s).replace(/[&<>"']/g, (c) => ({
@@ -3738,6 +3777,10 @@ const ALL_COLS = [
   {key:'recv_msg',label:'배송메세지',default:true},
   {key:'card_name',label:'상품명',default:true},
   {key:'card_code',label:'상품코드',default:false},
+  // 쿠팡 원본 코드 (057) — 상품설정의 채널 상품코드에 넣을 값. 매핑이 안 붙은 주문에서
+  //   어느 값을 등록해야 하는지 여기서 보고 복사한다. 다른 채널 주문은 비어 있다.
+  {key:'channel_product_code',label:'쿠팡_등록상품ID',default:false},
+  {key:'channel_option_id',label:'쿠팡_옵션ID',default:false},
   {key:'item_count',label:'상품수량',default:true,num:true},
   // 결제금액 컬럼 3종:
   //   · 주문총액 (item_amount): 이 row 의 정가 (쿠폰 적용 전)
@@ -4235,6 +4278,7 @@ function renderOrderTable() {
       `</tr>`;
   }).join('');
   document.getElementById('order-count').textContent = filtered.length;
+  _ordRenderCoupangMapStatus(filtered);
   // 수집/취소 건수
   const allOrders = getFilteredOrders();
   let collectedCnt = 0, cancelCnt = 0;
