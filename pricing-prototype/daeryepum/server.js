@@ -1621,7 +1621,7 @@ async function apiProductStats(query) {
           }
         } catch (e) { console.warn('[product-stats] 마켓 병합 실패 (무시):', e.message); }
       };
-      await mergeMarket(() => require('./coupang/store').listCoupangOrders({ startStr: s, endStr: e, byPaid: false }), r => `CP:${r.coupang_order_id}`, '쿠팡');
+      await mergeMarket(() => require('./coupang/store').listCoupangOrders({ startStr: s, endStr: e, byPaid: false, excludeRocketGrowth: true }), r => `CP:${r.coupang_order_id}`, '쿠팡');
       await mergeMarket(() => require('./naver/store').listNaverOrders({ startStr: s, endStr: e, byPaid: false }), r => `NV:${r.product_order_id}`, '네이버');
       await mergeMarket(() => require('./cafe24/store').listCafe24Orders({ startStr: s, endStr: e, byPaid: false }), r => `CF:${r.cafe24_order_id}`, '정수당');
       try {
@@ -2075,7 +2075,7 @@ async function apiProductRanking(query = {}) {
       console.warn(`[product-ranking] ${label} 집계 실패 (무시):`, e.message);
     }
   }
-  await mergeMarket('쿠팡', () => require('./coupang/store').listCoupangOrders({ startStr, endStr: endPlus, byPaid: false }));
+  await mergeMarket('쿠팡', () => require('./coupang/store').listCoupangOrders({ startStr, endStr: endPlus, byPaid: false, excludeRocketGrowth: true }));
   await mergeMarket('네이버', () => require('./naver/store').listNaverOrders({ startStr, endStr: endPlus, byPaid: false }));
   await mergeMarket('정수당', () => require('./cafe24/store').listCafe24Orders({ startStr, endStr: endPlus, byPaid: false }));
 
@@ -2330,7 +2330,7 @@ async function apiWeeklyReport(query = {}) {
     }
   }
   await mergeMarket(
-    () => require('./coupang/store').listCoupangOrders({ startStr: rangeStart, endStr: rangeEndExcl, byPaid: false }),
+    () => require('./coupang/store').listCoupangOrders({ startStr: rangeStart, endStr: rangeEndExcl, byPaid: false, excludeRocketGrowth: true }),
     r => `${r.coupang_order_id}::${r.shipment_box_id}`, '쿠팡',
   );
   await mergeMarket(
@@ -3140,7 +3140,7 @@ async function apiDashboardComparison(query = {}) {
     const _isDaeryepumCmp = !query.category || query.category === 'daeryepum';
     if (_isDaeryepumCmp) await mergeMarketplace(
       '쿠팡',
-      () => require('./coupang/store').listCoupangOrders({ startStr, endStr, byPaid: false }),
+      () => require('./coupang/store').listCoupangOrders({ startStr, endStr, byPaid: false, excludeRocketGrowth: true }),
       r => `${r.coupang_order_id}::${r.shipment_box_id}`,
     );
     if (_isDaeryepumCmp) await mergeMarketplace(
@@ -3809,6 +3809,7 @@ async function apiDashboardSummary(query) {
     const coupangStore = require('./coupang/store');
     const coupangRowsRaw = await coupangStore.listCoupangOrders({
       startStr: startDate, endStr: endDate, byPaid: false,
+      excludeRocketGrowth: true,   // 로켓그로스는 정산 리포트로 별도 집계 — 여기서 세면 이중계상
     });
     // 매출 집계 — 취소/반품 자동 제외 (CARD/ETC 의 status_seq NOT IN (3,5,...) 와 동일 정책).
     //   주문조회 / 정보입력완료 등 다른 호출은 store 함수가 모든 row 반환 → 취소 표시 가능.

@@ -80,9 +80,21 @@ async function updateCoupangOrderStatus(orderId, status, statusLabel) {
  *   주문조회 / 정보입력완료 등 모든 호출에서 취소 row 도 포함되어 표시 / 추적 가능.
  *   매출 집계 측 (apiSummary 등) 에서 자체적으로 status='CANCEL'/'RETURNS' row 를 필터.
  */
-async function listCoupangOrders({ startStr, endStr, byPaid = false, orderIds } = {}) {
+/**
+ * @param {boolean} opts.excludeRocketGrowth 로켓그로스 주문 제외 (062).
+ *   매출 집계에서만 켠다. 로켓그로스 매출은 정산 리포트(coupang_rg_order_lines)를
+ *   소스로 별도 채널로 집계되므로, 여기서도 세면 같은 매출이 두 번 잡힌다.
+ *   주문 목록·스티커 백필처럼 '주문을 보여주는' 호출은 끄고 그대로 포함한다.
+ *
+ *   서버에서 거르지 않고 받아온 뒤 거른다 — 062 마이그레이션 전이면 컬럼이 없어
+ *   PostgREST 필터가 400 을 내고 대시보드가 통째로 죽는다.
+ */
+async function listCoupangOrders({ startStr, endStr, byPaid = false, orderIds, excludeRocketGrowth = false } = {}) {
   if (!USE_SUPABASE) return [];
   const col = byPaid ? 'paid_at' : 'ordered_at';
+  const post = rows => (excludeRocketGrowth
+    ? (rows || []).filter(r => !r.is_rocket_growth)
+    : rows);
   // orderIds OR 모드 — PostgREST `or=(a.eq.x,b.eq.y)` syntax 활용.
   if (Array.isArray(orderIds) && orderIds.length) {
     const inClause = `coupang_order_id=in.(${orderIds.join(',')})`;
@@ -94,13 +106,13 @@ async function listCoupangOrders({ startStr, endStr, byPaid = false, orderIds } 
       params.push(inClause);
     }
     params.push(`order=${col}.desc`);
-    return sbGet('coupang_orders', params.join('&'));
+    return post(await sbGet('coupang_orders', params.join('&')));
   }
   const params = [];
   if (startStr) params.push(`${col}=gte.${encodeURIComponent(startStr)}`);
   if (endStr) params.push(`${col}=lt.${encodeURIComponent(endStr)}`);
   params.push(`order=${col}.desc`);
-  return sbGet('coupang_orders', params.join('&'));
+  return post(await sbGet('coupang_orders', params.join('&')));
 }
 
 /**

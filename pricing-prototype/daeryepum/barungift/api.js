@@ -896,7 +896,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
             }
           } catch (e) { console.warn('[products/sales-list] 마켓 병합 실패 (무시):', e.message); }
         };
-        await mergeMarket(() => require('../coupang/store').listCoupangOrders({ startStr, endStr: endPlus, byPaid: false }), '쿠팡');
+        await mergeMarket(() => require('../coupang/store').listCoupangOrders({ startStr, endStr: endPlus, byPaid: false, excludeRocketGrowth: true }), '쿠팡');
         await mergeMarket(() => require('../naver/store').listNaverOrders({ startStr, endStr: endPlus, byPaid: false }), '네이버');
         await mergeMarket(() => require('../cafe24/store').listCafe24Orders({ startStr, endStr: endPlus, byPaid: false }), '정수당');
         // 더기프트 수동 등록 (bg_manual_orders)

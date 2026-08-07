@@ -361,7 +361,8 @@ async function reconcileCancelled({ daysBack = 14, maxChecks = 300, delayMs = 12
   const fmt = ms => new Date(ms + 9 * 3600000).toISOString().slice(0, 10);   // KST 날짜
   let rows;
   try {
-    rows = await store.listCoupangOrders({ startStr: fmt(startMs), endStr: fmt(endMs + 86400000) });
+    // 로켓그로스는 마켓플레이스 단건 조회 대상이 아니다 — 넣으면 헛호출만 늘어난다
+    rows = await store.listCoupangOrders({ startStr: fmt(startMs), endStr: fmt(endMs + 86400000), excludeRocketGrowth: true });
   } catch (e) {
     return { checked: 0, cancelled: 0, error: `DB 조회 실패: ${e.message}` };
   }
