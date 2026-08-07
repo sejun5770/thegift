@@ -110,6 +110,7 @@ function parseCategoryTr(rows) {
     date: s => s.startsWith('발생일'),
     orderId: s => s === '주문ID',
     optionId: s => s === '옵션ID',
+    sellerProductId: s => s.includes('등록상품ID'),
     type: s => s.includes('거래유형'),
     productName: s => s.includes('등록상품명'),
     optionName: s => s === '옵션명',
@@ -144,6 +145,7 @@ function parseCategoryTr(rows) {
         vendor_item_id: vid,
         paid_date: d,
         product_name: [pName, oName].filter(Boolean).join(' / ') || null,
+        seller_product_id: String(r[col.sellerProductId] ?? '').trim() || null,
         sales_qty: 0, sales_amount: 0, commission: 0, settlement_amount: 0,
         is_cancel: false,
       });
@@ -193,6 +195,7 @@ function parseCfs(sheets) {
       date: s => s.startsWith('발생일'),
       orderId: s => s === '주문ID',
       optionId: s => s === '옵션ID',
+      sellerProductId: s => s.includes('등록상품ID'),
       // 비용 열은 시트마다 이름이 다르다 — '입출고비' / '배송비' 로 구분
       inout: s => s.includes('입출고비'),
       shipping: s => s.includes('배송비') && !s.includes('입출고'),
@@ -217,6 +220,7 @@ function parseCfs(sheets) {
           order_id: oid, vendor_item_id: vid, delivered_date: d,
           inout_fee: 0, shipping_fee: 0,
           product_name: [pName, oName].filter(Boolean).join(' / ') || null,
+          seller_product_id: String(r[col.sellerProductId] ?? '').trim() || null,
           sales_qty: Math.round(num(r[col.qty])) || null,
         });
       }

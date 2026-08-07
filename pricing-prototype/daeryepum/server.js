@@ -13850,6 +13850,31 @@ const server = http.createServer(async (req, res) => {
             startDate: parsed.query.start_date || null,
             endDate: parsed.query.end_date || null,
           });
+          // 내부 상품코드·스티커코드는 저장하지 않고 조회 시점에 붙인다 (058).
+          //   상품설정이 바뀌면 과거 라인 표시도 함께 따라가야 하기 때문.
+          //   옵션ID 매핑 > 등록상품ID 매핑 (057 과 같은 우선순위).
+          try {
+            const byOption = new Map();
+            const byProduct = new Map();
+            for (const ps of (await require('./barungift/store').getAllProductSettings()) || []) {
+              const m = ps.channel_product_codes?.coupang;
+              if (!m) continue;
+              const info = { code: ps.product_id, sticker: ps.channel_stickers?.coupang || null };
+              const pIds = Array.isArray(m) ? m : (m.product_ids || []);
+              for (const c of pIds) byProduct.set(String(c).trim(), info);
+              for (const c of (Array.isArray(m) ? [] : (m.option_ids || []))) {
+                byOption.set(String(c).trim(), info);
+              }
+            }
+            for (const r of rows) {
+              const hit = byOption.get(String(r.vendor_item_id || '').trim())
+                || byProduct.get(String(r.seller_product_id || '').trim());
+              r.internal_product_code = hit?.code || null;
+              r.sticker_code = hit?.sticker || null;
+            }
+          } catch (e) {
+            console.warn('[rfm/lines] 상품코드 매핑 실패 (원본만 표시):', e.message);
+          }
           data = { lines: rows };
         } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
