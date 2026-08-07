@@ -3289,10 +3289,12 @@ nav.nav-loading a[href^="#"] {
           <input type="radio" name="inc-filter-disp" value="operation" onchange="renderIncidentTab()"> 운영사고만
         </label>
       </div>
+      <!-- 기간 기준은 원주문 희망출고일이 기본 — 사고는 출고 일정으로 묶어 보는 것이 운영 기준이다.
+           등록일은 "이번 주에 접수된 사고" 를 볼 때만 쓰므로 뒤에 둔다. -->
       <select id="inc-date-basis" onchange="renderIncidentTab()" title="기간을 어느 날짜로 거를지"
               style="padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
-        <option value="created">사고 등록일</option>
         <option value="ship">희망출고일</option>
+        <option value="created">사고 등록일</option>
       </select>
       <input type="date" id="inc-date-from" onchange="renderIncidentTab()"
              style="padding:5px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
@@ -16720,7 +16722,7 @@ function clearIncidentDateFilter() {
 function _incidentFiltered() {
   const disp = document.querySelector('input[name="inc-filter-disp"]:checked')?.value || '';
   const q = (document.getElementById('inc-search')?.value || '').trim().toLowerCase();
-  const basis = document.getElementById('inc-date-basis')?.value || 'created';
+  const basis = document.getElementById('inc-date-basis')?.value || 'ship';
   const from = (document.getElementById('inc-date-from')?.value || '').trim();
   const to = (document.getElementById('inc-date-to')?.value || '').trim();
   return _incidents.filter(i => {
