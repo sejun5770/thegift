@@ -272,6 +272,20 @@ function _normChannelProductCodes(v) {
   return out;
 }
 
+/** 채널별 판매단위 {"coupang":10} 정규화 (060). 1 이상 정수만. */
+function _normChannelSalesUnits(v) {
+  const out = {};
+  if (v && typeof v === 'object' && !Array.isArray(v)) {
+    for (const [k, n] of Object.entries(v)) {
+      if (!PRODUCT_CHANNELS.includes(k)) continue;
+      const u = parseInt(n, 10);
+      // 1 은 기본값이라 굳이 저장하지 않는다 — 지정된 것만 남겨 의도가 드러나게
+      if (u > 1) out[k] = u;
+    }
+  }
+  return out;
+}
+
 /** 채널 배열 정규화 — 알 수 없는 값은 버리고, 비면 'own'.
  *  빈 배열이면 DB CHECK 에 걸려 저장이 통째로 실패하므로 여기서 반드시 하나는 남긴다. */
 function _normChannels(v) {
@@ -292,6 +306,9 @@ async function upsertProductSettings(productId, data) {
   }
   if ('channel_product_codes' in data) {
     data = { ...data, channel_product_codes: _normChannelProductCodes(data.channel_product_codes) };
+  }
+  if ('channel_sales_units' in data) {
+    data = { ...data, channel_sales_units: _normChannelSalesUnits(data.channel_sales_units) };
   }
 
   if (existing) {
@@ -346,6 +363,7 @@ async function upsertProductSettings(productId, data) {
     sales_channels: _normChannels(data.sales_channels),   // migration 054 (복수 채널)
     channel_stickers: _normChannelStickers(data.channel_stickers), // migration 056
     channel_product_codes: _normChannelProductCodes(data.channel_product_codes), // migration 057
+    channel_sales_units: _normChannelSalesUnits(data.channel_sales_units), // migration 060
   };
 
   if (USE_SUPABASE) return sbInsert('bg_product_settings', newSetting);

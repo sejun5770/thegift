@@ -80,7 +80,13 @@ function parseCoupangDate(s) {
   return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-function normalizeOrderSheet(sheet) {
+/**
+ * @param {object} sheet 쿠팡 ordersheet
+ * @param {(sellerProductId:string, vendorItemId:string)=>number|null} unitOf
+ *   채널 판매단위 조회 (060). 설정값이 있으면 상품명 파싱보다 우선한다 —
+ *   이름에 "10세트" 표기가 없거나 형식이 바뀌면 파싱이 조용히 1 로 떨어지기 때문.
+ */
+function normalizeOrderSheet(sheet, unitOf = null) {
   const orderId = sheet.orderId;
   const shipmentBoxId = sheet.shipmentBoxId;
   const orderedAt = parseCoupangDate(sheet.orderedAt);
@@ -107,7 +113,10 @@ function normalizeOrderSheet(sheet) {
       //   cart_qty(고객 주문 단위) × set_size(세트당 개수) = item_count(실제 개수).
       //   매출(item_total_price)은 unit × cart_qty 그대로 (price 는 set 단가, qty 는 cart 수).
       const productNameForSet = item.vendorItemName || item.sellerProductName || '';
-      const setSize = extractSetSize(productNameForSet);
+      const configured = unitOf
+        ? unitOf(String(item.sellerProductId ?? ''), String(item.vendorItemId ?? ''))
+        : null;
+      const setSize = configured || extractSetSize(productNameForSet);
       const effectiveCount = cartQty * setSize;
       return {
         coupang_order_id: orderId,
@@ -174,11 +183,31 @@ async function syncRecent({ daysBack = 7, status } = {}) {
   }
   const sheets = res.items || [];
   // 정규화 + 필터
+  // 채널 판매단위 (060) — 상품설정에 지정돼 있으면 상품명 파싱보다 우선.
+  //   실패해도 파싱 폴백으로 기존 동작이 유지되도록 조용히 넘어간다.
+  let unitOf = null;
+  try {
+    const settings = await bgStore.getAllProductSettings();
+    const byOpt = new Map(), byProd = new Map();
+    for (const ps of settings || []) {
+      const unit = ps.channel_sales_units?.coupang;
+      if (!(unit > 1)) continue;
+      const m = ps.channel_product_codes?.coupang;
+      if (!m) continue;
+      const pIds = Array.isArray(m) ? m : (m.product_ids || []);
+      for (const c of pIds) byProd.set(String(c).trim(), unit);
+      for (const c of (Array.isArray(m) ? [] : (m.option_ids || []))) byOpt.set(String(c).trim(), unit);
+    }
+    if (byOpt.size || byProd.size) {
+      unitOf = (pid, vid) => byOpt.get(String(vid).trim()) || byProd.get(String(pid).trim()) || null;
+    }
+  } catch (e) { console.warn('[coupang sync] 판매단위 로드 실패 (상품명 파싱 사용):', e.message); }
+
   const rows = [];
   let filteredOut = 0;
   for (const sheet of sheets) {
     const itemsBefore = (sheet.orderItems || []).length;
-    const normalized = normalizeOrderSheet(sheet);
+    const normalized = normalizeOrderSheet(sheet, unitOf);
     rows.push(...normalized);
     filteredOut += Math.max(0, itemsBefore - normalized.length);
   }

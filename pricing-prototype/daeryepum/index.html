@@ -2704,7 +2704,9 @@ nav.nav-loading a[href^="#"] {
             <div id="bg-p-ch-sticker-rows" style="display:flex;gap:8px;flex-wrap:wrap"></div>
             <div style="font-size:11px;color:var(--gray-500);margin:10px 0 6px">
               <b>채널 상품코드</b> — 그 채널이 쓰는 코드입니다. 주문조회에서 이 내부 코드로 보입니다. 콤마로 여러 개 넣을 수 있습니다.<br>
-              같은 <b>등록상품</b> 안에서 옵션마다 내부코드가 갈리면 <b>옵션ID</b> 로 넣으세요 — 옵션ID 매핑이 등록상품ID보다 우선합니다.
+              같은 <b>등록상품</b> 안에서 옵션마다 내부코드가 갈리면 <b>옵션ID</b> 로 넣으세요 — 옵션ID 매핑이 등록상품ID보다 우선합니다.<br>
+              <b>판매단위</b> — 그 채널에서 <b>1 주문이 실제 상품 몇 개</b>인지입니다(예: 자사 1개 / 쿠팡 10개 묶음 → 10).
+              비워두면 1, 상품명의 &quot;10세트&quot; 표기로 자동 인식합니다.
             </div>
             <div id="bg-p-ch-code-rows" style="display:flex;gap:8px;flex-wrap:wrap"></div>
           </div>
@@ -12218,6 +12220,7 @@ function _bgRenderChannelStickerRows(preserve = true) {
     .filter(cb => cb.checked && cb.value !== 'own').map(cb => cb.value);
   const codeRows = document.getElementById('bg-p-ch-code-rows');
   if (preserve) Object.assign(_bgChannelProductCodes, _bgCollectChannelProductCodes());
+  if (preserve) Object.assign(_bgChannelSalesUnits, _bgCollectChannelSalesUnits());
   if (!on.length) {
     wrap.style.display = 'none'; rows.innerHTML = '';
     if (codeRows) codeRows.innerHTML = '';
@@ -12238,6 +12241,12 @@ function _bgRenderChannelStickerRows(preserve = true) {
           <input type="text" data-ch-code="${ch}" data-ch-kind="option" value="${esc(_bgChCodes(ch, 'option_ids'))}" placeholder="95408060495"
             style="width:190px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px;font-family:monospace">
         </label>
+        <label style="display:inline-flex;align-items:center;gap:4px">
+          <span style="color:var(--gray-500);font-size:11px">판매단위</span>
+          <input type="number" min="1" step="1" data-ch-unit="${ch}" value="${esc(_bgChannelSalesUnits[ch] || '')}" placeholder="1"
+            style="width:70px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px;font-family:monospace">
+          <span style="color:var(--gray-400);font-size:11px">개/주문</span>
+        </label>
       </div>`).join('');
   }
   rows.innerHTML = on.map(ch => `
@@ -12249,6 +12258,18 @@ function _bgRenderChannelStickerRows(preserve = true) {
 }
 
 let _bgChannelProductCodes = {};
+
+// 채널 판매단위 (060) — {"coupang":10}. 그 채널 1 주문이 실제 상품 몇 개인지.
+let _bgChannelSalesUnits = {};
+
+function _bgCollectChannelSalesUnits() {
+  const out = {};
+  document.querySelectorAll('#bg-p-ch-code-rows input[data-ch-unit]').forEach(el => {
+    const n = parseInt(el.value, 10);
+    if (n > 1) out[el.dataset.chUnit] = n;   // 1 은 기본값이라 저장하지 않는다
+  });
+  return out;
+}
 
 function _bgCollectChannelProductCodes() {
   const out = {};
@@ -12457,6 +12478,7 @@ async function openBgProductForm(productId) {
       .forEach(cb => { cb.onchange = () => _bgRenderChannelStickerRows(true); });
     _bgChannelStickers = (s && s.channel_stickers && typeof s.channel_stickers === 'object') ? { ...s.channel_stickers } : {};
     _bgChannelProductCodes = (s && s.channel_product_codes && typeof s.channel_product_codes === 'object') ? { ...s.channel_product_codes } : {};
+    _bgChannelSalesUnits = (s && s.channel_sales_units && typeof s.channel_sales_units === 'object') ? { ...s.channel_sales_units } : {};
     // 이전 상품의 입력이 남아 있으면 다음 상품으로 새므로 먼저 비운다
     ['bg-p-ch-sticker-rows', 'bg-p-ch-code-rows'].forEach(id => {
       const el = document.getElementById(id); if (el) el.innerHTML = '';
@@ -13060,6 +13082,7 @@ async function saveBgProduct() {
     sales_channels: salesChannels,         // migration 054 (복수)
     channel_stickers: _bgCollectChannelStickers(),  // migration 056 (채널 고정 스티커)
     channel_product_codes: _bgCollectChannelProductCodes(), // migration 057 (채널 상품코드)
+    channel_sales_units: _bgCollectChannelSalesUnits(),     // migration 060 (채널 판매단위)
     available_sticker_ids: stickerIds,
     available_box_options: boxOptions,
     custom_options: customOptions,
@@ -16789,10 +16812,10 @@ function renderRgLines() {
       + (unmapped ? ` · <span style="color:#b45309">미매핑 ${fmtNum(unmapped)}건</span>` : '');
   }
   const cell = (v, style = '') => `<td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);text-align:right;${style}">${v === null || v === undefined ? '<span style="color:var(--gray-300)">-</span>' : fmtNum(Math.round(Number(v)))}</td>`;
-  $w.innerHTML = `<table class="data-table" style="font-size:12px;min-width:1120px">
+  $w.innerHTML = `<table class="data-table" style="font-size:12px;min-width:1220px">
     <thead><tr>
       <th>결제완료일</th><th>배송완료일</th><th>상품코드</th><th>스티커</th><th>상품명</th>
-      <th style="text-align:right">수량</th><th style="text-align:right">매출</th>
+      <th style="text-align:right" title="쿠팡 리포트의 판매수량 — 주문 단위">주문수량</th><th style="text-align:right" title="주문수량 × 채널 판매단위 — 실제 출고 개수">상품수량</th><th style="text-align:right">매출</th>
       <th style="text-align:right">수수료</th><th style="text-align:right">입출고비</th>
       <th style="text-align:right">배송비</th><th style="text-align:right">정산금액</th>
     </tr></thead><tbody>` + _rgLines.map(r => {
@@ -16808,19 +16831,19 @@ function renderRgLines() {
         <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px;white-space:nowrap">${
           r.sticker_code ? esc(r.sticker_code) : '<span style="color:var(--gray-300)">-</span>'}</td>
         <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.product_name || '')}">${esc(r.product_name || '-')}${r.is_cancel ? ' <span style="color:#dc2626;font-size:10px">취소</span>' : ''}</td>
-        ${cell(r.sales_qty)}${cell(r.sales_amount)}${cell(r.commission)}${cell(r.inout_fee)}${cell(r.shipping_fee)}${cell(r.settlement_amount, 'font-weight:600')}
+        ${cell(r.sales_qty)}${cell(r.item_qty ?? r.sales_qty, (r.sales_unit > 1 ? 'font-weight:600' : 'color:var(--gray-400)'))}${cell(r.sales_amount)}${cell(r.commission)}${cell(r.inout_fee)}${cell(r.shipping_fee)}${cell(r.settlement_amount, 'font-weight:600')}
       </tr>`;
     }).join('') + '</tbody></table>';
 }
 
 function downloadRgLinesXlsx() {
   if (!_rgLines.length) { alert('내려받을 데이터가 없습니다.'); return; }
-  const header = ['결제완료일', '배송완료일', '상품코드', '스티커코드', '등록상품ID', '옵션ID', '주문ID', '상품명', '수량', '매출', '수수료', '입출고비', '배송비', '정산금액', '취소'];
+  const header = ['결제완료일', '배송완료일', '상품코드', '스티커코드', '등록상품ID', '옵션ID', '주문ID', '상품명', '주문수량', '판매단위', '상품수량', '매출', '수수료', '입출고비', '배송비', '정산금액', '취소'];
   const body = _rgLines.map(r => [
     r.paid_date || '', r.delivered_date || '',
     r.internal_product_code || '', r.sticker_code || '',
     r.seller_product_id || '', r.vendor_item_id, r.order_id, r.product_name || '',
-    Number(r.sales_qty) || 0, Number(r.sales_amount) || 0, Number(r.commission) || 0,
+    Number(r.sales_qty) || 0, Number(r.sales_unit) || 1, Number(r.item_qty) || Number(r.sales_qty) || 0, Number(r.sales_amount) || 0, Number(r.commission) || 0,
     Number(r.inout_fee) || 0, Number(r.shipping_fee) || 0, Number(r.settlement_amount) || 0,
     r.is_cancel ? 'Y' : '',
   ]);

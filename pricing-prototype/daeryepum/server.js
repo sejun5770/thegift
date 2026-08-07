@@ -13887,7 +13887,12 @@ const server = http.createServer(async (req, res) => {
             for (const ps of (await require('./barungift/store').getAllProductSettings()) || []) {
               const m = ps.channel_product_codes?.coupang;
               if (!m) continue;
-              const info = { code: ps.product_id, sticker: ps.channel_stickers?.coupang || null };
+              const unit = parseInt(ps.channel_sales_units?.coupang, 10);
+              const info = {
+                code: ps.product_id,
+                sticker: ps.channel_stickers?.coupang || null,
+                unit: unit > 1 ? unit : 1,   // 060 — 이 채널 1 주문 = 실제 상품 몇 개
+              };
               const pIds = Array.isArray(m) ? m : (m.product_ids || []);
               for (const c of pIds) byProduct.set(String(c).trim(), info);
               for (const c of (Array.isArray(m) ? [] : (m.option_ids || []))) {
@@ -13899,6 +13904,10 @@ const server = http.createServer(async (req, res) => {
                 || byProduct.get(String(r.seller_product_id || '').trim());
               r.internal_product_code = hit?.code || null;
               r.sticker_code = hit?.sticker || null;
+              // 주문수량(엑셀 그대로) × 판매단위 = 상품수량(실제 출고 개수).
+              //   미매핑이면 단위를 알 수 없어 1 로 둔다 — 주문수량과 같아진다.
+              r.sales_unit = hit?.unit || 1;
+              r.item_qty = (Number(r.sales_qty) || 0) * r.sales_unit;
             }
           } catch (e) {
             console.warn('[rfm/lines] 상품코드 매핑 실패 (원본만 표시):', e.message);
