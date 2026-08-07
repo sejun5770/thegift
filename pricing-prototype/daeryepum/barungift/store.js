@@ -104,6 +104,7 @@ const FILES = {
   salesExclusions: path.join(DATA_DIR, 'bg_sales_exclusions.json'),
   stockItems: path.join(DATA_DIR, 'bg_stock_items.json'),
   stockBom: path.join(DATA_DIR, 'bg_stock_bom.json'),
+  incidents: path.join(DATA_DIR, 'bg_incidents.json'),
 };
 
 function ensureDataDir() {
@@ -1939,7 +1940,132 @@ async function removeBomRow(id) {
   return { ok: true };
 }
 
+// ─────────────────────────────────────────────────────────────
+// 사고건 (migration 051) — 운영사고 / 기타출고
+//   기타출고는 실제로 나간 품목·수량을 items 에 담는다 (물류·재무의 매출 처리 근거).
+//   한 주문에 사고가 여러 번 날 수 있어 주문 1 : 사고 N.
+// ─────────────────────────────────────────────────────────────
+
+const INCIDENT_TYPES = ['shortage', 'damage', 'omission', 'other'];
+const INCIDENT_DISPOSITIONS = ['operation', 'extra_shipment'];
+
+/** items 정규화 — 코드 없는 줄·수량 0 이하는 버린다. 같은 코드는 수량을 합친다. */
+function _normIncidentItems(v) {
+  const merged = new Map();
+  for (const raw of (Array.isArray(v) ? v : [])) {
+    const code = String(raw?.product_code ?? '').trim();
+    const qty = parseInt(raw?.quantity, 10);
+    if (!code || !(qty > 0)) continue;
+    const prev = merged.get(code);
+    if (prev) prev.quantity += qty;
+    else merged.set(code, {
+      product_code: code,
+      product_name: raw?.product_name ? String(raw.product_name) : null,
+      quantity: qty,
+    });
+  }
+  return [...merged.values()];
+}
+
+function _normIncident(data, createdBy) {
+  const type = INCIDENT_TYPES.includes(data?.incident_type) ? data.incident_type : 'other';
+  const disp = INCIDENT_DISPOSITIONS.includes(data?.disposition) ? data.disposition : 'operation';
+  const items = _normIncidentItems(data?.items);
+  // 운영사고는 실제 출고가 없다 — 품목이 딸려와도 버려서 매출 근거로 새지 않게 한다.
+  return {
+    order_id: String(data?.order_id ?? '').trim(),
+    category: String(data?.category || 'daeryepum'),
+    incident_type: type,
+    disposition: disp,
+    reason: data?.reason ? String(data.reason).trim() || null : null,
+    items: disp === 'extra_shipment' ? items : [],
+    recv_name: data?.recv_name ? String(data.recv_name) : null,
+    order_date: data?.order_date || null,
+    created_by: createdBy || null,
+  };
+}
+
+async function listIncidents({ category = 'daeryepum', orderId = null } = {}) {
+  if (USE_SUPABASE) {
+    const f = [`category=eq.${encodeURIComponent(category)}`, 'order=created_at.desc', 'limit=5000'];
+    if (orderId) f.unshift(`order_id=eq.${encodeURIComponent(orderId)}`);
+    return sbGet('bg_incidents', f.join('&'));
+  }
+  let rows = readJson(FILES.incidents, []).filter(r => (r.category || 'daeryepum') === category);
+  if (orderId) rows = rows.filter(r => r.order_id === orderId);
+  return rows.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+}
+
+async function getIncident(id) {
+  if (!id) return null;
+  if (USE_SUPABASE) {
+    const rows = await sbGet('bg_incidents', `id=eq.${encodeURIComponent(id)}`);
+    return (rows && rows[0]) || null;
+  }
+  return readJson(FILES.incidents, []).find(r => r.id === id) || null;
+}
+
+async function createIncident(data, createdBy = null) {
+  const payload = _normIncident(data, createdBy);
+  if (!payload.order_id) throw new Error('주문번호는 필수입니다');
+  if (payload.disposition === 'extra_shipment' && !payload.items.length) {
+    throw new Error('기타출고는 실제 출고된 품목과 수량을 입력해야 합니다');
+  }
+  if (USE_SUPABASE) return sbInsert('bg_incidents', payload);
+  const list = readJson(FILES.incidents, []);
+  const row = { id: uuid(), ...payload, created_at: now(), updated_at: now() };
+  list.push(row);
+  writeJson(FILES.incidents, list);
+  return row;
+}
+
+async function updateIncident(id, data) {
+  if (!id) throw new Error('id 필수');
+  const patch = { updated_at: now() };
+  if ('incident_type' in data) {
+    patch.incident_type = INCIDENT_TYPES.includes(data.incident_type) ? data.incident_type : 'other';
+  }
+  if ('reason' in data) patch.reason = data.reason ? String(data.reason).trim() || null : null;
+  // disposition 과 items 는 함께 판단해야 한다 — 운영사고로 바꾸면 품목을 비운다.
+  if ('disposition' in data || 'items' in data) {
+    const cur = await getIncident(id);
+    const disp = 'disposition' in data
+      ? (INCIDENT_DISPOSITIONS.includes(data.disposition) ? data.disposition : 'operation')
+      : (cur?.disposition || 'operation');
+    const items = 'items' in data ? _normIncidentItems(data.items) : _normIncidentItems(cur?.items);
+    if (disp === 'extra_shipment' && !items.length) {
+      throw new Error('기타출고는 실제 출고된 품목과 수량을 입력해야 합니다');
+    }
+    patch.disposition = disp;
+    patch.items = disp === 'extra_shipment' ? items : [];
+  }
+  if (USE_SUPABASE) return sbUpdate('bg_incidents', `id=eq.${encodeURIComponent(id)}`, patch);
+  const list = readJson(FILES.incidents, []);
+  const idx = list.findIndex(r => r.id === id);
+  if (idx < 0) return null;
+  list[idx] = { ...list[idx], ...patch };
+  writeJson(FILES.incidents, list);
+  return list[idx];
+}
+
+async function deleteIncident(id) {
+  if (!id) throw new Error('id 필수');
+  if (USE_SUPABASE) {
+    await sbDelete('bg_incidents', `id=eq.${encodeURIComponent(id)}`);
+    return { ok: true };
+  }
+  writeJson(FILES.incidents, readJson(FILES.incidents, []).filter(r => r.id !== id));
+  return { ok: true };
+}
+
 module.exports = {
+  INCIDENT_TYPES,
+  INCIDENT_DISPOSITIONS,
+  listIncidents,
+  getIncident,
+  createIncident,
+  updateIncident,
+  deleteIncident,
   BOM_ROLES,
   listBomRows,
   addBomRows,

@@ -1077,6 +1077,79 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   }
 
   // ============================================
+  // 사고건 (migration 051) — 운영사고 / 기타출고
+  //   기타출고는 실제 출고 품목·수량을 담아 물류·재무가 매출을 잡을 수 있게 한다.
+  //   등록/삭제 시 customer_info 의 is_special_shipping 플래그를 함께 맞춰
+  //   전체 탭의 🚨 강조·기타출고 필터가 계속 동작하도록 한다 (파생값).
+  // ============================================
+  async function _syncSpecialShippingFlag(orderId) {
+    try {
+      const rows = await store.listIncidents({ orderId });
+      const has = (rows || []).length > 0;
+      const top = (rows || [])[0] || null;
+      // ci 행이 없는 주문(미입력)은 표시할 대상이 없으므로 건너뛴다.
+      if (!(await store.getCustomerInfo(orderId))) return;
+      await store.updateCustomerInfo(orderId, {
+        is_special_shipping: has,
+        special_shipping_reason: has ? top.incident_type : null,
+        special_shipping_memo: has ? (top.reason || null) : null,
+      });
+    } catch (e) {
+      // 플래그는 표시용이라 실패해도 사고건 자체는 유지한다.
+      console.warn('[incidents] is_special_shipping 동기화 실패 (무시):', e.message);
+    }
+  }
+
+  if (pathname === '/api/bg/incidents' && method === 'GET') {
+    try {
+      return json(res, {
+        incidents: await store.listIncidents({
+          category: query.category || 'daeryepum',
+          orderId: query.order_id || null,
+        }),
+      });
+    } catch (err) {
+      console.error('[incidents GET] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+  if (pathname === '/api/bg/incidents' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const row = await store.createIncident(body, session?.email || null);
+      await _syncSpecialShippingFlag(row.order_id);
+      return json(res, row, 201);
+    } catch (err) {
+      console.error('[incidents POST] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  const incidentIdMatch = pathname.match(/^\/api\/bg\/incidents\/([^/]+)$/);
+  if (incidentIdMatch && method === 'PATCH') {
+    try {
+      const body = await parseBody(req);
+      const row = await store.updateIncident(decodeURIComponent(incidentIdMatch[1]), body);
+      if (row) await _syncSpecialShippingFlag(row.order_id);
+      return json(res, row || { error: 'not found' }, row ? 200 : 404);
+    } catch (err) {
+      console.error('[incidents PATCH] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  if (incidentIdMatch && method === 'DELETE') {
+    try {
+      const id = decodeURIComponent(incidentIdMatch[1]);
+      const cur = await store.getIncident(id);
+      const out = await store.deleteIncident(id);
+      if (cur) await _syncSpecialShippingFlag(cur.order_id);
+      return json(res, out);
+    } catch (err) {
+      console.error('[incidents DELETE] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+
+  // ============================================
   // BOM (migration 048 → 050 재구성) — 판매상품 1개의 구성품 목록
   // ============================================
   // 코드 검증 — parent 는 판매코드(S2_Card.Card_Code).

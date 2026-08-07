@@ -3052,6 +3052,11 @@ nav.nav-loading a[href^="#"] {
       title="스티커 여부와 관계없이 모든 답례품 카테고리 주문 노출 (주문자 정보 포함)">
       📚 전체 <span id="uni-count-all" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
     </button>
+    <button class="uni-tab" data-uni-tab="incident" onclick="switchUniTab('incident')"
+      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap"
+      title="운영사고 / 기타출고 기록 — 기타출고는 실제 나간 품목·수량을 남겨 물류·재무가 매출을 잡습니다">
+      🚨 기타출고(사고건) <span id="uni-count-incident" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+    </button>
     <button class="uni-tab" data-uni-tab="unsubmitted" onclick="switchUniTab('unsubmitted')"
       style="padding:9px 14px;background:none;border:none;border-bottom:3px solid var(--primary);color:var(--primary);font-weight:600;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">
       ⏳ 미입력 <span id="uni-count-unsubmitted" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
@@ -3165,6 +3170,109 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <div id="uni-loading" style="text-align:center;padding:40px;color:var(--gray-400)">데이터를 불러오는 중입니다...</div>
+
+  <!-- 사고건 등록/수정 모달 -->
+  <div id="incident-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1100;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto">
+    <div class="card" style="max-width:640px;width:100%;padding:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <strong style="font-size:14px">🚨 사고건 <span id="inc-modal-order" style="font-weight:400;color:var(--gray-500);font-family:monospace;font-size:12px"></span></strong>
+        <button class="btn" style="padding:4px 10px;font-size:12px" onclick="closeIncidentModal()">닫기</button>
+      </div>
+
+      <label style="display:block;font-size:12px;margin-bottom:10px">
+        <span style="color:var(--gray-500);font-weight:600">구분</span>
+        <div style="display:flex;gap:14px;margin-top:5px">
+          <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer">
+            <input type="radio" name="inc-disp" value="operation" onchange="_incToggleItems()"> 운영사고 <span style="color:var(--gray-400);font-size:11px">(출고 없음)</span>
+          </label>
+          <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer">
+            <input type="radio" name="inc-disp" value="extra_shipment" onchange="_incToggleItems()"> 기타출고 <span style="color:var(--gray-400);font-size:11px">(실제 출고 — 재고/매출)</span>
+          </label>
+        </div>
+      </label>
+
+      <label style="display:block;font-size:12px;margin-bottom:10px">
+        <span style="color:var(--gray-500);font-weight:600">사고 유형</span>
+        <div style="display:flex;gap:14px;margin-top:5px;flex-wrap:wrap">
+          <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="inc-type" value="shortage"> 수량부족</label>
+          <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="inc-type" value="damage"> 상품훼손</label>
+          <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="inc-type" value="omission"> 주문누락</label>
+          <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="inc-type" value="other"> 기타</label>
+        </div>
+      </label>
+
+      <label style="display:block;font-size:12px;margin-bottom:10px">
+        <span style="color:var(--gray-500);font-weight:600">사유</span>
+        <textarea id="inc-reason" rows="2" placeholder="어떤 사고였는지 적어주세요 (예: 수건 3개 파손 확인 → 동일 품목 재발송)"
+          style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;resize:vertical;box-sizing:border-box;margin-top:4px"></textarea>
+      </label>
+
+      <div id="inc-items-wrap" style="display:none;padding:10px;background:var(--gray-50);border-radius:6px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-size:12px;font-weight:600;color:var(--gray-600)">실제 출고 품목 · 수량</span>
+          <button class="btn" style="padding:3px 10px;font-size:11px" onclick="_incAddItemRow()">＋ 품목 추가</button>
+        </div>
+        <div style="font-size:11px;color:var(--gray-500);margin-bottom:8px">
+          여기 적힌 수량만 매출로 잡힙니다. 원주문 품목은 아래 버튼으로 바로 넣을 수 있습니다.
+        </div>
+        <div id="inc-order-items" style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px"></div>
+        <div id="inc-item-rows"></div>
+      </div>
+
+      <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center">
+        <span id="inc-modal-msg" style="font-size:12px;color:#dc2626;flex:1"></span>
+        <button class="btn btn-primary" style="padding:6px 16px;font-size:12px" onclick="saveIncident()">저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 기타출고(사고건) 탭 — 운영사고/기타출고 원장 (migration 051) -->
+  <div id="uni-incident-wrap" style="display:none">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+      <div style="display:flex;gap:4px">
+        <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
+          <input type="radio" name="inc-filter-disp" value="" checked onchange="renderIncidentTab()"> 전체
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;margin-left:8px">
+          <input type="radio" name="inc-filter-disp" value="extra_shipment" onchange="renderIncidentTab()"> 기타출고만
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;margin-left:8px">
+          <input type="radio" name="inc-filter-disp" value="operation" onchange="renderIncidentTab()"> 운영사고만
+        </label>
+      </div>
+      <input type="text" id="inc-search" oninput="renderIncidentTab()" placeholder="🔍 주문번호 · 품목코드 · 사유"
+             style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px;min-width:220px">
+      <div style="flex:1"></div>
+      <span id="inc-summary" style="font-size:12px;color:var(--gray-500)"></span>
+      <button class="btn" style="padding:6px 12px;font-size:12px" onclick="loadIncidents()">🔄 새로고침</button>
+      <button class="btn" style="padding:6px 12px;font-size:12px" onclick="downloadIncidentXlsx()"
+              title="기타출고 건의 품목·수량을 물류/재무 전달용으로 내려받습니다">📥 엑셀</button>
+    </div>
+    <div style="font-size:11px;color:var(--gray-500);line-height:1.6;margin-bottom:8px;background:var(--gray-50);padding:8px 10px;border-radius:6px">
+      <b>기타출고</b>는 실제로 나간 품목과 수량을 남깁니다 — 물류·재무는 이 수량만 매출로 잡습니다.
+      <b>운영사고</b>는 출고가 없어 유형·사유만 기록합니다.
+      사고건 등록은 주문 행의 <b>✎ 수정</b> 에서 합니다.
+    </div>
+    <div style="overflow-x:auto">
+      <table class="data-table" id="inc-table" style="font-size:12px">
+        <thead><tr>
+          <th>등록일시</th>
+          <th>주문번호</th>
+          <th>수령인</th>
+          <th>구분</th>
+          <th>유형</th>
+          <th>출고 품목 · 수량</th>
+          <th style="text-align:right">총 수량</th>
+          <th>사유</th>
+          <th>등록자</th>
+          <th style="width:70px">관리</th>
+        </tr></thead>
+        <tbody id="inc-tbody"></tbody>
+      </table>
+    </div>
+    <div id="inc-empty" style="display:none;text-align:center;padding:40px;color:var(--gray-400);font-size:13px"></div>
+  </div>
+
   <div id="uni-table-wrap" style="display:none">
     <!-- 통합 액션바: 선택 상태 + 모든 액션 버튼 한 곳에 -->
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
@@ -3471,36 +3579,16 @@ nav.nav-loading a[href^="#"] {
         <textarea id="bg-edit-request" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:14px;resize:vertical"></textarea>
       </div>
 
-      <!-- 기타출고 처리 (사고 케이스: 수량부족, 상품훼손, 주문누락 등) -->
+      <!-- 사고건 처리 (운영사고 / 기타출고) — migration 051 -->
       <div style="padding:12px;background:#fef9c3;border:1px solid #facc15;border-radius:8px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-          <input type="checkbox" id="bg-edit-special-shipping" onchange="toggleBgSpecialShippingEdit(this.checked)">
-          <label for="bg-edit-special-shipping" style="font-size:13px;font-weight:600;color:#92400e;cursor:pointer">
-            🚨 기타출고 처리
-          </label>
-          <span style="font-size:11px;color:var(--gray-500)">(사고건: 수량부족·상품훼손·주문누락 등)</span>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+          <span style="font-size:13px;font-weight:600;color:#92400e">🚨 사고건</span>
+          <button class="btn" style="padding:4px 10px;font-size:11px" onclick="openIncidentModal(_bgEditOrderId())">＋ 사고건 등록</button>
         </div>
-        <div id="bg-edit-special-shipping-detail" style="display:none;padding-top:8px;border-top:1px dashed #fcd34d;margin-top:6px">
-          <label style="font-size:11px;font-weight:600;color:#92400e;display:block;margin-bottom:6px">사유</label>
-          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">
-            <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
-              <input type="radio" name="bg-edit-special-shipping-reason" value="shortage" onchange="_bgToggleSpecialReasonMemo()"> 수량부족
-            </label>
-            <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
-              <input type="radio" name="bg-edit-special-shipping-reason" value="damage" onchange="_bgToggleSpecialReasonMemo()"> 상품훼손
-            </label>
-            <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
-              <input type="radio" name="bg-edit-special-shipping-reason" value="omission" onchange="_bgToggleSpecialReasonMemo()"> 주문누락
-            </label>
-            <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer">
-              <input type="radio" name="bg-edit-special-shipping-reason" value="other" onchange="_bgToggleSpecialReasonMemo()"> 기타
-            </label>
-          </div>
-          <label style="font-size:11px;font-weight:600;color:#92400e;display:block;margin-bottom:4px">
-            상세 사유 <span id="bg-edit-special-memo-req" style="font-weight:400;color:var(--gray-500)">(선택)</span>
-          </label>
-          <textarea id="bg-edit-special-shipping-memo" placeholder="어떤 사유든 상세 내용을 남길 수 있습니다 (예: 수량 3개 부족 → 재발송)" rows="2"
-            style="width:100%;padding:6px 8px;border:1px solid #fcd34d;border-radius:4px;font-size:12px;resize:vertical;box-sizing:border-box"></textarea>
+        <div id="bg-edit-incident-list" style="font-size:11px;color:var(--gray-600)"></div>
+        <div style="font-size:11px;color:var(--gray-500);line-height:1.6;margin-top:6px">
+          <b>기타출고</b>로 등록하면 실제 나간 품목·수량이 기록돼 물류·재무가 그 수량만 매출로 잡습니다.
+          <b>운영사고</b>는 출고가 없어 유형·사유만 남깁니다. 목록은 <b>정보입력현황 › 기타출고(사고건)</b> 탭에서 봅니다.
         </div>
       </div>
 
@@ -16398,6 +16486,289 @@ function setBgUnifiedProgress(stepText) {
 }
 
 // ============================================
+// ============================================
+// 사고건 (migration 051) — 운영사고 / 기타출고
+//   기타출고는 실제 나간 품목·수량을 남겨 물류·재무가 그 수량만 매출로 잡는다.
+//   원주문에 리마크만 남기던 기존 방식으로는 재무가 처리할 수 없었다.
+// ============================================
+const INCIDENT_TYPE_LABEL = { shortage: '수량부족', damage: '상품훼손', omission: '주문누락', other: '기타' };
+const INCIDENT_DISP_LABEL = { operation: '운영사고', extra_shipment: '기타출고' };
+let _incidents = [];
+let _incidentsByOrder = new Map();
+
+async function loadIncidents() {
+  try {
+    const r = await fetch(`${API}/api/bg/incidents?category=daeryepum`);
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    _incidents = d.incidents || [];
+  } catch (e) {
+    console.warn('[incidents] 로드 실패:', e.message);
+    _incidents = [];
+  }
+  _incidentsByOrder = new Map();
+  _incidents.forEach(i => {
+    if (!_incidentsByOrder.has(i.order_id)) _incidentsByOrder.set(i.order_id, []);
+    _incidentsByOrder.get(i.order_id).push(i);
+  });
+  const el = document.getElementById('uni-count-incident');
+  if (el) el.textContent = `(${_incidents.length})`;
+  if (document.getElementById('uni-active-tab')?.value === 'incident') renderIncidentTab();
+}
+
+const _incQty = inc => (inc.items || []).reduce((s, it) => s + (Number(it.quantity) || 0), 0);
+
+function _incidentFiltered() {
+  const disp = document.querySelector('input[name="inc-filter-disp"]:checked')?.value || '';
+  const q = (document.getElementById('inc-search')?.value || '').trim().toLowerCase();
+  return _incidents.filter(i => {
+    if (disp && i.disposition !== disp) return false;
+    if (!q) return true;
+    const hay = [i.order_id, i.reason || '', i.recv_name || '',
+      ...(i.items || []).flatMap(it => [it.product_code, it.product_name || ''])].join(' ').toLowerCase();
+    return hay.includes(q);
+  });
+}
+
+function renderIncidentTab() {
+  const $tb = document.getElementById('inc-tbody');
+  const $empty = document.getElementById('inc-empty');
+  const $table = document.getElementById('inc-table');
+  if (!$tb) return;
+  const rows = _incidentFiltered();
+  const extra = rows.filter(i => i.disposition === 'extra_shipment');
+  const noItems = extra.filter(i => !(i.items || []).length).length;
+  const sum = document.getElementById('inc-summary');
+  if (sum) {
+    sum.innerHTML = `기타출고 <b>${extra.length}</b>건 · 총 <b>${fmtNum(extra.reduce((s, i) => s + _incQty(i), 0))}</b>개`
+      + `${noItems ? ` · <span style="color:#b45309">품목 미입력 ${noItems}건</span>` : ''}`;
+  }
+  if (!rows.length) {
+    $table.style.display = 'none';
+    $empty.style.display = '';
+    $empty.textContent = _incidents.length ? '조건에 맞는 사고건이 없습니다.' : '등록된 사고건이 없습니다.';
+    return;
+  }
+  $table.style.display = '';
+  $empty.style.display = 'none';
+  $tb.innerHTML = rows.map(i => {
+    const isExtra = i.disposition === 'extra_shipment';
+    const items = i.items || [];
+    // 기타출고인데 품목이 없으면 재무가 처리할 수 없다 — 눈에 띄게 표시하고 채우도록 유도한다.
+    const itemsHtml = items.length
+      ? items.map(it => `<div style="white-space:nowrap"><span style="font-family:monospace">${esc(it.product_code)}</span>`
+          + `${it.product_name ? ` <span style="color:var(--gray-500)">${esc(it.product_name)}</span>` : ''}`
+          + ` <b>×${fmtNum(it.quantity)}</b></div>`).join('')
+      : (isExtra
+          ? '<span style="color:#b45309">⚠ 품목 미입력 — 매출 처리 불가</span>'
+          : '<span style="color:var(--gray-400)">출고 없음</span>');
+    return `<tr>
+      <td style="white-space:nowrap;color:var(--gray-500)">${esc(String(i.created_at || '').replace('T', ' ').slice(0, 16))}</td>
+      <td style="font-family:monospace;font-size:11px">${esc(i.order_id)}</td>
+      <td>${esc(i.recv_name || '-')}</td>
+      <td><span style="font-size:11px;padding:2px 8px;border-radius:999px;background:${isExtra ? '#fef3c7' : 'var(--gray-100)'};color:${isExtra ? '#92400e' : 'var(--gray-600)'}">${INCIDENT_DISP_LABEL[i.disposition] || i.disposition}</span></td>
+      <td>${esc(INCIDENT_TYPE_LABEL[i.incident_type] || i.incident_type)}</td>
+      <td style="max-width:340px;white-space:normal">${itemsHtml}</td>
+      <td style="text-align:right;font-weight:600">${isExtra ? fmtNum(_incQty(i)) : '-'}</td>
+      <td style="max-width:260px;white-space:normal;color:var(--gray-600)">${esc(i.reason || '')}</td>
+      <td style="color:var(--gray-500);font-size:11px">${esc(i.created_by || '')}</td>
+      <td style="white-space:nowrap">
+        <button onclick="openIncidentModal('${esc(i.order_id)}', '${esc(i.id)}')" title="수정"
+          style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:2px 6px">✎</button>
+        <button onclick="deleteIncident('${esc(i.id)}')" title="삭제"
+          style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:2px 6px;color:#dc2626;margin-left:3px">🗑</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+/** 물류·재무 전달용 — 기타출고는 품목 1건당 1행으로 펼친다 (그대로 매출 처리에 쓰도록) */
+function downloadIncidentXlsx() {
+  const rows = _incidentFiltered();
+  if (!rows.length) { alert('내려받을 사고건이 없습니다.'); return; }
+  const header = ['등록일시', '주문번호', '수령인', '구분', '유형', '품목코드', '품목명', '수량', '사유', '등록자'];
+  const body = [];
+  rows.forEach(i => {
+    const base = [
+      String(i.created_at || '').replace('T', ' ').slice(0, 19),
+      i.order_id, i.recv_name || '',
+      INCIDENT_DISP_LABEL[i.disposition] || i.disposition,
+      INCIDENT_TYPE_LABEL[i.incident_type] || i.incident_type,
+    ];
+    const tail = [i.reason || '', i.created_by || ''];
+    if ((i.items || []).length) {
+      i.items.forEach(it => body.push([...base, it.product_code, it.product_name || '', it.quantity, ...tail]));
+    } else {
+      body.push([...base, '', '', '', ...tail]);
+    }
+  });
+  const today = new Date().toISOString().slice(0, 10);
+  downloadXlsxRows([header, ...body], `기타출고_사고건_${today}`, '사고건');
+}
+
+// ─── 사고건 등록/수정 모달 ───
+let _incEditId = null;
+let _incOrderId = null;
+
+/** 주문의 품목 후보 — ci.sticker_selections 에서 뽑는다 (품목코드 + 상품명 + 주문수량) */
+function _incOrderItemCandidates(orderId) {
+  const ci = bgUnifiedCiMap?.get?.(orderId);
+  const sels = ci?.sticker_selections || [];
+  const seen = new Map();
+  sels.forEach(s => {
+    const code = String(s?.product_code || '').trim();
+    if (!code || seen.has(code)) return;
+    seen.set(code, { product_code: code, product_name: s.product_name || '', quantity: Number(s.quantity) || 1 });
+  });
+  return [...seen.values()];
+}
+
+function openIncidentModal(orderId, incidentId = null) {
+  if (!orderId) { alert('주문번호를 찾을 수 없습니다.'); return; }
+  _incOrderId = orderId;
+  _incEditId = incidentId;
+  const inc = incidentId ? _incidents.find(x => x.id === incidentId) : null;
+  document.getElementById('inc-modal-order').textContent = orderId;
+  document.getElementById('inc-modal-msg').textContent = '';
+  const disp = inc?.disposition || 'extra_shipment';
+  document.querySelectorAll('input[name="inc-disp"]').forEach(r => { r.checked = r.value === disp; });
+  const type = inc?.incident_type || 'shortage';
+  document.querySelectorAll('input[name="inc-type"]').forEach(r => { r.checked = r.value === type; });
+  document.getElementById('inc-reason').value = inc?.reason || '';
+
+  // 원주문 품목 바로넣기 버튼
+  const cands = _incOrderItemCandidates(orderId);
+  document.getElementById('inc-order-items').innerHTML = cands.length
+    ? cands.map(c => `<button class="btn" style="padding:2px 8px;font-size:11px"
+        onclick="_incAddItemRow(${JSON.stringify(JSON.stringify(c)).replace(/"/g, '&quot;')})">
+        ＋ ${esc(c.product_code)}${c.product_name ? ' · ' + esc(c.product_name) : ''}</button>`).join('')
+    : '<span style="font-size:11px;color:var(--gray-400)">원주문 품목 정보가 없습니다 — 직접 입력하세요</span>';
+
+  document.getElementById('inc-item-rows').innerHTML = '';
+  const items = (inc?.items || []);
+  if (items.length) items.forEach(it => _incAddItemRow(JSON.stringify(it)));
+  else _incAddItemRow();
+  _incToggleItems();
+  document.getElementById('incident-modal').style.display = 'flex';
+}
+
+function closeIncidentModal() {
+  document.getElementById('incident-modal').style.display = 'none';
+  _incEditId = null; _incOrderId = null;
+}
+
+function _incToggleItems() {
+  const disp = document.querySelector('input[name="inc-disp"]:checked')?.value;
+  document.getElementById('inc-items-wrap').style.display = (disp === 'extra_shipment') ? 'block' : 'none';
+}
+
+function _incAddItemRow(json) {
+  let it = { product_code: '', product_name: '', quantity: 1 };
+  if (json) { try { it = { ...it, ...JSON.parse(json) }; } catch { /* 잘못된 값이면 빈 줄 */ } }
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:6px;margin-bottom:5px;align-items:center';
+  row.innerHTML = `
+    <input type="text" class="inc-it-code" value="${esc(it.product_code)}" placeholder="품목코드"
+      style="flex:1;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;font-family:monospace">
+    <input type="text" class="inc-it-name" value="${esc(it.product_name || '')}" placeholder="품목명 (선택)"
+      style="flex:1;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+    <input type="number" class="inc-it-qty" value="${Number(it.quantity) || 1}" min="1" placeholder="수량"
+      style="width:80px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;text-align:right">
+    <button onclick="this.parentElement.remove()" title="이 줄 삭제"
+      style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:4px 8px;color:#dc2626">✕</button>`;
+  document.getElementById('inc-item-rows').appendChild(row);
+}
+
+function _incCollectItems() {
+  return [...document.querySelectorAll('#inc-item-rows > div')].map(row => ({
+    product_code: row.querySelector('.inc-it-code').value.trim(),
+    product_name: row.querySelector('.inc-it-name').value.trim() || null,
+    quantity: parseInt(row.querySelector('.inc-it-qty').value, 10) || 0,
+  })).filter(x => x.product_code && x.quantity > 0);
+}
+
+async function saveIncident() {
+  const $msg = document.getElementById('inc-modal-msg');
+  const disposition = document.querySelector('input[name="inc-disp"]:checked')?.value;
+  const incident_type = document.querySelector('input[name="inc-type"]:checked')?.value;
+  if (!disposition) { $msg.textContent = '구분(운영사고/기타출고)을 선택하세요.'; return; }
+  if (!incident_type) { $msg.textContent = '사고 유형을 선택하세요.'; return; }
+  const items = disposition === 'extra_shipment' ? _incCollectItems() : [];
+  if (disposition === 'extra_shipment' && !items.length) {
+    $msg.textContent = '기타출고는 실제 나간 품목과 수량을 1건 이상 입력해야 합니다.';
+    return;
+  }
+  const reason = document.getElementById('inc-reason').value.trim();
+  // 수령인·주문일은 스냅샷으로 남긴다 — 나중에 주문이 안 잡혀도 목록이 읽힌다.
+  const order = bgUnifiedOrders?.find?.(o => bgCiKey(o) === _incOrderId);
+  const payload = {
+    order_id: _incOrderId, category: 'daeryepum',
+    disposition, incident_type, reason, items,
+    recv_name: order?.recv_name || order?.display_name || null,
+    order_date: order?.order_date || null,
+  };
+  $msg.style.color = 'var(--gray-500)'; $msg.textContent = '저장 중…';
+  try {
+    const url = _incEditId
+      ? `${API}/api/bg/incidents/${encodeURIComponent(_incEditId)}`
+      : `${API}/api/bg/incidents`;
+    const r = await fetch(url, {
+      method: _incEditId ? 'PATCH' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    closeIncidentModal();
+    showToast(_incEditId ? '사고건을 수정했습니다' : '사고건을 등록했습니다');
+    await loadIncidents();
+    renderBgEditIncidentList();
+    if (typeof loadBgUnified === 'function') loadBgUnified();
+  } catch (e) {
+    $msg.style.color = '#dc2626';
+    $msg.textContent = `저장 실패: ${e.message}`;
+  }
+}
+
+/** 수정 모달이 열려 있는 주문번호 — hidden input 이 원본 */
+const _bgEditOrderId = () => document.getElementById('bg-edit-order-id')?.value || '';
+
+/** 주문 수정 모달 안의 사고건 목록 */
+function renderBgEditIncidentList() {
+  const el = document.getElementById('bg-edit-incident-list');
+  if (!el) return;
+  const rows = _incidentsByOrder.get(_bgEditOrderId()) || [];
+  if (!rows.length) {
+    el.innerHTML = '<span style="color:var(--gray-500)">등록된 사고건이 없습니다.</span>';
+    return;
+  }
+  el.innerHTML = rows.map(i => {
+    const isExtra = i.disposition === 'extra_shipment';
+    const qty = _incQty(i);
+    return `<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-top:1px dashed #fcd34d">
+      <span style="font-size:10px;padding:1px 6px;border-radius:999px;background:${isExtra ? '#fde68a' : 'var(--gray-100)'};color:#92400e">${INCIDENT_DISP_LABEL[i.disposition]}</span>
+      <span>${esc(INCIDENT_TYPE_LABEL[i.incident_type] || '')}</span>
+      ${isExtra ? `<span style="color:${qty ? 'var(--gray-600)' : '#b45309'}">${qty ? `${(i.items || []).length}품목 · ${fmtNum(qty)}개` : '⚠ 품목 미입력'}</span>` : ''}
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--gray-500)">${esc(i.reason || '')}</span>
+      <button onclick="openIncidentModal('${esc(i.order_id)}', '${esc(i.id)}')"
+        style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 6px">✎</button>
+    </div>`;
+  }).join('');
+}
+
+async function deleteIncident(id) {
+  const inc = _incidents.find(x => x.id === id);
+  if (!confirm(`${inc ? inc.order_id + ' · ' + (INCIDENT_DISP_LABEL[inc.disposition] || '') : id}\n\n이 사고건을 삭제할까요?`)) return;
+  try {
+    const r = await fetch(`${API}/api/bg/incidents/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const d = await r.json().catch(() => ({}));
+    if (d.error) throw new Error(d.error);
+    showToast('사고건을 삭제했습니다');
+    await loadIncidents();
+    if (typeof loadBgUnified === 'function') loadBgUnified();
+  } catch (e) { alert(`삭제 실패: ${e.message}`); }
+}
+
 // 수동 주문 등록 (MSSQL 누락 사고 케이스)
 // ============================================
 let _bgManualItems = []; // [{product_code, product_name, quantity, unit_price}]
@@ -16636,6 +17007,8 @@ async function loadBgUnified() {
     const fetchOrdersForCategory = c => fetch(`${API}/api/orders?start_date=${start}&end_date=${endPlus}&category=${c}`, { signal })
       .then(r => { if (!r.ok) throw new Error(`orders API ${c} ${r.status}`); return r.json(); })
       .then(v => Array.isArray(v) ? v : []);
+    // 사고건은 주문 조회와 독립이라 실패해도 화면이 죽지 않게 따로 띄운다 (탭 카운트/목록용).
+    loadIncidents();
     const [ordersRes, ciRes, psRes] = await Promise.allSettled([
       Promise.all([
         fetchOrdersForCategory('daeryepum'),
@@ -16793,6 +17166,22 @@ function switchUniTab(tab) {
     btn.style.color = isActive ? 'var(--primary)' : 'var(--gray-500)';
     btn.style.fontWeight = isActive ? '600' : '500';
   });
+  // 기타출고(사고건) 탭은 주문 표가 아니라 사고건 원장을 보여준다 — 컬럼 체계가 다르다.
+  const incWrap = document.getElementById('uni-incident-wrap');
+  if (tab === 'incident') {
+    if (incWrap) incWrap.style.display = 'block';
+    document.getElementById('uni-table-wrap').style.display = 'none';
+    document.getElementById('uni-loading').style.display = 'none';
+    ['uni-site-filter', 'uni-ship-date-filter', 'uni-special-shipping-filter',
+     'uni-submitted-subfilter', 'uni-hide-processed-wrap', 'uni-sort-options',
+     'uni-all-col-selector'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+    renderIncidentTab();
+    return;
+  }
+  if (incWrap) incWrap.style.display = 'none';
   const subFilter = document.getElementById('uni-submitted-subfilter');
   if (subFilter) subFilter.style.display = (tab === 'submitted') ? 'flex' : 'none';
   const hideProcessedWrap = document.getElementById('uni-hide-processed-wrap');
@@ -16918,6 +17307,8 @@ function renderBgUnified() {
   const hidePending = document.getElementById('uni-hide-pending')?.checked;
   // 탭 상태 = 필터 소스 (submitted / unsubmitted). 기존 '전체' 옵션은 제거됨.
   const activeTab = document.getElementById('uni-active-tab')?.value || 'unsubmitted';
+  // 사고건 탭은 주문 표를 쓰지 않는다 — 데이터 로드 후 재렌더가 걸려도 표가 다시 뜨지 않게 막는다.
+  if (activeTab === 'incident') { renderIncidentTab(); return; }
 
   // 주문사이트 카테고리 매칭 — order_type + 네이버 store 문자열 검사로 분류.
   //   네이버 store 는 문자열 substring 검사 (site_name / naver_store_id).
@@ -19538,16 +19929,8 @@ async function openBgOrderEdit(info) {
   document.getElementById('bg-edit-request').value = info.customer_request || '';
   toggleBgReceiptEdit(!!info.cash_receipt_yn);
 
-  // 기타출고 세팅
-  const specialChecked = !!info.is_special_shipping;
-  document.getElementById('bg-edit-special-shipping').checked = specialChecked;
-  document.getElementById('bg-edit-special-shipping-detail').style.display = specialChecked ? 'block' : 'none';
-  document.querySelectorAll('input[name="bg-edit-special-shipping-reason"]').forEach(r => {
-    r.checked = (r.value === info.special_shipping_reason);
-  });
-  const memoEl = document.getElementById('bg-edit-special-shipping-memo');
-  memoEl.value = info.special_shipping_memo || '';
-  _bgToggleSpecialReasonMemo();
+  // 사고건 — 원장(bg_incidents)에서 읽는다. ci 의 is_special_shipping 은 파생 플래그일 뿐이다.
+  renderBgEditIncidentList();
 
   const stickerWrap = document.getElementById('bg-edit-stickers');
   // 주문의 원본 상품 목록(bgUnifiedProductMap) 을 기준으로 sticker_selections 를 보강.
@@ -19939,27 +20322,9 @@ function toggleBgReceiptEdit(checked) {
   document.getElementById('bg-edit-receipt-detail').style.display = checked ? 'flex' : 'none';
 }
 
-// 기타출고 UI 토글 — 체크박스 on/off 로 사유 라디오 영역 노출
-function toggleBgSpecialShippingEdit(checked) {
-  document.getElementById('bg-edit-special-shipping-detail').style.display = checked ? 'block' : 'none';
-  if (!checked) {
-    // 해제 시 라디오/메모 초기화
-    document.querySelectorAll('input[name="bg-edit-special-shipping-reason"]').forEach(r => r.checked = false);
-    document.getElementById('bg-edit-special-shipping-memo').value = '';
-  }
-  _bgToggleSpecialReasonMemo();
-}
-
-// 상세 사유는 어떤 항목을 골라도 입력 가능 (운영 요청 2026-08-06).
-//   '기타' 일 때만 필수 — 라벨로 (선택)/(필수) 만 바꾼다.
-function _bgToggleSpecialReasonMemo() {
-  const sel = document.querySelector('input[name="bg-edit-special-shipping-reason"]:checked')?.value;
-  const req = document.getElementById('bg-edit-special-memo-req');
-  if (req) {
-    req.textContent = (sel === 'other') ? '(필수)' : '(선택)';
-    req.style.color = (sel === 'other') ? '#dc2626' : 'var(--gray-500)';
-  }
-}
+// 기타출고 체크박스/사유 라디오는 사고건 원장(bg_incidents, 051)으로 대체됐다.
+//   ci.is_special_shipping / special_shipping_reason / _memo 는 서버가 사고건에서 파생시켜
+//   전체 탭의 🚨 강조와 기타출고 필터를 유지한다 — 화면에서 직접 쓰지 않는다.
 
 function closeBgOrderEdit() {
   document.getElementById('bg-order-edit-modal').style.display = 'none';
@@ -20012,24 +20377,9 @@ async function saveBgOrderEdit() {
     sel.custom_values = collected[idx] || {};
   });
 
-  // 기타출고 payload
-  const isSpecial = document.getElementById('bg-edit-special-shipping').checked;
-  const specialReason = isSpecial
-    ? (document.querySelector('input[name="bg-edit-special-shipping-reason"]:checked')?.value || null)
-    : null;
-  // 상세 사유는 어떤 항목이든 저장 (빈 값이면 null)
-  const specialMemo = isSpecial
-    ? ((document.getElementById('bg-edit-special-shipping-memo').value || '').trim() || null)
-    : null;
-  if (isSpecial && !specialReason) {
-    alert('기타출고 사유를 선택해주세요.');
-    return;
-  }
-  if (isSpecial && specialReason === 'other' && !specialMemo) {
-    alert('기타 사유를 직접 입력해주세요.');
-    return;
-  }
-
+  // 사고건은 별도 원장(bg_incidents)에 저장된다 — 여기서는 건드리지 않는다.
+  //   ci 의 is_special_shipping/reason/memo 를 함께 보내면 서버가 사고건에서 파생시킨 값을
+  //   덮어써 🚨 표시가 어긋나므로, payload 에서 뺀다.
   const payload = {
     desired_ship_date: document.getElementById('bg-edit-ship-date').value,
     is_express: document.getElementById('bg-edit-shipping-type').value === 'true',
@@ -20038,9 +20388,6 @@ async function saveBgOrderEdit() {
     receipt_type: document.getElementById('bg-edit-receipt-type').value,
     receipt_number: document.getElementById('bg-edit-receipt-number').value,
     customer_request: document.getElementById('bg-edit-request').value,
-    is_special_shipping: isSpecial,
-    special_shipping_reason: specialReason,
-    special_shipping_memo: specialMemo,
   };
 
   try {
