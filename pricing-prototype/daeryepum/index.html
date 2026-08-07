@@ -1145,12 +1145,12 @@ nav.nav-loading a[href^="#"] {
   <div class="card" style="margin-bottom:16px;padding:16px;border:1px solid #fde68a;background:#fffbeb">
     <div style="font-weight:700;font-size:14px;margin-bottom:6px">🧾 주문 단위 통합 <span style="font-weight:400;font-size:11px;color:var(--gray-500)">(결제완료일 / 배송완료일 · 매출 · 수수료 · 물류비 · 정산금액)</span></div>
     <div style="font-size:11px;color:var(--gray-500);margin-bottom:10px;line-height:1.6">
-      두 리포트를 각각 올리면 <b>주문ID + 옵션ID</b> 로 같은 줄에 합쳐집니다. 순서는 상관없고, 파일 종류는 자동으로 구분합니다.<br>
+      두 리포트를 <b>한 번에 여러 개</b> 올릴 수 있습니다. <b>주문ID + 옵션ID</b> 로 같은 줄에 합쳐지고, 순서·파일 종류는 자동으로 구분합니다.<br>
       · <b>판매 수수료 리포트</b> (CATEGORY_TR) → 결제완료일 · 매출 · 수수료 · 정산금액<br>
       · <b>입출고비·배송비 정산 내역</b> (WAREHOUSING_SHIPPING) → 배송완료일 · 입출고비 · 배송비
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-      <input type="file" id="rgl-upload-file" accept=".xlsx" onchange="rglPreviewUpload()" style="font-size:12px">
+      <input type="file" id="rgl-upload-file" accept=".xlsx" multiple onchange="rglPreviewUpload()" style="font-size:12px">
       <button class="btn btn-primary" id="rgl-upload-btn" onclick="rglConfirmUpload()" style="display:none">✅ 등록</button>
       <button class="btn" id="rgl-upload-cancel" onclick="rglResetUpload()" style="display:none">취소</button>
     </div>
@@ -16614,76 +16614,107 @@ function renderWcTrend(data) {
 //   두 리포트를 (주문ID, 옵션ID) 로 합쳐 한 줄로 본다. 파일 종류는 서버가 헤더로 판별한다.
 //     파일1 CATEGORY_TR          → 결제완료일 · 매출 · 수수료 · 정산금액
 //     파일2 WAREHOUSING_SHIPPING → 배송완료일 · 입출고비 · 배송비
-let _rglB64 = null, _rglName = '';
+let _rglFiles = [];   // [{name, b64, kind, rowsTotal, dates, summary, skipped}]
 const RGL_KIND_LABEL = { category_tr: '판매 수수료 리포트', cfs: '입출고비·배송비 정산 내역' };
 
 function rglResetUpload() {
-  _rglB64 = null; _rglName = '';
+  _rglFiles = [];
   const f = document.getElementById('rgl-upload-file'); if (f) f.value = '';
   ['rgl-upload-btn', 'rgl-upload-cancel'].forEach(id => { const b = document.getElementById(id); if (b) b.style.display = 'none'; });
   const st = document.getElementById('rgl-upload-status'); if (st) st.innerHTML = '';
 }
 
+/** File → base64 (큰 파일도 스택이 터지지 않게 조각내 변환) */
+async function _rglToB64(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
+}
+
+const _rglMoney = v => fmtNum(Math.round(Number(v) || 0));
+
 async function rglPreviewUpload() {
-  const f = document.getElementById('rgl-upload-file')?.files?.[0];
+  const files = [...(document.getElementById('rgl-upload-file')?.files || [])];
   const $st = document.getElementById('rgl-upload-status');
-  if (!f) { rglResetUpload(); return; }
+  if (!files.length) { rglResetUpload(); return; }
+  _rglFiles = [];
   $st.style.color = 'var(--gray-500)';
-  $st.textContent = '파일 읽는 중…';
-  try {
-    const buf = await f.arrayBuffer();
-    let bin = '';
-    const bytes = new Uint8Array(buf);
-    for (let i = 0; i < bytes.length; i += 0x8000) {
-      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  $st.textContent = `${files.length}개 파일 읽는 중…`;
+  const lines = [];
+  for (const f of files) {
+    try {
+      const b64 = await _rglToB64(f);
+      const r = await fetch(`${API}/api/coupang/rfm/lines/upload`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_base64: b64, filename: f.name, dry_run: true }),
+      });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      const s = d.summary || {};
+      const isPaid = d.kind === 'category_tr';
+      _rglFiles.push({ name: f.name, b64, kind: d.kind });
+      lines.push(`<div style="margin-top:4px">✅ <b>${esc(f.name)}</b> — ${esc(RGL_KIND_LABEL[d.kind] || d.kind)}`
+        + `<br><span style="color:var(--gray-500)">기간 ${esc(d.dates?.from || '-')} ~ ${esc(d.dates?.to || '-')}`
+        + (isPaid
+          ? ` · 매출 ${_rglMoney(s.sales_amount)} · 수수료 ${_rglMoney(s.commission)} · 정산 ${_rglMoney(s.settlement_amount)}`
+          : ` · 입출고비 ${_rglMoney(s.inout_fee)} · 배송비 ${_rglMoney(s.shipping_fee)}`)
+        + `${d.skipped ? ` · 건너뜀 ${d.skipped}행` : ''}</span></div>`);
+    } catch (e) {
+      // 한 파일이 잘못돼도 나머지는 올릴 수 있게 남긴다
+      lines.push(`<div style="margin-top:4px;color:#dc2626">❌ <b>${esc(f.name)}</b> — ${esc(e.message)}</div>`);
     }
-    _rglB64 = btoa(bin); _rglName = f.name;
-    const r = await fetch(`${API}/api/coupang/rfm/lines/upload`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_base64: _rglB64, filename: _rglName, dry_run: true }),
-    });
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    const s = d.summary || {};
-    const isPaid = d.kind === 'category_tr';
-    $st.style.color = 'var(--gray-700)';
-    $st.innerHTML = `<b>${esc(RGL_KIND_LABEL[d.kind] || d.kind)}</b> 로 인식했습니다 · ${d.rows_total ?? d.rows?.length ?? 0}건 미리보기`
-      + `<br><span style="color:var(--gray-500)">기간 ${esc(d.dates?.from || '-')} ~ ${esc(d.dates?.to || '-')}`
-      + (isPaid
-        ? ` · 매출 ${fmtNum(Math.round(s.sales_amount || 0))}원 · 수수료 ${fmtNum(Math.round(s.commission || 0))}원 · 정산 ${fmtNum(Math.round(s.settlement_amount || 0))}원`
-        : ` · 입출고비 ${fmtNum(Math.round(s.inout_fee || 0))}원 · 배송비 ${fmtNum(Math.round(s.shipping_fee || 0))}원`)
-      + `${d.skipped ? ` · 건너뜀 ${d.skipped}행` : ''}</span>`;
-    ['rgl-upload-btn', 'rgl-upload-cancel'].forEach(id => { document.getElementById(id).style.display = ''; });
-  } catch (e) {
-    $st.style.color = '#dc2626';
-    $st.textContent = `읽기 실패: ${e.message}`;
-    _rglB64 = null;
+  }
+  $st.style.color = 'var(--gray-700)';
+  $st.innerHTML = lines.join('');
+  const ok = _rglFiles.length > 0;
+  ['rgl-upload-btn', 'rgl-upload-cancel'].forEach(id => {
+    document.getElementById(id).style.display = ok ? '' : 'none';
+  });
+  if (ok) {
+    document.getElementById('rgl-upload-btn').textContent = `✅ ${_rglFiles.length}개 등록`;
   }
 }
 
 async function rglConfirmUpload() {
-  if (!_rglB64) return;
+  if (!_rglFiles.length) return;
   const $st = document.getElementById('rgl-upload-status');
-  $st.style.color = 'var(--gray-500)'; $st.textContent = '등록 중…';
-  try {
-    const r = await fetch(`${API}/api/coupang/rfm/lines/upload`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_base64: _rglB64, filename: _rglName }),
-    });
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    rglResetUpload();
-    showToast(`${RGL_KIND_LABEL[d.kind] || ''} ${fmtNum(d.upserted)}건 등록`);
-    // 방금 올린 파일의 축으로 맞춰 결과가 바로 보이게 한다
-    const sel = document.getElementById('rgl-basis');
-    if (sel) sel.value = d.kind === 'cfs' ? 'delivered' : 'paid';
-    if (d.dates?.from) document.getElementById('rgl-from').value = d.dates.from;
-    if (d.dates?.to) document.getElementById('rgl-to').value = d.dates.to;
-    loadRgLines();
-  } catch (e) {
-    $st.style.color = '#dc2626';
-    $st.textContent = `등록 실패: ${e.message}`;
+  const done = [];
+  const failed = [];
+  let lastKind = null, from = null, to = null;
+  for (let i = 0; i < _rglFiles.length; i++) {
+    const f = _rglFiles[i];
+    $st.style.color = 'var(--gray-500)';
+    $st.textContent = `등록 중… (${i + 1}/${_rglFiles.length}) ${f.name}`;
+    try {
+      const r = await fetch(`${API}/api/coupang/rfm/lines/upload`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_base64: f.b64, filename: f.name }),
+      });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      done.push(`${f.name} ${fmtNum(d.upserted)}건`);
+      lastKind = d.kind;
+      if (d.dates?.from && (!from || d.dates.from < from)) from = d.dates.from;
+      if (d.dates?.to && (!to || d.dates.to > to)) to = d.dates.to;
+    } catch (e) { failed.push(`${f.name}: ${e.message}`); }
   }
+  rglResetUpload();
+  if (failed.length) {
+    $st.style.color = '#dc2626';
+    $st.innerHTML = `${done.length}개 등록 · <b>${failed.length}개 실패</b><br>`
+      + failed.map(x => `<span style="font-size:11px">${esc(x)}</span>`).join('<br>');
+  } else {
+    showToast(`${done.length}개 파일 등록 — ${done.join(' · ')}`);
+  }
+  // 방금 올린 범위로 맞춰 결과가 바로 보이게 한다
+  const sel = document.getElementById('rgl-basis');
+  if (sel && lastKind) sel.value = lastKind === 'cfs' ? 'delivered' : 'paid';
+  if (from) document.getElementById('rgl-from').value = from;
+  if (to) document.getElementById('rgl-to').value = to;
+  loadRgLines();
 }
 
 let _rgLines = [];
