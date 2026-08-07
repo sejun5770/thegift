@@ -1131,6 +1131,8 @@ async function apiOrders(query) {
           recv_msg: r.recv_message || '',
           card_name: r.product_name || '',
           // 내부 상품코드로 치환 (057). 옵션ID 매핑 > 등록상품ID 매핑 > 원본 코드.
+          // 로켓그로스 여부 (062) — 정보입력현황이 '쿠팡창고' 탭으로 가르는 기준
+          is_rocket_growth: !!r.is_rocket_growth,
           card_code: mapCp(r.product_code, r.vendor_item_id),
           // 원본은 지우지 않는다 — 매핑이 틀렸을 때 추적이 끊기면 안 된다
           channel_product_code: r.product_code || '',
@@ -13905,6 +13907,31 @@ const server = http.createServer(async (req, res) => {
               data.workflow_error = e.message;
             }
           }
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/coupang/rg-orders/sync' && req.method === 'POST') {
+        // 로켓그로스 주문 수집 (062) — 마켓플레이스 주문 API 로는 안 나오는 계열.
+        //   30일 창을 쪼개 순회하므로 기간이 길면 오래 걸린다. 수동 실행만 한다.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const body = await new Promise((resolve) => {
+          let raw = '';
+          req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+        });
+        logAdminAccess(session, req, 'coupang-rg-orders-sync', {
+          start: body.start_date, end: body.end_date, dry_run: body.dry_run === true,
+        });
+        try {
+          data = await require('./coupang/rg-orders').syncRgOrders({
+            startDate: body.start_date,
+            endDate: body.end_date,
+            dryRun: body.dry_run === true,
+          });
         } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: e.message }));

@@ -224,6 +224,62 @@ async function getOrderSheet(orderId) {
 }
 
 /**
+ * 로켓그로스 주문 목록 — 마켓플레이스 주문 API 로는 안 나오는 별도 계열.
+ *   GET /v2/providers/rg_open_api/apis/api/v1/vendors/{vendorId}/rg/orders
+ *   paidDateFrom / paidDateTo 는 yyyymmdd, 한 번에 최대 30일.
+ *   분당 50회 제한.
+ *
+ *   응답 data[]: { orderId, vendorItemId, productName, salesQuantity,
+ *                  unitSalesPrice, currency, paidAt }
+ *   주의: 수취인·배송지·주문상태가 없다. 쿠팡이 배송까지 처리하므로 우리 쪽에 안 준다.
+ */
+async function listRgOrders({ paidDateFrom, paidDateTo, nextToken } = {}) {
+  if (!paidDateFrom || !paidDateTo) throw new Error('listRgOrders: paidDateFrom/paidDateTo 필수 (yyyymmdd)');
+  const params = new URLSearchParams();
+  params.set('paidDateFrom', String(paidDateFrom));
+  params.set('paidDateTo', String(paidDateTo));
+  if (nextToken) params.set('nextToken', String(nextToken));
+  const path = `/v2/providers/rg_open_api/apis/api/v1/vendors/${VENDOR_ID}/rg/orders`;
+  return callCoupang('GET', path, params.toString());
+}
+
+/** 'YYYY-MM-DD' → 'YYYYMMDD' */
+function toYmd(d) { return String(d || '').replace(/-/g, '').slice(0, 8); }
+
+/**
+ * 기간 전체 조회 — 30일 제한을 넘으면 창을 쪼개 순회한다.
+ *   페이지 사이에 잠깐 쉰다 (분당 50회 제한).
+ */
+async function listAllRgOrders({ startDate, endDate, maxPagesPerWindow = 100 } = {}) {
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  if (isNaN(start) || isNaN(end)) throw new Error('listAllRgOrders: startDate/endDate 는 YYYY-MM-DD');
+  const items = [];
+  const windows = [];
+  for (let cur = start; cur <= end;) {
+    const to = new Date(Math.min(cur.getTime() + 29 * 86400000, end.getTime()));
+    windows.push([cur.toISOString().slice(0, 10), to.toISOString().slice(0, 10)]);
+    cur = new Date(to.getTime() + 86400000);
+  }
+  let pages = 0;
+  for (const [from, to] of windows) {
+    let nextToken = null;
+    const seen = new Set();
+    let p = 0;
+    while (p < maxPagesPerWindow) {
+      const res = await listRgOrders({ paidDateFrom: toYmd(from), paidDateTo: toYmd(to), nextToken });
+      p++; pages++;
+      if (Array.isArray(res.data)) items.push(...res.data);
+      const t = res.nextToken ? String(res.nextToken) : null;
+      if (!t || seen.has(t)) break;
+      seen.add(t); nextToken = t;
+      await new Promise(r => setTimeout(r, 1300));
+    }
+  }
+  return { items, pages, windows: windows.length };
+}
+
+/**
  * 로켓창고 재고 — 쿠팡 물류센터의 주문가능 수량.
  *   GET /v2/providers/rg_open_api/apis/api/v1/vendors/{vendorId}/rg/inventory/summaries
  *   vendorItemId 를 주면 그 옵션만, 생략하면 전체(페이징).
@@ -268,6 +324,8 @@ async function listAllRgInventory({ maxPages = 100 } = {}) {
 
 module.exports = {
   isConfigured,
+  listRgOrders,
+  listAllRgOrders,
   listRgInventory,
   listAllRgInventory,
   buildAuthHeader,

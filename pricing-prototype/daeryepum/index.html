@@ -1150,6 +1150,8 @@ nav.nav-loading a[href^="#"] {
       <input type="date" id="rgl-to" onchange="loadRgLines()" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
       <button class="btn" style="padding:5px 12px;font-size:12px" onclick="loadRgLines()">🔄 조회</button>
       <button class="btn" style="padding:5px 12px;font-size:12px" onclick="downloadRgLinesXlsx()">📥 엑셀</button>
+      <button class="btn" id="rgl-order-sync" style="padding:5px 12px;font-size:12px" onclick="syncRgOrders()"
+        title="로켓그로스 주문을 쿠팡에서 가져와 정보입력현황에 넣습니다. 조회 기간의 결제일 기준이며, 30일씩 나눠 호출합니다.">📥 주문 가져오기</button>
       <button class="btn" id="rgl-wf-sync" style="padding:5px 12px;font-size:12px" onclick="syncRgWorkflow()"
         title="배송완료일이 있는 건은 출고완료, 아직 없는 건은 포장완료로 정보입력현황 단계를 맞춥니다. 이미 더 진행된 건은 그대로 둡니다.">🔗 정보입력현황 연동</button>
       <div style="flex:1"></div>
@@ -3123,6 +3125,11 @@ nav.nav-loading a[href^="#"] {
     <button class="uni-tab" data-uni-tab="packed" onclick="switchUniTab('packed')"
       style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">
       📦 포장완료 <span id="uni-count-packed" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+    </button>
+    <button class="uni-tab" data-uni-tab="cp_warehouse" onclick="switchUniTab('cp_warehouse')"
+      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap"
+      title="로켓그로스 주문 중 아직 배송완료가 아닌 건 — 쿠팡 물류센터가 보관·출고합니다. 우리 쪽 작업은 없습니다.">
+      🏬 쿠팡창고 <span id="uni-count-cp_warehouse" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
     </button>
     <button class="uni-tab" data-uni-tab="shipped" onclick="switchUniTab('shipped')"
       style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">
@@ -16900,6 +16907,50 @@ function renderRgLines() {
 }
 
 /**
+ * 로켓그로스 주문 가져오기 — 조회 기간의 결제일 기준.
+ *   로켓그로스 주문은 마켓플레이스 주문 API 로 안 나와서, 이걸 돌려야 정보입력현황에 행이 생긴다.
+ *   30일씩 나눠 호출하므로 기간이 길면 오래 걸린다.
+ */
+async function syncRgOrders() {
+  const from = document.getElementById('rgl-from')?.value;
+  const to = document.getElementById('rgl-to')?.value;
+  if (!from || !to) { alert('조회 기간(시작일·종료일)을 먼저 지정하세요.'); return; }
+  const NL = String.fromCharCode(10);
+  if (!confirm([
+    `${from} ~ ${to} 의 로켓그로스 주문을 가져옵니다.`,
+    '',
+    '· 정보입력현황에 없던 주문은 새로 만들어집니다',
+    '· 이미 있는 주문의 진행 상태는 건드리지 않습니다',
+    '· 30일씩 나눠 호출해 기간이 길면 시간이 걸립니다',
+  ].join(NL))) return;
+  const btn = document.getElementById('rgl-order-sync');
+  if (btn) { btn.disabled = true; btn.textContent = '가져오는 중…'; }
+  try {
+    const r = await fetch(`${API}/api/coupang/rg-orders/sync`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ start_date: from, end_date: to }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    alert([
+      '로켓그로스 주문을 가져왔습니다.',
+      '',
+      `· 주문 ${fmtNum(d.orders)}건 / 상품 ${fmtNum(d.rows)}행`,
+      `· 새로 만든 주문 ${fmtNum(d.newOrders || 0)}건`,
+      `· 이미 있던 주문 ${fmtNum(d.preserved || 0)}건 (그대로 둠)`,
+      `· 배송완료 ${fmtNum(d.delivered)}건`,
+      `· 등록상품ID 확보 ${fmtNum(d.withSellerProductId)}행 (리포트에서 보강)`,
+      '',
+      '이어서 [정보입력현황 연동] 을 눌러 단계를 맞추세요.',
+    ].join(NL));
+  } catch (e) {
+    alert(`주문 가져오기 실패: ${e.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📥 주문 가져오기'; }
+  }
+}
+
+/**
  * 로켓그로스 리포트 → 정보입력현황 단계 반영.
  *   미리보기(dry run)로 무엇이 바뀌는지 먼저 보여주고, 확인을 받은 뒤에만 반영한다.
  *   업로드 시에도 자동으로 한 번 돌지만, 상품설정을 나중에 고친 경우 여기서 다시 돌린다.
@@ -18105,12 +18156,15 @@ function renderBgUnified() {
   // ============================================
   bgUnifiedRows.forEach(r => {
     r._stage = computeRowStage(r.order, r.ci, r.sel);
+    // 로켓그로스는 쿠팡이 포장·출고까지 한다 — 우리 작업 대기열에 섞이면 안 된다.
+    //   배송완료 전이면 '쿠팡창고' 로 빼서 포장완료 탭의 출고처리 대상과 구분한다.
+    if (r.order?.is_rocket_growth && r._stage !== 'shipped') r._stage = 'cp_warehouse';
   });
 
   // 탭 별 카운트 (row 기준) — 'all' 은 stage 무관 전체
   const stageCounts = {
     unsubmitted: 0, submitted: 0, sticker_completed: 0,
-    printed: 0, bound: 0, packed: 0, shipped: 0,
+    printed: 0, bound: 0, packed: 0, cp_warehouse: 0, shipped: 0,
   };
   bgUnifiedRows.forEach(r => { stageCounts[r._stage] = (stageCounts[r._stage] || 0) + 1; });
   Object.keys(stageCounts).forEach(stage => {
@@ -18538,7 +18592,8 @@ function renderBgUnified() {
 
 const STAGE_LABELS = {
   unsubmitted: '미입력', submitted: '입력완료', sticker_completed: '스티커 작업완료',
-  printed: '인쇄완료', bound: '제본완료', packed: '포장완료', shipped: '출고완료',
+  printed: '인쇄완료', bound: '제본완료', packed: '포장완료',
+  cp_warehouse: '쿠팡창고', shipped: '출고완료',
 };
 const STAGE_ORDER = ['unsubmitted', 'submitted', 'sticker_completed', 'printed', 'bound', 'packed', 'shipped'];
 
@@ -18557,6 +18612,10 @@ function _renderWorkflowCell(rowIdx, order, ci, sel, stickerIdx) {
 
   if (stage === 'unsubmitted') {
     return '<span style="color:var(--gray-400);font-size:11px">고객 입력 대기</span>';
+  }
+  // 로켓그로스 — 쿠팡이 포장·출고까지 한다. 우리가 누를 버튼이 없다.
+  if (order?.is_rocket_growth && stage !== 'shipped') {
+    return '<span style="color:#0369a1;font-size:11px;padding:4px 10px;background:#e0f2fe;border-radius:4px">쿠팡 물류센터 보관중</span>';
   }
 
   const items = [];
