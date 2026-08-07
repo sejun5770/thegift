@@ -1878,14 +1878,19 @@ async function listBomRows() {
 
 /** BOM 행 일괄 등록 — (parent_code, component_code) 중복은 갱신 */
 async function addBomRows(rows, createdBy = null) {
-  const norm = (Array.isArray(rows) ? rows : []).map(r => ({
-    parent_code: String(r.parent_code ?? '').trim(),
-    component_code: String(r.component_code ?? '').trim(),
-    qty: Math.max(1, parseInt(r.qty, 10) || 1),
-    component_role: _normRole(r.component_role),
-    memo: r.memo ? String(r.memo) : null,
-    created_by: createdBy,
-  })).filter(r => r.parent_code && r.component_code);
+  const norm = (Array.isArray(rows) ? rows : []).map(r => {
+    const parent = String(r.parent_code ?? '').trim();
+    return {
+      parent_code: parent,
+      // group_key 미지정이면 판매코드 자신 — 052 이전과 같은 '1그룹 1판매코드' 동작
+      group_key: String(r.group_key ?? '').trim() || parent,
+      component_code: String(r.component_code ?? '').trim(),
+      qty: Math.max(1, parseInt(r.qty, 10) || 1),
+      component_role: _normRole(r.component_role),
+      memo: r.memo ? String(r.memo) : null,
+      created_by: createdBy,
+    };
+  }).filter(r => r.parent_code && r.component_code);
   if (!norm.length) return [];
   const seen = new Set();
   const uniq = norm.filter(r => {
@@ -1908,6 +1913,65 @@ async function addBomRows(rows, createdBy = null) {
   const added = uniq.map(r => ({ id: uuid(), ...r, created_at: now(), updated_at: now() }));
   writeJson(FILES.stockBom, list.concat(added));
   return added;
+}
+
+/**
+ * BOM 그룹 통째 저장 (생성/수정) — 052.
+ *   판매코드 N개 × 구성품 M개 를 N×M 행으로 펼쳐 넣는다.
+ *   수정은 "그 group_key 의 기존 행을 지우고 다시 넣는" 방식이라
+ *   판매코드·구성품을 빼는 것도 그대로 반영된다.
+ */
+async function saveBomGroup({ group_key, parent_codes, components }, createdBy = null) {
+  const key = String(group_key ?? '').trim();
+  if (!key) throw new Error('그룹 키가 없습니다');
+  const parents = [...new Set((Array.isArray(parent_codes) ? parent_codes : [])
+    .map(c => String(c ?? '').trim()).filter(Boolean))];
+  if (!parents.length) throw new Error('판매코드를 1개 이상 입력하세요');
+  const comps = [];
+  const seenComp = new Set();
+  for (const c of (Array.isArray(components) ? components : [])) {
+    const code = String(c?.component_code ?? '').trim();
+    if (!code || seenComp.has(code)) continue;
+    seenComp.add(code);
+    comps.push({
+      component_code: code,
+      qty: Math.max(1, parseInt(c?.qty, 10) || 1),
+      component_role: _normRole(c?.component_role),
+    });
+  }
+  if (!comps.length) throw new Error('구성품을 1개 이상 입력하세요');
+
+  const rows = [];
+  for (const p of parents) {
+    for (const c of comps) {
+      rows.push({ parent_code: p, group_key: key, ...c, memo: null, created_by: createdBy });
+    }
+  }
+  await deleteBomGroup(key);
+  if (USE_SUPABASE) {
+    const res = await fetch(`${REST_BASE}/bg_stock_bom?on_conflict=parent_code,component_code`, {
+      method: 'POST',
+      headers: { ...HEADERS, Prefer: 'resolution=merge-duplicates,return=representation' },
+      body: JSON.stringify(rows),
+    });
+    if (!res.ok) throw new Error(`Supabase INSERT bg_stock_bom [${res.status}]: ${await res.text()}`);
+    return res.json();
+  }
+  const list = readJson(FILES.stockBom, []);
+  const added = rows.map(r => ({ id: uuid(), ...r, created_at: now(), updated_at: now() }));
+  writeJson(FILES.stockBom, list.concat(added));
+  return added;
+}
+
+async function deleteBomGroup(groupKey) {
+  const key = String(groupKey ?? '').trim();
+  if (!key) throw new Error('그룹 키가 없습니다');
+  if (USE_SUPABASE) {
+    await sbDelete('bg_stock_bom', `group_key=eq.${encodeURIComponent(key)}`);
+    return { ok: true };
+  }
+  writeJson(FILES.stockBom, readJson(FILES.stockBom, []).filter(r => (r.group_key || r.parent_code) !== key));
+  return { ok: true };
 }
 
 async function updateBomRow(id, data) {
@@ -2069,6 +2133,8 @@ module.exports = {
   BOM_ROLES,
   listBomRows,
   addBomRows,
+  saveBomGroup,
+  deleteBomGroup,
   updateBomRow,
   removeBomRow,
   listStockItems,

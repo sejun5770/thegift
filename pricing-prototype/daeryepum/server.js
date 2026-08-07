@@ -7918,6 +7918,9 @@ const server = http.createServer(async (req, res) => {
                 mult: Math.max(1, parseInt(b.qty, 10) || 1),
                 role: b.component_role || 'material',
                 bom_id: b.id || null,
+                // 052 — 공용 판정은 판매코드 수가 아니라 그룹 수로 센다.
+                //   변형코드(_A/_B/_C)는 같은 그룹이라 공용이 아니다.
+                group_key: safe(b.group_key) || parent,
               });
             }
           } catch { /* 테이블 없으면 BOM 미적용 */ }
@@ -8232,8 +8235,11 @@ const server = http.createServer(async (req, res) => {
                 qty: b.mult,
                 role: b.role,
                 bom_id: b.bom_id,
+                group_key: b.group_key,
                 sales_qty_30d: salesMap.get(b.code)?.qty || 0,
               })),
+              // 이 재고품목이 들어가는 '상품 그룹' 수 — 2 이상이면 공용 자재
+              bom_group_count: new Set((bomByComponent.get(r.stock_code) || []).map(b => b.group_key)).size,
               consume_qty_30d: consumeQty30d,    // 재고 소진 수량 (배수 반영)
               // 품목코드가 아닌 값이 매출·소진코드에 들어간 경우 (조용히 0 이 되는 것 방지)
               bad_codes: [...new Set([...cardCodes, ...(regRow.consume || []).map(c => c.code)])]

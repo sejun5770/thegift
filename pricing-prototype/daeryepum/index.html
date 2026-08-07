@@ -3171,6 +3171,40 @@ nav.nav-loading a[href^="#"] {
 
   <div id="uni-loading" style="text-align:center;padding:40px;color:var(--gray-400)">데이터를 불러오는 중입니다...</div>
 
+  <!-- BOM 그룹 생성/수정 모달 (052) -->
+  <div id="bomgroup-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1100;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto">
+    <div class="card" style="max-width:720px;width:100%;padding:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <strong style="font-size:14px">🧩 <span id="bg-modal-title">상품 그룹 만들기</span></strong>
+        <button class="btn" style="padding:4px 10px;font-size:12px" onclick="closeBomGroupModal()">닫기</button>
+      </div>
+
+      <label style="display:block;font-size:12px;margin-bottom:4px">
+        <span style="color:var(--gray-500);font-weight:600">판매코드</span>
+        <span style="color:var(--gray-400);font-size:11px">— 콤마 또는 줄바꿈으로 여러 개. 변형코드(_A/_B/_C)는 모두 넣어야 판매분이 빠지지 않습니다</span>
+      </label>
+      <textarea id="bg-parent-codes" rows="3" placeholder="TGJSD1001_A, TGJSD1001_B, TGJSD1001_C"
+        style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px;font-family:monospace;box-sizing:border-box"></textarea>
+      <div id="bg-parent-hint" style="font-size:11px;color:var(--gray-500);margin:4px 0 12px"></div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;font-weight:600;color:var(--gray-500)">구성품</span>
+        <button class="btn" style="padding:3px 10px;font-size:11px" onclick="_bgAddCompRow()">＋ 구성품 추가</button>
+      </div>
+      <div id="bg-comp-rows" style="margin-bottom:10px"></div>
+
+      <div style="font-size:11px;color:var(--gray-500);line-height:1.6;background:var(--gray-50);padding:8px 10px;border-radius:6px;margin-bottom:10px">
+        판매코드 하나당 구성품이 각각 소요수량만큼 빠집니다. 저장하면 이 그룹의 기존 구성이 <b>여기 입력한 내용으로 대체</b>됩니다 —
+        판매코드나 구성품을 빼는 것도 그대로 반영됩니다.
+      </div>
+
+      <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center">
+        <span id="bg-modal-msg" style="font-size:12px;color:#dc2626;flex:1"></span>
+        <button class="btn btn-primary" style="padding:6px 16px;font-size:12px" onclick="saveBomGroup()">저장</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 사고건 등록/수정 모달 -->
   <div id="incident-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1100;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto">
     <div class="card" style="max-width:640px;width:100%;padding:16px">
@@ -14014,8 +14048,9 @@ function _stockItemRow(it) {
     // 어느 상품에 쓰이는지 — BOM 이 있으면 배지로 알린다. 2개 이상이면 공용 자재.
     //   툴팁에 상품별 소요수량을 적어 어디서 얼마씩 빠지는지 바로 보이게 한다.
     const parents = it.bom_parents || [];
+    const gcnt = _bomGroupCount(it);
     const usedIn = parents.length
-      ? `<span style="font-size:9px;margin-left:3px;color:${parents.length > 1 ? '#b45309' : 'var(--gray-500)'}" title="${esc(parents.map(p => `${p.name || p.code} ×${p.qty}`).join('\n'))}&#10;&#10;${parents.length > 1 ? `${parents.length}개 상품이 나눠 쓰는 공용 자재입니다` : '이 상품의 구성품입니다'}">${parents.length > 1 ? `공용 ${parents.length}` : 'BOM'}</span>`
+      ? `<span style="font-size:9px;margin-left:3px;color:${gcnt > 1 ? '#b45309' : 'var(--gray-500)'}" title="${esc(parents.map(p => `${p.name || p.code} ×${p.qty}`).join('\n'))}&#10;&#10;${gcnt > 1 ? `${gcnt}개 상품이 나눠 쓰는 공용 자재입니다` : '이 상품의 구성품입니다'}">${gcnt > 1 ? `공용 ${gcnt}` : 'BOM'}</span>`
       : '';
     const checked = _stockSelected.has(it.stock_code) ? ' checked' : '';
     return `
@@ -14070,29 +14105,7 @@ function _bomFindComponent(id) {
   return null;
 }
 
-/** 그룹에 구성품 추가 — 이미 재고 목록에 있는 코드도, 아직 없는 부자재 코드도 넣을 수 있다. */
-async function addBomComponent(parentCode) {
-  const code = prompt(`${parentCode} 에 넣을 구성품 코드\n\n원물·부자재·포장재 모두 가능합니다.`, '');
-  if (code === null || !code.trim()) return;
-  const qtyRaw = prompt(`${parentCode} 1개당 ${code.trim()} 소요수량`, '1');
-  if (qtyRaw === null) return;
-  if (!/^\d+$/.test(qtyRaw.trim()) || parseInt(qtyRaw, 10) < 1) { alert('1 이상의 정수를 입력하세요.'); return; }
-  try {
-    const r = await fetch(`${API}/api/bg/stock-bom`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows: [{
-        parent_code: parentCode,
-        component_code: code.trim(),
-        qty: parseInt(qtyRaw, 10),
-        component_role: _guessBomRole(code.trim()),
-      }] }),
-    });
-    const d = await r.json();
-    if (d.error) throw new Error(d.error);
-    _stockGroupOpen.add(parentCode);
-    await loadDaeryepumStock();
-  } catch (e) { alert(`추가 실패: ${e.message}`); }
-}
+// 구성품 추가는 그룹 헤더의 ✎ 수정(그룹 모달)에서 한다 — 판매코드와 함께 한 화면에서 다룬다.
 
 /** 소요수량·역할 수정 */
 async function editBomComponent(id) {
@@ -14142,8 +14155,12 @@ function toggleStockGroup(code) {
 
 const _daysRank = d => (d === null || d === undefined ? 99999 : d);
 
-/** 공용 자재 = BOM 상 2개 이상 판매상품에 들어가는 품목 (자동 판정) */
-const _isSharedItem = it => ((it && it.bom_parents) || []).length > 1;
+/** 공용 자재 = 2개 이상 '상품 그룹' 에 들어가는 품목 (자동 판정).
+ *  판매코드 수가 아니라 그룹 수로 센다 — 변형코드(_A/_B/_C)는 같은 상품이라 공용이 아니다. */
+const _isSharedItem = it => _bomGroupCount(it) > 1;
+const _bomGroupCount = it => (it && it.bom_group_count != null)
+  ? it.bom_group_count
+  : new Set(((it && it.bom_parents) || []).map(p => p.group_key || p.code)).size;
 
 function _stockSectionHead(icon, title, note) {
   return `
@@ -14165,7 +14182,10 @@ function _stockGroupedRows(items) {
     if (!comps.length) continue;
     const tracked = comps.filter(c => c.item).map(c => c.item);
     groups.push({
-      code: p.parent_code,
+      code: p.group_key || p.parent_code,        // 그룹 식별자 (펼침 상태·수정·해제 키)
+      repCode: p.parent_code,                    // 대표 판매코드 (헤더 표기)
+      parentCodes: p.parent_codes || [p.parent_code],
+      parentMissing: p.parent_missing || [],
       name: p.parent_name || '',
       parent_ok: p.parent_ok !== false,
       comps,
@@ -14202,19 +14222,23 @@ function _stockGroupedRows(items) {
       : (g.worst !== null && g.worst <= 30 ? 'background:#fef3c7' : 'background:var(--gray-50)');
     const nameCell = g.parent_ok
       ? esc(g.name || '(이름 없음)')
-      : `<span style="color:#b45309" title="S2_Card 에서 이 판매코드를 찾지 못했습니다 — 판매수량이 0 이라 소진이 계산되지 않습니다">${esc(g.name || g.code)} ⚠</span>`;
+      : `<span style="color:#b45309" title="S2_Card 에서 이 판매코드를 찾지 못했습니다 — 판매수량이 0 이라 소진이 계산되지 않습니다">${esc(g.name || g.repCode)} ⚠</span>`;
+    // 판매코드가 여러 개면 대표 코드 + 나머지 개수로 접어 보여준다 (변형코드 _A/_B/_C).
+    const extraParents = g.parentCodes.length - 1;
+    const codeCell = `<span style="font-family:monospace;font-size:11px;color:var(--gray-600)"
+        title="${esc(g.parentCodes.join('\n'))}${g.parentMissing.length ? `&#10;&#10;⚠ 판매코드로 찾지 못함: ${esc(g.parentMissing.join(', '))}` : ''}">${esc(g.repCode)}${extraParents > 0 ? ` <span style="color:var(--gray-400)">+${extraParents}</span>` : ''}</span>`;
     out.push(`
       <tr style="${headBg};cursor:pointer" onclick="toggleStockGroup('${esc(g.code)}')">
         <td colspan="${STOCK_GROUP_COLSPAN}" style="padding:7px 12px;border-bottom:1px solid var(--gray-200)">
           <span style="font-size:10px;color:var(--gray-400);margin-right:6px">${open ? '▾' : '▸'}</span>
-          <span style="font-family:monospace;font-size:11px;color:var(--gray-600)">${esc(g.code)}</span>
+          ${codeCell}
           <span style="font-weight:600;margin-left:8px">${nameCell}</span>
           <span style="font-size:11px;color:var(--gray-500);margin-left:10px">구성품 ${g.comps.length}</span>
           ${g.worst !== null && g.worst <= 30 ? `<span style="font-size:11px;color:#dc2626;margin-left:8px">최단 ${g.worst}일</span>` : ''}
-          <button onclick="event.stopPropagation();addBomComponent('${esc(g.code)}')" title="이 상품에 구성품 추가"
-            style="float:right;border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 8px">＋ 구성품</button>
           <button onclick="event.stopPropagation();ungroupStockGroup('${esc(g.code)}')" title="이 그룹을 해제 — BOM 구성이 삭제되고 품목은 낱개로 돌아갑니다"
-            style="float:right;border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 8px;margin-right:4px;color:#dc2626">해제</button>
+            style="float:right;border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 8px;margin-left:4px;color:#dc2626">해제</button>
+          <button onclick="event.stopPropagation();editBomGroup('${esc(g.code)}')" title="판매코드·구성품 수정"
+            style="float:right;border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 8px">✎ 수정</button>
         </td>
       </tr>`);
     if (!open) continue;
@@ -14266,47 +14290,122 @@ function _guessBomRole(code) {
   return /^[A-Z]+\d+O/i.test(String(code || '')) ? 'product' : 'material';
 }
 
-/** 선택한 품목들을 판매상품 그룹(BOM)으로 묶는다 */
-async function groupSelectedStockItems() {
+// ─── BOM 그룹 생성/수정 모달 (052) ───
+let _bgEditGroupKey = null;
+
+/** 선택한 품목들로 그룹 만들기 — 이미 등록된 매출코드를 판매코드 기본값으로 끌어온다 */
+function groupSelectedStockItems() {
   const codes = [..._stockSelected];
   if (!codes.length) return;
-  const parent = prompt(
-    `선택한 ${codes.length}개 품목을 하나의 판매상품으로 묶습니다.\n\n`
-    + `${codes.join(', ')}\n\n`
-    + `이 구성품들이 들어가는 판매코드를 입력하세요.\n`
-    + `(이미 있는 판매코드면 그 그룹에 추가됩니다)`, '');
-  if (parent === null || !parent.trim()) return;
-  const rows = codes.map(c => ({
-    parent_code: parent.trim(),
-    component_code: c,
-    qty: 1,
-    component_role: _guessBomRole(c),
-  }));
+  const items = codes.map(c => _stockData.find(x => x.stock_code === c)).filter(Boolean);
+  // 판매코드 기본값 = 선택 품목들에 이미 등록된 매출코드 (변형코드까지 그대로).
+  //   손으로 다시 치지 않아도 되고, 실제 판매되는 코드라 소진이 바로 잡힌다.
+  const salesCodes = [...new Set(items.flatMap(it => it.sales_codes || []))];
+  openBomGroupModal({
+    groupKey: null,
+    parentCodes: salesCodes,
+    components: codes.map(c => ({ component_code: c, qty: 1, component_role: _guessBomRole(c) })),
+  });
+}
+
+/** 기존 그룹 수정 */
+function editBomGroup(groupKey) {
+  const g = (_stockBomParents || []).find(p => (p.group_key || p.parent_code) === groupKey);
+  if (!g) { alert('그룹을 찾을 수 없습니다. 새로고침 후 다시 시도하세요.'); return; }
+  openBomGroupModal({
+    groupKey,
+    parentCodes: g.parent_codes || [g.parent_code],
+    components: (g.components || []).map(c => ({
+      component_code: c.component_code, qty: c.qty, component_role: c.component_role,
+    })),
+  });
+}
+
+function openBomGroupModal({ groupKey, parentCodes, components }) {
+  _bgEditGroupKey = groupKey;
+  document.getElementById('bg-modal-title').textContent = groupKey ? '상품 그룹 수정' : '상품 그룹 만들기';
+  document.getElementById('bg-modal-msg').textContent = '';
+  document.getElementById('bg-parent-codes').value = (parentCodes || []).join(', ');
+  const hint = document.getElementById('bg-parent-hint');
+  hint.textContent = (parentCodes || []).length
+    ? (groupKey ? '' : '선택한 품목에 등록된 매출코드를 가져왔습니다. 빠진 변형코드가 있으면 추가하세요.')
+    : '선택한 품목에 등록된 매출코드가 없습니다 — 판매코드를 직접 입력하세요.';
+  const wrap = document.getElementById('bg-comp-rows');
+  wrap.innerHTML = '';
+  (components || []).forEach(c => _bgAddCompRow(c));
+  if (!(components || []).length) _bgAddCompRow();
+  document.getElementById('bomgroup-modal').style.display = 'flex';
+}
+
+function closeBomGroupModal() {
+  document.getElementById('bomgroup-modal').style.display = 'none';
+  _bgEditGroupKey = null;
+}
+
+function _bgAddCompRow(c) {
+  const it = { component_code: '', qty: 1, component_role: 'material', ...(c || {}) };
+  const name = (_stockData.find(x => x.stock_code === it.component_code) || {}).product_name || '';
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:6px;margin-bottom:5px;align-items:center';
+  row.innerHTML = `
+    <input type="text" class="bg-c-code" value="${esc(it.component_code)}" placeholder="구성품 코드"
+      style="flex:1;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;font-family:monospace">
+    <span class="bg-c-name" style="flex:1;font-size:11px;color:var(--gray-500);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span>
+    <select class="bg-c-role" style="padding:5px 6px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+      ${['product', 'material', 'package', 'etc'].map(r =>
+        `<option value="${r}"${r === it.component_role ? ' selected' : ''}>${BOM_ROLE_LABEL[r]}</option>`).join('')}
+    </select>
+    <input type="number" class="bg-c-qty" value="${Number(it.qty) || 1}" min="1" title="이 상품 1개당 소요수량"
+      style="width:76px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;text-align:right">
+    <button onclick="this.parentElement.remove()" title="이 줄 삭제"
+      style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:4px 8px;color:#dc2626">✕</button>`;
+  document.getElementById('bg-comp-rows').appendChild(row);
+}
+
+async function saveBomGroup() {
+  const $msg = document.getElementById('bg-modal-msg');
+  const parent_codes = document.getElementById('bg-parent-codes').value
+    .split(/[,\n]/).map(s => s.trim()).filter(Boolean);
+  if (!parent_codes.length) { $msg.textContent = '판매코드를 1개 이상 입력하세요.'; return; }
+  const components = [...document.querySelectorAll('#bg-comp-rows > div')].map(row => ({
+    component_code: row.querySelector('.bg-c-code').value.trim(),
+    component_role: row.querySelector('.bg-c-role').value,
+    qty: parseInt(row.querySelector('.bg-c-qty').value, 10) || 1,
+  })).filter(c => c.component_code);
+  if (!components.length) { $msg.textContent = '구성품을 1개 이상 입력하세요.'; return; }
+  // 그룹 키는 생성 시 첫 판매코드로 고정한다 — 이후 판매코드를 바꿔도 그룹 정체성은 유지된다.
+  const group_key = _bgEditGroupKey || parent_codes[0];
+  $msg.style.color = 'var(--gray-500)'; $msg.textContent = '저장 중…';
   try {
-    const r = await fetch(`${API}/api/bg/stock-bom`, {
+    const r = await fetch(`${API}/api/bg/stock-bom/group`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows }),
+      body: JSON.stringify({ group_key, parent_codes, components }),
     });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
-    _stockGroupOpen.add(parent.trim());
+    _stockGroupOpen.add(group_key);
     _stockSelected.clear();
-    showToast(`${codes.length}개 품목을 ${parent.trim()} 으로 묶었습니다 — 소요수량이 1이 아니면 행에서 수정하세요`);
+    closeBomGroupModal();
+    showToast(`판매코드 ${parent_codes.length}개 · 구성품 ${components.length}건 저장`);
     await loadDaeryepumStock();
-  } catch (e) { alert(`묶기 실패: ${e.message}`); }
+  } catch (e) {
+    $msg.style.color = '#dc2626';
+    $msg.textContent = `저장 실패: ${e.message}`;
+  }
 }
 
 /** 그룹 해제 — BOM 구성을 지우고 품목들을 낱개로 되돌린다 (재고 등록은 유지) */
-async function ungroupStockGroup(parentCode) {
-  const g = (_stockBomParents || []).find(p => p.parent_code === parentCode);
+async function ungroupStockGroup(groupKey) {
+  const g = (_stockBomParents || []).find(p => (p.group_key || p.parent_code) === groupKey);
   const n = g ? (g.components || []).length : 0;
-  if (!confirm(`${parentCode} 그룹을 해제합니다.\n\n구성품 ${n}건의 BOM 이 삭제되고 품목은 낱개로 돌아갑니다.\n재고 등록 자체는 유지됩니다.`)) return;
+  const label = g ? (g.parent_name || g.parent_code) : groupKey;
+  if (!confirm(`${label} 그룹을 해제합니다.\n\n구성품 ${n}건의 BOM 이 삭제되고 품목은 낱개로 돌아갑니다.\n재고 등록 자체는 유지됩니다.`)) return;
   try {
-    for (const c of (g?.components || [])) {
-      await fetch(`${API}/api/bg/stock-bom/${encodeURIComponent(c.id)}`, { method: 'DELETE' });
-    }
-    _stockGroupOpen.delete(parentCode);
-    showToast(`${parentCode} 그룹 해제`);
+    const r = await fetch(`${API}/api/bg/stock-bom/group/${encodeURIComponent(groupKey)}`, { method: 'DELETE' });
+    const d = await r.json().catch(() => ({}));
+    if (d.error) throw new Error(d.error);
+    _stockGroupOpen.delete(groupKey);
+    showToast('그룹 해제');
     await loadDaeryepumStock();
   } catch (e) { alert(`해제 실패: ${e.message}`); }
 }

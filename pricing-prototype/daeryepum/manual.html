@@ -68,6 +68,7 @@ code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px
   <a href="#vendors" class="h2">10. 위탁업체</a>
   <a href="#artists" class="h2">11. 작가 정산</a>
   <a href="#etc-pages" class="h2">12. 기타 페이지</a>
+  <a href="#stock-bom" class="h3">12-1. 답례품 재고 — 상품 그룹(BOM)</a>
   <a href="#automation" class="h2">13. 자동화 (동기화 스케줄)</a>
   <a href="#faq" class="h2">14. 자주 묻는 질문 (FAQ)</a>
   <a href="#glossary" class="h2">15. 용어집</a>
@@ -315,6 +316,41 @@ code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px
 </table>
 <div class="img-wrap"><img src="manual-assets/monthly-report.png" alt="월간 보고서"><div class="img-cap">월간 보고서</div></div>
 <div class="img-wrap"><img src="manual-assets/stock.png" alt="답례품 재고"><div class="img-cap">답례품 재고</div></div>
+
+<h3 id="stock-bom">12-1. 답례품 재고 — 상품 그룹(BOM)</h3>
+<p>목록은 두 영역으로 나뉩니다.</p>
+<ul>
+  <li><b>📦 일반 재고</b> — 등록된 모든 품목. BOM에 묶여도 여기서 빠지지 않습니다. 소진예상일 빠른 순.</li>
+  <li><b>🧩 BOM 구성 상품</b> — 상품별 구성. 재고 수치는 반복하지 않고 구성품 이름·소요수량만 적습니다.</li>
+</ul>
+
+<div class="step">
+  <b>묶는 방법</b><br>
+  1. 일반 재고에서 한 상품에 들어가는 품목들을 <b>체크</b>합니다.<br>
+  2. 상단에 뜨는 <b>🧩 그룹으로 묶기</b>를 누릅니다.<br>
+  3. <b>판매코드</b>가 이미 등록된 매출코드로 채워져 있습니다. 빠진 변형코드가 있으면 추가하세요.<br>
+  4. 구성품의 <b>역할</b>(원물/부자재/포장재/기타)과 <b>소요수량</b>을 확인하고 저장합니다.
+</div>
+
+<div class="warn">
+  <b>변형코드는 빠짐없이 넣어야 합니다.</b> 한 상품이 <code>TGJSD1001_A / _B / _C</code>로 갈려 팔리는데
+  하나만 넣으면 나머지 판매분이 소진에서 빠져 <b>소진예상일이 실제보다 길게</b> 나옵니다.
+  같은 그룹에 함께 넣으면 판매량이 합산되고, 같은 상품이므로 공용으로 잡히지도 않습니다.
+</div>
+
+<p><b>소진 계산</b>: 구성품 소진 = (그룹의 모든 판매코드 판매량 합) × 소요수량 + 그 품목이 단독으로 팔린 수량.</p>
+
+<div class="tip">
+  <b>공용 N</b> 배지는 <b>서로 다른 상품 그룹 N개</b>에 쓰인다는 뜻입니다 (쇼핑백·띠지 등).
+  변형코드 여러 개는 한 그룹이라 공용이 아닙니다. 공용 자재는 여러 상품에서 동시에 빠지므로 가장 먼저 소진되기 쉽습니다.
+</div>
+
+<p><b>수정·해제</b>: 그룹 헤더의 <b>✎ 수정</b>으로 판매코드와 구성품을 함께 고칩니다.
+저장하면 그 그룹이 입력한 내용으로 <b>대체</b>되므로 빼는 것도 반영됩니다.
+<b>해제</b>는 구성만 지우고 재고 등록은 남깁니다.</p>
+
+<p>구성품이 아직 재고관리에 없으면 회색 줄로 자리만 남고 <b>＋ 등록</b>으로 그 자리에서 등록할 수 있습니다.</p>
+
 <div class="img-wrap"><img src="manual-assets/wedding-calendar.png" alt="예식일 캘린더"><div class="img-cap">예식일 캘린더</div></div>
 
 <h2 id="automation">13. 자동화 (동기화 스케줄)</h2>

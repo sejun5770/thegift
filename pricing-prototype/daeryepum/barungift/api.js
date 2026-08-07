@@ -1195,29 +1195,74 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     });
   }
 
-  /** 판매상품(parent) 기준으로 묶어 내려준다 — BOM 화면이 상품 단위로 열리도록. */
+  /**
+   * BOM 그룹 단위로 묶어 내려준다 (052).
+   *   한 그룹에 판매코드가 여러 개(변형코드 _A/_B/_C)일 수 있으므로 group_key 로 묶고,
+   *   구성품은 코드 기준으로 접는다 — 판매코드 수만큼 행이 늘어나도 화면엔 한 줄로 보인다.
+   */
   function groupBomByParent(rows) {
-    const byParent = new Map();
+    const byGroup = new Map();
     for (const row of rows) {
-      const key = String(row.parent_code || '').trim();
-      if (!key) continue;
-      if (!byParent.has(key)) {
-        byParent.set(key, { parent_code: key, parent_name: row.parent_name || null, parent_ok: row.parent_ok !== false, components: [] });
+      const key = String(row.group_key || row.parent_code || '').trim();
+      const parent = String(row.parent_code || '').trim();
+      if (!key || !parent) continue;
+      if (!byGroup.has(key)) {
+        byGroup.set(key, { group_key: key, parents: new Map(), compMap: new Map() });
       }
-      const g = byParent.get(key);
-      if (!g.parent_name && row.parent_name) g.parent_name = row.parent_name;
-      g.components.push(row);
+      const g = byGroup.get(key);
+      if (!g.parents.has(parent)) {
+        g.parents.set(parent, { code: parent, name: row.parent_name || null, ok: row.parent_ok !== false });
+      } else if (!g.parents.get(parent).name && row.parent_name) {
+        g.parents.get(parent).name = row.parent_name;
+      }
+      // 구성품은 코드로 접는다. 판매코드마다 행이 있어도 소요수량·역할은 같아야 정상.
+      if (!g.compMap.has(row.component_code)) g.compMap.set(row.component_code, row);
     }
     const ROLE_ORDER = { product: 0, material: 1, package: 2, etc: 3 };
-    return [...byParent.values()].map(g => ({
-      ...g,
-      components: g.components.sort((a, b) =>
+    return [...byGroup.values()].map(g => {
+      const parents = [...g.parents.values()];
+      // 대표 판매코드 — 변형 접미(_A) 없는 것 우선, 그다음 사전순. 헤더 표기와 정렬에 쓴다.
+      const rep = parents.slice().sort((a, b) => {
+        const av = /_[A-Za-z]$/.test(a.code) ? 1 : 0, bv = /_[A-Za-z]$/.test(b.code) ? 1 : 0;
+        return av - bv || a.code.localeCompare(b.code);
+      })[0];
+      const components = [...g.compMap.values()].sort((a, b) =>
         (ROLE_ORDER[a.component_role] ?? 9) - (ROLE_ORDER[b.component_role] ?? 9)
-        || String(a.component_code).localeCompare(String(b.component_code))),
-      component_count: g.components.length,
-      // 구성품 중 재고관리 품목이 하나도 없으면 소진 계산에 아무 영향이 없다 (화면 경고용)
-      tracked_count: g.components.filter(c => c.component_registered).length,
-    })).sort((a, b) => String(a.parent_code).localeCompare(String(b.parent_code)));
+        || String(a.component_code).localeCompare(String(b.component_code)));
+      return {
+        group_key: g.group_key,
+        parent_code: rep.code,                      // 대표 코드 (기존 화면 호환)
+        parent_name: parents.find(p => p.name)?.name || null,
+        parent_ok: parents.some(p => p.ok),          // 하나라도 실판매코드면 OK
+        parent_codes: parents.map(p => p.code),      // 변형 포함 전체
+        parent_missing: parents.filter(p => !p.ok).map(p => p.code),
+        components,
+        component_count: components.length,
+        // 구성품 중 재고관리 품목이 하나도 없으면 소진 계산에 아무 영향이 없다 (화면 경고용)
+        tracked_count: components.filter(c => c.component_registered).length,
+      };
+    }).sort((a, b) => String(a.parent_name || a.parent_code).localeCompare(String(b.parent_name || b.parent_code)));
+  }
+
+  // BOM 그룹 저장 (생성/수정) — 판매코드 N개 × 구성품 M개
+  if (pathname === '/api/bg/stock-bom/group' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const rows = await store.saveBomGroup(body, session?.email || null);
+      return json(res, { rows, count: rows.length }, 201);
+    } catch (err) {
+      console.error('[stock-bom group POST] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
+  }
+  const bomGroupMatch = pathname.match(/^\/api\/bg\/stock-bom\/group\/([^/]+)$/);
+  if (bomGroupMatch && method === 'DELETE') {
+    try {
+      return json(res, await store.deleteBomGroup(decodeURIComponent(bomGroupMatch[1])));
+    } catch (err) {
+      console.error('[stock-bom group DELETE] error:', err.message);
+      return json(res, { error: err.message }, 400);
+    }
   }
 
   if (pathname === '/api/bg/stock-bom' && method === 'GET') {
