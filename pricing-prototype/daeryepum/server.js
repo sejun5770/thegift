@@ -1157,7 +1157,8 @@ async function apiOrders(query) {
           status_label: r.status_label || r.status || '',
           settle_method: r.settle_method || null,
           wedding_date: null,
-          site_name: '쿠팡',
+          // 판매자배송과 로켓그로스는 우리 손이 닿는 범위가 다르다 — 주문사이트부터 갈라 둔다
+          site_name: r.is_rocket_growth ? '쿠팡 로켓그로스' : '쿠팡',
           file_count: 0,
           delivery_seq: 1,
           // 마킹: 프론트가 쿠팡 row 임을 구분할 수 있도록
@@ -12300,6 +12301,7 @@ const server = http.createServer(async (req, res) => {
           const mapSite = (s) => {
             // 네이버 멀티 스토어 라벨 ('네이버(바른손카드)' 등) → '네이버' 통합
             const norm = normalizeNaverSite(s);
+            if (norm === '쿠팡 로켓그로스') return '쿠팡';   // 사이트 그룹은 쿠팡으로 합친다
             if (norm === '바른손카드' || norm === '쿠팡' || norm === '네이버') return norm;
             return '제휴몰'; // 바른손몰 포함 모든 제휴 채널 통합
           };

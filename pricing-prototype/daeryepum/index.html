@@ -1279,6 +1279,9 @@ nav.nav-loading a[href^="#"] {
     <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
       <input type="checkbox" data-ord-site="coupang" checked onchange="renderOrderTable()"> 쿠팡
     </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="쿠팡 물류센터가 보관·출고하는 주문">
+      <input type="checkbox" data-ord-site="coupang_rg" checked onchange="renderOrderTable()"> 🏬 쿠팡 로켓그로스
+    </label>
     <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
       <input type="checkbox" data-ord-site="cafe24" checked onchange="renderOrderTable()"> 정수당
     </label>
@@ -3190,6 +3193,9 @@ nav.nav-loading a[href^="#"] {
     <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
       <input type="checkbox" data-site="coupang" checked onchange="renderBgUnified()"> 쿠팡
     </label>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="쿠팡 물류센터가 보관·출고하는 주문">
+      <input type="checkbox" data-site="coupang_rg" checked onchange="renderBgUnified()"> 🏬 쿠팡 로켓그로스
+    </label>
     <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
       <input type="checkbox" data-site="cafe24" checked onchange="renderBgUnified()"> 정수당
     </label>
@@ -4291,7 +4297,9 @@ function getFilteredOrders() {
     { key: 'etc',     match: o => o.order_type === 'ETC' },
     { key: 'nv_card', match: o => o.order_type === 'NAVER' && /바른손/i.test(String(o.site_name || '') + '|' + String(o.naver_store_id || '')) },
     { key: 'nv_tnt',  match: o => o.order_type === 'NAVER' && /테넷텐|tenetten|tnt/i.test(String(o.site_name || '') + '|' + String(o.naver_store_id || '')) },
-    { key: 'coupang', match: o => o.order_type === 'COUPANG' },
+    // 쿠팡은 판매자배송 / 로켓그로스로 갈라 본다 — 우리 작업 유무가 달라 함께 보면 헷갈린다
+    { key: 'coupang',    match: o => o.order_type === 'COUPANG' && !o.is_rocket_growth },
+    { key: 'coupang_rg', match: o => o.order_type === 'COUPANG' && !!o.is_rocket_growth },
     { key: 'cafe24',  match: o => o.order_type === 'CAFE24' },
     { key: 'manual',  match: o => o.order_type === 'MANUAL' },
   ];
@@ -18098,7 +18106,8 @@ function renderBgUnified() {
     { key: 'etc',     match: o => o.order_type === 'ETC' },  // 바른손몰 (모든 제휴사 통합)
     { key: 'nv_card', match: o => o.order_type === 'NAVER' && /바른손/i.test(String(o.site_name || '') + '|' + String(o.naver_store_id || '')) },
     { key: 'nv_tnt',  match: o => o.order_type === 'NAVER' && /테넷텐|tenetten|tnt/i.test(String(o.site_name || '') + '|' + String(o.naver_store_id || '')) },
-    { key: 'coupang', match: o => o.order_type === 'COUPANG' },
+    { key: 'coupang',    match: o => o.order_type === 'COUPANG' && !o.is_rocket_growth },
+    { key: 'coupang_rg', match: o => o.order_type === 'COUPANG' && !!o.is_rocket_growth },
     { key: 'cafe24',  match: o => o.order_type === 'CAFE24' },  // 정수당 (카페24)
     { key: 'manual',  match: o => o.order_type === 'MANUAL' },  // 바른손더기프트 (CSV 등록)
   ];
