@@ -226,8 +226,18 @@ async function getProductSettings(productId) {
   return (readJson(FILES.productSettings, [])).find(s => s.product_id === productId) || null;
 }
 
+// 판매채널 (migration 053) — 매입형태(vendor_id)와는 다른 축.
+//   DB CHECK 제약과 같은 목록이어야 한다. 값이 어긋나면 저장이 통째로 실패하므로
+//   여기서 먼저 걸러 'own' 으로 떨어뜨린다.
+const PRODUCT_CHANNELS = ['own', 'coupang', 'naver', 'cafe24', 'thegift', 'etc'];
+
 async function upsertProductSettings(productId, data) {
   const existing = await getProductSettings(productId);
+  // 채널은 넘어온 경우에만 손댄다 — 안 보낸 필드를 임의로 'own' 으로 덮으면
+  // 다른 화면에서 부분 저장할 때 쿠팡 상품이 조용히 자사로 바뀐다.
+  if ('sales_channel' in data && !PRODUCT_CHANNELS.includes(data.sales_channel)) {
+    data = { ...data, sales_channel: 'own' };
+  }
 
   if (existing) {
     if (USE_SUPABASE) {
@@ -278,6 +288,7 @@ async function upsertProductSettings(productId, data) {
     canonical_display_name: data.canonical_display_name ?? null, // NULL 이면 product_name 사용
     custom_guide_text: data.custom_guide_text ?? null,           // 고객 order-info STEP1 안내 (migration 034)
     custom_guide_title: data.custom_guide_title ?? null,         // 안내 박스 타이틀 (migration 035)
+    sales_channel: PRODUCT_CHANNELS.includes(data.sales_channel) ? data.sales_channel : 'own', // migration 053
   };
 
   if (USE_SUPABASE) return sbInsert('bg_product_settings', newSetting);
@@ -2153,6 +2164,7 @@ module.exports = {
   createSticker,
   updateSticker,
   deleteSticker,
+  PRODUCT_CHANNELS,
   getAllProductSettings,
   getProductSettings,
   upsertProductSettings,

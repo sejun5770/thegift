@@ -2411,6 +2411,40 @@ nav.nav-loading a[href^="#"] {
       </div>
     </div>
   </div>
+  <!-- BOM 그룹 생성/수정 모달 (052) -->
+  <div id="bomgroup-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1100;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto">
+    <div class="card" style="max-width:720px;width:100%;padding:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <strong style="font-size:14px">🧩 <span id="bg-modal-title">상품 그룹 만들기</span></strong>
+        <button class="btn" style="padding:4px 10px;font-size:12px" onclick="closeBomGroupModal()">닫기</button>
+      </div>
+
+      <label style="display:block;font-size:12px;margin-bottom:4px">
+        <span style="color:var(--gray-500);font-weight:600">판매코드</span>
+        <span style="color:var(--gray-400);font-size:11px">— 콤마 또는 줄바꿈으로 여러 개. 변형코드(_A/_B/_C)는 모두 넣어야 판매분이 빠지지 않습니다</span>
+      </label>
+      <textarea id="bg-parent-codes" rows="3" placeholder="TGJSD1001_A, TGJSD1001_B, TGJSD1001_C"
+        style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px;font-family:monospace;box-sizing:border-box"></textarea>
+      <div id="bg-parent-hint" style="font-size:11px;color:var(--gray-500);margin:4px 0 12px"></div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-size:12px;font-weight:600;color:var(--gray-500)">구성품</span>
+        <button class="btn" style="padding:3px 10px;font-size:11px" onclick="_bgAddCompRow()">＋ 구성품 추가</button>
+      </div>
+      <div id="bg-comp-rows" style="margin-bottom:10px"></div>
+
+      <div style="font-size:11px;color:var(--gray-500);line-height:1.6;background:var(--gray-50);padding:8px 10px;border-radius:6px;margin-bottom:10px">
+        판매코드 하나당 구성품이 각각 소요수량만큼 빠집니다. 저장하면 이 그룹의 기존 구성이 <b>여기 입력한 내용으로 대체</b>됩니다 —
+        판매코드나 구성품을 빼는 것도 그대로 반영됩니다.
+      </div>
+
+      <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center">
+        <span id="bg-modal-msg" style="font-size:12px;color:#dc2626;flex:1"></span>
+        <button class="btn btn-primary" style="padding:6px 16px;font-size:12px" onclick="saveBomGroup()">저장</button>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ========== 바른손더기프트 주문 관리 ========== -->
@@ -2618,6 +2652,10 @@ nav.nav-loading a[href^="#"] {
     <button class="btn" id="bg-p-tab-consigned" onclick="setBgProductTab('consigned')" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">
       🤝 위탁상품 <span id="bg-p-tab-cnt-consigned" style="font-size:11px;color:var(--gray-400);font-weight:400">(0)</span>
     </button>
+    <!-- 판매채널 탭 (migration 053) — 매입형태와는 다른 축이라 구분선을 둔다.
+         등록된 상품이 있는 채널만 뜬다 (자사 전용이면 이 영역 자체가 비어 있음). -->
+    <span id="bg-p-tab-channel-sep" style="display:none;align-self:center;color:var(--gray-300);margin:0 4px">|</span>
+    <span id="bg-p-tab-channels" style="display:flex;gap:6px"></span>
   </div>
 
   <!-- 목록 -->
@@ -2669,10 +2707,21 @@ nav.nav-loading a[href^="#"] {
           <input type="text" id="bg-p-meta-name" placeholder="예: 비타민 답례품 30구" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 130px;gap:8px">
+      <div style="display:grid;grid-template-columns:1fr 130px 130px;gap:8px">
         <div>
           <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:4px">브랜드</label>
           <input type="text" id="bg-p-meta-brand" placeholder="예: 바른손" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:4px" title="이 상품 설정이 어느 판매채널용인지. 같은 물건이라도 채널별로 스티커코드가 다르면 코드를 나눠 등록하고 채널을 지정합니다.">판매채널</label>
+          <select id="bg-p-meta-channel" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
+            <option value="own">자사</option>
+            <option value="coupang">쿠팡</option>
+            <option value="naver">네이버</option>
+            <option value="cafe24">정수당</option>
+            <option value="thegift">더기프트</option>
+            <option value="etc">기타</option>
+          </select>
         </div>
         <div>
           <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:4px" title="고객 화면에 표시될 장식 형태 명칭 (스티커/띠지/라벨 등). 비워두면 '스티커' 가 적용됩니다.">장식 명칭</label>
@@ -3170,40 +3219,6 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <div id="uni-loading" style="text-align:center;padding:40px;color:var(--gray-400)">데이터를 불러오는 중입니다...</div>
-
-  <!-- BOM 그룹 생성/수정 모달 (052) -->
-  <div id="bomgroup-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1100;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto">
-    <div class="card" style="max-width:720px;width:100%;padding:16px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <strong style="font-size:14px">🧩 <span id="bg-modal-title">상품 그룹 만들기</span></strong>
-        <button class="btn" style="padding:4px 10px;font-size:12px" onclick="closeBomGroupModal()">닫기</button>
-      </div>
-
-      <label style="display:block;font-size:12px;margin-bottom:4px">
-        <span style="color:var(--gray-500);font-weight:600">판매코드</span>
-        <span style="color:var(--gray-400);font-size:11px">— 콤마 또는 줄바꿈으로 여러 개. 변형코드(_A/_B/_C)는 모두 넣어야 판매분이 빠지지 않습니다</span>
-      </label>
-      <textarea id="bg-parent-codes" rows="3" placeholder="TGJSD1001_A, TGJSD1001_B, TGJSD1001_C"
-        style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px;font-family:monospace;box-sizing:border-box"></textarea>
-      <div id="bg-parent-hint" style="font-size:11px;color:var(--gray-500);margin:4px 0 12px"></div>
-
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <span style="font-size:12px;font-weight:600;color:var(--gray-500)">구성품</span>
-        <button class="btn" style="padding:3px 10px;font-size:11px" onclick="_bgAddCompRow()">＋ 구성품 추가</button>
-      </div>
-      <div id="bg-comp-rows" style="margin-bottom:10px"></div>
-
-      <div style="font-size:11px;color:var(--gray-500);line-height:1.6;background:var(--gray-50);padding:8px 10px;border-radius:6px;margin-bottom:10px">
-        판매코드 하나당 구성품이 각각 소요수량만큼 빠집니다. 저장하면 이 그룹의 기존 구성이 <b>여기 입력한 내용으로 대체</b>됩니다 —
-        판매코드나 구성품을 빼는 것도 그대로 반영됩니다.
-      </div>
-
-      <div style="display:flex;gap:6px;justify-content:flex-end;align-items:center">
-        <span id="bg-modal-msg" style="font-size:12px;color:#dc2626;flex:1"></span>
-        <button class="btn btn-primary" style="padding:6px 16px;font-size:12px" onclick="saveBomGroup()">저장</button>
-      </div>
-    </div>
-  </div>
 
   <!-- 사고건 등록/수정 모달 -->
   <div id="incident-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1100;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto">
@@ -11977,13 +11992,23 @@ async function deleteBgSticker(id, name, code) {
 let bgProductSettings = [];
 let bgShippingGroupsCache = []; // 출고일 그룹 목록 캐시 (목록 렌더 시 그룹명 lookup 용)
 
-// 상품설정 탭 상태 — 'all' | 'owned' (자체매입) | 'consigned' (위탁)
+// 상품설정 탭 상태
+//   매입형태: 'all' | 'owned' (자체매입) | 'consigned' (위탁)
+//   판매채널: 'ch:coupang' 등 — 매입형태와 다른 축이라 접두로 구분한다 (migration 053)
 let _bgProductTab = 'all';
+
+// DB CHECK 제약과 같은 목록이어야 한다 (053)
+const PRODUCT_CHANNEL_LABEL = {
+  own: '자사', coupang: '쿠팡', naver: '네이버', cafe24: '정수당', thegift: '더기프트', etc: '기타',
+};
+const PRODUCT_CHANNEL_ICON = {
+  own: '🏠', coupang: '🚀', naver: '🟢', cafe24: '🍯', thegift: '🎁', etc: '📦',
+};
+const _psChannel = s => (PRODUCT_CHANNEL_LABEL[s?.sales_channel] ? s.sales_channel : 'own');
 
 function setBgProductTab(tab) {
   _bgProductTab = tab;
-  // 탭 스타일 갱신
-  ['all','owned','consigned'].forEach(t => {
+  ['all', 'owned', 'consigned'].forEach(t => {
     const btn = document.getElementById('bg-p-tab-' + t);
     if (!btn) return;
     const active = (t === tab);
@@ -11991,7 +12016,38 @@ function setBgProductTab(tab) {
     btn.style.color = active ? 'var(--primary)' : 'var(--gray-500)';
     btn.style.fontWeight = active ? '600' : '500';
   });
+  document.querySelectorAll('#bg-p-tab-channels button').forEach(btn => {
+    const active = (btn.dataset.chTab === tab);
+    btn.style.borderBottom = active ? '2px solid var(--primary)' : '2px solid transparent';
+    btn.style.color = active ? 'var(--primary)' : 'var(--gray-500)';
+    btn.style.fontWeight = active ? '600' : '500';
+  });
   renderBgProducts();
+}
+
+/** 채널 탭 — 등록된 상품이 있는 채널만 만든다 (자사만 쓰면 아예 안 뜬다) */
+function _bgRenderChannelTabs() {
+  const wrap = document.getElementById('bg-p-tab-channels');
+  const sep = document.getElementById('bg-p-tab-channel-sep');
+  if (!wrap) return;
+  const counts = new Map();
+  (bgProductSettings || []).forEach(s => {
+    const ch = _psChannel(s);
+    counts.set(ch, (counts.get(ch) || 0) + 1);
+  });
+  // 자사만 있으면 채널 탭이 의미 없다 — 자사 외 채널이 하나라도 있을 때만 노출
+  const others = [...counts.keys()].filter(c => c !== 'own');
+  if (!others.length) { wrap.innerHTML = ''; if (sep) sep.style.display = 'none'; return; }
+  if (sep) sep.style.display = '';
+  const order = ['own', 'coupang', 'naver', 'cafe24', 'thegift', 'etc'].filter(c => counts.has(c));
+  wrap.innerHTML = order.map(ch => {
+    const tab = 'ch:' + ch;
+    const active = _bgProductTab === tab;
+    return `<button class="btn" data-ch-tab="${tab}" onclick="setBgProductTab('${tab}')"
+      style="border:0;border-bottom:2px solid ${active ? 'var(--primary)' : 'transparent'};border-radius:0;color:${active ? 'var(--primary)' : 'var(--gray-500)'};font-weight:${active ? '600' : '500'};padding:8px 14px;background:transparent">
+      ${PRODUCT_CHANNEL_ICON[ch]} ${PRODUCT_CHANNEL_LABEL[ch]} <span style="font-size:11px;color:var(--gray-400);font-weight:400">(${counts.get(ch)})</span>
+    </button>`;
+  }).join('');
 }
 
 async function loadBgProducts() {
@@ -12021,20 +12077,26 @@ function renderBgProducts() {
   setCnt('bg-p-tab-cnt-all', allRows.length);
   setCnt('bg-p-tab-cnt-owned', ownedRows.length);
   setCnt('bg-p-tab-cnt-consigned', consignedRows.length);
-  // 현재 탭에 따라 표시 행
-  const rows = _bgProductTab === 'owned' ? ownedRows : (_bgProductTab === 'consigned' ? consignedRows : allRows);
+  _bgRenderChannelTabs();
+  // 현재 탭에 따라 표시 행 — 'ch:' 접두면 판매채널 탭 (053)
+  const chTab = _bgProductTab.startsWith('ch:') ? _bgProductTab.slice(3) : null;
+  const rows = chTab ? allRows.filter(s => _psChannel(s) === chTab)
+    : (_bgProductTab === 'owned' ? ownedRows : (_bgProductTab === 'consigned' ? consignedRows : allRows));
   // 위탁 컬럼 (거래처/수수료율) 노출 — 위탁탭 또는 전체탭에서 노출. 자체매입 탭에선 숨김.
   const showVendorCols = (_bgProductTab !== 'owned');
   document.querySelectorAll('.bg-p-col-vendor').forEach(th => { th.style.display = showVendorCols ? '' : 'none'; });
   // 타이틀
   const titleEl = document.getElementById('bg-product-list-title');
   if (titleEl) {
-    titleEl.textContent = _bgProductTab === 'owned' ? '🏭 자체매입 상품 목록'
-      : (_bgProductTab === 'consigned' ? '🤝 위탁 상품 목록' : '📋 전체 상품 설정 목록');
+    titleEl.textContent = chTab
+      ? `${PRODUCT_CHANNEL_ICON[chTab]} ${PRODUCT_CHANNEL_LABEL[chTab]} 상품 목록`
+      : (_bgProductTab === 'owned' ? '🏭 자체매입 상품 목록'
+        : (_bgProductTab === 'consigned' ? '🤝 위탁 상품 목록' : '📋 전체 상품 설정 목록'));
   }
   if (!rows.length) { tbody.innerHTML = ''; empty.classList.remove('hidden');
-    empty.textContent = _bgProductTab === 'owned' ? '자체매입 상품이 없습니다.'
-      : (_bgProductTab === 'consigned' ? '위탁 상품이 없습니다.' : '등록된 상품 설정이 없습니다.');
+    empty.textContent = chTab ? `${PRODUCT_CHANNEL_LABEL[chTab]} 채널 상품이 없습니다.`
+      : (_bgProductTab === 'owned' ? '자체매입 상품이 없습니다.'
+      : (_bgProductTab === 'consigned' ? '위탁 상품이 없습니다.' : '등록된 상품 설정이 없습니다.'));
     return;
   }
   empty.classList.add('hidden');
@@ -12065,8 +12127,13 @@ function renderBgProducts() {
         vendorCells = `<td><span style="color:var(--gray-400);font-size:11px">🏭 자체매입</span></td><td style="text-align:right;color:var(--gray-300)">-</td>`;
       }
     }
+    // 판매채널 배지 (053) — 자사는 표시하지 않는다 (대부분이라 배지가 잡음이 된다)
+    const ch = _psChannel(s);
+    const chBadge = ch === 'own' ? ''
+      : `<span style="display:inline-block;margin-left:6px;padding:1px 7px;background:#eef2ff;color:#4338ca;border-radius:10px;font-size:10px;font-weight:600"
+           title="${escapeHtml(PRODUCT_CHANNEL_LABEL[ch])} 채널 전용 상품 — 스티커 등 설정을 따로 관리합니다">${PRODUCT_CHANNEL_ICON[ch]} ${escapeHtml(PRODUCT_CHANNEL_LABEL[ch])}</span>`;
     return `<tr>
-      <td style="font-family:monospace;font-size:11px">${s.product_id}</td>
+      <td style="font-family:monospace;font-size:11px">${s.product_id}${chBadge}</td>
       <td style="font-size:12px">${s.brand || '-'}</td>
       <td style="font-size:12px;font-weight:500">${s.product_name || '-'}</td>
       <td>${groupBadge}</td>
@@ -12125,6 +12192,9 @@ async function openBgProductForm(productId) {
     }
     if (brandInput) brandInput.value = s?.brand || '';
     if (nameInput) nameInput.value = s?.product_name || '';
+    // 판매채널 (053) — 미지정이면 자사
+    const chSel = document.getElementById('bg-p-meta-channel');
+    if (chSel) chSel.value = _psChannel(s);
     // 장식 명칭 (decoration_label) — 비어있으면 placeholder '스티커' 그대로 보임
     const decoInput = document.getElementById('bg-p-meta-deco-label');
     if (decoInput) decoInput.value = s?.decoration_label || '';
@@ -12635,6 +12705,7 @@ async function saveBgProduct() {
   // 2) 메타데이터 (브랜드/제품명)
   const brand = (document.getElementById('bg-p-meta-brand')?.value || '').trim();
   const productName = (document.getElementById('bg-p-meta-name')?.value || '').trim();
+  const salesChannel = document.getElementById('bg-p-meta-channel')?.value || 'own';
 
   const stickerIds = [..._bgSelectedStickerIds];
 
@@ -12709,6 +12780,7 @@ async function saveBgProduct() {
   const body = {
     brand: brand || null,
     product_name: productName || null,
+    sales_channel: salesChannel,           // migration 053
     available_sticker_ids: stickerIds,
     available_box_options: boxOptions,
     custom_options: customOptions,
