@@ -415,7 +415,18 @@ async function syncRecent({ daysBack = 7 } = {}) {
  * 반환:
  *   { total, processed, offset_next, remaining, updated, no_change, failed, details }
  */
-async function backfillConfirmedAt({ offset = 0, limit = 100, includeAllStatus = false, alsoUpdateStatus = false } = {}) {
+/**
+ * @param {string} opts.scope 대상 범위.
+ *   'decided'   — 우리 DB 가 이미 구매확정으로 아는 것만 (좁다)
+ *   'shippable' — 배송중/배송완료/구매확정 (기본). 시스템 자동 구매확정을 잡으려면 이게 필요하다.
+ *   'all'       — 취소·반품·교환 빼고 전부
+ *
+ *   왜 'shippable' 이 기본인가: 배송완료 뒤 한참 지나 네이버가 자동으로 구매확정을 건다
+ *   (배송완료 07-29 → 자동확정 08-06 같은 식). 그때쯤이면 동기화 기간(최근 7일)이 그
+ *   주문을 이미 지나쳐 우리 DB 상태는 '배송완료' 로 멈춰 있다. 'decided' 로 좁히면
+ *   그 주문들이 대상에서 통째로 빠져 구매확정일이 영영 비어 있게 된다 (2026-08-10 확인).
+ */
+async function backfillConfirmedAt({ offset = 0, limit = 100, includeAllStatus = false, alsoUpdateStatus = false, scope = 'shippable' } = {}) {
   if (!store.USE_SUPABASE) return { error: 'Supabase 미설정' };
   if (!api.isConfigured()) return { error: 'Naver API 키 미설정' };
 
@@ -426,9 +437,12 @@ async function backfillConfirmedAt({ offset = 0, limit = 100, includeAllStatus =
   //      DELIVERED 로 남아있음) 를 잡기 위해 사용.
   const REST = `${process.env.SUPABASE_URL}/rest/v1`;
   const hdr = { apikey: process.env.SUPABASE_ANON_KEY, Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}` };
-  const statusFilter = includeAllStatus
+  const effScope = includeAllStatus ? 'all' : scope;
+  const statusFilter = effScope === 'all'
     ? '&status=not.in.(CANCELED,RETURNED,EXCHANGED)'
-    : '&status=eq.PURCHASE_DECIDED';
+    : (effScope === 'decided'
+      ? '&status=eq.PURCHASE_DECIDED'
+      : '&status=in.(DELIVERING,DELIVERED,PURCHASE_DECIDED)');
   const url = `${REST}/naver_orders?select=product_order_id,order_id,store_id,confirmed_at,status${statusFilter}&confirmed_at=is.null&order=synced_at.asc&limit=${limit}&offset=${offset}`;
   const listRes = await fetch(url, { headers: hdr });
   if (!listRes.ok) return { error: `Supabase list [${listRes.status}]: ${(await listRes.text()).slice(0, 200)}` };

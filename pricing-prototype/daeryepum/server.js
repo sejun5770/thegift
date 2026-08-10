@@ -11274,6 +11274,7 @@ const server = http.createServer(async (req, res) => {
         data = await naverSync.backfillConfirmedAt({
           offset: parseInt(body.offset) || 0,
           limit: parseInt(body.limit) || 100,
+          scope: body.scope || 'shippable',             // 기본: 배송중/배송완료/구매확정
           includeAllStatus: !!body.include_all_status,   // true 이면 취소 제외 전체 대상
           alsoUpdateStatus: !!body.also_update_status,   // true 이면 detail 응답 status 로 우리 DB 도 정정
         });

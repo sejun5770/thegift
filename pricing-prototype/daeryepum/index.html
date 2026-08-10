@@ -4938,6 +4938,9 @@ async function backfillNaverConfirmedAt(btn) {
   if (!confirm([
     '구매확정일이 비어 있는 네이버 주문을 상세 조회로 채웁니다.',
     '',
+    '· 배송중·배송완료·구매확정 주문이 대상입니다',
+    '  (네이버가 배송완료 한참 뒤 자동으로 구매확정을 걸기 때문에,',
+    '   우리 DB 가 배송완료로 멈춰 있는 주문까지 봐야 합니다)',
     '· 100건씩 끊어 끝까지 돌립니다 — 건수가 많으면 시간이 걸립니다',
     '· 이미 값이 있는 주문은 건너뜁니다',
     '· 상태가 낡은 주문은 실제 상태로 함께 정정합니다',
@@ -4953,7 +4956,7 @@ async function backfillNaverConfirmedAt(btn) {
       btn.innerHTML = `⏳ 채우는 중… ${fmtNum(total.updated)}건`;
       const res = await fetch(`${API}/api/naver/backfill-confirmed-at`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ offset, limit: 100, also_update_status: true }),
+        body: JSON.stringify({ offset, limit: 100, also_update_status: true, scope: 'shippable' }),
       });
       const d = await res.json();
       if (d.error) throw new Error(d.error);
@@ -4969,7 +4972,7 @@ async function backfillNaverConfirmedAt(btn) {
       '',
       `· 확인 ${fmtNum(total.processed)}건`,
       `· 채움 ${fmtNum(total.updated)}건`,
-      `· 변화 없음 ${fmtNum(total.no_change)}건 (네이버에도 확정일이 없음)`,
+      `· 변화 없음 ${fmtNum(total.no_change)}건 (아직 구매확정 전이거나 네이버에도 확정일이 없음)`,
       ...(total.failed ? [`· 실패 ${fmtNum(total.failed)}건`] : []),
       '',
       '조회를 다시 누르면 화면에 반영됩니다.',
