@@ -13977,6 +13977,59 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/coupang/rg-trace' && req.method === 'GET') {
+        // 진단용 — 한 주문이 왜 그 상태인지 근거를 한자리에 모아 보여준다.
+        //   "쿠팡창고에 왜 남아 있나" 같은 질문은 세 곳을 대조해야 답이 나온다:
+        //   주문 행(상태) / 정산 리포트 라인(배송완료일) / 주문정보(워크플로우 시각).
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const oid = String(parsed.query.order_id || '').trim();
+        if (!oid) {
+          data = { error: 'order_id 를 지정하세요 (예: ?order_id=32101311208245)' };
+        } else {
+          const pick = (o, keys) => Object.fromEntries(keys.map(k => [k, o?.[k] ?? null]));
+          const out = { order_id: oid };
+          try {
+            const rows = await require('./coupang/store').listCoupangOrders({ orderIds: [oid] });
+            out.coupang_orders = (rows || []).map(r => pick(r, [
+              'shipment_box_id', 'vendor_item_id', 'product_code', 'product_name',
+              'status', 'status_label', 'is_rocket_growth', 'ordered_at', 'paid_at', 'item_count',
+            ]));
+          } catch (e) { out.coupang_orders_error = e.message; }
+          try {
+            const lines = await require('./coupang/rfm-store').listAllOrderLines({});
+            out.report_lines = lines
+              .filter(l => String(l.order_id).trim() === oid)
+              .map(l => pick(l, [
+                'vendor_item_id', 'seller_product_id', 'paid_date', 'delivered_date',
+                'fulfillment', 'is_cancel', 'sales_qty', 'sales_amount', 'inout_fee', 'shipping_fee',
+              ]));
+          } catch (e) { out.report_lines_error = e.message; }
+          try {
+            const ci = await require('./barungift/workflow-store').getCustomerInfoForUpdate(`CP-${oid}`);
+            out.customer_info = ci ? {
+              order_id: ci._resolvedOrderId || `CP-${oid}`,
+              desired_ship_date: ci.desired_ship_date ?? null,
+              sticker_selections: (ci.sticker_selections || []).map(s => pick(s, [
+                'product_code', 'sticker_code',
+                'sticker_completed_at', 'printed_at', 'bound_at', 'packed_at', 'shipped_at',
+              ])),
+            } : null;
+          } catch (e) { out.customer_info_error = e.message; }
+          // 왜 창고에 남아 있는지 한 줄로 요약
+          const anyDelivered = (out.report_lines || []).some(l => l.delivered_date);
+          const anyShipped = (out.customer_info?.sticker_selections || []).some(s => s.shipped_at);
+          const orderDelivered = (out.coupang_orders || []).some(r => r.status === 'FINAL_DELIVERY');
+          out.diagnosis = anyShipped || orderDelivered
+            ? '출고완료로 잡혀야 정상 — 창고 탭에 있다면 화면 새로고침 필요'
+            : (anyDelivered
+              ? '리포트에 배송완료일은 있는데 반영 전 — [정보입력현황 연동] 을 돌리면 빠진다'
+              : ((out.report_lines || []).length
+                ? '리포트 라인은 있으나 배송완료일이 비었다 — 파일2(입출고비·배송비)에 이 주문이 아직 없다'
+                : '정산 리포트에 이 주문 라인 자체가 없다 — 그 기간 파일1/파일2 업로드 여부 확인'));
+          data = out;
+        }
       } else if (pathname === '/api/coupang/rg-orders/probe' && req.method === 'GET') {
         // 진단용 — RG 주문 API 응답 원본을 그대로 보여준다.
         //   문서만 보고 맞춘 필드명(orderId/vendorItemId/salesQuantity)이 실제와 다르거나,
