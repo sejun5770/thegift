@@ -1322,6 +1322,7 @@ nav.nav-loading a[href^="#"] {
     <button class="btn" onclick="downloadExcel()" style="padding:5px 12px;font-size:12px" title="선택된 주문 (없으면 전체) 을 엑셀로 다운로드">📥 엑셀</button>
     <button class="btn" id="ord-btn-coupang-sync" onclick="syncCoupangOrders(this)" style="padding:5px 12px;font-size:12px;background:#fef2f2;border-color:#fecaca" title="쿠팡 Wing API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟥 쿠팡 동기화 <span id="ord-coupang-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
     <button class="btn" id="ord-btn-naver-sync" onclick="syncNaverOrders(this)" style="padding:5px 12px;font-size:12px;background:#ecfdf5;border-color:#a7f3d0" title="네이버 커머스 API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟩 네이버 동기화 <span id="ord-naver-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
+    <button class="btn" id="ord-btn-naver-confirm" onclick="backfillNaverConfirmedAt(this)" style="padding:5px 12px;font-size:12px" title="구매확정일이 비어 있는 네이버 주문을 상세 조회로 채웁니다. 동기화 시점에 필드가 안 왔거나 그 전에 들어온 옛 주문을 소급 적용합니다.">📅 구매확정일 채우기</button>
     <button class="btn" id="ord-btn-cafe24-sync" onclick="syncCafe24Orders(this)" style="padding:5px 12px;font-size:12px;background:#fff7ed;border-color:#fed7aa" title="카페24(정수당) Admin API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟧 정수당 동기화 <span id="ord-cafe24-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
     <button class="btn" id="ord-btn-csv-upload" onclick="openBgCsvUpload()" style="padding:5px 12px;font-size:12px;background:#dbeafe;border-color:#93c5fd;color:#1e40af;display:none" title="바른손더기프트 퍼스트몰 원본 Excel(.xlsx) 또는 CSV 를 업로드하여 여러 주문을 한 번에 등록합니다">📤 CSV/Excel 업로드</button>
     <button class="btn" id="ord-btn-bhg-backfill" onclick="backfillBhgStubs()" style="padding:5px 12px;font-size:12px;background:#eef2ff;border-color:#c7d2fe;color:#4338ca;display:none" title="이전에 등록된 바른손더기프트 주문 중 정보입력현황 stub 이 없는 것을 일괄 생성 (스티커/희망출고일 정보 backfill)">🔧 stub 재생성</button>
@@ -4927,6 +4928,61 @@ async function refreshCoupangSyncMeta() {
 }
 
 /** 네이버 스마트스토어 주문 수동 동기화 — Commerce API → Supabase naver_orders upsert. */
+/**
+ * 네이버 구매확정일 소급 채우기.
+ *   서버는 한 번에 100건씩만 처리한다(상세 API 호출량 때문). 끝까지 자동으로 돌린다.
+ *   중간에 실패해도 앞서 채운 건 그대로 남는다 — 다시 눌러 이어서 하면 된다.
+ */
+async function backfillNaverConfirmedAt(btn) {
+  const NL = String.fromCharCode(10);
+  if (!confirm([
+    '구매확정일이 비어 있는 네이버 주문을 상세 조회로 채웁니다.',
+    '',
+    '· 100건씩 끊어 끝까지 돌립니다 — 건수가 많으면 시간이 걸립니다',
+    '· 이미 값이 있는 주문은 건너뜁니다',
+    '· 상태가 낡은 주문은 실제 상태로 함께 정정합니다',
+  ].join(NL))) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  const total = { processed: 0, updated: 0, no_change: 0, failed: 0 };
+  let offset = 0;
+  let rounds = 0;
+  try {
+    while (rounds < 200) {           // 안전장치 — 최대 2만 건
+      rounds++;
+      btn.innerHTML = `⏳ 채우는 중… ${fmtNum(total.updated)}건`;
+      const res = await fetch(`${API}/api/naver/backfill-confirmed-at`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ offset, limit: 100, also_update_status: true }),
+      });
+      const d = await res.json();
+      if (d.error) throw new Error(d.error);
+      total.processed += Number(d.processed) || 0;
+      total.updated += Number(d.updated) || 0;
+      total.no_change += Number(d.no_change) || 0;
+      total.failed += Number(d.failed) || 0;
+      if (!d.processed || !d.remaining) break;
+      offset = Number(d.offset_next) || (offset + 100);
+    }
+    alert([
+      '구매확정일 소급 적용이 끝났습니다.',
+      '',
+      `· 확인 ${fmtNum(total.processed)}건`,
+      `· 채움 ${fmtNum(total.updated)}건`,
+      `· 변화 없음 ${fmtNum(total.no_change)}건 (네이버에도 확정일이 없음)`,
+      ...(total.failed ? [`· 실패 ${fmtNum(total.failed)}건`] : []),
+      '',
+      '조회를 다시 누르면 화면에 반영됩니다.',
+    ].join(NL));
+    loadOrders();
+  } catch (e) {
+    alert(`구매확정일 채우기 실패: ${e.message}${NL}${NL}앞서 채운 건은 그대로 남아 있습니다. 다시 누르면 이어서 진행됩니다.`);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
 async function syncNaverOrders(btn) {
   if (!confirm('네이버 커머스 API 에서 최근 7일치 주문을 가져와 Supabase 에 저장합니다.\n동기화 후 조회 버튼을 다시 눌러야 화면이 갱신됩니다. 진행할까요?')) return;
   const origText = btn.innerHTML;

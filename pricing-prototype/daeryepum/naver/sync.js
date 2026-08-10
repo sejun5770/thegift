@@ -511,6 +511,23 @@ async function backfillConfirmedAt({ offset = 0, limit = 100, includeAllStatus =
   }
 
   result.processed = result.updated + result.no_change + result.failed;
+
+  // 다음 시작 위치 — 채워진 행은 confirmed_at 이 생겨 필터에서 빠진다.
+  //   offset 을 그냥 +limit 하면 그만큼을 건너뛰어 미처리 행이 남는다.
+  //   다시 걸릴 행은 '못 채운 것'(네이버에도 확정일 없음 + 실패)뿐이라 그만큼만 넘긴다.
+  result.offset_next = offset + result.no_change + result.failed;
+
+  // 남은 대상 수 — 이번 패스 반영 후 다시 센다. 호출측이 이 값으로 반복을 멈춘다.
+  //   (예전엔 0 으로 고정돼 있어 한 페이지만 돌고 끝났다)
+  try {
+    const cntUrl = `${REST}/naver_orders?select=product_order_id${statusFilter}&confirmed_at=is.null&limit=1`;
+    const cntRes = await fetch(cntUrl, { headers: { ...hdr, Prefer: 'count=exact' } });
+    const range = cntRes.headers.get('content-range');      // '0-0/123'
+    const left = range ? parseInt(String(range).split('/')[1], 10) : NaN;
+    if (Number.isFinite(left)) result.remaining = Math.max(0, left - result.offset_next);
+  } catch (e) {
+    console.warn('[naver backfill] 남은 건수 조회 실패:', e.message);
+  }
   return result;
 }
 
