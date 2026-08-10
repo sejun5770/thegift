@@ -172,8 +172,69 @@ async function syncRgOrders({ startDate, endDate, dryRun = false } = {}) {
     return out;
   }
 
-  const up = await store.upsertCoupangOrders(rows);
-  out.upserted = up.upserted || rows.length;
+  // 마켓플레이스 동기화로 이미 들어와 있는 주문인지 본다.
+  //   로켓그로스/마켓플레이스 동시 운영 상품은 양쪽 API 에 다 잡힌다. 그때 새 row 를 만들면
+  //   unique 키의 shipment_box_id 가 달라(0 vs 실제 박스ID) 같은 주문이 두 줄로 보이고,
+  //   로켓그로스 응답엔 수취인이 없어 한 줄만 고객 정보가 비는 모양이 된다.
+  //   같은 (주문, 옵션) 에 행이 여러 개일 수 있다 — 앞선 버전이 만든 쌍둥이가 그것이다.
+  const existingByPair = new Map();     // `${주문}|${옵션}` → row[]
+  const receiverByOrder = new Map();    // 주문 → 수취인 (형제 행에서 물려받는다)
+  try {
+    const ids = [...new Set(rows.map(r => r.coupang_order_id))];
+    for (let i = 0; i < ids.length; i += 200) {
+      for (const o of await store.listCoupangOrders({ orderIds: ids.slice(i, i + 200) })) {
+        const k = `${o.coupang_order_id}|${o.vendor_item_id}`;
+        if (!existingByPair.has(k)) existingByPair.set(k, []);
+        existingByPair.get(k).push(o);
+        if (o.recv_name && !receiverByOrder.has(String(o.coupang_order_id))) {
+          receiverByOrder.set(String(o.coupang_order_id), o);
+        }
+      }
+    }
+  } catch (e) { console.warn('[rg-orders] 기존 주문 조회 실패 (중복 방지 생략):', e.message); }
+
+  const toMark = [];
+  const toDedupe = [];
+  const toInsert = [];
+  for (const r of rows) {
+    const hits = existingByPair.get(`${r.coupang_order_id}|${r.vendor_item_id}`) || [];
+    // 마켓플레이스 원본 = 자리표시자(0) 가 아닌 행
+    const origin = hits.find(o => String(o.shipment_box_id) !== '0');
+    if (origin) {
+      // 이미 있는 주문 — 표시만 남긴다. 새로 만들면 수취인 없는 쌍둥이가 생긴다.
+      if (!origin.is_rocket_growth) {
+        toMark.push({ orderId: r.coupang_order_id, vendorItemId: r.vendor_item_id });
+      }
+      // 앞선 버전이 만든 쌍둥이가 남아 있으면 치운다
+      if (hits.some(o => String(o.shipment_box_id) === '0')) {
+        toDedupe.push({ orderId: r.coupang_order_id, vendorItemId: r.vendor_item_id });
+      }
+      continue;
+    }
+    // 같은 주문의 다른 품목이 마켓플레이스로 들어와 있으면 수취인을 물려받는다.
+    //   한 주문 안에서 한 줄만 고객 정보가 비는 것을 막는다.
+    const sib = receiverByOrder.get(String(r.coupang_order_id));
+    if (sib) {
+      r.recv_name = sib.recv_name; r.recv_hphone = sib.recv_hphone;
+      r.recv_address = sib.recv_address; r.recv_postal_code = sib.recv_postal_code;
+      r.recv_message = sib.recv_message;
+    }
+    toInsert.push(r);
+  }
+  out.markedExisting = toMark.length;
+  out.receiverInherited = toInsert.filter(r => r.recv_name).length;
+
+  const up = await store.upsertCoupangOrders(toInsert);
+  out.upserted = up.upserted || toInsert.length;
+  if (toMark.length) {
+    try { out.markedExisting = (await store.markRocketGrowth(toMark)).marked; }
+    catch (e) { console.warn('[rg-orders] 로켓그로스 표시 실패:', e.message); }
+  }
+  // 표시를 옮긴 뒤에 지운다 — 순서가 바뀌면 로켓그로스 표시가 사라진 채로 남는다
+  if (toDedupe.length) {
+    try { out.duplicatesRemoved = (await store.deleteRocketGrowthTwins(toDedupe)).deleted; }
+    catch (e) { console.warn('[rg-orders] 중복 행 정리 실패:', e.message); }
+  }
 
   // 로켓그로스 목록(coupang_rg_order_lines)에도 미리 띄운다 — 정산파일을 올리기 전에도
   //   "주문은 들어왔고 배송완료일은 아직 없다" 가 보여야 한다.

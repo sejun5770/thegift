@@ -116,6 +116,64 @@ async function listCoupangOrders({ startStr, endStr, byPaid = false, orderIds, e
 }
 
 /**
+ * 이미 있는 주문 row 에 로켓그로스 표시만 남긴다 (062).
+ *
+ * 로켓그로스 주문이 마켓플레이스 동기화로도 들어와 있는 경우가 있다(동시 운영 상품).
+ * 그때 로켓그로스 쪽으로 새 row 를 만들면 unique 키의 shipment_box_id 가 달라
+ * 같은 주문이 두 줄로 보인다. 게다가 로켓그로스 응답에는 수취인이 없어
+ * 한 줄은 고객 정보가 있고 한 줄은 비는 이상한 모양이 된다.
+ *
+ * 그래서 새로 만들지 않고 기존 row 에 표시만 남긴다 — 수취인·상태를 지키기 위해서다.
+ */
+async function markRocketGrowth(pairs) {
+  if (!USE_SUPABASE || !pairs.length) return { marked: 0 };
+  let marked = 0;
+  for (let i = 0; i < pairs.length; i += 8) {
+    await Promise.all(pairs.slice(i, i + 8).map(async ({ orderId, vendorItemId }) => {
+      const q = `coupang_order_id=eq.${encodeURIComponent(orderId)}`
+        + `&vendor_item_id=eq.${encodeURIComponent(vendorItemId)}`;
+      const res = await fetch(`${REST_BASE}/coupang_orders?${q}`, {
+        method: 'PATCH',
+        headers: { ...HEADERS, Prefer: 'return=minimal' },
+        body: JSON.stringify({ is_rocket_growth: true }),
+      });
+      if (res.ok) marked++;
+      else console.warn(`[coupang store] 로켓그로스 표시 실패 ${orderId}/${vendorItemId}: ${res.status}`);
+    }));
+  }
+  return { marked };
+}
+
+/**
+ * 앞선 버전이 만든 로켓그로스 쌍둥이 행 삭제.
+ *   shipment_box_id=0 은 로켓그로스 수집이 붙인 자리표시자다. 같은 (주문, 옵션) 에
+ *   실제 박스ID 를 가진 마켓플레이스 행이 따로 있으면 그쪽이 원본이고 이건 중복이다.
+ *   조건을 셋 다 걸어 마켓플레이스 행을 지울 여지를 없앤다.
+ */
+async function deleteRocketGrowthTwins(pairs) {
+  if (!USE_SUPABASE || !pairs.length) return { deleted: 0 };
+  let deleted = 0;
+  for (let i = 0; i < pairs.length; i += 8) {
+    await Promise.all(pairs.slice(i, i + 8).map(async ({ orderId, vendorItemId }) => {
+      const q = `coupang_order_id=eq.${encodeURIComponent(orderId)}`
+        + `&vendor_item_id=eq.${encodeURIComponent(vendorItemId)}`
+        + `&shipment_box_id=eq.0&is_rocket_growth=is.true`;
+      const res = await fetch(`${REST_BASE}/coupang_orders?${q}`, {
+        method: 'DELETE',
+        headers: { ...HEADERS, Prefer: 'return=representation' },
+      });
+      if (!res.ok) {
+        console.warn(`[coupang store] 쌍둥이 삭제 실패 ${orderId}/${vendorItemId}: ${res.status}`);
+        return;
+      }
+      const rows = await res.json().catch(() => []);
+      deleted += Array.isArray(rows) ? rows.length : 0;
+    }));
+  }
+  return { deleted };
+}
+
+/**
  * 쿠팡 주문용 stub customer_info 일괄 upsert — 정보입력현황 자동 입력완료 처리용.
  *   order_id 'CP-{coupang_order_id}' 로 bg_order_customer_info 에 빈 row 생성.
  *   이미 있으면 skip (processed_at 등 사용자 설정 상태 보존).
@@ -197,6 +255,8 @@ module.exports = {
   upsertCoupangStubCustomerInfos,
   patchCoupangStubEnrichment,
   listCoupangOrders,
+  markRocketGrowth,
+  deleteRocketGrowthTwins,
   getSyncState,
   updateSyncState,
 };

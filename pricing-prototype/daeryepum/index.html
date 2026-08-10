@@ -17039,6 +17039,8 @@ async function syncRgOrders() {
       `· 배송완료 ${fmtNum(d.delivered)}행 / 취소 ${fmtNum(d.cancelled || 0)}행`,
       `· 등록상품ID 확보 ${fmtNum(d.withSellerProductId)}행 (리포트에서 보강)`,
       `· 매출 목록에 선반영 ${fmtNum(d.linesCreated || 0)}행 (정산 전이라 금액은 비어 있음)`,
+      ...(d.markedExisting ? [`· 이미 있던 주문에 로켓그로스 표시 ${fmtNum(d.markedExisting)}건`] : []),
+      ...(d.duplicatesRemoved ? [`· 중복으로 만들어졌던 행 ${fmtNum(d.duplicatesRemoved)}건 정리`] : []),
       ...(d.shipDateCleared ? [`· 잘못 들어갔던 희망출고일 ${fmtNum(d.shipDateCleared)}건 정리`] : []),
       ...(d.cancelUnknown
         ? ['', `⚠️ ${fmtNum(d.cancelUnknown)}행은 정산 리포트에 대응 라인이 없어`,
