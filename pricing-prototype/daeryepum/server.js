@@ -14059,6 +14059,20 @@ const server = http.createServer(async (req, res) => {
             endDate: body.end_date,
             dryRun: body.dry_run === true,
           });
+          // 주문을 넣었으면 단계까지 맞춘다 — 사람이 버튼을 하나 더 누르게 할 이유가 없다.
+          if (body.dry_run !== true) {
+            try {
+              data.workflow = await require('./coupang/rg-workflow').syncRocketGrowthWorkflow({
+                dryRun: false,
+                startDate: body.start_date,
+                endDate: body.end_date,
+                by: `rg-sync:${session?.email || 'system'}`,
+              });
+            } catch (e) {
+              console.warn('[rg-orders sync] 워크플로우 연동 실패:', e.message);
+              data.workflow_error = e.message;
+            }
+          }
         } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: e.message }));

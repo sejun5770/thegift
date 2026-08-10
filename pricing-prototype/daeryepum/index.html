@@ -17004,7 +17004,9 @@ async function syncRgOrders() {
     const chunks = _monthChunks(from, to);
     const d = { fetched: 0, lines: 0, orders: 0, rows: 0, newOrders: 0, preserved: 0,
       delivered: 0, cancelled: 0, withSellerProductId: 0, linesCreated: 0,
-      cancelUnknown: 0, windows: 0, pages: 0 };
+      cancelUnknown: 0, windows: 0, pages: 0,
+      markedExisting: 0, duplicatesRemoved: 0, shipDateCleared: 0,
+      wfShipped: 0, wfPacked: 0 };
     for (let i = 0; i < chunks.length; i++) {
       const [cs, ce] = chunks[i];
       if (btn) btn.textContent = `가져오는 중… (${i + 1}/${chunks.length}) ${cs.slice(0, 7)}`;
@@ -17015,6 +17017,10 @@ async function syncRgOrders() {
       const part = await r.json();
       if (part.error) throw new Error(`${cs}~${ce}: ${part.error}`);
       for (const k of Object.keys(d)) d[k] += Number(part[k]) || 0;
+      // 단계 연동 결과는 한 겹 안쪽이라 따로 더한다
+      d.wfShipped += Number(part.workflow?.toShipped) || 0;
+      d.wfPacked += Number(part.workflow?.toPacked) || 0;
+      if (part.workflow) d.hasWorkflow = true;
     }
     if (!d.fetched) {
       // 0건이면 대개 필드명이나 API 권한 문제다 — 원인을 볼 수 있는 곳을 알려준다
@@ -17047,7 +17053,9 @@ async function syncRgOrders() {
            '   취소 여부를 확인할 수 없습니다. 그 기간 리포트를 올리면 정정됩니다.']
         : []),
       '',
-      '이어서 [정보입력현황 연동] 을 눌러 단계를 맞추세요.',
+      ...(d.hasWorkflow
+        ? ['', `정보입력현황 단계도 함께 맞췄습니다 — 출고완료 ${fmtNum(d.wfShipped)}건 · 포장완료 ${fmtNum(d.wfPacked)}건`]
+        : ['', '이어서 [정보입력현황 연동] 을 눌러 단계를 맞추세요.']),
     ].join(NL));
   } catch (e) {
     alert(`주문 가져오기 실패: ${e.message}`);
@@ -18265,7 +18273,11 @@ function renderBgUnified() {
     r._stage = computeRowStage(r.order, r.ci, r.sel);
     // 로켓그로스는 쿠팡이 포장·출고까지 한다 — 우리 작업 대기열에 섞이면 안 된다.
     //   배송완료 전이면 '쿠팡창고' 로 빼서 포장완료 탭의 출고처리 대상과 구분한다.
-    if (r.order?.is_rocket_growth && r._stage !== 'shipped') r._stage = 'cp_warehouse';
+    if (r.order?.is_rocket_growth && r._stage !== 'shipped') {
+      // 주문 자체가 배송완료면 창고에 없다. 워크플로우 시각(shipped_at)은 정산 리포트를
+      //   올리고 연동을 돌려야 찍히는데, 그 전에도 배송된 건이 창고 탭에 남으면 안 된다.
+      r._stage = r.order.status === 'FINAL_DELIVERY' ? 'shipped' : 'cp_warehouse';
+    }
   });
 
   // 탭 별 카운트 (row 기준) — 'all' 은 stage 무관 전체
