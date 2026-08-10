@@ -366,4 +366,59 @@ async function syncRgOrders({ startDate, endDate, dryRun = false } = {}) {
   return out;
 }
 
-module.exports = { syncRgOrders, buildUnitMap, kstNoon };
+/**
+ * 정산 리포트 → 주문 상태 반영.
+ *
+ * 주문 상태(취소·배송완료)는 로켓그로스 주문을 수집할 때만 정해졌다. 그래서 리포트를
+ * 나중에 올리거나 수집 기간이 그 주문을 안 덮으면, 취소된 주문이 '상품준비중' 으로
+ * 남아 '취소 제외' 필터에도 안 걸리고 쿠팡창고 탭에 계속 쌓였다 (2026-08-10 확인).
+ *
+ * 수집과 분리해 리포트만 보고 상태를 맞춘다 — 수집 기간과 무관하게 동작한다.
+ *
+ * @returns {{scanned, toCancel, toDelivered, updated}}
+ */
+async function syncRgOrderStatusFromReport({ startDate = null, endDate = null } = {}) {
+  const lines = await rfmStore.listAllOrderLines({ startDate, endDate });
+  const out = { scanned: lines.length, toCancel: 0, toDelivered: 0, updated: 0 };
+  if (!lines.length) return out;
+
+  // 리포트가 말하는 상태. 판단할 근거가 없으면 건드리지 않는다.
+  const wanted = new Map();
+  for (const l of lines) {
+    // 부분취소는 순액이 남는다 — 수량·금액이 0 이하로 상계된 것만 전체취소로 본다
+    const cancelled = !!l.is_cancel
+      && (Number(l.sales_qty) || 0) <= 0 && (Number(l.sales_amount) || 0) <= 0;
+    const status = cancelled ? 'CANCEL' : (l.delivered_date ? 'FINAL_DELIVERY' : null);
+    if (!status) continue;
+    wanted.set(`${String(l.order_id).trim()}|${String(l.vendor_item_id).trim()}`, {
+      orderId: String(l.order_id).trim(),
+      vendorItemId: String(l.vendor_item_id).trim(),
+      status,
+      statusLabel: status === 'CANCEL' ? '주문취소' : '배송완료',
+    });
+  }
+  if (!wanted.size) return out;
+
+  const ids = [...new Set([...wanted.values()].map(w => w.orderId))];
+  const todo = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    let rows = [];
+    try { rows = await store.listCoupangOrders({ orderIds: ids.slice(i, i + 200) }); }
+    catch (e) { console.warn('[rg-orders] 상태 반영 조회 실패:', e.message); continue; }
+    for (const r of rows) {
+      // 판매자배송은 마켓플레이스 동기화가 상태를 관리한다 — 덮지 않는다
+      if (!r.is_rocket_growth) continue;
+      const w = wanted.get(`${r.coupang_order_id}|${r.vendor_item_id}`);
+      if (!w || r.status === w.status) continue;
+      todo.push(w);
+    }
+  }
+  out.toCancel = todo.filter(t => t.status === 'CANCEL').length;
+  out.toDelivered = todo.filter(t => t.status === 'FINAL_DELIVERY').length;
+  if (todo.length) {
+    out.updated = (await store.updateCoupangItemStatus(todo)).updated;
+  }
+  return out;
+}
+
+module.exports = { syncRgOrders, syncRgOrderStatusFromReport, buildUnitMap, kstNoon };

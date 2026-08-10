@@ -145,6 +145,30 @@ async function markRocketGrowth(pairs) {
 }
 
 /**
+ * 품목 단위 상태 갱신 — (주문ID, 옵션ID) 한 쌍만 바꾼다.
+ *   updateCoupangOrderStatus 는 주문의 모든 행을 함께 바꾼다. 한 주문에서 한 옵션만
+ *   취소된 경우 그걸 쓰면 멀쩡한 옵션까지 취소로 죽는다.
+ */
+async function updateCoupangItemStatus(items) {
+  if (!USE_SUPABASE || !items.length) return { updated: 0 };
+  let updated = 0;
+  for (let i = 0; i < items.length; i += 8) {
+    await Promise.all(items.slice(i, i + 8).map(async ({ orderId, vendorItemId, status, statusLabel }) => {
+      const q = `coupang_order_id=eq.${encodeURIComponent(orderId)}`
+        + `&vendor_item_id=eq.${encodeURIComponent(vendorItemId)}`;
+      const res = await fetch(`${REST_BASE}/coupang_orders?${q}`, {
+        method: 'PATCH',
+        headers: { ...HEADERS, Prefer: 'return=minimal' },
+        body: JSON.stringify({ status, status_label: statusLabel, synced_at: new Date().toISOString() }),
+      });
+      if (res.ok) updated++;
+      else console.warn(`[coupang store] 상태 갱신 실패 ${orderId}/${vendorItemId}: ${res.status}`);
+    }));
+  }
+  return { updated };
+}
+
+/**
  * 앞선 버전이 만든 로켓그로스 쌍둥이 행 삭제.
  *   shipment_box_id=0 은 로켓그로스 수집이 붙인 자리표시자다. 같은 (주문, 옵션) 에
  *   실제 박스ID 를 가진 마켓플레이스 행이 따로 있으면 그쪽이 원본이고 이건 중복이다.
@@ -257,6 +281,7 @@ module.exports = {
   listCoupangOrders,
   markRocketGrowth,
   deleteRocketGrowthTwins,
+  updateCoupangItemStatus,
   getSyncState,
   updateSyncState,
 };

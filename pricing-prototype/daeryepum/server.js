@@ -11015,6 +11015,8 @@ const server = http.createServer(async (req, res) => {
               startDate: kstYmd(nowMs - days * 86400000),
               endDate: kstYmd(nowMs),
             });
+            data.rg_order_status = await require('./coupang/rg-orders')
+              .syncRgOrderStatusFromReport({});
           } catch (e) {
             console.warn('[coupang sync] 로켓그로스 주문 수집 실패:', e.message);
             data.rocket_growth = { error: e.message };
@@ -13938,6 +13940,16 @@ const server = http.createServer(async (req, res) => {
             } catch (e) {
               console.warn('[rfm/lines upload] 판매방식 분류 실패:', e.message);
             }
+            // 리포트가 말하는 취소·배송완료를 주문 상태에 반영한다.
+            //   수집 기간과 무관하게 돌아야 한다 — 그래서 수집과 분리해 여기서 부른다.
+            try {
+              data.order_status = await require('./coupang/rg-orders').syncRgOrderStatusFromReport({
+                startDate: parsed.dates?.from || null,
+                endDate: parsed.dates?.to || null,
+              });
+            } catch (e) {
+              console.warn('[rfm/lines upload] 주문 상태 반영 실패:', e.message);
+            }
             // 업로드된 내용이 곧 실제 진행 상태 — 정보입력현황 단계를 바로 맞춘다.
             //   실패해도 업로드 자체는 성공으로 둔다 (연동은 버튼으로 다시 돌릴 수 있다).
             try {
@@ -14114,6 +14126,12 @@ const server = http.createServer(async (req, res) => {
           });
           // 주문을 넣었으면 단계까지 맞춘다 — 사람이 버튼을 하나 더 누르게 할 이유가 없다.
           if (body.dry_run !== true) {
+            // 기간을 좁혀 수집했더라도 리포트가 아는 취소·배송완료는 전부 맞춘다
+            try {
+              data.order_status = await require('./coupang/rg-orders').syncRgOrderStatusFromReport({});
+            } catch (e) {
+              console.warn('[rg-orders sync] 주문 상태 반영 실패:', e.message);
+            }
             try {
               data.workflow = await require('./coupang/rg-workflow').syncRocketGrowthWorkflow({
                 dryRun: false,
