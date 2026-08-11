@@ -1896,7 +1896,10 @@ async function apiProductRanking(query = {}) {
   //   scope 'market:{채널}' : 외부 마켓 — 상품명이 마케팅 롱타이틀이라 자사와 표기가 달라 섞이지 않도록
   //                          분리하고, 채널(쿠팡/네이버/정수당)별로도 각각 나눈다.
   function addEntry(rawName, qty, revenue, channelLabel, scope = 'own', memberSpec = null) {
-    const display = scope === 'own'
+    // 자사 계열(own, own:*)은 같은 이름 정규화를 쓴다 — scope 를 나눴다고 표시명 규칙이
+    //   달라지면 같은 상품이 섹션마다 다른 이름으로 보인다.
+    const isOwn = scope === 'own' || String(scope).startsWith('own:');
+    const display = isOwn
       ? (normName(rawName) || cleanName(rawName) || String(rawName || '').trim())
       : (cleanName(rawName) || String(rawName || '').trim());
     if (!display) return;
@@ -2123,7 +2126,9 @@ async function apiProductRanking(query = {}) {
         const mSpec = it.product_code
           ? { site_name: '', match_type: 'code', match_value: it.product_code, label: it.product_name }
           : { site_name: '더기프트', match_type: 'name', match_value: it.product_name, label: it.product_name };
-        addEntry(gName || it.product_name, qty, amt, '더기프트', 'own', mSpec);
+        // 더기프트는 소스가 따로라(bg_manual_orders) 섹션도 나눈다 — 바른손카드와 섞이면
+        //   어느 채널에서 팔린 건지 구분이 안 된다 (운영 요청 2026-08-12).
+        addEntry(gName || it.product_name, qty, amt, '더기프트', 'own:thegift', mSpec);
       }
     }
   } catch (e) {

@@ -5575,7 +5575,13 @@ async function loadProductRanking() {
     // 자사 + 외부채널(쿠팡/네이버/정수당 각각) 섹션으로 분리 렌더.
     //   각 섹션 독립 순위·비중·WoW 변동. 판매 없는 채널은 섹션 자체를 만들지 않는다.
     const CH_STYLE = { '쿠팡': { icon: '🚀', color: '#ef4444' }, '쿠팡 로켓그로스': { icon: '🟥', color: '#991b1b' }, '네이버': { icon: '🟢', color: '#03c75a' }, '정수당': { icon: '🏬', color: '#d97706' } };
-    const GROUPS = [{ key: 'own', title: '🏢 자사 (바른손카드 + 더기프트)', color: '#3b82f6' }];
+    // 자사 섹션은 MSSQL(바른손카드 custom_order + 바른손몰 CUSTOM_ETC_ORDER),
+    //   더기프트는 소스가 따로(bg_manual_orders)라 별도 섹션으로 뗀다.
+    const GROUPS = [{ key: 'own', title: '🏢 자사 (바른손카드 · 바른손몰)', color: '#3b82f6' }];
+    // 판매가 있을 때만 섹션을 만든다 — 마켓 채널과 같은 규칙. 늘 비어 있으면 표만 길어진다.
+    if (allProducts.some(p => p.scope === 'own:thegift')) {
+      GROUPS.push({ key: 'own:thegift', title: '🎁 더기프트', color: '#8b5cf6' });
+    }
     // 데이터에 실제로 존재하는 마켓 채널만 섹션 추가 (매출/판매 없는 채널 제외)
     [...new Set(allProducts.map(p => p.scope).filter(s => String(s || '').startsWith('market:')))]
       .sort()
