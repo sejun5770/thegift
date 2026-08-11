@@ -176,8 +176,11 @@ nav a:hover{color:var(--gray-900)}
 /* pivot table sticky first column */
 #sales-table{border-collapse:separate;border-spacing:0}
 #sales-table th,#sales-table td{border-bottom:1px solid var(--gray-100)}
-#sales-table thead th{border-bottom:2px solid var(--gray-200);position:sticky;top:0;z-index:3}
+#sales-table thead th{border-bottom:2px solid var(--gray-200);position:sticky;top:0;z-index:3;
+  background:var(--gray-50);box-shadow:0 1px 0 var(--gray-200)}
+/* 첫 열(구분)은 가로·세로 양쪽으로 고정되므로 교차 지점이 위로 와야 한다 */
 #sales-table thead th:first-child{z-index:4}
+#sales-table-wrap{scrollbar-gutter:stable}
 /* CATEGORY TABS */
 .cat-tab{padding:10px 20px;border:none;background:transparent;cursor:pointer;font-size:14px;font-weight:500;color:var(--gray-500);border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s}
 .cat-tab:hover{color:var(--gray-900);background:var(--gray-50)}
@@ -359,7 +362,10 @@ nav.nav-loading a[href^="#"] {
       <button class="btn btn-sm btn-primary" id="tab-daily" onclick="setTableTab('daily')">일자별</button>
       <button class="btn btn-sm" id="tab-weekly" onclick="setTableTab('weekly')">주차별</button>
     </div>
-    <div class="card" style="padding:0;overflow-x:auto">
+    <!-- 세로로도 스크롤되는 영역이어야 날짜 헤더가 붙어 있는다.
+         overflow-x:auto 만 주면 overflow-y 가 auto 로 따라 바뀌어 이 div 가 스크롤 컨테이너가 되는데,
+         높이 제한이 없으면 실제로는 페이지가 스크롤돼 sticky 가 걸릴 자리가 없다. -->
+    <div class="card" id="sales-table-wrap" style="padding:0;overflow:auto;max-height:calc(100vh - 200px)">
       <table class="data-table" id="sales-table"></table>
     </div>
   </div>
@@ -5328,8 +5334,9 @@ function _prPeriod(anchorMs) {
   } else if (g === 'month') {
     start = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
     end = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
-  } else { // week — 월요일 시작
-    const dow = (anchor.getDay() + 6) % 7; // Mon=0 … Sun=6
+  } else { // week — 일요일 시작 (일~토)
+    // 대시보드 주차별·매출예측·주간리포트가 모두 일~토 기준이라 여기만 월~일이면 숫자가 어긋난다
+    const dow = anchor.getDay(); // Sun=0 … Sat=6
     start = new Date(anchor); start.setDate(anchor.getDate() - dow);
     end = new Date(start); end.setDate(start.getDate() + 6);
   }
@@ -10847,7 +10854,7 @@ function renderDailyTable(data, topProducts) {
     return `<th class="num" style="min-width:88px;white-space:nowrap;font-weight:500">${d.slice(5)} <span style="font-size:10px;color:${dowColor}">(${dowKor})</span></th>`;
   }).join('');
   const thead = `<tr>
-    <th style="${STICKY}background:var(--gray-50);min-width:80px">구분</th>
+    <th style="${STICKY}z-index:5;background:var(--gray-50);min-width:80px">구분</th><!-- 좌상단 교차 칸 — 가로·세로 양쪽으로 고정되므로 본문 고정열(z-index:2)보다 위여야 한다. STICKY 의 z-index 를 뒤에서 덮어쓴다 (인라인이 CSS 규칙을 이기므로 CSS 로는 못 올린다) -->
     ${dateThs}
     <th class="num" style="min-width:96px;background:#fef9c3;border-left:2px solid var(--gray-200)">합계</th>
   </tr>`;
@@ -11242,7 +11249,7 @@ function renderWeeklyTable(data, topProducts) {
     return `<th class="num" style="min-width:100px;white-space:nowrap;font-weight:500">${weekNo}주차<br><span style="font-size:10px;font-weight:400;color:var(--gray-500)">${fmtShortDate(sunday)}(일)~${fmtShortDate(saturday)}(토)</span></th>`;
   }).join('');
   const thead = `<tr>
-    <th style="${STICKY}background:var(--gray-50);min-width:80px">구분</th>
+    <th style="${STICKY}z-index:5;background:var(--gray-50);min-width:80px">구분</th><!-- 좌상단 교차 칸 — 가로·세로 양쪽으로 고정되므로 본문 고정열(z-index:2)보다 위여야 한다. STICKY 의 z-index 를 뒤에서 덮어쓴다 (인라인이 CSS 규칙을 이기므로 CSS 로는 못 올린다) -->
     ${weekThs}
     <th class="num" style="min-width:100px;background:#fef9c3;border-left:2px solid var(--gray-200)">합계</th>
   </tr>`;
