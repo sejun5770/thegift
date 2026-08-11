@@ -13996,6 +13996,69 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/cafe24/sticker-trace' && req.method === 'GET') {
+        // 진단용 — 정수당 주문의 스티커코드가 왜 비었는지 근거를 모아 보여준다.
+        //   코드는 두 경로로 정해진다: bg_stickers 매칭 > 카페24 변형코드.
+        //   둘 다 실패하면 이름만 남고 코드가 빈다.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const oid = String(parsed.query.order_id || '').trim();
+        if (!oid) {
+          data = { error: 'order_id 를 지정하세요 (카페24 주문번호, CF- 접두 없이)' };
+        } else {
+          const out = { order_id: oid };
+          try {
+            const rows = await require('./cafe24/store').listCafe24Orders({ orderIds: [oid] });
+            const { parseCafe24OptionValue } = require('./cafe24/option-parser');
+            const { matchSticker } = require('./naver/option-parser');
+            const stickers = await require('./barungift/store').getAllStickers(true).catch(() => []);
+            out.items = (rows || []).map(r => {
+              const raw = r.raw_payload?.item || {};
+              const optionValue = raw.option_value || null;
+              const parsedOpt = parseCafe24OptionValue(optionValue);
+              let stickerType = null;
+              for (const [k, v] of Object.entries(parsedOpt)) {
+                if (k.includes('스티커') && !k.includes('문구')) { stickerType = v; break; }
+              }
+              const hit = matchSticker(stickers, r.product_code, stickerType);
+              // 이 상품코드에 걸려 있는 스티커 후보 — 매칭이 왜 실패했는지 바로 보인다
+              const cands = (stickers || [])
+                .filter(x => x && x.is_active !== false
+                  && Array.isArray(x.product_codes) && x.product_codes.includes(r.product_code))
+                .map(x => ({ code: x.sticker_code, name: x.name, type: x.type }));
+              return {
+                product_code: r.product_code,
+                product_name: r.product_name,
+                option_value: optionValue,
+                parsed_option: parsedOpt,
+                sticker_type_from_option: stickerType,
+                custom_variant_code: raw.custom_variant_code ?? null,
+                custom_product_code: raw.custom_product_code ?? null,
+                matched_sticker: hit ? { code: hit.sticker_code, name: hit.name, type: hit.type } : null,
+                candidates_for_product_code: cands,
+              };
+            });
+          } catch (e) { out.items_error = e.message; }
+          try {
+            const ci = await require('./barungift/workflow-store').getCustomerInfoForUpdate(`CF-${oid}`);
+            out.sticker_selections = (ci?.sticker_selections || []).map(x => ({
+              product_code: x.product_code, sticker_code: x.sticker_code,
+              sticker_name: x.sticker_name, sticker_id: x.sticker_id,
+            }));
+          } catch (e) { out.customer_info_error = e.message; }
+          const it0 = (out.items || [])[0];
+          out.diagnosis = !it0
+            ? '이 주문번호로 저장된 카페24 주문이 없다'
+            : (it0.matched_sticker
+              ? '스티커 매칭은 됐다 — 주문정보가 옛 동기화 값이면 재동기화 필요'
+              : (!it0.candidates_for_product_code.length
+                ? `이 상품코드(${it0.product_code})에 연결된 스티커가 없다 — 상품설정/스티커의 상품코드 확인`
+                : (it0.custom_variant_code
+                  ? '스티커 이름이 후보와 안 맞는다 — 스티커 이름/타입 표기 확인'
+                  : '스티커 이름도 안 맞고 카페24 변형코드도 비어 있다 — 둘 중 하나는 있어야 코드가 잡힌다')));
+          data = out;
+        }
       } else if (pathname === '/api/coupang/rg-trace' && req.method === 'GET') {
         // 진단용 — 한 주문이 왜 그 상태인지 근거를 한자리에 모아 보여준다.
         //   "쿠팡창고에 왜 남아 있나" 같은 질문은 세 곳을 대조해야 답이 나온다:
