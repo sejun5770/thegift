@@ -15167,12 +15167,85 @@ function scheduleCoupangSync(baseUrl) {
   console.log(`[coupang auto-sync] ${minutes}분 주기 시작 (최근 ${daysBack}일 · 끄려면 COUPANG_AUTO_SYNC_DISABLED=1)`);
 }
 
+/**
+ * 네이버 구매확정일 소급 채우기 — 하루 한 번.
+ *
+ * 네이버는 배송완료 한참 뒤에 자동으로 구매확정을 건다(배송완료 07-29 → 자동확정 08-06).
+ * 그때쯤이면 주문 동기화 기간(최근 7일)이 그 주문을 이미 지나쳐, 우리 DB 는 '배송완료' 로
+ * 멈춘 채 구매확정일이 영영 비어 있게 된다. 그래서 주문 동기화와 별개로 주기적으로 훑는다.
+ *
+ * 하루 한 번이면 충분하다 — 자동확정 자체가 하루 단위로 걸린다.
+ * 끄려면 NAVER_CONFIRM_BACKFILL_DISABLED=1.
+ */
+function scheduleNaverConfirmBackfill() {
+  if (process.env.NAVER_CONFIRM_BACKFILL_DISABLED === '1') {
+    console.log('[naver confirm-backfill] 비활성 (NAVER_CONFIRM_BACKFILL_DISABLED=1)');
+    return;
+  }
+  if (!require('./naver/api').isConfigured()) {
+    console.log('[naver confirm-backfill] 네이버 API 키 미설정 — 건너뜀');
+    return;
+  }
+  // 실행 시각 (KST). 기본 04:10 — 네이버 자동확정이 새벽에 걸린 뒤를 노린다.
+  const target = (() => {
+    const m = /^(\d{1,2}):(\d{1,2})$/.exec(process.env.NAVER_CONFIRM_BACKFILL_TIME || '04:10');
+    if (!m) return 4 * 60 + 10;
+    const h = Number(m[1]), mi = Number(m[2]);
+    return (h >= 0 && h <= 23 && mi >= 0 && mi <= 59) ? h * 60 + mi : 4 * 60 + 10;
+  })();
+  const MAX_PAGES = 20;          // 한 번에 최대 2000건 — 못 채운 건은 다음 날 이어서
+  let lastRunDate = null;
+  let running = false;
+
+  async function tick() {
+    if (running) return;
+    const kst = new Date(Date.now() + 9 * 3600 * 1000);
+    const today = kst.toISOString().slice(0, 10);
+    if (lastRunDate === today) return;
+    const nowMin = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+    const delta = nowMin - target;
+    // 창을 벗어난 늦은 기동(재배포 등)에는 돌지 않는다 — 엉뚱한 시각 실행 방지
+    if (delta < 0 || delta > 10) return;
+    lastRunDate = today;          // 실패해도 같은 날 재시도하지 않는다
+    running = true;
+    const total = { processed: 0, updated: 0, no_change: 0, failed: 0 };
+    try {
+      const naverSync = require('./naver/sync');
+      let offset = 0;
+      for (let i = 0; i < MAX_PAGES; i++) {
+        const r = await naverSync.backfillConfirmedAt({
+          offset, limit: 100, alsoUpdateStatus: true, scope: 'shippable',
+        });
+        if (r.error) throw new Error(r.error);
+        total.processed += r.processed || 0;
+        total.updated += r.updated || 0;
+        total.no_change += r.no_change || 0;
+        total.failed += r.failed || 0;
+        if (!r.processed || !r.remaining) break;
+        offset = r.offset_next;
+      }
+      console.log(`[naver confirm-backfill] 완료 — 확인 ${total.processed} / 채움 ${total.updated}`
+        + ` / 변화없음 ${total.no_change}${total.failed ? ` / 실패 ${total.failed}` : ''}`);
+    } catch (e) {
+      console.error('[naver confirm-backfill] 실패:', e.message);
+    } finally {
+      running = false;
+    }
+  }
+
+  setInterval(() => { tick().catch(() => {}); }, 60000);
+  const hh = String(Math.floor(target / 60)).padStart(2, '0');
+  const mm = String(target % 60).padStart(2, '0');
+  console.log(`[naver confirm-backfill] 매일 ${hh}:${mm} KST 실행 (끄려면 NAVER_CONFIRM_BACKFILL_DISABLED=1)`);
+}
+
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`답례품 관리 서버: http://localhost:${PORT}${BASE_PATH || ''}`);
   // 재고 데일리 슬랙 알림 — BG_STOCK_ALERT_ENABLED=1 일 때만 등록
   require('./barungift/stock-alert')
     .scheduleDailyStockAlert(`http://localhost:${PORT}${BASE_PATH || ''}`);
   scheduleCoupangSync(`http://localhost:${PORT}${BASE_PATH || ''}`);
+  scheduleNaverConfirmBackfill();
 });
 
 // 서버 크래시 방지
