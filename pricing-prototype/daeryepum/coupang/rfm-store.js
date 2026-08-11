@@ -138,12 +138,20 @@ async function listSales({ startDate, endDate } = {}) {
       });
     }
     const a = agg.get(key);
-    if (r.order_id) a.order_ids.push(String(r.order_id));
     if (!a.product_name && r.product_name) a.product_name = r.product_name;
     const qty = Number(r.sales_qty) || 0;
     const amt = Number(r.sales_amount) || 0;
-    // 취소분은 음수로 들어와 있다 — 환불로 분리해야 대시보드의 순매출 계산이 맞는다
-    if (r.is_cancel || qty < 0 || amt < 0) {
+    // 주문 건수에서 취소는 뺀다 — 다른 채널도 취소 제외 순 기준이라 그쪽에 맞춘다.
+    //   전체취소만 뺀다: 부분취소는 순액이 남아 주문 자체는 살아 있다.
+    //   한 주문에 상품이 여럿이면 살아 있는 상품이 하나라도 있는 한 그 주문은 잡힌다.
+    const fullyCancelled = !!r.is_cancel && qty <= 0 && amt <= 0;
+    if (r.order_id && !fullyCancelled) a.order_ids.push(String(r.order_id));
+    // 취소분은 부호로 가른다. is_cancel 을 조건에 넣으면 안 된다 —
+    //   파서가 이미 (주문, 옵션) 안에서 정산 + 정산취소를 상계해 순액으로 만들어 두는데,
+    //   부분취소라 순액이 양수로 남은 라인까지 환불로 보내면 그 매출이 사라지고
+    //   오히려 음수로 빠진다 (2026-08-12 수정).
+    //   전체취소는 순액 0 이라 어느 쪽으로 가든 결과가 같다.
+    if (qty < 0 || amt < 0) {
       a.refund_qty += Math.abs(qty);
       a.refund_amount += Math.abs(amt);
     } else {
