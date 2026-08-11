@@ -3923,7 +3923,8 @@ async function apiDashboardSummary(query) {
   //   · Wing API 가 RFM 매출 노출 안 해 운영자가 수동 입력 → coupang_rocket_growth_sales 테이블
   //   · 일자당 1 row (vendor_item_id='_manual'), 상품 명세 없는 일별 합계
   //   · net_amount 는 generated column (= sales_amount - refund_amount) — Wing 셀러센터 표시값과 일관
-  //   · 주문건수는 실제 주문 단위 데이터 없음 → row 수(=일자 수) 사용
+  //   · 주문건수는 주문ID(coupang_rg_order_lines.order_id) distinct — 집계 단위가
+  //     (결제완료일 × 옵션) 이라 행 수를 세면 상품 종류 수가 된다 (2026-08-12 수정)
   //
   // 컨벤션 정렬: apiDashboardComparison 의 getPeriodTotal 과 동일 패턴 — 채널별 합계 KPI
   //   카드가 비교 카드와 어긋나지 않도록 통일 (amount=net_amount, qty=sales_qty gross, order_count=row수).
@@ -3935,28 +3936,38 @@ async function apiDashboardSummary(query) {
     // 답례품 아님으로 지정된 품목(아크릴 액자 등) 제외
     const rgRows = (rgRowsRaw || []).filter(r => !_sumGiftExcl.has('쿠팡 로켓그로스', r.product_id, r.product_name));
     if (rgRows && rgRows.length) {
+      // 하루의 주문 건수는 그 날 주문ID 의 distinct 수다. 집계행마다 세면
+      //   한 주문이 상품 수만큼 중복된다 — 그래서 날짜별로 모아 한 번만 센다.
+      const rgOrderIdsByDay = new Map();
       for (const r of rgRows) {
         const day = String(r.sale_date || '').slice(0, 10);
         if (!day) continue;
         const netAmount = Number(r.net_amount) || 0; // generated column = sales - refund
         const grossQty = Number(r.sales_qty) || 0;   // getPeriodTotal 컨벤션과 일치 (gross)
-        // summary rows — 일별 단일 집계 row (상품별 분해 불가)
+        const ids = r.order_ids || [];
+        // summary rows — (날짜 × 상품) 단위. 건수는 그 칸의 주문ID distinct.
         rows.push({
           card_name: r.product_name || '쿠팡 로켓그로스 (일별 집계)',
           card_code: 'ROCKET_GROWTH',
           order_day: day,
           site_name: '쿠팡 로켓그로스',
           order_type: '단독주문',
-          order_count: 1, // 일별 1 entry (수동 입력 단위)
+          order_count: new Set(ids).size || 1,
           total_qty: grossQty,
           total_amount: Math.round(netAmount),
         });
-        // orderCounts — row 수 = 1/일 (수동 집계 단위)
+        if (!rgOrderIdsByDay.has(day)) rgOrderIdsByDay.set(day, new Set());
+        const daySet = rgOrderIdsByDay.get(day);
+        // 주문ID 가 없는 옛 데이터는 행 하나를 한 건으로 — 종전 동작 유지
+        if (ids.length) ids.forEach(id => daySet.add(id));
+        else daySet.add(`_row:${r.vendor_item_id}`);
+      }
+      for (const [day, idSet] of rgOrderIdsByDay) {
         orderCounts.push({
           order_day: day,
           site_name: '쿠팡 로켓그로스',
           order_type: '단독주문',
-          distinct_order_count: 1,
+          distinct_order_count: idSet.size,
         });
       }
     }
