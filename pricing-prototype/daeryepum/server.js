@@ -3157,8 +3157,9 @@ async function apiDashboardComparison(query = {}) {
     );
 
     // 쿠팡 로켓그로스(RFM) 매출 — 일별 aggregate (주문 단위 X). 운영자가 Wing 셀러센터
-    //   보고 수동 입력 (Coupang Open API RFM endpoint 미공개). order_count 는 row 수
-    //   (=일자 수) 사용 — 정확한 주문 수는 알 수 없음.
+    //   주문 건수는 주문ID(coupang_rg_order_lines.order_id) distinct 로 센다.
+    //   집계 단위가 (결제완료일 × 옵션) 이라 행 수를 세면 상품 종류 수가 나온다 —
+    //   한 주문에 상품이 여럿이면 그만큼 부풀려졌다 (2026-08-10 수정).
     //   endStr 는 exclusive 라 rfm listSales 의 lte 와 맞추려 -1 일.
     if (_isDaeryepumCmp) try {
       const rfmStore = require('./coupang/rfm-store');
@@ -3168,20 +3169,25 @@ async function apiDashboardComparison(query = {}) {
       const rfmKept = (rfmRows || []).filter(r => !_cmpGiftExcl.has('쿠팡 로켓그로스', r.product_id, r.product_name));
       if (rfmKept.length) {
         let amount = 0, qty = 0;
+        // 제외 필터를 통과한 행의 주문ID 만 모은다 — 금액·수량과 같은 모집단이어야 한다
+        const orderIds = new Set();
         for (const r of rfmKept) {
           amount += Number(r.net_amount) || 0;
           qty += Number(r.sales_qty) || 0;
+          for (const oid of (r.order_ids || [])) orderIds.add(oid);
         }
+        // 옛 데이터라 주문ID 가 없으면 종전대로 행 수로 — 0 건으로 보이는 것보다 낫다
+        const orders = orderIds.size || rfmKept.length;
         if (amount !== 0 || qty !== 0 || rfmKept.length) {
           const site = ensureSite('쿠팡 로켓그로스');
-          site.order_count += rfmKept.length;
+          site.order_count += orders;
           site.total_amount += amount;
           site.total_qty += qty;
           site.standalone.amount += amount;
-          site.standalone.orders += rfmKept.length;
+          site.standalone.orders += orders;
           site.standalone.qty += qty;
           standalone_amount += amount;
-          standalone_orders += rfmKept.length;
+          standalone_orders += orders;
           standalone_qty += qty;
         }
       }

@@ -132,9 +132,13 @@ async function listSales({ startDate, endDate } = {}) {
         product_id: r.seller_product_id || r.vendor_item_id || null,
         product_name: r.product_name || null,
         sales_qty: 0, sales_amount: 0, refund_qty: 0, refund_amount: 0,
+        // 주문 건수를 세려면 주문ID 가 필요하다. 이 집계 단위는 (날짜 × 옵션) 이라
+        //   행 수를 세면 상품 종류 수가 나온다 — 한 주문에 상품이 여럿이면 부풀려진다.
+        order_ids: [],
       });
     }
     const a = agg.get(key);
+    if (r.order_id) a.order_ids.push(String(r.order_id));
     if (!a.product_name && r.product_name) a.product_name = r.product_name;
     const qty = Number(r.sales_qty) || 0;
     const amt = Number(r.sales_amount) || 0;
@@ -152,6 +156,7 @@ async function listSales({ startDate, endDate } = {}) {
   return [...agg.values()]
     .map(a => ({
       ...a,
+      order_ids: [...new Set(a.order_ids)],
       net_amount: a.sales_amount - a.refund_amount,
       net_qty: a.sales_qty - a.refund_qty,
     }))
