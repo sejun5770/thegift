@@ -455,6 +455,7 @@ code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px
   <tr><th>작업</th><th>주기</th><th>방식</th></tr>
   <tr><td>쿠팡 / 네이버 / 정수당 주문 동기화</td><td>약 30분 간격</td><td>외부 스케줄러(cron-job.org)가 API 호출</td></tr>
   <tr><td>쿠팡 동기화 (마켓플레이스 + 로켓그로스 + 옵션ID 맵)</td><td>15분 간격</td><td>서버 내부 스케줄 — 외부 설정 불필요</td></tr>
+  <tr><td>네이버 구매확정일 채우기</td><td>매일 04:10</td><td>서버 내부 스케줄 — 자동 구매확정이 늦게 걸려 동기화가 놓친 건을 메움</td></tr>
   <tr><td>답례품 재고 슬랙 알림</td><td>매일 지정 시각</td><td>서버 내부 스케줄 (재고 화면에서 시각 변경)</td></tr>
   <tr><td>주문 RAW 시트 동기화</td><td>매일 03:00</td><td>서버 내부 스케줄</td></tr>
   <tr><td>화환·청첩장 데일리 리포트 (Slack)</td><td>매일 00:02</td><td>별도 컨테이너 (사업운영-본부 채널 발송)</td></tr>

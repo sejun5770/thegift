@@ -99,6 +99,10 @@ const SUPER_ADMIN_EMAILS = (process.env.SUPER_ADMIN_EMAILS || 'sejun.song@barunn
   .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 
 function isSuperAdmin(session) {
+  // 개발모드(GOOGLE_CLIENT_ID 미설정)는 로그인 자체를 우회한다. 그런데 세션이 없으니
+  //   역할 게이트가 걸린 화면은 통째로 403 이 돼 로컬에서 열어볼 수 없었다.
+  //   운영에는 GOOGLE_CLIENT_ID 가 반드시 있어 이 분기가 켜지지 않는다.
+  if (DEV_SKIP_AUTH) return true;
   if (!session || !session.email) return false;
   return SUPER_ADMIN_EMAILS.includes(String(session.email).toLowerCase());
 }
