@@ -1407,6 +1407,7 @@ nav.nav-loading a[href^="#"] {
         <button class="btn" id="ord-btn-bhg-backfill" onclick="backfillBhgStubs()" style="padding:5px 12px;font-size:12px;background:#eef2ff;border-color:#c7d2fe;color:#4338ca;display:none" title="이전에 등록된 바른손더기프트 주문 중 정보입력현황 stub 이 없는 것을 일괄 생성 (스티커/희망출고일 정보 backfill)">🔧 stub 재생성</button>
         <button class="btn" id="ord-btn-bhg-bulk-cancel" onclick="bulkCancelBhg()" style="padding:5px 12px;font-size:12px;background:#fef3c7;border-color:#fbbf24;color:#92400e;display:none" title="선택된 바른손더기프트 주문을 취소 상태 (status_seq=3) 로 변경">🚫 선택 취소</button>
         <button class="btn" id="ord-btn-bhg-bulk-delete" onclick="bulkDeleteBhg()" style="padding:5px 12px;font-size:12px;background:#fef2f2;border-color:#fca5a5;color:#dc2626;display:none" title="선택된 바른손더기프트 주문을 완전 삭제 (정보입력현황 stub 도 함께 사라짐)">🗑️ 선택 삭제</button>
+        <button class="btn" id="ord-btn-dispatch" onclick="openDispatchModal()" style="padding:5px 12px;font-size:12px;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8" title="우리가 등록한 송장을 쿠팡·네이버에 올려 주문을 배송중으로 넘깁니다. 보내기 전에 대상을 확인합니다.">🚚 출고상태 전송</button>
         <button id="ord-cp-backfill" class="btn" style="display:none;padding:2px 10px;font-size:11px"
             title="상품설정에 넣은 채널 코드로, 이미 들어온 쿠팡 주문의 스티커와 상품코드를 채웁니다. 먼저 미리보기로 무엇이 바뀌는지 확인합니다."
             onclick="runCoupangStickerBackfill(true)">🩹 스티커 백필</button>
@@ -3845,6 +3846,7 @@ function _ordRenderCoupangMapStatus(rows) {
   }
   if (btn) btn.style.display = '';
   const unmapped = cp.filter(r => !r.channel_code_mapped);
+  _ordUnmappedRows = unmapped;
   if (!unmapped.length) {
     el.style.display = '';
     el.style.background = '#f0fdf4'; el.style.color = '#047857';
@@ -3858,17 +3860,266 @@ function _ordRenderCoupangMapStatus(rows) {
     + (noProductId ? ` (등록상품ID 없음 ${noProductId}건 → 옵션ID 필요)` : '');
 }
 
-/** 미매핑 쿠팡 주문만 보도록 컬럼을 켜고 검색어를 비운다 */
+/**
+ * 미매핑 쿠팡 코드 목록.
+ *   등록상품ID·옵션ID 는 표 컬럼에서 뺐다 (평소 볼 값이 아니다). 대신 배지를 누르면
+ *   상품설정에 넣어야 할 코드만 상품별로 묶어 보여준다 — 같은 상품이 여러 줄이어도 한 줄로.
+ */
+let _ordUnmappedRows = [];   // 배지 렌더 시점의 미매핑 행 — 모달이 이걸 본다
+let _ordUnmappedTsv = '';
 function _ordShowUnmappedCoupang() {
-  // 컬럼을 켜도 구역이 접혀 있으면 무엇이 바뀌었는지 안 보인다 — 함께 펼친다
-  const sec = document.getElementById('ord-sec-cols');
-  if (sec) sec.open = true;
-  ['channel_product_code', 'channel_option_id', 'card_code'].forEach(k => {
-    // 컬럼 셀렉터의 체크박스는 data-key 로 식별한다 (buildColSelector)
-    const cb = document.querySelector(`#col-selector input[data-key="${k}"]`);
-    if (cb && !cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change')); }
+  const cp = _ordUnmappedRows;
+  if (!cp.length) { showToast('미매핑 쿠팡 주문이 없습니다'); return; }
+  const byKey = new Map();
+  for (const r of cp) {
+    const pid = String(r.channel_product_code || '').trim();
+    const oid = String(r.channel_option_id || '').trim();
+    const k = `${pid}|${oid}`;
+    if (!byKey.has(k)) byKey.set(k, { pid, oid, name: r.card_name || '', n: 0 });
+    byKey.get(k).n++;
+  }
+  const list = [...byKey.values()].sort((a, b) => b.n - a.n);
+  _ordUnmappedTsv = list.map(v => `${v.name}\t${v.pid}\t${v.oid}\t${v.n}`).join('\n');
+  const rowsHtml = list.map(v => `<tr>
+      <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100)">${esc(v.name)}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);font-family:monospace">${v.pid ? esc(v.pid) : '<span style="color:#b45309">없음</span>'}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);font-family:monospace">${esc(v.oid) || '-'}</td>
+      <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);text-align:right">${v.n}건</td>
+    </tr>`).join('');
+  let el = document.getElementById('ord-unmapped-modal');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'ord-unmapped-modal';
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+    el.onclick = e => { if (e.target === el) el.remove(); };
+    document.body.appendChild(el);
+  }
+  el.innerHTML = `
+    <div style="background:#fff;border-radius:12px;max-width:720px;width:100%;max-height:86vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.2)" onclick="event.stopPropagation()">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--gray-200);display:flex;justify-content:space-between;align-items:center">
+        <strong style="font-size:15px">쿠팡 미매핑 코드 ${list.length}종 · ${cp.length}건</strong>
+        <button class="btn btn-sm" onclick="document.getElementById('ord-unmapped-modal').remove()">닫기</button>
+      </div>
+      <div style="padding:16px 20px">
+        <p style="margin:0 0 10px;color:var(--gray-600);font-size:12px">
+          <b>등록상품ID</b>를 상품설정 › 채널 상품코드에 넣으면 그 상품의 옵션이 한 번에 잡힙니다.
+          등록상품ID가 비어 있는 줄만 옵션ID로 등록하세요.</p>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="background:var(--gray-50)">
+            <th style="padding:6px 8px;text-align:left">상품명</th>
+            <th style="padding:6px 8px;text-align:left">등록상품ID</th>
+            <th style="padding:6px 8px;text-align:left">옵션ID</th>
+            <th style="padding:6px 8px;text-align:right">건수</th>
+          </tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+        <div style="margin-top:12px;text-align:right">
+          <button class="btn" onclick="_ordCopyUnmapped()">📋 목록 복사</button>
+        </div>
+      </div>
+    </div>`;
+}
+function _ordCopyUnmapped() {
+  navigator.clipboard.writeText(_ordUnmappedTsv)
+    .then(() => showToast('복사했습니다'))
+    .catch(() => showToast('복사 실패 — 표를 직접 선택해 복사하세요'));
+}
+
+// ============================================
+// 출고상태 전송 (2단계) — 우리 송장을 쿠팡·네이버에 올린다
+// ============================================
+//   되돌릴 수 없는 동작이다 (고객에게 발송 알림이 나간다). 그래서 흐름을 셋으로 나눈다:
+//     ① 대상 조회 → ② 보낼 건만 체크 → ③ 확인 문구를 보고 전송.
+//   송장이 없거나 택배사 코드를 모르는 건은 아예 체크할 수 없게 막는다.
+let _dispatchRows = [];
+
+const DISPATCH_CH = { coupang: { label: '쿠팡', bg: '#fef2f2', fg: '#b91c1c' },
+                      naver: { label: '네이버', bg: '#ecfdf5', fg: '#047857' } };
+
+async function openDispatchModal() {
+  let el = document.getElementById('dispatch-modal');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'dispatch-modal';
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+    el.onclick = e => { if (e.target === el) closeDispatchModal(); };
+    document.body.appendChild(el);
+  }
+  el.innerHTML = _dispatchShell('<div style="padding:40px;text-align:center;color:var(--gray-500)">불러오는 중…</div>');
+  try {
+    const r = await fetch(`${API}/api/dispatch/pending?days=14`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    _dispatchRows = j.rows || [];
+    _dispatchRender(j);
+  } catch (e) {
+    el.innerHTML = _dispatchShell(
+      `<div style="padding:24px;color:#b91c1c;font-size:13px">불러오지 못했습니다 — ${esc(e.message)}</div>`);
+  }
+}
+
+function closeDispatchModal() {
+  const el = document.getElementById('dispatch-modal');
+  if (el) el.remove();
+}
+
+function _dispatchShell(inner) {
+  return `<div style="background:#fff;border-radius:12px;max-width:1000px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.2)" onclick="event.stopPropagation()">
+    <div style="padding:16px 20px;border-bottom:1px solid var(--gray-200);display:flex;justify-content:space-between;align-items:center">
+      <strong style="font-size:15px">🚚 출고상태 전송</strong>
+      <button class="btn btn-sm" onclick="closeDispatchModal()">닫기</button>
+    </div>
+    <div id="dispatch-body" style="overflow:auto;flex:1">${inner}</div>
+  </div>`;
+}
+
+function _dispatchRender(j) {
+  const body = document.getElementById('dispatch-body');
+  if (!body) return;
+  const rows = _dispatchRows;
+  const notes = [];
+  for (const s of (j.skipped || [])) notes.push(`${DISPATCH_CH[s.channel]?.label || s.channel}: ${s.reason}`);
+  for (const e of (j.errors || [])) notes.push(`${DISPATCH_CH[e.channel]?.label || e.channel} 조회 실패 — ${e.message}`);
+  const noteHtml = notes.length
+    ? `<div style="margin:0 0 12px;padding:8px 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;font-size:12px;color:#92400e">${notes.map(esc).join('<br>')}</div>`
+    : '';
+
+  if (!rows.length) {
+    body.innerHTML = `<div style="padding:20px">${noteHtml}
+      <div style="padding:30px;text-align:center;color:var(--gray-500);font-size:13px">
+        최근 ${j.days}일 안에 출고 처리가 필요한 주문이 없습니다.</div></div>`;
+    return;
+  }
+
+  const tr = rows.map((r, i) => {
+    const ch = DISPATCH_CH[r.channel] || { label: r.channel, bg: '#f3f4f6', fg: '#374151' };
+    return `<tr style="${r.ready ? '' : 'background:#fafafa;color:var(--gray-400)'}">
+      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100)">
+        <input type="checkbox" data-dispatch-idx="${i}" ${r.ready ? 'checked' : 'disabled'} onchange="_dispatchUpdateCount()">
+      </td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100)">
+        <span style="padding:1px 6px;border-radius:4px;font-size:11px;background:${ch.bg};color:${ch.fg}">${ch.label}</span>
+      </td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:12px">${esc(r.order_id)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);font-size:12px">${esc(r.status_label || '')}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);font-size:12px">${esc((r.product_name || '').slice(0, 28))}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);text-align:right;font-size:12px">${r.item_count || ''}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);font-size:12px">${esc(r.delivery_company || '')}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:12px">${esc(r.invoice_number || '')}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);font-size:11px;color:${r.ready ? '#047857' : '#b45309'}">${r.ready ? '전송 가능' : esc(r.blocked_reason || '')}</td>
+    </tr>`;
+  }).join('');
+
+  body.innerHTML = `<div style="padding:16px 20px">
+    ${noteHtml}
+    <p style="margin:0 0 10px;font-size:12px;color:var(--gray-600)">
+      최근 ${j.days}일 · 채널에서 아직 발송 전인 주문 <b>${rows.length}건</b>
+      (전송 가능 <b style="color:#047857">${j.ready}</b> · 송장 없음 <b style="color:#b45309">${j.blocked}</b>).
+      전송하면 채널 주문이 <b>배송중</b>으로 바뀌고 고객에게 발송 알림이 나갑니다 — 되돌릴 수 없습니다.</p>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:var(--gray-50)">
+        <th style="padding:6px 8px;width:28px"><input type="checkbox" checked onchange="_dispatchToggleAll(this.checked)"></th>
+        <th style="padding:6px 8px;text-align:left">채널</th>
+        <th style="padding:6px 8px;text-align:left">주문번호</th>
+        <th style="padding:6px 8px;text-align:left">현재상태</th>
+        <th style="padding:6px 8px;text-align:left">상품</th>
+        <th style="padding:6px 8px;text-align:right">수량</th>
+        <th style="padding:6px 8px;text-align:left">택배사</th>
+        <th style="padding:6px 8px;text-align:left">송장번호</th>
+        <th style="padding:6px 8px;text-align:left">상태</th>
+      </tr></thead>
+      <tbody>${tr}</tbody>
+    </table>
+    <div style="margin-top:14px;display:flex;justify-content:flex-end;align-items:center;gap:10px">
+      <span id="dispatch-count" style="font-size:12px;color:var(--gray-600)"></span>
+      <button class="btn" onclick="openDispatchModal()">새로고침</button>
+      <button class="btn" id="dispatch-send-btn" style="background:#1d4ed8;border-color:#1d4ed8;color:#fff" onclick="_dispatchSend()">채널로 전송</button>
+    </div>
+  </div>`;
+  _dispatchUpdateCount();
+}
+
+function _dispatchToggleAll(on) {
+  document.querySelectorAll('#dispatch-body input[data-dispatch-idx]').forEach(cb => {
+    if (!cb.disabled) cb.checked = on;
   });
-  showToast('쿠팡 등록상품ID·옵션ID 컬럼을 켰습니다 — 상품코드가 11자리이거나 비어 있는 행의 값을 상품설정 › 채널 상품코드에 넣으세요');
+  _dispatchUpdateCount();
+}
+
+function _dispatchSelected() {
+  return [...document.querySelectorAll('#dispatch-body input[data-dispatch-idx]:checked')]
+    .map(cb => _dispatchRows[Number(cb.dataset.dispatchIdx)])
+    .filter(Boolean);
+}
+
+function _dispatchUpdateCount() {
+  const el = document.getElementById('dispatch-count');
+  const btn = document.getElementById('dispatch-send-btn');
+  if (!el) return;
+  const n = _dispatchSelected().length;
+  el.textContent = `${n}건 선택`;
+  if (btn) { btn.disabled = n === 0; btn.style.opacity = n === 0 ? '.5' : '1'; }
+}
+
+async function _dispatchSend() {
+  const items = _dispatchSelected();
+  if (!items.length) { showToast('전송할 주문을 선택하세요'); return; }
+  const byCh = {};
+  for (const it of items) byCh[it.channel] = (byCh[it.channel] || 0) + 1;
+  const summary = Object.entries(byCh)
+    .map(([c, n]) => `${DISPATCH_CH[c]?.label || c} ${n}건`).join(' · ');
+  if (!confirm(`${summary} 을(를) 채널에 전송합니다.\n\n주문이 배송중으로 바뀌고 고객에게 발송 알림이 나갑니다. 되돌릴 수 없습니다.\n\n진행할까요?`)) return;
+
+  const btn = document.getElementById('dispatch-send-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '전송 중…'; }
+  try {
+    const r = await fetch(`${API}/api/dispatch/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items, confirm: true }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    _dispatchRenderResult(j);
+  } catch (e) {
+    showToast(`전송 실패 — ${e.message}`);
+    if (btn) { btn.disabled = false; btn.textContent = '채널로 전송'; }
+  }
+}
+
+function _dispatchRenderResult(j) {
+  const body = document.getElementById('dispatch-body');
+  if (!body) return;
+  const rows = (j.results || []).map(r => {
+    const ch = DISPATCH_CH[r.channel] || { label: r.channel, bg: '#f3f4f6', fg: '#374151' };
+    return `<tr>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100)">
+        <span style="padding:1px 6px;border-radius:4px;font-size:11px;background:${ch.bg};color:${ch.fg}">${ch.label}</span></td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:12px">${esc(r.order_id)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:12px">${esc(r.invoice_number || '')}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);font-size:12px;color:${r.ok ? '#047857' : '#b91c1c'}">${r.ok ? '성공' : '실패'}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);font-size:11px;color:var(--gray-600)">${esc(r.message || '')}</td>
+    </tr>`;
+  }).join('');
+  body.innerHTML = `<div style="padding:16px 20px">
+    <div style="margin-bottom:12px;padding:10px 12px;border-radius:6px;background:${j.failed ? '#fffbeb' : '#f0fdf4'};border:1px solid ${j.failed ? '#fde68a' : '#bbf7d0'};font-size:13px">
+      성공 <b style="color:#047857">${j.ok}</b>건 · 실패 <b style="color:#b91c1c">${j.failed}</b>건${j.skipped ? ` · 제외 ${j.skipped}건` : ''}
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="background:var(--gray-50)">
+        <th style="padding:6px 8px;text-align:left">채널</th>
+        <th style="padding:6px 8px;text-align:left">주문번호</th>
+        <th style="padding:6px 8px;text-align:left">송장번호</th>
+        <th style="padding:6px 8px;text-align:left">결과</th>
+        <th style="padding:6px 8px;text-align:left">메시지</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div style="margin-top:14px;text-align:right">
+      <button class="btn" onclick="openDispatchModal()">목록 다시 보기</button>
+      <button class="btn" onclick="closeDispatchModal()">닫기</button>
+    </div>
+  </div>`;
 }
 
 /**
@@ -3943,10 +4194,9 @@ const ALL_COLS = [
   {key:'recv_msg',label:'배송메세지',default:true},
   {key:'card_name',label:'상품명',default:true},
   {key:'card_code',label:'상품코드',default:false},
-  // 쿠팡 원본 코드 (057) — 상품설정의 채널 상품코드에 넣을 값. 매핑이 안 붙은 주문에서
-  //   어느 값을 등록해야 하는지 여기서 보고 복사한다. 다른 채널 주문은 비어 있다.
-  {key:'channel_product_code',label:'쿠팡_등록상품ID',default:false},
-  {key:'channel_option_id',label:'쿠팡_옵션ID',default:false},
+  // 쿠팡 원본 코드 (057) 는 컬럼에서 뺐다 — 평소 보는 값이 아니다.
+  //   응답(channel_product_code / channel_option_id)에는 그대로 실려 오고,
+  //   등록이 필요할 때만 '쿠팡 미매핑' 배지 → 목록 모달에서 본다.
   {key:'item_count',label:'상품수량',default:true,num:true},
   // 결제금액 컬럼 3종:
   //   · 주문총액 (item_amount): 이 row 의 정가 (쿠폰 적용 전)

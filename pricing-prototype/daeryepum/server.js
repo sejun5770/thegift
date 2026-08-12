@@ -14439,6 +14439,48 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/dispatch/pending' && req.method === 'GET') {
+        // 출고상태 전송 대기 목록 — 채널에서 아직 '발송 전' 인 주문 + 우리 송장 매칭 결과.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          const chParam = String(parsed.query.channels || '').trim();
+          data = await require('./channel-dispatch').listPending({
+            daysBack: parsed.query.days || 14,
+            channels: chParam ? chParam.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+          });
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/dispatch/send' && req.method === 'POST') {
+        // 실제 출고상태 전송 — 고객에게 발송 알림이 나가고 되돌릴 수 없다.
+        //   confirm:true 가 없으면 미리보기만 돌려준다 (channel-dispatch 안에서 판정).
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const body = await new Promise((resolve) => {
+          let raw = '';
+          req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+        });
+        const confirm = body.confirm === true;
+        logAdminAccess(session, req, 'channel-dispatch-send', {
+          confirm, count: Array.isArray(body.items) ? body.items.length : 0,
+        });
+        try {
+          data = await require('./channel-dispatch').sendDispatch({
+            items: body.items || [],
+            confirm,
+            by: session?.email || 'system',
+          });
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
       } else if (pathname === '/api/coupang/rfm/workflow-sync' && req.method === 'POST') {
         // 로켓그로스 리포트 → 정보입력현황 단계 반영 (배송완료 → 출고완료 / 미배송 → 포장완료).
         //   업로드 시 자동으로 한 번 돌지만, 상품설정을 나중에 고친 경우 등 수동 재실행용.
