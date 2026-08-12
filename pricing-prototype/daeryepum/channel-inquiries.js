@@ -109,6 +109,7 @@ async function fetchCoupang(daysBack) {
   if (!api.isConfigured()) return { rows: [], skipped: '쿠팡 API 키 미설정' };
   const V = api.VENDOR_ID;
   const rows = [];
+  const errors = [];
   const now = Date.now();
   for (let start = daysBack; start > 0; start -= 7) {
     const from = ymd(now - start * 86400000);
@@ -123,7 +124,10 @@ async function fetchCoupang(daysBack) {
           const n = normalize('coupang', 'callcenter', it);
           if (n) rows.push(n);
         }
-      } catch (e) { console.warn(`[inquiries] 쿠팡 고객센터(${status}) ${from}~${to} 실패:`, e.message); }
+      } catch (e) {
+        console.warn(`[inquiries] 쿠팡 고객센터(${status}) ${from}~${to} 실패:`, e.message);
+        errors.push(`고객센터(${status}) ${from}~${to}: ${String(e.message).slice(0, 200)}`);
+      }
     }
     // 상품별 문의
     try {
@@ -134,9 +138,12 @@ async function fetchCoupang(daysBack) {
         const n = normalize('coupang', 'online', it);
         if (n) rows.push(n);
       }
-    } catch (e) { console.warn(`[inquiries] 쿠팡 상품문의 ${from}~${to} 실패:`, e.message); }
+    } catch (e) {
+      console.warn(`[inquiries] 쿠팡 상품문의 ${from}~${to} 실패:`, e.message);
+      errors.push(`상품문의 ${from}~${to}: ${String(e.message).slice(0, 200)}`);
+    }
   }
-  return { rows };
+  return { rows, errors };
 }
 
 /** 네이버 — 스토어별로 조회 */
@@ -144,20 +151,33 @@ async function fetchNaver(daysBack) {
   const api = require('./naver/api');
   if (!api.isConfigured()) return { rows: [], skipped: '네이버 API 키 미설정' };
   const rows = [];
+  const errors = [];
   const now = Date.now();
   const from = ymd(now - daysBack * 86400000);
   const to = ymd(now);
+  // size 는 100 으로 — 상한을 넘기면 400 이 나고 그 스토어가 통째로 비어 버린다.
+  //   대신 페이지를 돌며 모은다.
+  const SIZE = 100, MAX_PAGES = 20;
   for (const store of api.getStores()) {
-    try {
-      const r = await api.callNaver(store, 'GET',
-        `/external/v1/pay-user/inquiries?startSearchDate=${from}&endSearchDate=${to}&page=1&size=200`);
-      for (const it of listOf(r)) {
-        const n = normalize('naver', 'customer', it);
-        if (n) rows.push(n);
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      try {
+        const r = await api.callNaver(store, 'GET',
+          `/external/v1/pay-user/inquiries?startSearchDate=${from}&endSearchDate=${to}&page=${page}&size=${SIZE}`);
+        const list = listOf(r);
+        for (const it of list) {
+          const n = normalize('naver', 'customer', it);
+          if (n) rows.push(n);
+        }
+        // last=true 이거나 받은 게 한 페이지 미만이면 끝
+        if (r?.last === true || list.length < SIZE) break;
+      } catch (e) {
+        console.warn(`[inquiries] 네이버(${store.id}) page${page} 실패:`, e.message);
+        errors.push(`${store.id} page${page}: ${String(e.message).slice(0, 200)}`);
+        break;
       }
-    } catch (e) { console.warn(`[inquiries] 네이버(${store.id}) 실패:`, e.message); }
+    }
   }
-  return { rows };
+  return { rows, errors };
 }
 
 /**
@@ -166,13 +186,15 @@ async function fetchNaver(daysBack) {
  */
 async function syncInquiries({ daysBack = 30 } = {}) {
   const days = Math.min(Math.max(parseInt(daysBack, 10) || 30, 1), 180);
-  const out = { days, coupang: 0, naver: 0, saved: 0, skipped: [] };
+  const out = { days, coupang: 0, naver: 0, saved: 0, skipped: [], errors: [] };
   const all = [];
   for (const [name, fn] of [['coupang', fetchCoupang], ['naver', fetchNaver]]) {
     try {
       const r = await fn(days);
       if (r.skipped) { out.skipped.push({ channel: name, reason: r.skipped }); continue; }
       out[name] = r.rows.length;
+      // 실패를 삼키면 화면엔 '0건' 으로만 보여 원인을 알 수 없다 — 사유를 함께 올린다
+      if (r.errors && r.errors.length) out.errors.push({ channel: name, messages: r.errors.slice(0, 5) });
       all.push(...r.rows);
     } catch (e) {
       out.skipped.push({ channel: name, reason: e.message });
