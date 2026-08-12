@@ -151,6 +151,23 @@ nav a:hover{color:var(--gray-900)}
 .data-table tr.row-pending-alert td{color:#7c3aed;font-weight:600}
 .data-table .num{text-align:right;font-variant-numeric:tabular-nums}
 /* COLUMN SELECTOR */
+/* 주문조회 접이식 구역 — 매번 쓰는 것(기간·조회)과 가끔 바꾸는 것(필터·컬럼)을 층으로 나눈다.
+   컨트롤이 40개 가까이 한 높이에 깔려 있어 화면이 읽히지 않던 문제 (운영 요청 2026-08-13). */
+.ord-sec{margin-bottom:10px;border:1px solid var(--gray-200);border-radius:6px;background:#f8fafc}
+.ord-sec>summary{cursor:pointer;list-style:none;padding:8px 12px;font-size:13px;font-weight:500;color:var(--gray-600);display:flex;align-items:center;gap:8px;user-select:none}
+.ord-sec>summary::-webkit-details-marker{display:none}
+.ord-sec>summary::before{content:'▸';color:var(--gray-400);font-size:11px}
+.ord-sec[open]>summary::before{content:'▾'}
+.ord-sec>summary:hover{color:var(--gray-900)}
+.ord-sec .ord-sec-body{padding:0 12px 10px}
+.ord-sec .ord-badge{font-size:11px;color:var(--primary);background:#eef2ff;border-radius:10px;padding:1px 7px;font-weight:600}
+/* 동기화·도구 — 버튼 7개를 한 곳으로 접는다 */
+.ord-tools{position:relative;display:inline-block}
+.ord-tools>summary{cursor:pointer;list-style:none;padding:5px 12px;font-size:12px;border:1px solid var(--gray-300);border-radius:var(--radius);background:#fff;color:var(--gray-700);white-space:nowrap}
+.ord-tools>summary::-webkit-details-marker{display:none}
+.ord-tools>summary:hover{background:var(--gray-50)}
+.ord-tools .ord-tools-panel{position:absolute;right:0;top:calc(100% + 4px);z-index:30;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:8px;display:flex;flex-direction:column;gap:6px;min-width:230px}
+.ord-tools .ord-tools-panel button{width:100%;text-align:left}
 .col-selector{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;padding:12px;background:var(--gray-50);border-radius:var(--radius)}
 .col-selector label{display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;padding:4px 8px;border-radius:4px;background:#fff;border:1px solid var(--gray-200)}
 .col-selector label:hover{border-color:var(--primary)}
@@ -1296,18 +1313,23 @@ nav.nav-loading a[href^="#"] {
       <input type="text" id="ord-code-search" placeholder="상품코드 검색" style="width:160px;min-width:100px" oninput="renderOrderTable()" />
       <button class="btn btn-primary" onclick="loadOrders()">조회</button>
     </div>
-    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
-      <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
-        <input type="checkbox" id="exclude-cancel" onchange="renderOrderTable()"> 취소주문 제외
-      </label>
-      <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
-        <input type="checkbox" id="exclude-pending" onchange="renderOrderTable()"> 결제대기 제외
-      </label>
-      <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
-        <input type="checkbox" id="hide-collected" onchange="renderOrderTable()"> 수집완료 숨기기
-      </label>
-    </div>
   </div>
+
+  <!-- 필터 — 기본 접힘. 걸린 조건 수를 배지로 보여 접어 둬도 놓치지 않게 한다. -->
+  <details class="ord-sec" id="ord-sec-filter">
+    <summary>필터 <span class="ord-badge" id="ord-filter-badge" style="display:none"></span></summary>
+    <div class="ord-sec-body">
+      <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+        <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="exclude-cancel" onchange="renderOrderTable()"> 취소주문 제외
+        </label>
+        <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="exclude-pending" onchange="renderOrderTable()"> 결제대기 제외
+        </label>
+        <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="hide-collected" onchange="renderOrderTable()"> 수집완료 숨기기
+        </label>
+      </div>
   <!-- 주문사이트 필터 (체크박스 그룹) — 답례품 카테고리 전용. 데코/꽃다발/더기프트 탭에서는 숨김.
        초기값 flex (default currentCategory='daeryepum'). switchCategory 가 카테고리에 따라 조정. -->
   <div id="ord-site-filter" style="display:flex;gap:14px;align-items:center;padding:9px 12px;background:#f8fafc;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:10px;font-size:13px;flex-wrap:wrap">
@@ -1339,9 +1361,17 @@ nav.nav-loading a[href^="#"] {
     <div style="flex:1"></div>
     <button class="btn" onclick="document.querySelectorAll('#ord-site-filter input').forEach(c=>c.checked=true);renderOrderTable()" style="padding:3px 8px;font-size:11px" title="모든 사이트 체크">전체선택</button>
     <button class="btn" onclick="document.querySelectorAll('#ord-site-filter input').forEach(c=>c.checked=false);renderOrderTable()" style="padding:3px 8px;font-size:11px" title="모두 해제">해제</button>
-  </div>
+      </div>
+    </div>
+  </details>
 
-  <div class="col-selector" id="col-selector"></div>
+  <!-- 표시 컬럼 — 한 번 정해두고 거의 안 바꾸는 영역이라 접어 둔다 -->
+  <details class="ord-sec" id="ord-sec-cols">
+    <summary>표시 컬럼 <span class="ord-badge" id="ord-cols-badge" style="display:none"></span></summary>
+    <div class="ord-sec-body">
+      <div class="col-selector" id="col-selector" style="margin-bottom:0"></div>
+    </div>
+  </details>
 
   <!-- 통합 액션바: 카운트 + 지능적 액션 버튼 -->
   <div style="display:flex;align-items:center;gap:12px;margin:12px 0 8px;flex-wrap:wrap;font-size:12px;color:var(--gray-500)">
@@ -1353,9 +1383,6 @@ nav.nav-loading a[href^="#"] {
     <span id="ord-cp-map" style="flex-shrink:0;display:none;padding:2px 8px;border-radius:4px;background:#fffbeb;color:#b45309;cursor:pointer"
           title="상품설정에 쿠팡 채널 상품코드가 없어 내부 상품코드로 바뀌지 않은 주문입니다. 눌러 그 주문만 봅니다."
           onclick="_ordShowUnmappedCoupang()"></span>
-    <button id="ord-cp-backfill" class="btn" style="display:none;padding:2px 10px;font-size:11px"
-            title="상품설정에 넣은 채널 코드로, 이미 들어온 쿠팡 주문의 스티커와 상품코드를 채웁니다. 먼저 미리보기로 무엇이 바뀌는지 확인합니다."
-            onclick="runCoupangStickerBackfill(true)">🩹 스티커 백필</button>
     <!-- 매출 합계 — 답례품_더기프트 카테고리 전용. 대시보드 기준과 대조 편의성. -->
     <span id="ord-revenue-summary" style="flex-shrink:0;display:none;padding:2px 8px;border-radius:4px;background:#f3f4f6;color:var(--gray-700)" title="현재 필터로 조회된 주문의 매출. 대시보드 (취소/환불/반품 제외 기준) 와 대조용.">
       <span style="color:var(--gray-500)">순매출</span> <strong id="ord-revenue-net" style="color:#047857">-</strong>
@@ -1368,14 +1395,24 @@ nav.nav-loading a[href^="#"] {
     <button class="btn" id="ord-btn-unmark" onclick="unmarkCollected()" style="display:none;background:#fef3c7;border-color:#fcd34d;padding:5px 12px;font-size:12px" title="선택된 주문의 수집완료 상태를 해제">↩️ <span id="ord-btn-unmark-label">수집해제</span></button>
     <button class="btn" onclick="copySelected()" style="padding:5px 12px;font-size:12px" title="선택된 주문 (없으면 전체) 을 클립보드로 복사">📋 복사</button>
     <button class="btn" onclick="downloadExcel()" style="padding:5px 12px;font-size:12px" title="선택된 주문 (없으면 전체) 을 엑셀로 다운로드">📥 엑셀</button>
-    <button class="btn" id="ord-btn-coupang-sync" onclick="syncCoupangOrders(this)" style="padding:5px 12px;font-size:12px;background:#fef2f2;border-color:#fecaca" title="쿠팡 Wing API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟥 쿠팡 동기화 <span id="ord-coupang-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
-    <button class="btn" id="ord-btn-naver-sync" onclick="syncNaverOrders(this)" style="padding:5px 12px;font-size:12px;background:#ecfdf5;border-color:#a7f3d0" title="네이버 커머스 API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟩 네이버 동기화 <span id="ord-naver-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
-    <button class="btn" id="ord-btn-naver-confirm" onclick="backfillNaverConfirmedAt(this)" style="padding:5px 12px;font-size:12px" title="구매확정일이 비어 있는 네이버 주문을 상세 조회로 채웁니다. 동기화 시점에 필드가 안 왔거나 그 전에 들어온 옛 주문을 소급 적용합니다.">📅 구매확정일 채우기</button>
-    <button class="btn" id="ord-btn-cafe24-sync" onclick="syncCafe24Orders(this)" style="padding:5px 12px;font-size:12px;background:#fff7ed;border-color:#fed7aa" title="카페24(정수당) Admin API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟧 정수당 동기화 <span id="ord-cafe24-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
-    <button class="btn" id="ord-btn-csv-upload" onclick="openBgCsvUpload()" style="padding:5px 12px;font-size:12px;background:#dbeafe;border-color:#93c5fd;color:#1e40af;display:none" title="바른손더기프트 퍼스트몰 원본 Excel(.xlsx) 또는 CSV 를 업로드하여 여러 주문을 한 번에 등록합니다">📤 CSV/Excel 업로드</button>
-    <button class="btn" id="ord-btn-bhg-backfill" onclick="backfillBhgStubs()" style="padding:5px 12px;font-size:12px;background:#eef2ff;border-color:#c7d2fe;color:#4338ca;display:none" title="이전에 등록된 바른손더기프트 주문 중 정보입력현황 stub 이 없는 것을 일괄 생성 (스티커/희망출고일 정보 backfill)">🔧 stub 재생성</button>
-    <button class="btn" id="ord-btn-bhg-bulk-cancel" onclick="bulkCancelBhg()" style="padding:5px 12px;font-size:12px;background:#fef3c7;border-color:#fbbf24;color:#92400e;display:none" title="선택된 바른손더기프트 주문을 취소 상태 (status_seq=3) 로 변경">🚫 선택 취소</button>
-    <button class="btn" id="ord-btn-bhg-bulk-delete" onclick="bulkDeleteBhg()" style="padding:5px 12px;font-size:12px;background:#fef2f2;border-color:#fca5a5;color:#dc2626;display:none" title="선택된 바른손더기프트 주문을 완전 삭제 (정보입력현황 stub 도 함께 사라짐)">🗑️ 선택 삭제</button>
+    <!-- 동기화·도구 — 가끔 누르는 것들을 한 곳으로 접는다. 표시/숨김 로직은 버튼 id 그대로 동작한다. -->
+    <details class="ord-tools" id="ord-tools">
+      <summary>동기화 · 도구 ▾</summary>
+      <div class="ord-tools-panel">
+        <button class="btn" id="ord-btn-coupang-sync" onclick="syncCoupangOrders(this)" style="padding:5px 12px;font-size:12px;background:#fef2f2;border-color:#fecaca" title="쿠팡 Wing API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟥 쿠팡 동기화 <span id="ord-coupang-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
+        <button class="btn" id="ord-btn-naver-sync" onclick="syncNaverOrders(this)" style="padding:5px 12px;font-size:12px;background:#ecfdf5;border-color:#a7f3d0" title="네이버 커머스 API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟩 네이버 동기화 <span id="ord-naver-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
+        <button class="btn" id="ord-btn-naver-confirm" onclick="backfillNaverConfirmedAt(this)" style="padding:5px 12px;font-size:12px" title="구매확정일이 비어 있는 네이버 주문을 상세 조회로 채웁니다. 동기화 시점에 필드가 안 왔거나 그 전에 들어온 옛 주문을 소급 적용합니다.">📅 구매확정일 채우기</button>
+        <button class="btn" id="ord-btn-cafe24-sync" onclick="syncCafe24Orders(this)" style="padding:5px 12px;font-size:12px;background:#fff7ed;border-color:#fed7aa" title="카페24(정수당) Admin API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟧 정수당 동기화 <span id="ord-cafe24-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
+        <button class="btn" id="ord-btn-csv-upload" onclick="openBgCsvUpload()" style="padding:5px 12px;font-size:12px;background:#dbeafe;border-color:#93c5fd;color:#1e40af;display:none" title="바른손더기프트 퍼스트몰 원본 Excel(.xlsx) 또는 CSV 를 업로드하여 여러 주문을 한 번에 등록합니다">📤 CSV/Excel 업로드</button>
+        <button class="btn" id="ord-btn-bhg-backfill" onclick="backfillBhgStubs()" style="padding:5px 12px;font-size:12px;background:#eef2ff;border-color:#c7d2fe;color:#4338ca;display:none" title="이전에 등록된 바른손더기프트 주문 중 정보입력현황 stub 이 없는 것을 일괄 생성 (스티커/희망출고일 정보 backfill)">🔧 stub 재생성</button>
+        <button class="btn" id="ord-btn-bhg-bulk-cancel" onclick="bulkCancelBhg()" style="padding:5px 12px;font-size:12px;background:#fef3c7;border-color:#fbbf24;color:#92400e;display:none" title="선택된 바른손더기프트 주문을 취소 상태 (status_seq=3) 로 변경">🚫 선택 취소</button>
+        <button class="btn" id="ord-btn-bhg-bulk-delete" onclick="bulkDeleteBhg()" style="padding:5px 12px;font-size:12px;background:#fef2f2;border-color:#fca5a5;color:#dc2626;display:none" title="선택된 바른손더기프트 주문을 완전 삭제 (정보입력현황 stub 도 함께 사라짐)">🗑️ 선택 삭제</button>
+        <button id="ord-cp-backfill" class="btn" style="display:none;padding:2px 10px;font-size:11px"
+            title="상품설정에 넣은 채널 코드로, 이미 들어온 쿠팡 주문의 스티커와 상품코드를 채웁니다. 먼저 미리보기로 무엇이 바뀌는지 확인합니다."
+            onclick="runCoupangStickerBackfill(true)">🩹 스티커 백필</button>
+      </div>
+    </details>
+
   </div>
 
   <div class="card" style="padding:0;overflow-x:auto">
@@ -3823,6 +3860,9 @@ function _ordRenderCoupangMapStatus(rows) {
 
 /** 미매핑 쿠팡 주문만 보도록 컬럼을 켜고 검색어를 비운다 */
 function _ordShowUnmappedCoupang() {
+  // 컬럼을 켜도 구역이 접혀 있으면 무엇이 바뀌었는지 안 보인다 — 함께 펼친다
+  const sec = document.getElementById('ord-sec-cols');
+  if (sec) sec.open = true;
   ['channel_product_code', 'channel_option_id', 'card_code'].forEach(k => {
     // 컬럼 셀렉터의 체크박스는 data-key 로 식별한다 (buildColSelector)
     const cb = document.querySelector(`#col-selector input[data-key="${k}"]`);
@@ -4072,6 +4112,7 @@ function init() {
   initMkDates(90);
 
   buildColSelector();
+  _ordSecRestore();
   // GNB 설정 적용 — 페이지 로드 직후 (네비 깜빡임 최소화). 실패해도 페이지 진행.
   fetchAndApplyNavConfig().catch(() => {});
   // 배경 패턴 복원 (localStorage)
@@ -4215,7 +4256,56 @@ function switchCategory(cat) {
   //   데코/꽃다발은 채널 단일이라 불필요, 더기프트는 MANUAL 만이라 불필요.
   const siteFilter = document.getElementById('ord-site-filter');
   if (siteFilter) siteFilter.style.display = showMarketplaceSync ? 'flex' : 'none';
+  _ordUpdateFilterBadge();
   loadOrders();
+}
+
+// ── 주문조회 접이식 구역 (2026-08-13) ──────────────────
+//   기간·조회는 항상 보이고, 필터·표시컬럼은 접어 둔다. 접힌 상태는 브라우저에 기억한다.
+const ORD_SEC_KEY = 'ord-sections-open';
+
+function _ordSecRestore() {
+  let open = {};
+  try { open = JSON.parse(localStorage.getItem(ORD_SEC_KEY) || '{}'); } catch {}
+  ['ord-sec-filter', 'ord-sec-cols'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.open = !!open[id];
+    el.addEventListener('toggle', () => {
+      let cur = {};
+      try { cur = JSON.parse(localStorage.getItem(ORD_SEC_KEY) || '{}'); } catch {}
+      cur[id] = el.open;
+      try { localStorage.setItem(ORD_SEC_KEY, JSON.stringify(cur)); } catch {}
+    });
+  });
+  // 도구 드롭다운 — 바깥을 누르면 닫는다
+  document.addEventListener('click', (e) => {
+    const d = document.getElementById('ord-tools');
+    if (d && d.open && !d.contains(e.target)) d.open = false;
+  });
+}
+
+/** 접어 둬도 무엇이 걸려 있는지 보이도록 요약 배지를 갱신한다 */
+function _ordUpdateFilterBadge() {
+  const badge = document.getElementById('ord-filter-badge');
+  if (badge) {
+    const excl = ['exclude-cancel', 'exclude-pending', 'hide-collected']
+      .filter(id => document.getElementById(id)?.checked).length;
+    const sites = [...document.querySelectorAll('#ord-site-filter input[data-ord-site]')];
+    const off = sites.filter(cb => !cb.checked).length;
+    const parts = [];
+    if (excl) parts.push(`제외 ${excl}`);
+    if (off) parts.push(`사이트 −${off}`);
+    badge.textContent = parts.join(' · ');
+    badge.style.display = parts.length ? '' : 'none';
+  }
+  const cb = document.getElementById('ord-cols-badge');
+  if (cb) {
+    const all = [...document.querySelectorAll('#col-selector input[data-key]')];
+    const on = all.filter(x => x.checked).length;
+    cb.textContent = all.length ? `${on}/${all.length}` : '';
+    cb.style.display = all.length ? '' : 'none';
+  }
 }
 
 // --- Column Selector ---
@@ -4366,6 +4456,7 @@ function getFilteredOrders() {
 }
 
 function renderOrderTable() {
+  _ordUpdateFilterBadge();
   const cols = getSelectedCols();
   const hideCollected = document.getElementById('hide-collected')?.checked;
   const collected = getCollectedSet();
