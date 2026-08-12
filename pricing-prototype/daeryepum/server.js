@@ -4636,6 +4636,7 @@ async function apiDashboardByShipDate(query) {
   const ciByCardSeq = new Map();   // CARD: order_seq → ci
   const ciByEtcSeq = new Map();    // ETC: order_seq → ci
   const ciByManualId = new Map();  // MANUAL (바른손더기프트): manual_order_id → ci
+  const ciByMarketId = new Map();  // 마켓 (쿠팡/네이버/정수당): 'CP-…' 등 order_id 그대로 → ci
   inWindow.forEach(ci => {
     const oid = String(ci.order_id || '');
     if (oid.startsWith('ETC-')) {
@@ -4643,6 +4644,11 @@ async function apiDashboardByShipDate(query) {
       if (seq) ciByEtcSeq.set(seq, ci);
     } else if (oid.startsWith('MO-')) {
       ciByManualId.set(oid.slice(3), ci);
+    } else if (oid.startsWith('CP-') || oid.startsWith('NV-') || oid.startsWith('CF-')) {
+      // 마켓 채널 — 접두가 붙어 parseInt 가 NaN 이라 여태 통째로 빠져 있었다.
+      //   우리가 출고하는 주문이므로 출고 일정에 잡혀야 한다 (2026-08-12 수정).
+      //   로켓그로스는 희망출고일을 아예 넣지 않으므로 여기까지 오지 않는다 (쿠팡이 출고).
+      ciByMarketId.set(oid, ci);
     } else {
       const seq = parseInt(oid);
       if (seq) ciByCardSeq.set(seq, ci);
@@ -4736,6 +4742,48 @@ async function apiDashboardByShipDate(query) {
     } catch (e) { console.warn('[by-ship-date] MANUAL lookup 실패:', e.message); }
   }
 
+  // 마켓 (쿠팡 판매자배송 / 네이버 / 정수당) — 주문 단위 합계.
+  //   copurchase 개념이 없어 전부 단독주문으로 본다.
+  if (ciByMarketId.size) {
+    const MARKET_CANCELLED = new Set([
+      'CANCELED', 'RETURNED', 'EXCHANGED', 'CANCEL', 'RETURNS',
+      'C00', 'C10', 'C11', 'R00', 'R10', 'E00', 'E10',
+    ]);
+    const CHANNELS = [
+      { prefix: 'CP-', site: '쿠팡', key: r => `CP-${r.coupang_order_id}`,
+        load: ids => require('./coupang/store').listCoupangOrders({ orderIds: ids, excludeRocketGrowth: true }) },
+      { prefix: 'NV-', site: '네이버', key: r => `NV-${r.product_order_id}`,
+        load: ids => require('./naver/store').listNaverOrders({ orderIds: ids }) },
+      { prefix: 'CF-', site: '정수당', key: r => `CF-${r.cafe24_order_id}`,
+        load: ids => require('./cafe24/store').listCafe24Orders({ orderIds: ids }) },
+    ];
+    for (const ch of CHANNELS) {
+      const ids = [...ciByMarketId.keys()]
+        .filter(k => k.startsWith(ch.prefix))
+        .map(k => k.slice(ch.prefix.length));
+      if (!ids.length) continue;
+      try {
+        const rows = await ch.load(ids);
+        // 주문 단위로 합친다 — 한 주문이 여러 상품 줄로 나뉘어 있다
+        const byOrder = new Map();
+        for (const r of (rows || [])) {
+          if (MARKET_CANCELLED.has(String(r.status || '').toUpperCase())) continue;
+          const k = ch.key(r);
+          if (!ciByMarketId.has(k)) continue;     // 이 기간 출고 대상이 아닌 주문
+          if (!byOrder.has(k)) {
+            byOrder.set(k, { order_seq: k, is_copurchase: 0, amount: 0, qty: 0, site_name: ch.site, _src: 'MARKET' });
+          }
+          const b = byOrder.get(k);
+          b.amount += Number(r.item_total_price) || 0;
+          b.qty += Number(r.item_count) || 0;
+        }
+        salesRows.push(...byOrder.values());
+      } catch (e) {
+        console.warn(`[by-ship-date] ${ch.site} lookup 실패 (무시):`, e.message);
+      }
+    }
+  }
+
   // 출고일별 그룹핑 (by_site 추가 — 채널별 매출 breakdown)
   const buckets = {}; // date → { amount, orders, qty, express, regular, copurchase, standalone, by_site }
   function ensureBucket(date) {
@@ -4760,6 +4808,7 @@ async function apiDashboardByShipDate(query) {
   salesRows.forEach(r => {
     const ci = r._src === 'ETC' ? ciByEtcSeq.get(r.order_seq)
              : r._src === 'MANUAL' ? ciByManualId.get(r.order_seq)
+             : r._src === 'MARKET' ? ciByMarketId.get(r.order_seq)
              : ciByCardSeq.get(r.order_seq);
     if (!ci) return;
     const date = String(ci.desired_ship_date).slice(0, 10);
