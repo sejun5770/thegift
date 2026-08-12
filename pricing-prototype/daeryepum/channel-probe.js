@@ -94,18 +94,25 @@ async function naverRaw(store, method, path, body = null) {
 async function cafe24Raw(method, path, body = null) {
   const { getAccessToken } = require('./cafe24/auth');
   const MALL = process.env.CAFE24_MALL_ID || 'barunn01';
-  const VERSION = process.env.CAFE24_API_VERSION || '2024-06-01';
+  const VERSION = process.env.CAFE24_API_VERSION || '2026-03-01';
   const token = await getAccessToken();
-  const res = await fetch(`https://${MALL}.cafe24api.com/api/v2/admin${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      'X-Cafe24-Api-Version': VERSION,
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  return { status: res.status, body: await res.text() };
+  const call = async (withVersion) => {
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    if (withVersion) headers['X-Cafe24-Api-Version'] = VERSION;
+    const res = await fetch(`https://${MALL}.cafe24api.com/api/v2/admin${path}`, {
+      method, headers, body: body ? JSON.stringify(body) : undefined,
+    });
+    return { status: res.status, body: await res.text() };
+  };
+  let r = await call(true);
+  // 버전 미지원이면 헤더를 빼고 앱 기본버전으로 다시 — 운영 클라이언트와 같은 방식.
+  //   이걸 안 하면 버전 헤더에서 먼저 막혀 권한 판정 자체가 불가능하다 (2026-08-13 확인).
+  if (r.status === 400 && /version/i.test(r.body)) {
+    const retried = await call(false);
+    retried.body = `[버전헤더 제거 후 재시도] ${retried.body}`;
+    return retried;
+  }
+  return r;
 }
 
 /**
@@ -151,7 +158,8 @@ async function probeChannels({ includeWrite = true } = {}) {
     const to = ymd(today);
     results.push(await runOne('고객센터 문의조회', '쿠팡', '고객문의', () =>
       coupangRaw('GET', `/v2/providers/openapi/apis/api/v4/vendors/${V}/callCenterInquiries`,
-        `pageNum=1&pageSize=10&inquiryStartAt=${from}&inquiryEndAt=${to}`)));
+        // partnerCounselingStatus 는 필수 (probe 로 확인, 2026-08-13)
+        `partnerCounselingStatus=NONE&pageNum=1&pageSize=10&inquiryStartAt=${from}&inquiryEndAt=${to}`)));
     results.push(await runOne('상품별 고객문의 조회', '쿠팡', '고객문의', () =>
       coupangRaw('GET', `/v2/providers/openapi/apis/api/v4/vendors/${V}/onlineInquiries`,
         `inquiryStartAt=${from}&inquiryEndAt=${to}&answeredType=ALL&pageNum=1&pageSize=10`)));
@@ -180,15 +188,14 @@ async function probeChannels({ includeWrite = true } = {}) {
             }],
           })));
       }
-      // 문의 — 공개 문서에서 경로를 확정 못 해 후보를 함께 때려 본다 (전부 읽기)
-      for (const path of [
-        '/external/v1/contact-leave/questions?page=1&size=10',
-        '/external/v1/pay-user/inquiries?page=1&size=10',
-        '/external/v2/product-inquiries?page=1&size=10',
-      ]) {
-        results.push(await runOne(`문의 조회 후보 ${path.split('?')[0]}`, '네이버', '고객문의', () =>
-          naverRaw(store, 'GET', path)));
-      }
+      // 문의 — probe 로 찾아낸 경로 (2026-08-13). 핸들러가 getCustomerInquiry 라
+      //   startSearchDate/endSearchDate 가 필수다.
+      const d = (ms) => new Date(ms + 9 * 3600 * 1000).toISOString().slice(0, 10);
+      const nvTo = d(Date.now());
+      const nvFrom = d(Date.now() - 13 * 86400000);
+      results.push(await runOne('고객문의 조회', '네이버', '고객문의', () =>
+        naverRaw(store, 'GET',
+          `/external/v1/pay-user/inquiries?startSearchDate=${nvFrom}&endSearchDate=${nvTo}&page=1&size=10`)));
     }
   }
   });
