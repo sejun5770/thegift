@@ -7,7 +7,9 @@ WORKDIR /app
 RUN npm init -y && npm install mssql mysql2 bcryptjs xlsx date-fns
 
 # 답례품 앱 복사
-COPY pricing-prototype/daeryepum/server.js ./
+# 최상위 JS 는 글롭으로 통째 — 파일을 새로 만들 때마다 COPY 줄을 잊어
+#   런타임에 'Cannot find module' 이 나는 일이 반복됐다 (channel-probe.js, 2026-08-13).
+COPY pricing-prototype/daeryepum/*.js ./
 COPY pricing-prototype/daeryepum/index.html ./
 COPY pricing-prototype/daeryepum/barungift/ ./barungift/
 COPY pricing-prototype/daeryepum/coupang/ ./coupang/
