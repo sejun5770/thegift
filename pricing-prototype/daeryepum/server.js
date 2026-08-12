@@ -3926,6 +3926,64 @@ async function apiDashboardSummary(query) {
     console.warn('[summary] 네이버 주문 머지 실패 (무시):', e.message);
   }
 
+  // 정수당(카페24) 일별 합산 — 쿠팡·네이버와 동일 패턴. 답례품 전용.
+  //   카드 보기(apiDashboardComparison)에는 진작 들어가 있었는데 여기만 빠져 있어
+  //   테이블 보기에서 정수당 매출이 통째로 안 보였다 (2026-08-12 수정).
+  if (_isDaeryepumCategory) try {
+    const cafe24Store = require('./cafe24/store');
+    const cafe24RowsRaw = await cafe24Store.listCafe24Orders({
+      startStr: startDate, endStr: endDate, byPaid: false,
+    });
+    // 취소/반품/교환 제외 — 카페24 상태코드 계열(C**/R**/E**)까지 함께 본다
+    const CF_CANCELLED = new Set(['CANCELED', 'RETURNED', 'EXCHANGED',
+      'C00', 'C10', 'C11', 'R00', 'R10', 'E00', 'E10']);
+    const cafe24Rows = (cafe24RowsRaw || []).filter(r =>
+      !CF_CANCELLED.has(String(r.status || '').toUpperCase())
+      && !_sumGiftExcl.has('정수당', r.product_code, r.product_name));   // 답례품 아님 제외
+    if (cafe24Rows.length) {
+      const byDayProduct = new Map();
+      const byDayForCount = new Map();
+      for (const r of cafe24Rows) {
+        const day = String(r.ordered_at || '').slice(0, 10);
+        if (!day) continue;
+        const name = r.product_name || '정수당 답례품';
+        const code = r.product_code || '';
+        const key = `${day}|${code}|${name}`;
+        if (!byDayProduct.has(key)) {
+          byDayProduct.set(key, {
+            card_name: name, card_code: code,
+            order_day: day, site_name: '정수당',
+            order_type: '단독주문',
+            order_count: 0, total_qty: 0, total_amount: 0,
+            _orderIds: new Set(),
+          });
+        }
+        const bucket = byDayProduct.get(key);
+        bucket.total_qty += r.item_count || 0;
+        bucket.total_amount += r.item_total_price || 0;
+        // 한 주문이 여러 줄(line_key)로 나뉘므로 주문번호로 센다
+        bucket._orderIds.add(String(r.cafe24_order_id));
+        const ck = `${day}|정수당|단독주문`;
+        if (!byDayForCount.has(ck)) {
+          byDayForCount.set(ck, { order_day: day, site_name: '정수당', order_type: '단독주문', _orderIds: new Set() });
+        }
+        byDayForCount.get(ck)._orderIds.add(String(r.cafe24_order_id));
+      }
+      for (const v of byDayProduct.values()) {
+        v.order_count = v._orderIds.size;
+        delete v._orderIds;
+        rows.push(v);
+      }
+      for (const v of byDayForCount.values()) {
+        const distinct_order_count = v._orderIds.size;
+        delete v._orderIds;
+        orderCounts.push({ order_day: v.order_day, site_name: v.site_name, order_type: v.order_type, distinct_order_count });
+      }
+    }
+  } catch (e) {
+    console.warn('[summary] 정수당 주문 머지 실패 (무시):', e.message);
+  }
+
   // 쿠팡 로켓그로스 매출 (수동 입력 집계) 머지 — 일별 aggregate, '쿠팡 로켓그로스' 사이트 그룹. 답례품 전용.
   //
   // 데이터 특성:
