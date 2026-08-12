@@ -14123,6 +14123,56 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/inquiries' && req.method === 'GET') {
+        // 외부채널 고객문의 목록 (065)
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          const q = parsed.query;
+          const rows = await require('./channel-inquiries').listInquiries({
+            channel: q.channel || null,
+            answered: q.answered === '1' ? true : (q.answered === '0' ? false : undefined),
+            startDate: q.start_date || null,
+            endDate: q.end_date || null,
+          });
+          data = { items: rows, count: rows.length };
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/inquiries/sync' && req.method === 'POST') {
+        // 채널에서 문의를 가져와 저장. 쿠팡은 조회기간이 7일이라 창을 쪼개 돈다.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const body = await new Promise((resolve) => {
+          let raw = '';
+          req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+        });
+        logAdminAccess(session, req, 'inquiries-sync', { days: body.days_back });
+        try {
+          data = await require('./channel-inquiries').syncInquiries({ daysBack: body.days_back });
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname.match(/^\/api\/inquiries\/[^/]+\/check$/) && req.method === 'POST') {
+        // 우리 쪽 '확인' 표시 — 채널 답변 여부와 별개다
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const id = pathname.split('/')[3];
+        try {
+          data = await require('./channel-inquiries').markChecked(id, session?.email || null);
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
       } else if (pathname === '/api/admin/channel-probe' && req.method === 'GET') {
         // 외부채널 쓰기 권한 확인 — 출고상태 변경 / 고객문의 API 를 쓸 수 있는지 가른다.
         //   쓰기 API 는 '있을 수 없는 식별자' 로만 호출하므로 실제 주문·문의는 바뀌지 않는다.

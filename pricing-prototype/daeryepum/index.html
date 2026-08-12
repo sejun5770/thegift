@@ -61,6 +61,9 @@ nav{background:#fff;border-bottom:1px solid var(--gray-200);padding:0 24px;displ
 .user-area img{width:28px;height:28px;border-radius:50%;border:1px solid var(--gray-200)}
 .user-area button{padding:4px 10px;font-size:11px;border:1px solid var(--gray-300);border-radius:var(--radius);background:#fff;cursor:pointer;color:var(--gray-500)}
 .user-area button:hover{background:var(--gray-50);color:var(--gray-700)}
+/* 매뉴얼 — GNB 링크가 아니라 로그아웃 오른쪽 버튼 (운영 요청 2026-08-13) */
+.user-area .manual-btn{padding:4px 10px;font-size:11px;border:1px solid var(--gray-300);border-radius:var(--radius);background:#fff;color:var(--gray-500);text-decoration:none;white-space:nowrap}
+.user-area .manual-btn:hover{background:var(--gray-50);color:var(--gray-700)}
 nav .logo{font-weight:700;font-size:16px;color:var(--primary)}
 nav a{text-decoration:none;color:var(--gray-500);font-weight:500;padding:14px 0;border-bottom:2px solid transparent;font-size:14px}
 nav a.active{color:var(--primary);border-bottom-color:var(--primary)}
@@ -275,23 +278,23 @@ nav.nav-loading a[href^="#"] {
 </head>
 <body>
 <nav class="nav-loading">
-  <span class="logo">💐 답례품 관리</span>
+  <span class="logo">답례품 관리</span>
   <a href="#dashboard" class="active" onclick="showPage('dashboard')">대시보드</a>
-  <a href="#monthly-report" onclick="showPage('monthly-report')">📊 월간 보고서</a>
+  <a href="#monthly-report" onclick="showPage('monthly-report')">월간 보고서</a>
   <a href="#orders" onclick="showPage('orders')">주문조회</a>
-  <a href="#bg-unified" onclick="showPage('bg-unified')">📋 정보입력현황</a>
-  <a href="#sns" onclick="showPage('sns')">💡 SNS 인사이트</a>
-  <a href="#worklog" onclick="showPage('worklog')">📝 일지</a>
-  <a href="#bg-stickers" onclick="showPage('bg-stickers')">🏷️ 스티커</a>
-  <a href="#bg-products" onclick="showPage('bg-products')">⚙️ 상품설정</a>
-  <a href="#bg-shipping" onclick="showPage('bg-shipping')">📅 출고일설정</a>
-  <a href="#coupang-rfm" onclick="showPage('coupang-rfm')">🟥 로켓그로스</a>
-  <a href="#bg-vendors" onclick="showPage('bg-vendors')">🤝 위탁업체</a>
-  <a href="#bg-artists" onclick="showPage('bg-artists')">🎨 작가 정산</a>
-  <a href="#daeryepum-stock" onclick="showPage('daeryepum-stock')">📦 답례품 재고</a>
-  <a href="#wedding-calendar" onclick="showPage('wedding-calendar')">💍 예식일 캘린더</a>
-  <a href="manual.html" target="_blank" rel="noopener" title="기능 정의 · 사용법 위키 (새 탭)">📖 매뉴얼</a>
-  <a href="#admin-nav-settings" onclick="showPage('admin-nav-settings')" id="nav-link-admin-nav-settings" style="display:none">⚙️ GNB 설정</a>
+  <a href="#bg-unified" onclick="showPage('bg-unified')">정보입력현황</a>
+  <a href="#sns" onclick="showPage('sns')">SNS 인사이트</a>
+  <a href="#worklog" onclick="showPage('worklog')">일지</a>
+  <a href="#bg-stickers" onclick="showPage('bg-stickers')">스티커</a>
+  <a href="#bg-products" onclick="showPage('bg-products')">상품설정</a>
+  <a href="#bg-shipping" onclick="showPage('bg-shipping')">출고일설정</a>
+  <a href="#coupang-rfm" onclick="showPage('coupang-rfm')">로켓그로스</a>
+  <a href="#channel-inquiries" onclick="showPage('channel-inquiries')">상품문의</a>
+  <a href="#bg-vendors" onclick="showPage('bg-vendors')">위탁업체</a>
+  <a href="#bg-artists" onclick="showPage('bg-artists')">작가 정산</a>
+  <a href="#daeryepum-stock" onclick="showPage('daeryepum-stock')">답례품 재고</a>
+  <a href="#wedding-calendar" onclick="showPage('wedding-calendar')">예식일 캘린더</a>
+  <a href="#admin-nav-settings" onclick="showPage('admin-nav-settings')" id="nav-link-admin-nav-settings" style="display:none">GNB 설정</a>
   <div class="user-area" id="user-area"></div>
 </nav>
 
@@ -333,10 +336,10 @@ nav.nav-loading a[href^="#"] {
     <div style="display:flex;gap:4px;align-items:center">
       <button class="btn btn-sm btn-primary" id="btn-view-card" onclick="setDashView('card')">카드 보기</button>
       <button class="btn btn-sm" id="btn-view-table" onclick="setDashView('table')">테이블 보기</button>
-      <button class="btn btn-sm" id="btn-dash-download" onclick="downloadDashTableExcel()" style="display:none;border-color:#10b981;color:#047857" title="현재 테이블 내용을 엑셀로 다운로드">📥 엑셀</button>
+      <button class="btn btn-sm" id="btn-dash-download" onclick="downloadDashTableExcel()" style="display:none;border-color:#10b981;color:#047857" title="현재 테이블 내용을 엑셀로 다운로드">엑셀</button>
       <!-- 매출 그룹 — 상품별 매출 행을 체크해 하나의 그룹으로 묶어 합산 표시 -->
-      <button class="btn btn-sm btn-primary" id="sheet-group-btn" onclick="_sheetOpenGroupModal()" style="display:none">🔗 그룹으로 묶기 (<span id="sheet-sel-count">0</span>)</button>
-      <button class="btn btn-sm" id="btn-sheet-groups" onclick="openSalesGroupManager()" style="display:none" title="매출 그룹 관리">⚙️ 그룹</button>
+      <button class="btn btn-sm btn-primary" id="sheet-group-btn" onclick="_sheetOpenGroupModal()" style="display:none">그룹으로 묶기 (<span id="sheet-sel-count">0</span>)</button>
+      <button class="btn btn-sm" id="btn-sheet-groups" onclick="openSalesGroupManager()" style="display:none" title="매출 그룹 관리">그룹</button>
     </div>
   </div>
   <div id="dash-card-view">
@@ -472,7 +475,7 @@ nav.nav-loading a[href^="#"] {
         <input type="date" id="ltc-b-start" value="2026-07-01" style="padding:4px 8px;border:1px solid #fca5a5;border-radius:4px;font-size:11px">
         <span style="font-size:11px">~</span>
         <input type="date" id="ltc-b-end" value="2026-07-12" style="padding:4px 8px;border:1px solid #fca5a5;border-radius:4px;font-size:11px">
-        <button class="btn btn-sm btn-primary" onclick="loadLeadtimeCompare()">🔀 비교</button>
+        <button class="btn btn-sm btn-primary" onclick="loadLeadtimeCompare()">비교</button>
       </div>
     </div>
     <div class="card" id="ltc-body" style="padding:16px;font-size:13px">
@@ -619,7 +622,7 @@ nav.nav-loading a[href^="#"] {
           <button id="bsd-view-chart" onclick="setBsdView('chart')" style="padding:6px 12px;font-size:12px;border:none;background:var(--primary);color:#fff;cursor:pointer">📊 차트</button>
           <button id="bsd-view-table" onclick="setBsdView('table')" style="padding:6px 12px;font-size:12px;border:none;background:#fff;color:var(--gray-700);cursor:pointer;border-left:1px solid var(--gray-300)">📋 테이블</button>
         </div>
-        <button class="btn btn-sm" onclick="downloadBsdExcel()" style="border-color:#10b981;color:#047857;padding:6px 12px;font-size:12px" title="현재 조회된 희망출고일별 매출을 엑셀로 다운로드">📥 엑셀</button>
+        <button class="btn btn-sm" onclick="downloadBsdExcel()" style="border-color:#10b981;color:#047857;padding:6px 12px;font-size:12px" title="현재 조회된 희망출고일별 매출을 엑셀로 다운로드">엑셀</button>
         <!-- 주차별 복사 — 예식 캘린더와 동일 포맷 (사이트 행 × 일~토 열) -->
         <select id="bsd-copy-metric" style="padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px" title="복사할 값">
           <option value="amount">매출</option>
@@ -629,7 +632,7 @@ nav.nav-loading a[href^="#"] {
         <select id="bsd-copy-site" style="padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px" title="복사할 사이트">
           <option value="__all__">전체 사이트(행 분리)</option>
         </select>
-        <button class="btn btn-sm" onclick="copyBsdWeeks()" style="padding:6px 12px;font-size:12px" title="주차별 × 일~토 형태로 클립보드 복사">📋 주차별 복사</button>
+        <button class="btn btn-sm" onclick="copyBsdWeeks()" style="padding:6px 12px;font-size:12px" title="주차별 × 일~토 형태로 클립보드 복사">주차별 복사</button>
       </div>
       <div style="display:flex;gap:24px;margin-bottom:12px;flex-wrap:wrap">
         <div><span style="font-size:12px;color:var(--gray-500)">총 매출</span><br><strong id="bsd-total-amount" style="font-size:16px">-</strong></div>
@@ -713,9 +716,9 @@ nav.nav-loading a[href^="#"] {
         </div>
         <span style="color:var(--gray-300);margin:0 2px">|</span>
         <!-- 매출 그룹 — 여러 행을 체크해 하나의 그룹으로 묶어 합산 표시 -->
-        <button class="btn btn-sm btn-primary" id="pr-group-btn" onclick="_prOpenGroupModal()" style="display:none;padding:5px 10px">🔗 그룹으로 묶기 (<span id="pr-sel-count">0</span>)</button>
-        <button class="btn btn-sm" id="pr-excl-btn" onclick="_prExcludeSelected()" style="display:none;padding:5px 10px;color:#dc2626;border-color:#fecaca" title="선택한 품목을 답례품 매출 집계에서 제외 (자개카드·탈취제 등 비-답례품)">🚫 답례품 아님</button>
-        <button class="btn btn-sm" onclick="openSalesGroupManager()" style="padding:5px 10px" title="매출 그룹 · 제외 품목 관리">⚙️ 그룹</button>
+        <button class="btn btn-sm btn-primary" id="pr-group-btn" onclick="_prOpenGroupModal()" style="display:none;padding:5px 10px">그룹으로 묶기 (<span id="pr-sel-count">0</span>)</button>
+        <button class="btn btn-sm" id="pr-excl-btn" onclick="_prExcludeSelected()" style="display:none;padding:5px 10px;color:#dc2626;border-color:#fecaca" title="선택한 품목을 답례품 매출 집계에서 제외 (자개카드·탈취제 등 비-답례품)">답례품 아님</button>
+        <button class="btn btn-sm" onclick="openSalesGroupManager()" style="padding:5px 10px" title="매출 그룹 · 제외 품목 관리">그룹</button>
       </div>
     </div>
     <div class="card" style="padding:16px">
@@ -758,7 +761,7 @@ nav.nav-loading a[href^="#"] {
         <label style="display:flex;align-items:center;gap:4px;cursor:pointer;margin-left:6px">
           <input type="checkbox" id="ps-compare-prev" onchange="loadProductStats()"> 전기 대비
         </label>
-        <button class="btn btn-sm" onclick="downloadPsCsv()" title="선택된 상품들의 일별 데이터 CSV 다운로드">📥 CSV</button>
+        <button class="btn btn-sm" onclick="downloadPsCsv()" title="선택된 상품들의 일별 데이터 CSV 다운로드">CSV</button>
       </div>
     </div>
     <div class="card" style="padding:16px">
@@ -1170,6 +1173,45 @@ nav.nav-loading a[href^="#"] {
 
 </div>
 
+<!-- ========== 상품문의 (외부채널 고객문의 모아보기, 065) ========== -->
+<div id="page-channel-inquiries" class="page">
+  <div class="card" style="margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="font-weight:700;font-size:16px">💬 상품문의</div>
+      <span style="font-size:12px;color:var(--gray-500)">쿠팡·네이버 고객문의를 한자리에서 봅니다.</span>
+      <div style="flex:1"></div>
+      <select id="ciq-days" style="padding:5px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
+        <option value="7">최근 7일</option>
+        <option value="30" selected>최근 30일</option>
+        <option value="90">최근 90일</option>
+      </select>
+      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="loadInquiries()">🔄 조회</button>
+      <button class="btn btn-primary" id="ciq-sync" onclick="syncInquiries()" style="padding:5px 12px;font-size:12px"
+        title="채널에서 문의를 가져와 저장합니다. 쿠팡은 조회기간이 7일이라 창을 쪼개 여러 번 호출합니다.">📥 채널에서 가져오기</button>
+    </div>
+    <div style="font-size:11px;color:var(--gray-500);margin-top:8px">
+      쿠팡 고객센터 문의는 <b>조회기간이 최대 7일</b>이라, 지난 이력을 남기려면 주기적으로 가져와야 합니다.
+      정수당은 카페24 앱 권한(scope)이 확보되면 탭이 추가됩니다.
+    </div>
+  </div>
+
+  <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+    <button class="btn btn-sm btn-primary" data-ciq-tab="" onclick="setInquiryTab('')">전체 <span data-ciq-count="">(0)</span></button>
+    <button class="btn btn-sm" data-ciq-tab="coupang" onclick="setInquiryTab('coupang')">쿠팡 <span data-ciq-count="coupang">(0)</span></button>
+    <button class="btn btn-sm" data-ciq-tab="naver" onclick="setInquiryTab('naver')">네이버 <span data-ciq-count="naver">(0)</span></button>
+    <div style="width:12px"></div>
+    <label style="font-size:12px;display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" id="ciq-unanswered" onchange="renderInquiries()"> 미답변만
+    </label>
+    <div style="flex:1"></div>
+    <span id="ciq-summary" style="font-size:12px;color:var(--gray-600)"></span>
+  </div>
+
+  <div class="card" style="padding:0;overflow-x:auto">
+    <div id="ciq-table-wrap"></div>
+  </div>
+</div>
+
 <!-- ========== ADMIN: GNB 설정 ========== -->
 <div id="page-admin-nav-settings" class="page">
   <div class="card" style="margin-bottom:16px">
@@ -1240,10 +1282,10 @@ nav.nav-loading a[href^="#"] {
 <div id="page-orders" class="page">
   <!-- 카테고리 탭 -->
   <div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid var(--gray-200)">
-    <button class="cat-tab active" data-cat="daeryepum" onclick="switchCategory('daeryepum')">🎁 답례품</button>
-    <button class="cat-tab" data-cat="deco" onclick="switchCategory('deco')">✨ 데코소품</button>
-    <button class="cat-tab" data-cat="flower" onclick="switchCategory('flower')">💐 꽃다발</button>
-    <button class="cat-tab" data-cat="bhands_gift" onclick="switchCategory('bhands_gift')" title="API 미연동 채널 — CSV 업로드로 수동 등록">🎁 답례품_더기프트</button>
+    <button class="cat-tab active" data-cat="daeryepum" onclick="switchCategory('daeryepum')">답례품</button>
+    <button class="cat-tab" data-cat="deco" onclick="switchCategory('deco')">데코소품</button>
+    <button class="cat-tab" data-cat="flower" onclick="switchCategory('flower')">꽃다발</button>
+    <button class="cat-tab" data-cat="bhands_gift" onclick="switchCategory('bhands_gift')" title="API 미연동 채널 — CSV 업로드로 수동 등록">답례품_더기프트</button>
   </div>
   <!-- 필터바: 날짜/검색/조회 + 표시 필터 통합 -->
   <div class="toolbar" style="gap:12px">
@@ -1368,7 +1410,7 @@ nav.nav-loading a[href^="#"] {
       <div class="card" id="sns-hashtag-card">
         <h3 style="margin-bottom:12px">추천 해시태그</h3>
         <div id="sns-hashtags" style="display:flex;flex-wrap:wrap;gap:6px"></div>
-        <button class="btn btn-sm" style="margin-top:12px" onclick="copySnsHashtags()">📋 해시태그 복사</button>
+        <button class="btn btn-sm" style="margin-top:12px" onclick="copySnsHashtags()">해시태그 복사</button>
       </div>
     </div>
   </div>
@@ -1887,7 +1929,7 @@ nav.nav-loading a[href^="#"] {
   <div class="card" style="margin-bottom:14px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <h3 style="font-size:14px;font-weight:600;margin:0">🤝 매출처 · 거래처별 매출 · 수수료 · 정산</h3>
-      <button class="btn btn-sm" onclick="downloadBvdVendorExcel()" style="border-color:#10b981;color:#047857;padding:5px 12px;font-size:12px" title="현재 조회 기간의 거래처별 정산 내역을 엑셀로 다운로드">📥 엑셀</button>
+      <button class="btn btn-sm" onclick="downloadBvdVendorExcel()" style="border-color:#10b981;color:#047857;padding:5px 12px;font-size:12px" title="현재 조회 기간의 거래처별 정산 내역을 엑셀로 다운로드">엑셀</button>
     </div>
     <div style="overflow-x:auto">
       <table class="data-table" id="bvd-vendor-table">
@@ -3106,46 +3148,36 @@ nav.nav-loading a[href^="#"] {
   <div id="uni-tab-strip" style="display:flex;gap:2px;border-bottom:2px solid var(--gray-200);margin-bottom:12px;flex-wrap:wrap;overflow-x:auto">
     <button class="uni-tab" data-uni-tab="all" onclick="switchUniTab('all')"
       style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap"
-      title="스티커 여부와 관계없이 모든 답례품 카테고리 주문 노출 (주문자 정보 포함)">
-      📚 전체 <span id="uni-count-all" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+      title="스티커 여부와 관계없이 모든 답례품 카테고리 주문 노출 (주문자 정보 포함)">전체 <span id="uni-count-all" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
     </button>
     <button class="uni-tab" data-uni-tab="incident" onclick="switchUniTab('incident')"
       style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap"
-      title="운영사고 / 기타출고 기록 — 기타출고는 실제 나간 품목·수량을 남겨 물류·재무가 매출을 잡습니다">
-      🚨 기타출고(사고건) <span id="uni-count-incident" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+      title="운영사고 / 기타출고 기록 — 기타출고는 실제 나간 품목·수량을 남겨 물류·재무가 매출을 잡습니다">기타출고(사고건) <span id="uni-count-incident" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
     </button>
     <button class="uni-tab" data-uni-tab="unsubmitted" onclick="switchUniTab('unsubmitted')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid var(--primary);color:var(--primary);font-weight:600;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">
-      ⏳ 미입력 <span id="uni-count-unsubmitted" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid var(--primary);color:var(--primary);font-weight:600;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">미입력 <span id="uni-count-unsubmitted" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
     </button>
     <button class="uni-tab" data-uni-tab="submitted" onclick="switchUniTab('submitted')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">
-      ✅ 입력완료 <span id="uni-count-submitted" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">입력완료 <span id="uni-count-submitted" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
     </button>
     <button class="uni-tab" data-uni-tab="sticker_completed" onclick="switchUniTab('sticker_completed')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">
-      🎨 스티커 작업완료 <span id="uni-count-sticker_completed" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">스티커 작업완료 <span id="uni-count-sticker_completed" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
     </button>
     <button class="uni-tab" data-uni-tab="printed" onclick="switchUniTab('printed')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">
-      🖨️ 인쇄완료 <span id="uni-count-printed" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">인쇄완료 <span id="uni-count-printed" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
     </button>
     <button class="uni-tab" data-uni-tab="bound" onclick="switchUniTab('bound')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">
-      📑 제본완료 <span id="uni-count-bound" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">제본완료 <span id="uni-count-bound" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
     </button>
     <button class="uni-tab" data-uni-tab="packed" onclick="switchUniTab('packed')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">
-      📦 포장완료 <span id="uni-count-packed" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">포장완료 <span id="uni-count-packed" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
     </button>
     <button class="uni-tab" data-uni-tab="cp_warehouse" onclick="switchUniTab('cp_warehouse')"
       style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap"
-      title="로켓그로스 주문 중 아직 배송완료가 아닌 건 — 쿠팡 물류센터가 보관·출고합니다. 우리 쪽 작업은 없습니다.">
-      🏬 쿠팡창고 <span id="uni-count-cp_warehouse" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+      title="로켓그로스 주문 중 아직 배송완료가 아닌 건 — 쿠팡 물류센터가 보관·출고합니다. 우리 쪽 작업은 없습니다.">쿠팡창고 <span id="uni-count-cp_warehouse" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
     </button>
     <button class="uni-tab" data-uni-tab="shipped" onclick="switchUniTab('shipped')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">
-      🚚 출고완료 <span id="uni-count-shipped" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">출고완료 <span id="uni-count-shipped" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
     </button>
   </div>
   <!-- 현재 활성 탭 상태 (내부) -->
@@ -3994,7 +4026,7 @@ function loadUserInfo() {
     if (!r.ok) {
       // 개발모드(인증 우회)에서는 reload하지 않음
       document.getElementById('user-area').innerHTML =
-        '<span style="color:var(--gray-500);font-size:11px">개발 모드</span>';
+        '<span style="color:var(--gray-500);font-size:11px">개발 모드</span><a href="manual.html" target="_blank" rel="noopener" class="manual-btn" title="기능 정의 · 사용법 위키 (새 탭)">매뉴얼</a>';
       return;
     }
     return r.json();
@@ -4008,10 +4040,10 @@ function loadUserInfo() {
     const pic = safePicUrl ? `<img src="${esc(safePicUrl)}" alt="">` : '';
     const name = esc(user.name || user.email || '');
     document.getElementById('user-area').innerHTML =
-      `${pic}<span>${name}</span><button onclick="logout()">로그아웃</button>`;
+      `${pic}<span>${name}</span><button onclick="logout()">로그아웃</button><a href="manual.html" target="_blank" rel="noopener" class="manual-btn" title="기능 정의 · 사용법 위키 (새 탭)">매뉴얼</a>`;
   }).catch(() => {
     document.getElementById('user-area').innerHTML =
-      '<span style="color:var(--gray-500);font-size:11px">개발 모드</span>';
+      '<span style="color:var(--gray-500);font-size:11px">개발 모드</span><a href="manual.html" target="_blank" rel="noopener" class="manual-btn" title="기능 정의 · 사용법 위키 (새 탭)">매뉴얼</a>';
   });
 }
 function logout() {
@@ -4152,6 +4184,7 @@ function showPage(name) {
   if (name === 'bg-shipping') loadBgShipping();
   if (name === 'bg-unified') loadBgUnified();
   if (name === 'coupang-rfm') loadRgLines();
+  if (name === 'channel-inquiries') loadInquiries();
   if (name === 'bg-vendors') loadBgVendors();
   if (name === 'bg-settlements') initBgSettlements();
   if (name === 'bg-vendor-dashboard') initBgVendorDashboard();
@@ -10146,7 +10179,7 @@ function renderSnsInsight(mk, summary, lt, orderCounts) {
     <div style="background:var(--gray-50);border-radius:8px;padding:12px;position:relative">
       <span style="font-size:10px;background:var(--primary);color:#fff;padding:2px 6px;border-radius:4px;position:absolute;top:8px;right:8px">${cap.type}</span>
       <pre style="white-space:pre-wrap;font-family:inherit;font-size:12px;line-height:1.6;margin:0">${cap.text}</pre>
-      <button class="btn btn-sm" style="margin-top:8px" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);showToast('캡션이 복사되었습니다')">📋 복사</button>
+      <button class="btn btn-sm" style="margin-top:8px" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);showToast('캡션이 복사되었습니다')">복사</button>
     </div>
   `).join('');
 
@@ -10454,7 +10487,7 @@ function openSalesGroupModal(items) {
         </div>
       </div>
       <div style="padding:12px 20px;border-top:1px solid var(--gray-200);display:flex;justify-content:space-between;align-items:center">
-        <button class="btn btn-sm" onclick="openSalesGroupManager()">⚙️ 그룹 관리</button>
+        <button class="btn btn-sm" onclick="openSalesGroupManager()">그룹 관리</button>
         <div style="display:flex;gap:6px">
           <button class="btn btn-sm" onclick="closeSalesGroupModal()">취소</button>
           <button class="btn btn-sm btn-primary" onclick="_sgSubmit()">저장</button>
@@ -11982,8 +12015,8 @@ function renderBgStickers() {
     <td style="padding:6px 10px;max-width:280px">${productHtml(s)}</td>
     <td style="padding:6px 10px;text-align:center"><span class="badge ${s.is_active ? 'badge-up' : 'badge-neutral'}">${s.is_active ? '활성' : '비활성'}</span></td>
     <td style="padding:6px 10px;text-align:center;white-space:nowrap">
-      <button class="btn btn-sm" onclick="editBgSticker('${s.id}')" title="수정">✏️</button>
-      <button class="btn btn-sm" onclick="deleteBgSticker('${s.id}', '${(s.name || '').replace(/'/g, '\\\'')}', '${s.sticker_code || ''}')" title="삭제 (영구)" style="color:var(--red)">🗑️</button>
+      <button class="btn btn-sm" onclick="editBgSticker('${s.id}')" title="수정"></button>
+      <button class="btn btn-sm" onclick="deleteBgSticker('${s.id}', '${(s.name || '').replace(/'/g, '\\\'')}', '${s.sticker_code || ''}')" title="삭제 (영구)" style="color:var(--red)"></button>
     </td>
   </tr>`;
 
@@ -12520,8 +12553,8 @@ function renderBgProducts() {
       <td>${(s.available_sticker_ids||[]).length}개</td>
       ${vendorCells}
       <td>
-        <button class="btn btn-sm" onclick="openBgProductForm('${s.product_id}')" title="편집">✏️</button>
-        <button class="btn btn-sm" onclick="deleteBgProduct('${s.product_id}')" title="삭제" style="color:var(--red)">🗑️</button>
+        <button class="btn btn-sm" onclick="openBgProductForm('${s.product_id}')" title="편집"></button>
+        <button class="btn btn-sm" onclick="deleteBgProduct('${s.product_id}')" title="삭제" style="color:var(--red)"></button>
       </td>
     </tr>`;
   }).join('');
@@ -17001,6 +17034,152 @@ function renderRgLines() {
         ${cell(r.sales_qty)}${cell(r.item_qty ?? r.sales_qty, (r.sales_unit > 1 ? 'font-weight:600' : 'color:var(--gray-400)'))}${cell(r.sales_amount)}${cell(r.commission)}${cell(r.inout_fee)}${cell(r.shipping_fee)}${cell(r.settlement_amount, 'font-weight:600')}
       </tr>`;
     }).join('') + '</tbody></table>';
+}
+
+// ============================================
+// 상품문의 — 외부채널 고객문의 모아보기 (065)
+// ============================================
+let _ciqRows = [];
+let _ciqTab = '';   // '' = 전체 | 'coupang' | 'naver'
+
+const CIQ_CHANNEL = {
+  coupang: { label: '쿠팡', color: '#ef4444' },
+  naver: { label: '네이버', color: '#03c75a' },
+  cafe24: { label: '정수당', color: '#d97706' },
+};
+
+function setInquiryTab(ch) {
+  _ciqTab = ch;
+  document.querySelectorAll('[data-ciq-tab]').forEach(b => {
+    b.classList.toggle('btn-primary', (b.dataset.ciqTab || '') === ch);
+  });
+  renderInquiries();
+}
+
+/**
+ * 채널에서 문의를 가져온다.
+ *   쿠팡은 조회기간이 7일이라 서버가 창을 쪼개 여러 번 부른다 — 기간이 길면 시간이 걸린다.
+ */
+async function syncInquiries() {
+  const btn = document.getElementById('ciq-sync');
+  const days = parseInt(document.getElementById('ciq-days')?.value, 10) || 30;
+  const NL = String.fromCharCode(10);
+  if (btn) { btn.disabled = true; btn.textContent = '가져오는 중…'; }
+  try {
+    const r = await fetch(`${API}/api/inquiries/sync`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days_back: days }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    alert([
+      `최근 ${d.days}일치 문의를 가져왔습니다.`,
+      '',
+      `· 쿠팡 ${fmtNum(d.coupang || 0)}건 · 네이버 ${fmtNum(d.naver || 0)}건`,
+      `· 저장 ${fmtNum(d.saved || 0)}건`,
+      ...(d.missing_content
+        ? ['', `⚠️ ${fmtNum(d.missing_content)}건은 내용이 비어 있습니다.`,
+           '   채널 응답 필드명이 예상과 달라 그럴 수 있습니다 — 원본은 보관돼 있어 정정 가능합니다.']
+        : []),
+      ...((d.skipped || []).length
+        ? ['', ...d.skipped.map(x => `· ${x.channel} 건너뜀 — ${x.reason}`)]
+        : []),
+    ].join(NL));
+    await loadInquiries();
+  } catch (e) {
+    alert(`가져오기 실패: ${e.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📥 채널에서 가져오기'; }
+  }
+}
+
+async function loadInquiries() {
+  const wrap = document.getElementById('ciq-table-wrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<div style="padding:16px;color:var(--gray-400);font-size:12px">불러오는 중…</div>';
+  const days = parseInt(document.getElementById('ciq-days')?.value, 10) || 30;
+  const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  try {
+    const r = await fetch(`${API}/api/inquiries?start_date=${from}`);
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    _ciqRows = d.items || [];
+    renderInquiries();
+  } catch (e) {
+    wrap.innerHTML = `<div style="padding:16px;color:#dc2626;font-size:12px">조회 실패: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderInquiries() {
+  const wrap = document.getElementById('ciq-table-wrap');
+  const sum = document.getElementById('ciq-summary');
+  if (!wrap) return;
+  // 탭 건수는 필터 전 전체 기준 — 탭을 옮겨도 숫자가 흔들리지 않게 한다
+  document.querySelectorAll('[data-ciq-count]').forEach(el => {
+    const ch = el.dataset.ciqCount;
+    const n = ch ? _ciqRows.filter(r => r.channel === ch).length : _ciqRows.length;
+    el.textContent = `(${fmtNum(n)})`;
+  });
+
+  const onlyOpen = document.getElementById('ciq-unanswered')?.checked;
+  let rows = _ciqRows;
+  if (_ciqTab) rows = rows.filter(r => r.channel === _ciqTab);
+  if (onlyOpen) rows = rows.filter(r => !r.answered);
+
+  const open = rows.filter(r => !r.answered).length;
+  if (sum) {
+    sum.innerHTML = `${fmtNum(rows.length)}건`
+      + (open ? ` · <b style="color:#dc2626">미답변 ${fmtNum(open)}건</b>` : ' · 미답변 없음');
+  }
+  if (!rows.length) {
+    wrap.innerHTML = '<div style="padding:16px;color:var(--gray-400);font-size:12px">'
+      + '해당 조건의 문의가 없습니다. 아직 가져온 적이 없다면 <b>채널에서 가져오기</b>를 눌러주세요.</div>';
+    return;
+  }
+  const fmtWhen = (v) => {
+    if (!v) return '-';
+    const d = new Date(v);
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  wrap.innerHTML = `<table class="data-table" style="font-size:12px;min-width:1100px">
+    <thead><tr>
+      <th style="width:90px">채널</th><th style="width:130px">문의일시</th>
+      <th style="width:120px">주문번호</th><th style="width:180px">상품</th>
+      <th>내용</th><th style="width:80px">상태</th><th style="width:90px">확인</th>
+    </tr></thead><tbody>` + rows.map(r => {
+      const ch = CIQ_CHANNEL[r.channel] || { label: r.channel, color: 'var(--gray-500)' };
+      // 제목과 본문이 따로 오는 채널이 있어 둘 다 보여준다
+      const body = [r.title, r.content].filter(Boolean).join(' — ') || '(내용 없음)';
+      return `<tr${r.answered ? '' : ' style="background:#fffbeb"'}>
+        <td><span style="color:${ch.color};font-weight:600">${esc(ch.label)}</span></td>
+        <td style="white-space:nowrap;color:var(--gray-600)">${fmtWhen(r.inquired_at)}</td>
+        <td style="font-family:monospace;font-size:11px">${r.order_id ? esc(r.order_id) : '<span style="color:var(--gray-300)">-</span>'}</td>
+        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.product_name || '')}">${esc(r.product_name || '-')}</td>
+        <td style="white-space:normal;line-height:1.5">${esc(String(body).slice(0, 300))}
+          ${r.answer_content ? `<div style="margin-top:4px;padding:6px 8px;background:var(--gray-50);border-radius:4px;color:var(--gray-600)">↳ ${esc(String(r.answer_content).slice(0, 300))}</div>` : ''}</td>
+        <td>${r.answered
+          ? '<span style="color:#16a34a;font-weight:600">답변완료</span>'
+          : '<span style="color:#dc2626;font-weight:600">미답변</span>'}</td>
+        <td style="text-align:center">${r.checked_at
+          ? `<span style="font-size:11px;color:var(--gray-500)" title="${esc(r.checked_by || '')}">✔ 확인</span>`
+          : `<button class="btn" style="padding:2px 8px;font-size:11px" onclick="markInquiryChecked('${esc(r.id)}')">확인</button>`}</td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
+}
+
+/** 우리 쪽 확인 표시 — 채널 답변 여부와 별개다 */
+async function markInquiryChecked(id) {
+  try {
+    const r = await fetch(`${API}/api/inquiries/${encodeURIComponent(id)}/check`, { method: 'POST' });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    const row = _ciqRows.find(x => x.id === id);
+    if (row) { row.checked_at = d.checked_at; row.checked_by = d.checked_by; }
+    renderInquiries();
+  } catch (e) {
+    alert(`확인 처리 실패: ${e.message}`);
+  }
 }
 
 /** 기간을 달 단위로 쪼갠다 — [['2026-05-01','2026-05-31'], ...] */
