@@ -14123,6 +14123,23 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/admin/channel-probe' && req.method === 'GET') {
+        // 외부채널 쓰기 권한 확인 — 출고상태 변경 / 고객문의 API 를 쓸 수 있는지 가른다.
+        //   쓰기 API 는 '있을 수 없는 식별자' 로만 호출하므로 실제 주문·문의는 바뀌지 않는다.
+        //   ?write=0 이면 읽기(문의 조회)만 확인한다.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin']))) {
+          return denyForbidden(res, 'admin 필요');
+        }
+        logAdminAccess(session, req, 'channel-probe', { write: parsed.query.write !== '0' });
+        try {
+          data = await require('./channel-probe').probeChannels({
+            includeWrite: parsed.query.write !== '0',
+          });
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
       } else if (pathname === '/api/cafe24/sticker-trace' && req.method === 'GET') {
         // 진단용 — 정수당 주문의 스티커코드가 왜 비었는지 근거를 모아 보여준다.
         //   코드는 두 경로로 정해진다: bg_stickers 매칭 > 카페24 변형코드.
