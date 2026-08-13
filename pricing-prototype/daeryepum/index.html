@@ -5891,6 +5891,7 @@ function _gaRender(j) {
     <div style="flex:1;min-width:220px;padding:10px 12px;border:1px solid ${accent ? '#bfdbfe' : 'var(--gray-200)'};border-radius:8px;background:${accent ? '#eff6ff' : 'var(--gray-50)'}">
       <div style="font-size:12px;color:var(--gray-500);margin-bottom:4px"><b>${label}</b> ${p.start} ~ ${p.end}</div>
       <div style="font-size:13px">조회 <b>${p.totals.views.toLocaleString()}</b>
+        ${p.totals.carts != null ? `· 장바구니 <b>${p.totals.carts.toLocaleString()}</b>` : ''}
         · 주문 <b>${p.totals.orders.toLocaleString()}</b>
         · 전환율 <b style="color:#047857">${p.totals.conversion_rate != null ? p.totals.conversion_rate + '%' : '-'}</b></div>
     </div>` : '';
@@ -5911,17 +5912,22 @@ function _gaRender(j) {
     return;
   }
 
-  const th = (t, right) => `<th style="padding:8px 10px;${right ? 'text-align:right' : 'text-align:left'}">${t}</th>`;
+  const th = (t, right, title) => `<th style="padding:8px 10px;${right ? 'text-align:right' : 'text-align:left'}"${title ? ` title="${title}"` : ''}>${t}</th>`;
+  const cartTitle = '장바구니 담기 (GA). 바른손카드는 장바구니가 상품과 연결되지 않아 측정없음으로 표시됩니다';
   thead.innerHTML = `<tr style="border-bottom:2px solid var(--gray-200);color:var(--gray-500);font-size:12px">
     ${th('순위')}${th('사이트')}${th('상품')}
-    ${th('A 조회', 1)}${th('A 주문', 1)}${th('A 전환율', 1)}
-    ${hasB ? th('B 조회', 1) + th('B 주문', 1) + th('B 전환율', 1) + th('조회 증감', 1) + th('전환 증감', 1) : ''}
+    ${th('A 조회', 1)}${th('A 장바구니', 1, cartTitle)}${th('A 주문', 1)}${th('A 전환율', 1)}
+    ${hasB ? th('B 조회', 1) + th('B 장바구니', 1, cartTitle) + th('B 주문', 1) + th('B 전환율', 1) + th('조회 증감', 1) + th('전환 증감', 1) : ''}
   </tr>`;
 
   const num = (x) => (x == null ? '<span style="color:var(--gray-300)">-</span>' : Number(x).toLocaleString());
+  // 장바구니 — null 은 0 이 아니라 '측정 안 됨' 이다. 구분해 보여준다.
+  const cart = (s) => (s?.carts == null
+    ? '<span style="color:var(--gray-300)" title="이 사이트는 장바구니가 상품과 연결되지 않습니다">측정없음</span>'
+    : Number(s.carts).toLocaleString());
   const cr = (x) => (x == null ? '<span style="color:var(--gray-300)">-</span>'
     : `<b style="color:${x >= 3 ? '#047857' : '#b45309'}">${x}%</b>`);
-  const colCount = hasB ? 11 : 6;
+  const colCount = hasB ? 13 : 7;
 
   _gaRows = rows.slice(0, 150);
   tbody.innerHTML = _gaRows.map((r, i) => {
@@ -5944,10 +5950,12 @@ function _gaRender(j) {
         <td style="padding:7px 10px">${caret}${esc(r.name || r.code)}${badge}
           <span style="color:var(--gray-400);font-size:11px;margin-left:6px">${esc(r.code)}</span>${vcount}</td>
         <td style="padding:7px 10px;text-align:right">${num(r.a?.views)}</td>
+        <td style="padding:7px 10px;text-align:right;font-size:12px">${cart(r.a)}</td>
         <td style="padding:7px 10px;text-align:right">${num(r.a?.orders)}</td>
         <td style="padding:7px 10px;text-align:right">${cr(r.a?.conversion_rate)}</td>
         ${hasB ? `
         <td style="padding:7px 10px;text-align:right;color:var(--gray-500)">${num(r.b?.views)}</td>
+        <td style="padding:7px 10px;text-align:right;font-size:12px;color:var(--gray-500)">${cart(r.b)}</td>
         <td style="padding:7px 10px;text-align:right;color:var(--gray-500)">${num(r.b?.orders)}</td>
         <td style="padding:7px 10px;text-align:right">${cr(r.b?.conversion_rate)}</td>
         <td style="padding:7px 10px;text-align:right">${_gaDelta(r.delta?.views_diff)}</td>
@@ -5971,10 +5979,12 @@ function _gaRender(j) {
           ${v.name && v.name !== r.name ? `<span style="color:var(--gray-500);margin-left:6px">${esc(v.name)}</span>` : ''}
         </td>
         <td style="padding:5px 10px;text-align:right;font-size:12px">${num(v.a?.views)}</td>
+        <td></td><!-- 장바구니는 변형 단위로 받지 않는다 — 그룹 행에서만 -->
         <td style="padding:5px 10px;text-align:right;font-size:12px">${num(v.a?.orders)}</td>
         <td style="padding:5px 10px;text-align:right;font-size:12px">${cr(v.a?.conversion_rate)}</td>
         ${hasB ? `
         <td style="padding:5px 10px;text-align:right;font-size:12px;color:var(--gray-500)">${num(v.b?.views)}</td>
+        <td></td>
         <td style="padding:5px 10px;text-align:right;font-size:12px;color:var(--gray-500)">${num(v.b?.orders)}</td>
         <td style="padding:5px 10px;text-align:right;font-size:12px">${cr(v.b?.conversion_rate)}</td>
         <td></td><td></td>` : ''}
