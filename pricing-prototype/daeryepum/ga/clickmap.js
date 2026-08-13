@@ -136,10 +136,12 @@ async function clicksForPath({ site = 'card', path, startDate, endDate } = {}) {
   const rows = [...by.values()].map(r => ({
     ...r,
     variants: [...r.variants].slice(0, 5),
-    // 배지에 쓸 대표값 — element_click 이 사이트가 설계한 요소 추적이라 우선.
-    //   없으면 링크 자동추적(all_link_click)으로. 절대 둘을 더하지 않는다.
-    count: r.element_click > 0 ? r.element_click : r.all_link_click,
-    count_source: r.element_click > 0 ? 'element_click' : 'all_link_click',
+    // 배지에 쓸 대표값 — 두 이벤트 중 큰 쪽. 합산은 이중계상이라 금지지만,
+    //   'element 우선' 은 함정이었다: 병합 키가 요소가 아니라 문구라서, 같은 문구의
+    //   버튼(element 40)과 링크(all_link 900)가 한 줄이 되면 900 이 통째로 숨는다
+    //   (리뷰 지적). max 는 숨기지도 더하지도 않는다.
+    count: Math.max(r.element_click, r.all_link_click),
+    count_source: r.element_click >= r.all_link_click ? 'element_click' : 'all_link_click',
   }));
   rows.sort((a, b) => b.count - a.count);
   return {

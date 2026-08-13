@@ -809,9 +809,10 @@ nav.nav-loading a[href^="#"] {
     <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <span>🖱 상세페이지 클릭맵 <span style="font-size:11px;font-weight:400;color:var(--gray-500);margin-left:4px">바른손카드 · 요소별 클릭수</span></span>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;font-weight:400">
-        <input type="date" id="cm-from" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px">
+        <!-- 날짜를 바꾸면 페이지 목록(조회수 순)도 그 기간 기준으로 다시 받아야 한다 -->
+        <input type="date" id="cm-from" onchange="_cmPagesLoaded=false" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px">
         <span style="color:var(--gray-400)">~</span>
-        <input type="date" id="cm-to" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px">
+        <input type="date" id="cm-to" onchange="_cmPagesLoaded=false" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px">
         <select id="cm-page" onfocus="loadClickmapPages()" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px;max-width:260px">
           <option value="">▼ 눌러서 페이지 목록 불러오기</option>
         </select>
@@ -5992,6 +5993,9 @@ function _gaToggleRow(i) {
 //   배지 위치는 GA click_text 와 요소 문구를 맞춰 잡는다. click_id 가 있으면 그걸 우선.
 // ============================================
 let _cmPagesLoaded = false;
+let _cmLoadGen = 0;        // 조회 세대 — 연타 시 이전 조회의 onload 를 무효화한다
+let _cmOnload = null;      // 현재 걸려 있는 load 리스너 (새 조회 시작 시 뗀다)
+let _cmLoadTimeout = null;
 
 function _cmDefaultDates() {
   const d = (n) => new Date(Date.now() - n * 86400000 + 9 * 3600000).toISOString().slice(0, 10);
@@ -6014,9 +6018,11 @@ async function loadClickmapPages() {
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
     const pages = j.pages || [];
+    const prev = sel.value;   // 날짜 변경으로 다시 받아도 보던 페이지 선택은 유지
     sel.innerHTML = pages.length
       ? pages.map(p => `<option value="${esc(p.path)}">${esc(p.code || p.path)} · 조회 ${Number(p.views).toLocaleString()}</option>`).join('')
       : '<option value="">기간 내 답례품 상세 조회가 없습니다</option>';
+    if (prev && pages.some(p => p.path === prev)) sel.value = prev;
     _cmPagesLoaded = true;
   } catch (e) {
     sel.innerHTML = `<option value="">목록 실패 — ${esc(String(e.message).slice(0, 60))}</option>`;
@@ -6044,24 +6050,34 @@ async function loadClickmap() {
       `${j.start_date} ~ ${j.end_date} · ${path} · ${j.note || ''}`;
 
     // 스냅샷 iframe 로드 → onload 에서 배지 부착.
-    //   로드가 영영 안 오면 (스냅샷 5xx 등) '불러오는 중' 에 갇힌다 — 타임아웃으로 풀어준다.
+    //   조회를 연달아 누르면 이전 조회의 리스너가 남아 한 번의 load 에 두 조회의 배지가
+    //   겹쳐 찍힌다 (리뷰 지적) — 세대 토큰으로 stale 콜백을 버리고 이전 리스너를 뗀다.
+    //   로드가 영영 안 오면 (스냅샷 5xx 등) 타임아웃으로 풀어준다.
     const frame = document.getElementById('cm-frame');
-    const timeout = setTimeout(() => {
-      frame.removeEventListener('load', onload);
+    const gen = ++_cmLoadGen;
+    if (_cmOnload) { frame.removeEventListener('load', _cmOnload); _cmOnload = null; }
+    if (_cmLoadTimeout) clearTimeout(_cmLoadTimeout);
+    _cmLoadTimeout = setTimeout(() => {
+      if (gen !== _cmLoadGen) return;
+      if (_cmOnload) { frame.removeEventListener('load', _cmOnload); _cmOnload = null; }
       status.innerHTML = '<span style="color:#b91c1c">페이지 스냅샷 로드가 오래 걸립니다 — 잠시 후 다시 시도하세요</span>';
     }, 30000);
     const onload = () => {
-      clearTimeout(timeout);
       frame.removeEventListener('load', onload);
+      if (gen !== _cmLoadGen) return;      // 이 사이 새 조회가 시작됐다 — 이 결과는 버린다
+      clearTimeout(_cmLoadTimeout);
+      _cmOnload = null;
       // 먼저 보이게 해야 레이아웃이 잡힌다 — 숨긴 채 재면 크기가 전부 0 이라
       //   배율이 음수가 되고 요소 위치도 못 잡는다 (2026-08-13 실측)
       status.style.display = 'none';
       wrap.style.display = 'flex';
       requestAnimationFrame(() => {
+        if (gen !== _cmLoadGen) return;
         try { _cmPlaceBadges(frame, j.rows || []); }
         catch (e) { console.warn('clickmap badge 실패:', e); _cmRenderList(j.rows || [], new Set()); }
       });
     };
+    _cmOnload = onload;
     frame.addEventListener('load', onload);
     frame.src = `${API}/api/ga/clickmap/snapshot?${new URLSearchParams({ site: 'card', path })}`;
   } catch (e) {
@@ -6087,15 +6103,24 @@ function _cmPlaceBadges(frame, rows) {
   // clientWidth 가 0 이면(아직 숨김 등) 축소를 포기하고 원본 크기로 — 음수 배율 방지
   const scale = outer.clientWidth > 100 ? Math.min(1, (outer.clientWidth - 2) / 1280) : 1;
   scaler.style.transform = `scale(${scale})`;
-  scaler.style.width = '1280px';
-  // transform 은 레이아웃 크기를 안 바꾼다 — 스크롤 영역을 배율에 맞춰 직접 잡는다
-  scaler.style.height = fullH + 'px';
+  // transform 은 레이아웃 크기를 안 바꾼다 — 스크롤 영역은 '축소된' 크기로 직접 잡아야
+  //   콘텐츠가 끝난 뒤 수만 px 의 백지 스크롤이 생기지 않는다 (리뷰 실측 검증).
+  scaler.style.width = Math.round(1280 * scale) + 'px';
+  scaler.style.height = Math.round(fullH * scale) + 'px';
   outer.style.height = Math.min(fullH * scale, window.innerHeight * 0.78) + 'px';
 
-  // 클릭 가능한 요소들을 문구 → [요소] 로 색인 (작은 요소 우선 — 큰 컨테이너 오매칭 방지)
+  // 이전 조회의 배지가 남아 있으면 지운다 — 새 문서면 없겠지만, 같은 문서에 다시
+  //   붙는 경로(캐시·연타)에서 겹침을 막는 마지막 방어선이다
+  doc.querySelectorAll('[data-cm-badge]').forEach(b => b.remove());
+
+  // 클릭 가능한 요소들을 문구 → [요소] 로 색인.
+  //   숨은 요소(0×0)는 색인에서 뺀다 — GNB '답례품' 처럼 데스크톱/모바일 메뉴에 같은
+  //   문구가 중복될 때, 숨은 쪽이 '가장 작은 요소' 로 뽑혀 배지가 통째로 탈락했다 (리뷰 지적).
   const candidates = doc.querySelectorAll('a,button,input[type=button],input[type=submit],label,[role=button]');
   const byText = new Map();
   for (const el of candidates) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) continue;
     const raw = el.tagName === 'INPUT' ? el.value : el.innerText;
     const key = _cmBase(raw);
     if (!key || key.length > 60) continue;
@@ -6113,13 +6138,19 @@ function _cmPlaceBadges(frame, rows) {
     if (!row.count) continue;
     rank++;
     let el = null;
-    if (row.click_id && doc.getElementById(row.click_id)) el = doc.getElementById(row.click_id);
-    else if (row.text && byText.has(row.text)) el = smallest(byText.get(row.text));
+    if (row.click_id) {
+      const byId = doc.getElementById(row.click_id);
+      // id 로 찾은 요소가 숨어 있으면 문구 매칭으로 넘어간다 — 여기서 행을 버리면
+      //   보이는 동일 문구 요소가 있어도 배지가 안 붙는다
+      if (byId) { const r = byId.getBoundingClientRect(); if (r.width >= 2 && r.height >= 2) el = byId; }
+    }
+    if (!el && row.text && byText.has(row.text)) el = smallest(byText.get(row.text));
     if (!el) continue;
     const rect = el.getBoundingClientRect();
-    if (rect.width < 2 || rect.height < 2) continue;     // 숨은 요소는 건너뛴다
+    if (rect.width < 2 || rect.height < 2) continue;
     matched.add(row.text || row.click_id);
     const badge = doc.createElement('div');
+    badge.setAttribute('data-cm-badge', '1');
     badge.textContent = `${Number(row.count).toLocaleString()}`;
     badge.title = `${row.text || row.click_id} — ${row.count_source} ${row.count.toLocaleString()}회`;
     badge.style.cssText = 'position:absolute;z-index:2147483647;pointer-events:none;'
