@@ -802,6 +802,55 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- ============================================
+       상세페이지 클릭맵 — 실제 상세페이지 위에 GA 클릭수 배지를 얹는다 (바른손카드 전용).
+       바른손몰은 요소 클릭 커스텀 차원(click_text)이 없어 v1 대상이 아니다.
+       ============================================ -->
+  <div class="section" data-dash-section="4" data-dash-only="daeryepum">
+    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span>🖱 상세페이지 클릭맵 <span style="font-size:11px;font-weight:400;color:var(--gray-500);margin-left:4px">바른손카드 · 요소별 클릭수</span></span>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;font-weight:400">
+        <input type="date" id="cm-from" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px">
+        <span style="color:var(--gray-400)">~</span>
+        <input type="date" id="cm-to" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px">
+        <select id="cm-page" onfocus="loadClickmapPages()" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px;max-width:260px">
+          <option value="">▼ 눌러서 페이지 목록 불러오기</option>
+        </select>
+        <button class="btn btn-sm" onclick="loadClickmap()">클릭맵 보기</button>
+      </div>
+    </div>
+    <div class="card" style="padding:16px">
+      <div id="cm-status" style="padding:30px 20px;text-align:center;color:var(--gray-400);font-size:13px">상품 페이지를 고르고 [클릭맵 보기]를 누르세요</div>
+      <div id="cm-wrap" style="display:none;gap:16px;align-items:flex-start;flex-wrap:wrap">
+        <!-- 좌: 페이지 미리보기 + 배지 오버레이 (iframe 안에 직접 붙는다)
+             basis 합이 100%+gap 을 넘으면 wrap 돼 목록이 아래로 떨어진다 — % 는 좌측만 쓴다 -->
+        <div style="flex:1 1 56%;min-width:340px">
+          <div style="font-size:11px;color:var(--gray-500);margin-bottom:6px">
+            실제 상세페이지 스냅샷 위에 클릭수를 표시합니다. 배지 위치는 버튼 문구로 맞춘 것이라
+            문구가 바뀐 요소는 오른쪽 목록에만 나옵니다.</div>
+          <div id="cm-frame-outer" style="border:1px solid var(--gray-200);border-radius:8px;overflow:auto;max-height:78vh;background:#fff">
+            <div id="cm-frame-scaler" style="transform-origin:0 0">
+              <iframe id="cm-frame" sandbox="allow-same-origin" style="width:1280px;height:4000px;border:0;display:block"></iframe>
+            </div>
+          </div>
+        </div>
+        <!-- 우: 클릭 순위 목록 (배지 매칭 여부 표시) -->
+        <div style="flex:1 1 300px;min-width:280px;max-height:78vh;overflow:auto">
+          <div id="cm-note" style="font-size:11px;color:var(--gray-500);margin-bottom:8px"></div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead><tr style="border-bottom:2px solid var(--gray-200);color:var(--gray-500)">
+              <th style="padding:6px 8px;text-align:left">#</th>
+              <th style="padding:6px 8px;text-align:left">요소 (버튼 문구)</th>
+              <th style="padding:6px 8px;text-align:right">클릭수</th>
+              <th style="padding:6px 8px;text-align:left">표시</th>
+            </tr></thead>
+            <tbody id="cm-list"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================
        상품별 판매 통계 — 썸네일 선택 + 다상품 비교
        ============================================ -->
   <div class="section">
@@ -5751,6 +5800,9 @@ function onPsCustomDate() {
 //   바른손카드는 구매가 상품코드로 기록되지 않고, 수량 기준이라 단위도 안 맞는다.
 // ============================================
 const GA_SITE_LABEL = { card: '바른손카드', etc: '바른손몰' };
+let _gaLast = null;          // 마지막 응답 — 행 펼침만 바뀔 때 재조회 없이 다시 그린다
+let _gaRows = [];            // 화면에 그린 행 (인덱스가 _gaOpen 의 키)
+let _gaOpen = new Set();     // 펼쳐진 행 인덱스
 
 function _gaDefaultDates() {
   // A = 최근 14일. 처음 열 때 비어 있으면 눌러볼 수가 없다.
@@ -5824,6 +5876,8 @@ function _gaRender(j) {
   const tbody = document.getElementById('ga-tbody');
   const summary = document.getElementById('ga-summary');
   const hasB = !!j.b;
+  // 새 조회면 펼침 상태를 버린다 — 행 순서가 바뀌어 인덱스가 다른 상품을 가리키게 된다
+  if (j !== _gaLast) { _gaOpen = new Set(); _gaLast = j; }
 
   // 요약 카드 — 기간 합계 + GA 쪽 주의사항
   const totCard = (label, p, accent) => p?.totals ? `
@@ -5860,24 +5914,230 @@ function _gaRender(j) {
   const num = (x) => (x == null ? '<span style="color:var(--gray-300)">-</span>' : Number(x).toLocaleString());
   const cr = (x) => (x == null ? '<span style="color:var(--gray-300)">-</span>'
     : `<b style="color:${x >= 3 ? '#047857' : '#b45309'}">${x}%</b>`);
-  tbody.innerHTML = rows.slice(0, 150).map((r, i) => `
-    <tr style="border-bottom:1px solid var(--gray-100)">
-      <td style="padding:7px 10px;color:var(--gray-500)">${i + 1}</td>
-      <td style="padding:7px 10px">${esc(r.site_label)}</td>
-      <td style="padding:7px 10px">${esc(r.name || r.code)}
-        <span style="color:var(--gray-400);font-size:11px;margin-left:6px">${esc(r.code)}</span></td>
-      <td style="padding:7px 10px;text-align:right">${num(r.a?.views)}</td>
-      <td style="padding:7px 10px;text-align:right">${num(r.a?.orders)}</td>
-      <td style="padding:7px 10px;text-align:right">${cr(r.a?.conversion_rate)}</td>
-      ${hasB ? `
-      <td style="padding:7px 10px;text-align:right;color:var(--gray-500)">${num(r.b?.views)}</td>
-      <td style="padding:7px 10px;text-align:right;color:var(--gray-500)">${num(r.b?.orders)}</td>
-      <td style="padding:7px 10px;text-align:right">${cr(r.b?.conversion_rate)}</td>
-      <td style="padding:7px 10px;text-align:right">${_gaDelta(r.delta?.views_diff)}</td>
-      <td style="padding:7px 10px;text-align:right">${_gaDelta(r.delta?.cr_diff_pt, '%p')}</td>` : ''}
-    </tr>`).join('');
+  const colCount = hasB ? 11 : 6;
+
+  _gaRows = rows.slice(0, 150);
+  tbody.innerHTML = _gaRows.map((r, i) => {
+    // 변형이 하나뿐이면 펼쳐도 같은 숫자라 토글을 달지 않는다
+    const expandable = (r.variants || []).length > 1;
+    const open = _gaOpen.has(i);
+    const caret = expandable
+      ? `<span style="display:inline-block;width:10px;color:var(--gray-400);font-size:10px">${open ? '▾' : '▸'}</span> `
+      : '<span style="display:inline-block;width:10px"></span> ';
+    const badge = r.grouped
+      ? '<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:#eef2ff;color:#4338ca;margin-left:6px" title="매출 데이터 그룹으로 묶인 행입니다 (매출 화면과 같은 기준)">그룹</span>'
+      : '';
+    const vcount = expandable
+      ? `<span style="color:var(--gray-400);font-size:11px;margin-left:6px">변형 ${r.variants.length}</span>` : '';
+    const head = `
+      <tr style="border-bottom:1px solid var(--gray-100);${expandable ? 'cursor:pointer' : ''}"
+          ${expandable ? `onclick="_gaToggleRow(${i})"` : ''}>
+        <td style="padding:7px 10px;color:var(--gray-500)">${i + 1}</td>
+        <td style="padding:7px 10px">${esc(r.site_label)}</td>
+        <td style="padding:7px 10px">${caret}${esc(r.name || r.code)}${badge}
+          <span style="color:var(--gray-400);font-size:11px;margin-left:6px">${esc(r.code)}</span>${vcount}</td>
+        <td style="padding:7px 10px;text-align:right">${num(r.a?.views)}</td>
+        <td style="padding:7px 10px;text-align:right">${num(r.a?.orders)}</td>
+        <td style="padding:7px 10px;text-align:right">${cr(r.a?.conversion_rate)}</td>
+        ${hasB ? `
+        <td style="padding:7px 10px;text-align:right;color:var(--gray-500)">${num(r.b?.views)}</td>
+        <td style="padding:7px 10px;text-align:right;color:var(--gray-500)">${num(r.b?.orders)}</td>
+        <td style="padding:7px 10px;text-align:right">${cr(r.b?.conversion_rate)}</td>
+        <td style="padding:7px 10px;text-align:right">${_gaDelta(r.delta?.views_diff)}</td>
+        <td style="padding:7px 10px;text-align:right">${_gaDelta(r.delta?.cr_diff_pt, '%p')}</td>` : ''}
+      </tr>`;
+    if (!expandable || !open) return head;
+
+    // 한 주문에 같은 그룹의 변형이 둘 이상이면 그룹 주문수 < 변형 주문 합이 된다.
+    //   그룹 행이 중복 제거된 정답이고, 아래는 코드별 각자 기준 — 다르면 그 사실을 적는다.
+    const vSum = r.variants.reduce((s, v) => s + (v.a?.orders || 0), 0);
+    const mismatch = vSum !== (r.a?.orders || 0)
+      ? `<div style="font-size:11px;color:#b45309;padding:4px 0 0 26px">
+           변형 주문 합 ${vSum.toLocaleString()}건이 그룹 ${Number(r.a?.orders || 0).toLocaleString()}건과 다릅니다 —
+           한 주문에 이 그룹의 변형이 둘 이상 담긴 경우입니다. 그룹 행이 주문 건수 기준의 정답입니다.</div>`
+      : '';
+    const body = r.variants.map(v => `
+      <tr style="background:var(--gray-50);border-bottom:1px solid var(--gray-100)">
+        <td></td><td></td>
+        <td style="padding:5px 10px 5px 34px;font-size:12px">
+          <span style="font-family:monospace">${esc(v.code)}</span>
+          ${v.name && v.name !== r.name ? `<span style="color:var(--gray-500);margin-left:6px">${esc(v.name)}</span>` : ''}
+        </td>
+        <td style="padding:5px 10px;text-align:right;font-size:12px">${num(v.a?.views)}</td>
+        <td style="padding:5px 10px;text-align:right;font-size:12px">${num(v.a?.orders)}</td>
+        <td style="padding:5px 10px;text-align:right;font-size:12px">${cr(v.a?.conversion_rate)}</td>
+        ${hasB ? `
+        <td style="padding:5px 10px;text-align:right;font-size:12px;color:var(--gray-500)">${num(v.b?.views)}</td>
+        <td style="padding:5px 10px;text-align:right;font-size:12px;color:var(--gray-500)">${num(v.b?.orders)}</td>
+        <td style="padding:5px 10px;text-align:right;font-size:12px">${cr(v.b?.conversion_rate)}</td>
+        <td></td><td></td>` : ''}
+      </tr>`).join('');
+    const foot = mismatch
+      ? `<tr style="background:var(--gray-50)"><td colspan="${colCount}">${mismatch}</td></tr>` : '';
+    return head + body + foot;
+  }).join('');
   status.style.display = 'none';
   table.style.display = '';
+}
+
+/** 그룹 행 펼치기/접기 — 변형코드별 조회수 */
+function _gaToggleRow(i) {
+  if (_gaOpen.has(i)) _gaOpen.delete(i); else _gaOpen.add(i);
+  _gaRender(_gaLast);
+}
+
+// ============================================
+// 🖱 상세페이지 클릭맵 (바른손카드)
+//   스냅샷 iframe 은 우리 origin 에서 서빙돼 same-origin — DOM 을 뒤져 배지를 붙인다.
+//   배지 위치는 GA click_text 와 요소 문구를 맞춰 잡는다. click_id 가 있으면 그걸 우선.
+// ============================================
+let _cmPagesLoaded = false;
+
+function _cmDefaultDates() {
+  const d = (n) => new Date(Date.now() - n * 86400000 + 9 * 3600000).toISOString().slice(0, 10);
+  const set = (id, v) => { const el = document.getElementById(id); if (el && !el.value) el.value = v; };
+  set('cm-from', d(28)); set('cm-to', d(0));
+}
+
+async function loadClickmapPages() {
+  if (_cmPagesLoaded) return;
+  const sel = document.getElementById('cm-page');
+  if (!sel) return;
+  _cmDefaultDates();
+  try {
+    const qs = new URLSearchParams({
+      site: 'card',
+      start_date: document.getElementById('cm-from').value,
+      end_date: document.getElementById('cm-to').value,
+    });
+    const r = await fetch(`${API}/api/ga/clickmap/pages?${qs}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    const pages = j.pages || [];
+    sel.innerHTML = pages.length
+      ? pages.map(p => `<option value="${esc(p.path)}">${esc(p.code || p.path)} · 조회 ${Number(p.views).toLocaleString()}</option>`).join('')
+      : '<option value="">기간 내 답례품 상세 조회가 없습니다</option>';
+    _cmPagesLoaded = true;
+  } catch (e) {
+    sel.innerHTML = `<option value="">목록 실패 — ${esc(String(e.message).slice(0, 60))}</option>`;
+  }
+}
+
+async function loadClickmap() {
+  const status = document.getElementById('cm-status');
+  const wrap = document.getElementById('cm-wrap');
+  if (!status) return;
+  _cmDefaultDates();
+  await loadClickmapPages();
+  const path = document.getElementById('cm-page').value;
+  if (!path) { showToast('상품 페이지를 선택하세요'); return; }
+  status.style.display = ''; status.textContent = '클릭 데이터와 페이지를 불러오는 중…';
+  wrap.style.display = 'none';
+
+  const from = document.getElementById('cm-from').value;
+  const to = document.getElementById('cm-to').value;
+  try {
+    const r = await fetch(`${API}/api/ga/clickmap/clicks?${new URLSearchParams({ site: 'card', path, start_date: from, end_date: to })}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    document.getElementById('cm-note').textContent =
+      `${j.start_date} ~ ${j.end_date} · ${path} · ${j.note || ''}`;
+
+    // 스냅샷 iframe 로드 → onload 에서 배지 부착
+    const frame = document.getElementById('cm-frame');
+    const onload = () => {
+      frame.removeEventListener('load', onload);
+      // 먼저 보이게 해야 레이아웃이 잡힌다 — 숨긴 채 재면 크기가 전부 0 이라
+      //   배율이 음수가 되고 요소 위치도 못 잡는다 (2026-08-13 실측)
+      status.style.display = 'none';
+      wrap.style.display = 'flex';
+      requestAnimationFrame(() => {
+        try { _cmPlaceBadges(frame, j.rows || []); }
+        catch (e) { console.warn('clickmap badge 실패:', e); _cmRenderList(j.rows || [], new Set()); }
+      });
+    };
+    frame.addEventListener('load', onload);
+    frame.src = `${API}/api/ga/clickmap/snapshot?${new URLSearchParams({ site: 'card', path })}`;
+  } catch (e) {
+    status.innerHTML = `<span style="color:#b91c1c">불러오지 못했습니다 — ${esc(e.message)}</span>`;
+  }
+}
+
+/** 텍스트 정규화 — 서버 clicksForPath 와 같은 규칙이어야 매칭이 된다 */
+const _cmNorm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+const _cmBase = (s) => _cmNorm(String(s).replace(/\(\s*[\d,.]+\s*\)/g, ''));
+
+function _cmPlaceBadges(frame, rows) {
+  const doc = frame.contentDocument;
+  const win = frame.contentWindow;
+  if (!doc || !doc.body) { _cmRenderList(rows, new Set()); return; }
+
+  // iframe 높이 = 문서 높이 (상한 3만px), 축소 배율 = 컨테이너 폭 / 1280
+  // 상세페이지가 3만px 을 넘는다 (실측 37,929px — 후기 섹션이 밑에 있다). 캡을 넉넉히.
+  const fullH = Math.min(Math.max(doc.documentElement.scrollHeight, 1200), 60000);
+  frame.style.height = fullH + 'px';
+  const outer = document.getElementById('cm-frame-outer');
+  const scaler = document.getElementById('cm-frame-scaler');
+  // clientWidth 가 0 이면(아직 숨김 등) 축소를 포기하고 원본 크기로 — 음수 배율 방지
+  const scale = outer.clientWidth > 100 ? Math.min(1, (outer.clientWidth - 2) / 1280) : 1;
+  scaler.style.transform = `scale(${scale})`;
+  scaler.style.width = '1280px';
+  // transform 은 레이아웃 크기를 안 바꾼다 — 스크롤 영역을 배율에 맞춰 직접 잡는다
+  scaler.style.height = fullH + 'px';
+  outer.style.height = Math.min(fullH * scale, window.innerHeight * 0.78) + 'px';
+
+  // 클릭 가능한 요소들을 문구 → [요소] 로 색인 (작은 요소 우선 — 큰 컨테이너 오매칭 방지)
+  const candidates = doc.querySelectorAll('a,button,input[type=button],input[type=submit],label,[role=button]');
+  const byText = new Map();
+  for (const el of candidates) {
+    const raw = el.tagName === 'INPUT' ? el.value : el.innerText;
+    const key = _cmBase(raw);
+    if (!key || key.length > 60) continue;
+    if (!byText.has(key)) byText.set(key, []);
+    byText.get(key).push(el);
+  }
+  const smallest = (els) => els.slice().sort((a, b) => {
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    return (ra.width * ra.height) - (rb.width * rb.height);
+  })[0];
+
+  const matched = new Set();
+  let rank = 0;
+  for (const row of rows) {
+    if (!row.count) continue;
+    rank++;
+    let el = null;
+    if (row.click_id && doc.getElementById(row.click_id)) el = doc.getElementById(row.click_id);
+    else if (row.text && byText.has(row.text)) el = smallest(byText.get(row.text));
+    if (!el) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) continue;     // 숨은 요소는 건너뛴다
+    matched.add(row.text || row.click_id);
+    const badge = doc.createElement('div');
+    badge.textContent = `${Number(row.count).toLocaleString()}`;
+    badge.title = `${row.text || row.click_id} — ${row.count_source} ${row.count.toLocaleString()}회`;
+    badge.style.cssText = 'position:absolute;z-index:2147483647;pointer-events:none;'
+      + 'background:#dc2626;color:#fff;font:700 13px/1 sans-serif;padding:4px 8px;'
+      + 'border-radius:99px;box-shadow:0 1px 4px rgba(0,0,0,.35);white-space:nowrap;'
+      + `top:${rect.top + win.scrollY - 10}px;left:${rect.right + win.scrollX - 14}px`;
+    doc.body.appendChild(badge);
+  }
+  _cmRenderList(rows, matched);
+}
+
+function _cmRenderList(rows, matched) {
+  const tbody = document.getElementById('cm-list');
+  tbody.innerHTML = rows.filter(r => r.count > 0).slice(0, 60).map((r, i) => {
+    const key = r.text || r.click_id;
+    const on = matched.has(key);
+    return `<tr style="border-bottom:1px solid var(--gray-100);${on ? '' : 'color:var(--gray-400)'}">
+      <td style="padding:5px 8px">${i + 1}</td>
+      <td style="padding:5px 8px" title="${esc(key || '')}">${esc((key || '(문구 없음)').length > 42 ? key.slice(0, 42) + '…' : (key || '(문구 없음)'))}
+        ${r.click_id && r.text ? `<span style="color:var(--gray-400);font-size:10px;margin-left:4px">#${esc(r.click_id)}</span>` : ''}</td>
+      <td style="padding:5px 8px;text-align:right;font-weight:600">${Number(r.count).toLocaleString()}</td>
+      <td style="padding:5px 8px;font-size:11px">${on ? '🔴 배지' : '목록만'}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--gray-400)">클릭 데이터가 없습니다</td></tr>';
 }
 
 //  🏆 상품 판매 순위 — 일/주/월 기간별 전체 채널 순위

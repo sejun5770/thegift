@@ -14459,16 +14459,83 @@ const server = http.createServer(async (req, res) => {
         try {
           const q = parsed.query;
           const sitesRaw = String(q.sites || '').trim();
+          // 매출 화면과 같은 그룹 기준으로 묶는다 (2026-08-13 요청).
+          //   운영자가 묶은 매출 그룹(migration 040)이 BASE 코드 규칙보다 우선.
+          //   조회 실패 시 빈 인덱스라 예전처럼 BASE 로만 묶인다 (fail-open).
+          const sgIndex = await _loadSalesGroupIndex('daeryepum');
+          const groupOf = sgIndex.byCode.size
+            ? (code) => sgIndex.byCode.get(String(code || '').trim().toLowerCase()) || null
+            : null;
           data = await require('./ga/funnel').compare({
             a: { start: q.a_start, end: q.a_end },
             b: (q.b_start && q.b_end) ? { start: q.b_start, end: q.b_end } : null,
             sites: sitesRaw ? sitesRaw.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+            groupOf,
             // 주문은 기존 조회 경로를 그대로 쓴다 — 집계 규칙이 화면과 어긋나지 않게.
             fetchOrders: async (start, end) => {
               const r = await apiOrders({ start_date: start, end_date: end, category: 'daeryepum' });
               return Array.isArray(r) ? r : (r.orders || r.rows || []);
             },
           });
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/ga/clickmap/pages' && req.method === 'GET') {
+        // 클릭맵 페이지 목록 — 상세페이지 경로 + 상품코드 + 조회수
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          data = await require('./ga/clickmap').listPages({
+            site: parsed.query.site || 'card',
+            startDate: parsed.query.start_date || null,
+            endDate: parsed.query.end_date || null,
+            giftOnly: parsed.query.gift_only !== '0',
+          });
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/ga/clickmap/clicks' && req.method === 'GET') {
+        // 한 상세페이지의 클릭 분해 (click_text 기준, 이벤트별 분리)
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          data = await require('./ga/clickmap').clicksForPath({
+            site: parsed.query.site || 'card',
+            path: parsed.query.path || '',
+            startDate: parsed.query.start_date || null,
+            endDate: parsed.query.end_date || null,
+          });
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/ga/clickmap/snapshot' && req.method === 'GET') {
+        // 상세페이지 HTML 스냅샷 — 우리 origin 에서 서빙해야 iframe DOM 접근이 된다.
+        //   경로 화이트리스트는 clickmap.snapshot 안에서 검증한다 (SSRF 방지).
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          const snap = await require('./ga/clickmap').snapshot({
+            site: parsed.query.site || 'card',
+            path: parsed.query.path || '',
+          });
+          res.writeHead(200, {
+            'Content-Type': 'text/html; charset=utf-8',
+            // 스냅샷 안에서 우리 API 로 요청이 나가면 안 된다 — 문서 자체를 봉인
+            'Content-Security-Policy':
+              "default-src 'none'; img-src https: data:; style-src https: 'unsafe-inline'; font-src https: data:",
+            'Cache-Control': 'private, max-age=300',
+          });
+          res.end(snap.html);
+          return;
         } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: e.message }));
