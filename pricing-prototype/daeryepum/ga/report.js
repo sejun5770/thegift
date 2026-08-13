@@ -166,8 +166,11 @@ async function productReport({ sites, startDate, endDate, mode = 'auto', limit =
       }
 
       const summary = await siteSummary(site, start, end).catch(() => null);
-      // 구매는 있는데 item 에 안 붙는 사이트가 있다 (바른손카드: 구매 4,332건이지만 상품별 구매 0).
-      //   이걸 알리지 않으면 화면의 전환율 0% 가 '안 팔린다' 로 읽힌다 — 실제로는 측정이 없는 것이다.
+      // 조회와 구매가 서로 다른 코드로 기록되는 사이트가 있다.
+      //   바른손카드: view_item 은 상품코드(BC4914 / TGJSD01O4_B)로 오는데 purchase 는
+      //   주문라인 ID(17770682 …)로 온다. 그래서 상품별 구매가 전부 0 이 된다.
+      //   (2026-08-13 실측: 사이트 전체 itemsPurchased 는 273만인데 상품코드 기준으로는 0)
+      //   이걸 알리지 않으면 화면의 전환율 0% 가 '안 팔린다' 로 읽힌다.
       const itemPurchases = used === 'item'
         ? rows.reduce((a, r) => a + (r.itemsPurchased || 0), 0) : 0;
       const purchaseNotLinked = used === 'item' && itemPurchases === 0 && (summary?.transactions || 0) > 0;
@@ -182,7 +185,7 @@ async function productReport({ sites, startDate, endDate, mode = 'auto', limit =
         note: used === 'page'
           ? '전자상거래(view_item·purchase) 이벤트가 없어 페이지 조회수만 집계했습니다 — 상품별 전환율은 낼 수 없습니다'
           : purchaseNotLinked
-            ? `구매 ${Number(summary.transactions).toLocaleString()}건이 상품과 연결돼 있지 않습니다 (purchase·add_to_cart 이벤트에 items 누락) — 이 사이트는 조회수만 유효합니다. 빈 칸은 0이 아니라 측정 공백입니다`
+            ? `구매 ${Number(summary.transactions).toLocaleString()}건이 상품별로 연결되지 않습니다 — purchase 이벤트가 상품코드가 아닌 주문라인 ID로 기록되고 있습니다. 이 사이트는 조회수만 유효하며, 빈 칸은 0이 아니라 연결 불가입니다`
             : null,
       });
 
@@ -195,8 +198,8 @@ async function productReport({ sites, startDate, endDate, mode = 'auto', limit =
             item_id: r.itemId || null,
             name: r.itemName || null,
             viewed,
-            // 장바구니도 같은 원인으로 비어 있다 (바른손카드: 사이트 add_to_cart 27,539건인데
-            //   상품별은 전부 0). 0 으로 보여주면 '아무도 안 담았다' 로 읽힌다.
+            // 장바구니도 같이 비운다 — 조회/구매 코드가 어긋난 사이트는 담기 지표도
+            //   같은 이유로 신뢰할 수 없다. 0 으로 보여주면 '아무도 안 담았다' 로 읽힌다.
             added_to_cart: purchaseNotLinked ? null : (r.itemsAddedToCart ?? null),
             purchased: purchaseNotLinked ? null : purchased,
             revenue: r.itemRevenue ?? null,

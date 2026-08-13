@@ -5768,9 +5768,31 @@ async function loadGaProducts() {
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
     if (!j.configured) {
-      // 자격증명이 없을 때 '데이터 없음' 으로 보이면 원인을 못 찾는다 — 무엇이 빠졌는지 그대로 쓴다
+      // 자격증명이 없을 때 '데이터 없음' 으로 보이면 원인을 못 찾는다 — 무엇이 빠졌는지 그대로 쓴다.
+      //   등록했는데도 안 잡히는 경우가 실제로 있었다 (이름 오타·따옴표 혼입·재배포 누락).
+      //   그래서 env 상태를 값 없이 함께 띄운다.
+      const e = j.config?.env;
+      let detail = '';
+      if (e) {
+        const rows = Object.entries(e.vars).map(([k, v]) => {
+          if (!v.present) return `<tr><td style="padding:2px 8px">${k}</td><td style="padding:2px 8px;color:#b91c1c">없음</td></tr>`;
+          const flags = [
+            v.empty_after_trim ? '값이 비어 있음' : `${v.length}자`,
+            v.quoted ? '따옴표 포함 (제거됨)' : '',
+            v.has_outer_space ? '앞뒤 공백' : '',
+            v.has_hash ? '# 포함 — 주석줄이 섞였는지 확인' : '',
+          ].filter(Boolean);
+          return `<tr><td style="padding:2px 8px">${k}</td><td style="padding:2px 8px;color:${v.empty_after_trim ? '#b91c1c' : '#047857'}">${esc(flags.join(' · '))}</td></tr>`;
+        }).join('');
+        const typos = (e.unexpected_ga_vars || []).length
+          ? `<div style="margin-top:6px;color:#b45309">이름이 다른 GA 변수: ${esc(e.unexpected_ga_vars.join(', '))} — 오타인지 확인하세요</div>` : '';
+        detail = `<div style="margin-top:14px;display:inline-block;text-align:left;font-size:12px">
+            <table style="border-collapse:collapse">${rows}</table>${typos}
+            <div style="margin-top:8px;color:var(--gray-500)">모두 정상인데도 이 화면이면, 환경변수 등록 후 <b>컨테이너를 재배포</b>했는지 확인하세요 — 환경변수는 시작할 때만 읽습니다.</div>
+          </div>`;
+      }
       status.innerHTML = `GA 연동이 아직 설정되지 않았습니다.<br>
-        <span style="font-size:12px;color:var(--gray-500)">${esc(j.config?.hint || '')}</span>`;
+        <span style="font-size:12px;color:var(--gray-500)">${esc(j.config?.hint || '')}</span>${detail}`;
       return;
     }
     _gaRender(j);

@@ -33,9 +33,55 @@ const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const SCOPE = 'https://www.googleapis.com/auth/analytics.readonly';
 const DATA_HOST = 'https://analyticsdata.googleapis.com';
 
+/**
+ * 환경변수 읽기 — 값에 섞여 들어온 따옴표·공백을 떼어낸다.
+ *   docker-manager 로 env 를 넣으면 값 양쪽에 따옴표가 함께 들어오거나 끝에 공백/개행이
+ *   붙는 일이 있다 (flower-daily-report 때 같은 함정을 겪었다). 그대로 쓰면 토큰이
+ *   조용히 틀려 '설정되지 않았습니다' 로만 보인다.
+ */
+function envOf(name) {
+  let v = process.env[name];
+  if (v == null) return '';
+  v = String(v).trim();
+  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+    v = v.slice(1, -1).trim();
+  }
+  return v;
+}
+
+/**
+ * env 진단 — 값은 절대 담지 않는다. 이름·길이·의심스러운 문자만 본다.
+ *   이름 오타/미등록/따옴표 혼입을 값 없이 가려내기 위한 것이다.
+ */
+const GA_ENV_NAMES = [
+  'GA_PROPERTIES', 'GA_SERVICE_ACCOUNT_JSON',
+  'GA_OAUTH_CLIENT_ID', 'GA_OAUTH_CLIENT_SECRET',
+  'GA_OAUTH_REFRESH_TOKEN', 'GA_OAUTH_CLIENT_REFRESH_TOKEN',
+];
+function envReport() {
+  const vars = {};
+  for (const n of GA_ENV_NAMES) {
+    const raw = process.env[n];
+    if (raw == null) { vars[n] = { present: false }; continue; }
+    const s = String(raw);
+    vars[n] = {
+      present: true,
+      length: s.length,
+      quoted: /^["'].*["']$/.test(s.trim()),
+      has_outer_space: s !== s.trim(),
+      has_hash: s.includes('#'),
+      empty_after_trim: envOf(n) === '',
+    };
+  }
+  // 이름 오타를 잡으려면 실제로 들어온 GA_* 이름을 봐야 한다 (값은 보지 않는다)
+  const unexpected = Object.keys(process.env)
+    .filter(k => /^GA[_A-Z0-9]*$/.test(k) && !GA_ENV_NAMES.includes(k));
+  return { vars, unexpected_ga_vars: unexpected };
+}
+
 /** 키 JSON 파싱 — 원문/base64 둘 다 받는다 */
 function parseServiceAccount() {
-  const raw = (process.env.GA_SERVICE_ACCOUNT_JSON || '').trim();
+  const raw = envOf('GA_SERVICE_ACCOUNT_JSON');
   if (!raw) return null;
   let text = raw;
   if (!text.startsWith('{')) {
@@ -53,7 +99,7 @@ function parseServiceAccount() {
 /** 'card:412345678,mall:987654321' → { card: '412345678', ... } */
 function parseProperties() {
   const out = {};
-  for (const part of String(process.env.GA_PROPERTIES || '').split(',')) {
+  for (const part of envOf('GA_PROPERTIES').split(',')) {
     const m = /^\s*([A-Za-z0-9_-]+)\s*:\s*(\d+)\s*$/.exec(part);
     if (m) out[m[1]] = m[2];
   }
@@ -64,9 +110,11 @@ const SA = parseServiceAccount();
 const PROPERTIES = parseProperties();
 
 const OAUTH = {
-  client_id: (process.env.GA_OAUTH_CLIENT_ID || '').trim(),
-  client_secret: (process.env.GA_OAUTH_CLIENT_SECRET || '').trim(),
-  refresh_token: (process.env.GA_OAUTH_REFRESH_TOKEN || '').trim(),
+  client_id: envOf('GA_OAUTH_CLIENT_ID'),
+  client_secret: envOf('GA_OAUTH_CLIENT_SECRET'),
+  // CLIENT_ID/CLIENT_SECRET 옆에 있으니 CLIENT_REFRESH_TOKEN 으로 적기 쉽다 (실제로 그렇게
+  //   등록돼 하루를 날렸다). 둘 다 받는다 — 이름 하나 때문에 막힐 이유가 없다.
+  refresh_token: envOf('GA_OAUTH_REFRESH_TOKEN') || envOf('GA_OAUTH_CLIENT_REFRESH_TOKEN'),
 };
 const OAUTH_OK = !!(OAUTH.client_id && OAUTH.client_secret && OAUTH.refresh_token);
 
@@ -99,6 +147,8 @@ function configStatus() {
     properties: PROPERTIES,
     properties_ok: Object.keys(PROPERTIES).length > 0,
     hint,
+    // 값은 담지 않는다 — 이름·길이·따옴표 여부만으로 등록 사고를 가려낸다
+    env: envReport(),
   };
 }
 
