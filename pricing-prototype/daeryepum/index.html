@@ -772,6 +772,9 @@ nav.nav-loading a[href^="#"] {
         <input type="date" id="ga-from" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px">
         <span style="color:var(--gray-400)">~</span>
         <input type="date" id="ga-to" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px">
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="끄면 청첩장까지 전 상품을 봅니다 (GA 상품 대부분은 청첩장입니다)">
+          <input type="checkbox" id="ga-gift-only" checked> 답례품만
+        </label>
         <button class="btn btn-sm" onclick="loadGaProducts()">조회</button>
       </div>
     </div>
@@ -5759,6 +5762,7 @@ async function loadGaProducts() {
   const qs = new URLSearchParams();
   if (from) qs.set('start_date', from);
   if (to) qs.set('end_date', to);
+  if (!document.getElementById('ga-gift-only')?.checked) qs.set('scope', 'all');
   try {
     const r = await fetch(`${API}/api/ga/products?${qs}`);
     const j = await r.json();
@@ -5811,8 +5815,9 @@ function _gaRender(j) {
       <td style="padding:7px 10px;text-align:right">${num(r.viewed)}</td>
       <td style="padding:7px 10px;text-align:right">${num(r.added_to_cart)}</td>
       <td style="padding:7px 10px;text-align:right">${num(r.purchased)}</td>
-      <td style="padding:7px 10px;text-align:right;font-weight:600;color:${r.conversion_rate == null ? 'var(--gray-300)' : (r.conversion_rate >= 3 ? '#047857' : '#b45309')}">
-        ${r.conversion_rate == null ? '-' : r.conversion_rate + '%'}</td>
+      <td style="padding:7px 10px;text-align:right;font-weight:600;color:${r.conversion_rate == null ? 'var(--gray-300)' : (r.conversion_rate >= 3 ? '#047857' : '#b45309')}"
+          ${r.conversion_rate == null ? 'title="이 사이트는 구매가 상품과 연결돼 있지 않습니다 — 값이 없는 것이지 0%가 아닙니다"' : ''}>
+        ${r.conversion_rate == null ? '측정없음' : r.conversion_rate + '%'}</td>
     </tr>`).join('');
   status.style.display = 'none';
   table.style.display = '';

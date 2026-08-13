@@ -30,19 +30,64 @@ function dropRejectedMetrics(metrics, err) {
   return kept.length && kept.length < metrics.length ? kept : null;
 }
 
-/** item 단위 집계 */
-async function itemReport(site, startDate, endDate, limit) {
+/**
+ * 같은 상품이 이름만 달라 여러 줄로 쪼개지는 것을 합친다.
+ *   실제 데이터에서 itemId 'TGJSD01O4_B' 가 '[30%할인]메이플 호두정과' 와
+ *   '[27%할인]메이플 호두정과' 로 따로 잡혔다 (2026-08-13 확인). 할인 문구가 이름에
+ *   들어가 프로모션이 바뀔 때마다 줄이 늘어난다. 상품 기준으로 보려면 itemId 로 묶어야 한다.
+ *   이름은 할인 문구를 뗀 뒤 가장 조회가 많은 것을 대표로 쓴다.
+ */
+function mergeByItemId(rows) {
+  const by = new Map();
+  const nameOf = (r) => ({
+    name: String(r.itemName || '').replace(/^\s*\[[^\]]*\]\s*/, ''),
+    n: r.itemsViewed || 0,
+  });
+  for (const r of rows) {
+    const id = r.itemId || r.itemName;
+    const t = by.get(id);
+    // 첫 행은 그대로 담는다. 여기서 합산까지 하면 자기 자신을 두 번 더한다.
+    if (!t) { by.set(id, { ...r, _names: [nameOf(r)] }); continue; }
+    for (const k of ['itemsViewed', 'itemsAddedToCart', 'itemsPurchased', 'itemRevenue']) {
+      if (typeof r[k] === 'number') t[k] = (t[k] || 0) + r[k];
+    }
+    t._names.push(nameOf(r));
+  }
+  for (const t of by.values()) {
+    t.itemName = t._names.sort((a, b) => b.n - a.n)[0]?.name || t.itemName;
+    delete t._names;
+  }
+  return [...by.values()].sort((a, b) => (b.itemsViewed || 0) - (a.itemsViewed || 0));
+}
+
+/**
+ * 답례품 상품코드 접두.
+ *   GA 에 잡히는 상품은 대부분 청첩장이라(바른손카드 상위 500개 중 답례품은 20개) 그대로 두면
+ *   답례품이 목록 아래로 밀려 보이지 않는다. 답례품 itemId 는 'TGJ' 로 시작한다
+ *   (예: TGJSD01O4_B = 메이플 호두정과, 2026-08-13 확인).
+ */
+const GIFT_PREFIX = process.env.GA_GIFT_ID_PREFIX || 'TGJ';
+
+/** item 단위 집계. scope='gift' 면 답례품만 (기본), 'all' 이면 전 상품 */
+async function itemReport(site, startDate, endDate, limit, scope = 'gift') {
   let metrics = ITEM_METRICS.slice();
+  const giftFilter = scope === 'gift' ? {
+    filter: {
+      fieldName: 'itemId',
+      stringFilter: { matchType: 'BEGINS_WITH', value: GIFT_PREFIX, caseSensitive: false },
+    },
+  } : undefined;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const res = await api.runReport(site, {
         dateRanges: [{ startDate, endDate }],
         dimensions: [{ name: 'itemId' }, { name: 'itemName' }],
+        ...(giftFilter ? { dimensionFilter: giftFilter } : {}),
         metrics: metrics.map(name => ({ name })),
         orderBys: [{ metric: { metricName: metrics[0] }, desc: true }],
         limit,
       });
-      return { rows: api.flatten(res), metrics };
+      return { rows: mergeByItemId(api.flatten(res)), metrics };
     } catch (e) {
       const kept = dropRejectedMetrics(metrics, e);
       if (!kept) throw e;
@@ -88,7 +133,7 @@ const pct = (num, den) => (den > 0 ? Math.round((num / den) * 1000) / 10 : null)
  * @param {string[]} opts.sites  사이트키 (기본: 설정된 전부)
  * @param {string}   opts.mode   'auto' | 'item' | 'page'
  */
-async function productReport({ sites, startDate, endDate, mode = 'auto', limit = 250 } = {}) {
+async function productReport({ sites, startDate, endDate, mode = 'auto', limit = 250, scope = 'gift' } = {}) {
   if (!api.isConfigured()) {
     return { configured: false, config: api.configStatus(), rows: [], sites: [] };
   }
@@ -109,7 +154,7 @@ async function productReport({ sites, startDate, endDate, mode = 'auto', limit =
       let metrics = null;
 
       if (mode === 'auto' || mode === 'item') {
-        const r = await itemReport(site, start, end, limit);
+        const r = await itemReport(site, start, end, limit, scope);
         metrics = r.metrics;
         if (r.rows.length) { used = 'item'; rows = r.rows; }
         else if (mode === 'item') { used = 'item'; rows = []; }
@@ -121,16 +166,24 @@ async function productReport({ sites, startDate, endDate, mode = 'auto', limit =
       }
 
       const summary = await siteSummary(site, start, end).catch(() => null);
+      // 구매는 있는데 item 에 안 붙는 사이트가 있다 (바른손카드: 구매 4,332건이지만 상품별 구매 0).
+      //   이걸 알리지 않으면 화면의 전환율 0% 가 '안 팔린다' 로 읽힌다 — 실제로는 측정이 없는 것이다.
+      const itemPurchases = used === 'item'
+        ? rows.reduce((a, r) => a + (r.itemsPurchased || 0), 0) : 0;
+      const purchaseNotLinked = used === 'item' && itemPurchases === 0 && (summary?.transactions || 0) > 0;
       out.sites.push({
         site, mode: used, rows: rows.length, metrics,
+        purchase_not_linked: purchaseNotLinked,
         sessions: summary?.sessions ?? null,
         transactions: summary?.transactions ?? null,
         revenue: summary?.purchaseRevenue ?? null,
         conversion_rate: summary ? pct(summary.transactions, summary.sessions) : null,
-        // page 모드는 상품별 전환을 낼 수 없다 — 화면에서 그 사실이 드러나야 한다
+        // 낼 수 없는 값은 화면에서 그 사실이 드러나야 한다
         note: used === 'page'
           ? '전자상거래(view_item·purchase) 이벤트가 없어 페이지 조회수만 집계했습니다 — 상품별 전환율은 낼 수 없습니다'
-          : null,
+          : purchaseNotLinked
+            ? `구매 ${Number(summary.transactions).toLocaleString()}건이 상품과 연결돼 있지 않습니다 (purchase·add_to_cart 이벤트에 items 누락) — 이 사이트는 조회수만 유효합니다. 빈 칸은 0이 아니라 측정 공백입니다`
+            : null,
       });
 
       for (const r of rows) {
@@ -142,11 +195,14 @@ async function productReport({ sites, startDate, endDate, mode = 'auto', limit =
             item_id: r.itemId || null,
             name: r.itemName || null,
             viewed,
-            added_to_cart: r.itemsAddedToCart ?? null,
-            purchased,
+            // 장바구니도 같은 원인으로 비어 있다 (바른손카드: 사이트 add_to_cart 27,539건인데
+            //   상품별은 전부 0). 0 으로 보여주면 '아무도 안 담았다' 로 읽힌다.
+            added_to_cart: purchaseNotLinked ? null : (r.itemsAddedToCart ?? null),
+            purchased: purchaseNotLinked ? null : purchased,
             revenue: r.itemRevenue ?? null,
-            cart_rate: pct(r.itemsAddedToCart || 0, viewed),
-            conversion_rate: pct(purchased, viewed),
+            cart_rate: purchaseNotLinked ? null : pct(r.itemsAddedToCart || 0, viewed),
+            // 측정이 없는 것을 0% 로 보여주면 안 된다 — 값 없음으로 둔다
+            conversion_rate: purchaseNotLinked ? null : pct(purchased, viewed),
           });
         } else {
           out.rows.push({

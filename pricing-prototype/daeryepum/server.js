@@ -14463,6 +14463,8 @@ const server = http.createServer(async (req, res) => {
             startDate: parsed.query.start_date || null,
             endDate: parsed.query.end_date || null,
             mode: ['item', 'page', 'auto'].includes(parsed.query.mode) ? parsed.query.mode : 'auto',
+            // 기본은 답례품만 — GA 상품 대부분이 청첩장이라 섞으면 답례품이 묻힌다
+            scope: parsed.query.scope === 'all' ? 'all' : 'gift',
           });
         } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
