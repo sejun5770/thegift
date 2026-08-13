@@ -53,16 +53,34 @@ function listOf(res) {
   return [];
 }
 
+/**
+ * 문의일시 후보 키.
+ *   네이버 실제 필드는 inquiryRegistrationDateTime 이다 (2026-08-13 raw_payload 로 확인).
+ *   이 값이 비면 목록의 기간 필터에서 통째로 빠져 '문의를 못 가져온다' 로 보인다 —
+ *   실제로 그렇게 3건이 화면에서 사라져 있었다.
+ */
+const DATE_KEYS = [
+  'inquiryRegistrationDateTime', 'inquiryAt', 'inquiryDate', 'createdAt',
+  'registerDate', 'questionDate', 'receiptDate',
+];
+const _warnedDateShapes = new Set();
+
 function normalize(channel, inquiryType, raw) {
   const externalId = pick(raw, [
     'inquiryId', 'onlineInquiryId', 'counselingId', 'id', 'questionId', 'inquiryNo', 'answerTemplateNo',
   ]);
   if (externalId == null) return null;   // 식별자가 없으면 저장해도 갱신이 안 된다
+  // 날짜를 못 찾으면 목록 기간 필터에서 통째로 빠진다 — 조용히 null 로 두지 말고 키를 남긴다
+  if (!_warnedDateShapes.has(`${channel}/${inquiryType}`)
+      && !pick(raw, DATE_KEYS)) {
+    _warnedDateShapes.add(`${channel}/${inquiryType}`);
+    console.warn(`[inquiries] ${channel}/${inquiryType}: 문의일시 필드를 찾지 못했습니다. 응답 키: ${Object.keys(raw).join(', ')}`);
+  }
   return {
     channel,
     inquiry_type: inquiryType,
     external_id: String(externalId),
-    inquired_at: toIso(pick(raw, ['inquiryAt', 'inquiryDate', 'createdAt', 'registerDate', 'questionDate', 'receiptDate'])),
+    inquired_at: toIso(pick(raw, DATE_KEYS)),
     order_id: (pick(raw, ['orderId', 'orderNo', 'productOrderId', 'orderSerialNumber']) ?? null) &&
       String(pick(raw, ['orderId', 'orderNo', 'productOrderId', 'orderSerialNumber'])),
     product_name: pick(raw, ['productName', 'sellerProductName', 'itemName', 'goodsName']),
@@ -71,7 +89,7 @@ function normalize(channel, inquiryType, raw) {
     content: pick(raw, ['content', 'inquiryContent', 'question', 'questionContent', 'body']),
     answered: !!pick(raw, ['answered', 'answeredAt', 'answerDate', 'answerContent', 'replyContent']),
     answer_content: pick(raw, ['answerContent', 'replyContent', 'answer']),
-    answered_at: toIso(pick(raw, ['answeredAt', 'answerDate', 'replyDate'])),
+    answered_at: toIso(pick(raw, ['answerRegistrationDateTime', 'answeredAt', 'answerDate', 'replyDate'])),
     raw_payload: raw,
     synced_at: new Date().toISOString(),
   };
