@@ -14510,6 +14510,7 @@ const server = http.createServer(async (req, res) => {
             path: parsed.query.path || '',
             startDate: parsed.query.start_date || null,
             endDate: parsed.query.end_date || null,
+            device: ['desktop', 'mobile'].includes(parsed.query.device) ? parsed.query.device : 'all',
           });
         } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -14526,6 +14527,7 @@ const server = http.createServer(async (req, res) => {
           const snap = await require('./ga/clickmap').snapshot({
             site: parsed.query.site || 'card',
             path: parsed.query.path || '',
+            device: parsed.query.device === 'mobile' ? 'mobile' : 'desktop',
           });
           res.writeHead(200, {
             'Content-Type': 'text/html; charset=utf-8',

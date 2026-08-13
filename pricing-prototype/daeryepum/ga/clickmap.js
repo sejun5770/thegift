@@ -74,17 +74,35 @@ async function listPages({ site = 'card', startDate, endDate, giftOnly = true, l
 /** 텍스트 정규화 — 공백을 하나로. 매칭·병합 공통 키. */
 const normText = (s) => String(s || '').replace(/\s+/g, ' ').trim();
 
+/** 기기 필터 — PC/모바일 레이아웃이 별개 HTML 이라 (UA 분기, 2026-08-13 확인) 클릭도 기기로 가른다 */
+const DEVICE_FILTER = {
+  all: null,
+  desktop: ['desktop'],
+  mobile: ['mobile', 'tablet'],
+};
+
 /**
  * 한 페이지의 클릭 분해.
  *   (click_text, click_id) 로 묶고 이벤트별 건수를 나란히 둔다 — 합산하지 않는다.
  *   '구매후기 (3)' 처럼 텍스트에 유동 숫자가 들어가 여러 줄로 갈라지는 것은
  *   숫자 괄호를 뗀 base_text 로 병합한다 (매칭도 base_text 기준).
+ *   사용자 수(totalUsers)도 함께 — 클릭수는 반복 클릭에 부풀 수 있어 사람 수가 보정 지표다.
+ *   ⚠ 병합 시 users 는 단순 합산이라, 문구 변형 양쪽을 다 누른 사용자는 중복될 수 있다
+ *     (드묾 — 변형은 시간대 분할이라 겹치려면 그 경계에 걸쳐 눌러야 한다). 응답 note 에 명시.
  */
-async function clicksForPath({ site = 'card', path, startDate, endDate } = {}) {
+async function clicksForPath({ site = 'card', path, startDate, endDate, device = 'all' } = {}) {
   if (!SNAPSHOT_HOSTS[site]) throw new Error(`클릭맵을 지원하지 않는 사이트입니다: ${site}`);
   if (!path) throw new Error('path 가 필요합니다');
+  if (!(device in DEVICE_FILTER)) throw new Error(`device 는 all/desktop/mobile 중 하나입니다: ${device}`);
   const start = startDate || daysAgo(28);
   const end = endDate || daysAgo(0);
+  const exprs = [
+    { filter: { fieldName: 'eventName', inListFilter: { values: ['element_click', 'all_link_click'] } } },
+    { filter: { fieldName: 'pagePath', stringFilter: { value: path } } },
+  ];
+  if (DEVICE_FILTER[device]) {
+    exprs.push({ filter: { fieldName: 'deviceCategory', inListFilter: { values: DEVICE_FILTER[device] } } });
+  }
   const res = await api.runReport(site, {
     dateRanges: [{ startDate: start, endDate: end }],
     dimensions: [
@@ -92,15 +110,8 @@ async function clicksForPath({ site = 'card', path, startDate, endDate } = {}) {
       { name: 'customEvent:click_id' },
       { name: 'customEvent:click_text' },
     ],
-    metrics: [{ name: 'eventCount' }],
-    dimensionFilter: {
-      andGroup: {
-        expressions: [
-          { filter: { fieldName: 'eventName', inListFilter: { values: ['element_click', 'all_link_click'] } } },
-          { filter: { fieldName: 'pagePath', stringFilter: { value: path } } },
-        ],
-      },
-    },
+    metrics: [{ name: 'eventCount' }, { name: 'totalUsers' }],
+    dimensionFilter: { andGroup: { expressions: exprs } },
     orderBys: [{ metric: { metricName: 'eventCount' }, desc: true }],
     limit: 300,
   });
@@ -123,6 +134,8 @@ async function clicksForPath({ site = 'card', path, startDate, endDate } = {}) {
         click_id: id,
         element_click: 0,
         all_link_click: 0,
+        element_users: 0,
+        all_link_users: 0,
         variants: new Set(),
       });
     }
@@ -130,24 +143,31 @@ async function clicksForPath({ site = 'card', path, startDate, endDate } = {}) {
     if (id && !t.click_id) t.click_id = id;
     if (text) t.variants.add(text);
     const n = Number(r.eventCount) || 0;
-    if (r.eventName === 'element_click') t.element_click += n;
-    else t.all_link_click += n;
+    const u = Number(r.totalUsers) || 0;
+    if (r.eventName === 'element_click') { t.element_click += n; t.element_users += u; }
+    else { t.all_link_click += n; t.all_link_users += u; }
   }
-  const rows = [...by.values()].map(r => ({
-    ...r,
-    variants: [...r.variants].slice(0, 5),
+  const rows = [...by.values()].map(r => {
     // 배지에 쓸 대표값 — 두 이벤트 중 큰 쪽. 합산은 이중계상이라 금지지만,
     //   'element 우선' 은 함정이었다: 병합 키가 요소가 아니라 문구라서, 같은 문구의
     //   버튼(element 40)과 링크(all_link 900)가 한 줄이 되면 900 이 통째로 숨는다
     //   (리뷰 지적). max 는 숨기지도 더하지도 않는다.
-    count: Math.max(r.element_click, r.all_link_click),
-    count_source: r.element_click >= r.all_link_click ? 'element_click' : 'all_link_click',
-  }));
+    const useElement = r.element_click >= r.all_link_click;
+    return {
+      ...r,
+      variants: [...r.variants].slice(0, 5),
+      count: Math.max(r.element_click, r.all_link_click),
+      count_source: useElement ? 'element_click' : 'all_link_click',
+      // 사용자 수는 대표값과 같은 이벤트에서 — 다른 이벤트의 users 를 섞으면 기준이 어긋난다
+      users: useElement ? r.element_users : r.all_link_users,
+    };
+  });
   rows.sort((a, b) => b.count - a.count);
   return {
-    site, path, start_date: start, end_date: end,
+    site, path, start_date: start, end_date: end, device,
     rows,
-    note: '같은 클릭이 element_click·all_link_click 양쪽에 잡힐 수 있어 두 수는 합산하지 않습니다.',
+    note: '같은 클릭이 element_click·all_link_click 양쪽에 잡힐 수 있어 두 수는 합산하지 않습니다. '
+      + '사용자 수는 문구 변형 병합 시 근소하게 중복될 수 있습니다.',
   };
 }
 
@@ -171,21 +191,29 @@ function sanitizeHtml(html, baseUrl) {
   return s;
 }
 
-async function snapshot({ site = 'card', path } = {}) {
+/**
+ * device 별 UA — 사이트가 UA 로 PC/모바일 HTML 을 갈라 내려준다 (PC 766KB vs 모바일 112KB,
+ * 모바일엔 reviewA id 도 없음 — GA 의 기기별 click_id 유무와 일치. 2026-08-13 확인).
+ */
+const SNAP_UA = {
+  desktop: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 daeryepum-clickmap',
+  mobile: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 daeryepum-clickmap',
+};
+
+async function snapshot({ site = 'card', path, device = 'desktop' } = {}) {
   const host = SNAPSHOT_HOSTS[site];
   if (!host) throw new Error(`스냅샷을 지원하지 않는 사이트입니다: ${site}`);
+  const ua = SNAP_UA[device === 'mobile' ? 'mobile' : 'desktop'];
   // 경로 화이트리스트 — 상세페이지 형태만. 이 검증이 SSRF·오픈프록시를 막는 방어선이다.
   if (!/^\/Product\/(Option|Card)Detail\/\d+$/i.test(String(path || ''))) {
     throw new Error('상세페이지 경로만 허용됩니다 (/Product/OptionDetail/{id})');
   }
-  const cached = _snapCache.get(`${site}${path}`);
+  const cacheKey = `${site}|${device === 'mobile' ? 'mobile' : 'desktop'}|${path}`;
+  const cached = _snapCache.get(cacheKey);
   if (cached && Date.now() - cached.at < SNAP_TTL) return { html: cached.html, cached: true };
 
   const res = await fetch(host + path, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) daeryepum-clickmap',
-      Accept: 'text/html',
-    },
+    headers: { 'User-Agent': ua, Accept: 'text/html' },
     redirect: 'follow',
   });
   if (!res.ok) throw new Error(`상세페이지 로드 실패 [${res.status}] ${host}${path}`);
@@ -194,7 +222,7 @@ async function snapshot({ site = 'card', path } = {}) {
     throw new Error(`허용되지 않은 위치로 리디렉트됨: ${res.url.slice(0, 120)}`);
   }
   const html = sanitizeHtml(await res.text(), host);
-  _snapCache.set(`${site}${path}`, { at: Date.now(), html });
+  _snapCache.set(cacheKey, { at: Date.now(), html });
   return { html, cached: false };
 }
 

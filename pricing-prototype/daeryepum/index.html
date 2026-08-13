@@ -816,6 +816,11 @@ nav.nav-loading a[href^="#"] {
         <select id="cm-page" onfocus="loadClickmapPages()" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px;max-width:260px">
           <option value="">▼ 눌러서 페이지 목록 불러오기</option>
         </select>
+        <!-- 기기 전환 — PC/모바일이 별개 HTML·별개 클릭 집계라 함께 갈아탄다 -->
+        <div style="display:flex;gap:2px;border:1px solid var(--gray-200);border-radius:6px;overflow:hidden">
+          <button class="btn btn-sm cm-dev" data-dev="desktop" onclick="setCmDevice('desktop')" style="border:0;border-radius:0;padding:4px 10px;background:var(--primary);color:#fff">PC</button>
+          <button class="btn btn-sm cm-dev" data-dev="mobile" onclick="setCmDevice('mobile')" style="border:0;border-radius:0;padding:4px 10px">모바일</button>
+        </div>
         <button class="btn btn-sm" onclick="loadClickmap()">클릭맵 보기</button>
       </div>
     </div>
@@ -842,6 +847,7 @@ nav.nav-loading a[href^="#"] {
               <th style="padding:6px 8px;text-align:left">#</th>
               <th style="padding:6px 8px;text-align:left">요소 (버튼 문구)</th>
               <th style="padding:6px 8px;text-align:right">클릭수</th>
+              <th style="padding:6px 8px;text-align:right" title="클릭한 사람 수 — 반복 클릭에 부풀지 않는 기준">사용자</th>
               <th style="padding:6px 8px;text-align:left">표시</th>
             </tr></thead>
             <tbody id="cm-list"></tbody>
@@ -5996,6 +6002,21 @@ let _cmPagesLoaded = false;
 let _cmLoadGen = 0;        // 조회 세대 — 연타 시 이전 조회의 onload 를 무효화한다
 let _cmOnload = null;      // 현재 걸려 있는 load 리스너 (새 조회 시작 시 뗀다)
 let _cmLoadTimeout = null;
+let _cmDevice = 'desktop'; // PC/모바일 — 스냅샷 UA·iframe 폭·클릭 필터가 함께 바뀐다
+
+function setCmDevice(dev) {
+  _cmDevice = dev === 'mobile' ? 'mobile' : 'desktop';
+  document.querySelectorAll('.cm-dev').forEach(b => {
+    const on = b.dataset.dev === _cmDevice;
+    b.style.background = on ? 'var(--primary)' : '';
+    b.style.color = on ? '#fff' : '';
+  });
+  // 이미 결과가 떠 있으면 새 기기 기준으로 바로 다시 그린다
+  if (document.getElementById('cm-wrap').style.display !== 'none') loadClickmap();
+}
+
+/** 기기별 스냅샷 기준 폭 — 배지 좌표·축소 배율이 이 폭 기준으로 계산된다 */
+const CM_BASE_WIDTH = { desktop: 1280, mobile: 390 };
 
 function _cmDefaultDates() {
   const d = (n) => new Date(Date.now() - n * 86400000 + 9 * 3600000).toISOString().slice(0, 10);
@@ -6043,11 +6064,12 @@ async function loadClickmap() {
   const from = document.getElementById('cm-from').value;
   const to = document.getElementById('cm-to').value;
   try {
-    const r = await fetch(`${API}/api/ga/clickmap/clicks?${new URLSearchParams({ site: 'card', path, start_date: from, end_date: to })}`);
+    const r = await fetch(`${API}/api/ga/clickmap/clicks?${new URLSearchParams({
+      site: 'card', path, start_date: from, end_date: to, device: _cmDevice })}`);
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
     document.getElementById('cm-note').textContent =
-      `${j.start_date} ~ ${j.end_date} · ${path} · ${j.note || ''}`;
+      `${j.start_date} ~ ${j.end_date} · ${_cmDevice === 'mobile' ? '모바일' : 'PC'} · ${path} · ${j.note || ''}`;
 
     // 스냅샷 iframe 로드 → onload 에서 배지 부착.
     //   조회를 연달아 누르면 이전 조회의 리스너가 남아 한 번의 load 에 두 조회의 배지가
@@ -6079,7 +6101,7 @@ async function loadClickmap() {
     };
     _cmOnload = onload;
     frame.addEventListener('load', onload);
-    frame.src = `${API}/api/ga/clickmap/snapshot?${new URLSearchParams({ site: 'card', path })}`;
+    frame.src = `${API}/api/ga/clickmap/snapshot?${new URLSearchParams({ site: 'card', path, device: _cmDevice })}`;
   } catch (e) {
     status.innerHTML = `<span style="color:#b91c1c">불러오지 못했습니다 — ${esc(e.message)}</span>`;
   }
@@ -6094,18 +6116,22 @@ function _cmPlaceBadges(frame, rows) {
   const win = frame.contentWindow;
   if (!doc || !doc.body) { _cmRenderList(rows, new Set()); return; }
 
-  // iframe 높이 = 문서 높이 (상한 3만px), 축소 배율 = 컨테이너 폭 / 1280
+  // iframe 폭 = 기기 기준 (PC 1280 / 모바일 390) — 좌표·배율이 전부 이 폭 기준이다.
+  //   폭을 바꾸면 레이아웃이 다시 잡히므로 높이 측정 전에 먼저 적용한다.
+  const baseW = CM_BASE_WIDTH[_cmDevice] || 1280;
+  frame.style.width = baseW + 'px';
   // 상세페이지가 3만px 을 넘는다 (실측 37,929px — 후기 섹션이 밑에 있다). 캡을 넉넉히.
-  const fullH = Math.min(Math.max(doc.documentElement.scrollHeight, 1200), 60000);
+  const fullH = Math.min(Math.max(doc.documentElement.scrollHeight, 800), 60000);
   frame.style.height = fullH + 'px';
   const outer = document.getElementById('cm-frame-outer');
   const scaler = document.getElementById('cm-frame-scaler');
-  // clientWidth 가 0 이면(아직 숨김 등) 축소를 포기하고 원본 크기로 — 음수 배율 방지
-  const scale = outer.clientWidth > 100 ? Math.min(1, (outer.clientWidth - 2) / 1280) : 1;
+  // clientWidth 가 0 이면(아직 숨김 등) 축소를 포기하고 원본 크기로 — 음수 배율 방지.
+  //   모바일(390px)은 컨테이너보다 좁아도 확대하지 않는다 (min 1).
+  const scale = outer.clientWidth > 100 ? Math.min(1, (outer.clientWidth - 2) / baseW) : 1;
   scaler.style.transform = `scale(${scale})`;
   // transform 은 레이아웃 크기를 안 바꾼다 — 스크롤 영역은 '축소된' 크기로 직접 잡아야
   //   콘텐츠가 끝난 뒤 수만 px 의 백지 스크롤이 생기지 않는다 (리뷰 실측 검증).
-  scaler.style.width = Math.round(1280 * scale) + 'px';
+  scaler.style.width = Math.round(baseW * scale) + 'px';
   scaler.style.height = Math.round(fullH * scale) + 'px';
   outer.style.height = Math.min(fullH * scale, window.innerHeight * 0.78) + 'px';
 
@@ -6152,7 +6178,9 @@ function _cmPlaceBadges(frame, rows) {
     const badge = doc.createElement('div');
     badge.setAttribute('data-cm-badge', '1');
     badge.textContent = `${Number(row.count).toLocaleString()}`;
-    badge.title = `${row.text || row.click_id} — ${row.count_source} ${row.count.toLocaleString()}회`;
+    badge.title = `${row.text || row.click_id} — 클릭 ${row.count.toLocaleString()}회`
+      + (row.users ? ` · ${Number(row.users).toLocaleString()}명` : '')
+      + ` (${row.count_source})`;
     badge.style.cssText = 'position:absolute;z-index:2147483647;pointer-events:none;'
       + 'background:#dc2626;color:#fff;font:700 13px/1 sans-serif;padding:4px 8px;'
       + 'border-radius:99px;box-shadow:0 1px 4px rgba(0,0,0,.35);white-space:nowrap;'
@@ -6172,9 +6200,10 @@ function _cmRenderList(rows, matched) {
       <td style="padding:5px 8px" title="${esc(key || '')}">${esc((key || '(문구 없음)').length > 42 ? key.slice(0, 42) + '…' : (key || '(문구 없음)'))}
         ${r.click_id && r.text ? `<span style="color:var(--gray-400);font-size:10px;margin-left:4px">#${esc(r.click_id)}</span>` : ''}</td>
       <td style="padding:5px 8px;text-align:right;font-weight:600">${Number(r.count).toLocaleString()}</td>
+      <td style="padding:5px 8px;text-align:right;color:var(--gray-600)">${r.users ? Number(r.users).toLocaleString() : '-'}</td>
       <td style="padding:5px 8px;font-size:11px">${on ? '🔴 배지' : '목록만'}</td>
     </tr>`;
-  }).join('') || '<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--gray-400)">클릭 데이터가 없습니다</td></tr>';
+  }).join('') || '<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--gray-400)">클릭 데이터가 없습니다</td></tr>';
 }
 
 //  🏆 상품 판매 순위 — 일/주/월 기간별 전체 채널 순위
