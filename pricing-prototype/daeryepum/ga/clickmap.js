@@ -39,21 +39,35 @@ function codeOfTitle(title) {
  * 상세페이지 목록 — 페이지 선택 드롭다운용.
  *   giftOnly: 제목의 상품코드가 TGJ 로 시작하는 답례품만 (기본). 끄면 청첩장 포함 전체.
  */
+const GIFT_TITLE_PREFIX = process.env.GA_GIFT_ID_PREFIX || 'TGJ';
+
 async function listPages({ site = 'card', startDate, endDate, giftOnly = true, limit = 100 } = {}) {
   if (!SNAPSHOT_HOSTS[site]) throw new Error(`클릭맵을 지원하지 않는 사이트입니다: ${site}`);
   const start = startDate || daysAgo(28);
   const end = endDate || daysAgo(0);
+  // 답례품만 볼 때는 GA 쿼리에서 제목(… | TGJ코드)으로 직접 거른다.
+  //   '조회수 상위 500개 상세페이지' 를 받아 걸러내면 상위가 거의 청첩장이라
+  //   답례품이 10개만 남았다 (실제로는 59종+) — 잘라낸 쪽에서 찾으면 안 된다.
+  const exprs = [{
+    filter: {
+      fieldName: 'pagePath',
+      stringFilter: { matchType: 'CONTAINS', value: 'Detail', caseSensitive: false },
+    },
+  }];
+  if (giftOnly) {
+    exprs.push({
+      filter: {
+        fieldName: 'pageTitle',
+        stringFilter: { matchType: 'CONTAINS', value: GIFT_TITLE_PREFIX, caseSensitive: false },
+      },
+    });
+  }
   const res = await api.runReport(site, {
     dateRanges: [{ startDate: start, endDate: end }],
     dimensions: [{ name: 'pagePath' }, { name: 'pageTitle' }],
     metrics: [{ name: 'screenPageViews' }],
-    dimensionFilter: {
-      filter: {
-        fieldName: 'pagePath',
-        stringFilter: { matchType: 'CONTAINS', value: 'Detail', caseSensitive: false },
-      },
-    },
-    orderBys: [{ metric: { metricName: 'screenPageViews' } , desc: true }],
+    dimensionFilter: exprs.length > 1 ? { andGroup: { expressions: exprs } } : exprs[0],
+    orderBys: [{ metric: { metricName: 'screenPageViews' }, desc: true }],
     limit: 500,
   });
   const rows = [];
