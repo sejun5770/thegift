@@ -767,14 +767,25 @@ nav.nav-loading a[href^="#"] {
        ============================================ -->
   <div class="section" data-dash-section="4" data-dash-only="daeryepum">
     <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-      <span>🔎 유입 · 구매전환 <span style="font-size:11px;font-weight:400;color:var(--gray-500);margin-left:4px">Google Analytics · 자사몰만</span></span>
-      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;font-weight:400">
-        <input type="date" id="ga-from" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px">
-        <span style="color:var(--gray-400)">~</span>
-        <input type="date" id="ga-to" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px">
-        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="끄면 청첩장까지 전 상품을 봅니다 (GA 상품 대부분은 청첩장입니다)">
-          <input type="checkbox" id="ga-gift-only" checked> 답례품만
-        </label>
+      <span>🔎 유입 · 구매전환 <span style="font-size:11px;font-weight:400;color:var(--gray-500);margin-left:4px">조회수 GA · 주문 우리DB · 자사몰만</span></span>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;font-weight:400">
+        <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:#eff6ff;border-radius:6px">
+          <b style="color:#1d4ed8">A</b>
+          <input type="date" id="ga-a-from" style="padding:3px 6px;font-size:12px;border:1px solid var(--gray-200);border-radius:5px">
+          <span style="color:var(--gray-400)">~</span>
+          <input type="date" id="ga-a-to" style="padding:3px 6px;font-size:12px;border:1px solid var(--gray-200);border-radius:5px">
+        </span>
+        <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:var(--gray-50);border-radius:6px" title="비우면 A 기간만 봅니다. 가격 변경 전 기간을 넣으면 전후 비교가 됩니다.">
+          <b style="color:var(--gray-600)">B</b>
+          <input type="date" id="ga-b-from" style="padding:3px 6px;font-size:12px;border:1px solid var(--gray-200);border-radius:5px">
+          <span style="color:var(--gray-400)">~</span>
+          <input type="date" id="ga-b-to" style="padding:3px 6px;font-size:12px;border:1px solid var(--gray-200);border-radius:5px">
+        </span>
+        <select id="ga-site" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px">
+          <option value="">전체</option>
+          <option value="card">바른손카드</option>
+          <option value="etc">바른손몰</option>
+        </select>
         <button class="btn btn-sm" onclick="loadGaProducts()">조회</button>
       </div>
     </div>
@@ -783,17 +794,7 @@ nav.nav-loading a[href^="#"] {
       <div id="ga-body" style="overflow-x:auto">
         <div id="ga-status" style="padding:36px 20px;text-align:center;color:var(--gray-400);font-size:13px">조회를 누르면 표시됩니다</div>
         <table id="ga-table" style="width:100%;border-collapse:collapse;font-size:13px;display:none">
-          <thead>
-            <tr style="border-bottom:2px solid var(--gray-200);text-align:left;color:var(--gray-500);font-size:12px">
-              <th style="padding:8px 10px;width:56px">순위</th>
-              <th style="padding:8px 10px;width:110px">사이트</th>
-              <th style="padding:8px 10px">상품 / 페이지</th>
-              <th style="padding:8px 10px;width:100px;text-align:right">조회</th>
-              <th style="padding:8px 10px;width:100px;text-align:right">장바구니</th>
-              <th style="padding:8px 10px;width:100px;text-align:right">구매</th>
-              <th style="padding:8px 10px;width:100px;text-align:right">구매전환율</th>
-            </tr>
-          </thead>
+          <thead id="ga-thead"></thead>
           <tbody id="ga-tbody"></tbody>
         </table>
       </div>
@@ -5745,80 +5746,101 @@ function onPsCustomDate() {
 
 // ============================================================
 // ============================================
-// 🔎 GA 유입·구매전환 (자사몰)
+// 🔎 GA 유입·구매전환 (자사몰) — 기간 A vs B 비교
+//   분모(조회수)는 GA, 분자(주문)는 우리 DB. GA 구매 데이터는 쓰지 않는다 —
+//   바른손카드는 구매가 상품코드로 기록되지 않고, 수량 기준이라 단위도 안 맞는다.
 // ============================================
-const GA_SITE_LABEL = { card: '바른손카드', etc: '바른손몰', mall: '바른손몰' };
+const GA_SITE_LABEL = { card: '바른손카드', etc: '바른손몰' };
+
+function _gaDefaultDates() {
+  // A = 최근 14일. 처음 열 때 비어 있으면 눌러볼 수가 없다.
+  const d = (n) => new Date(Date.now() - n * 86400000 + 9 * 3600000).toISOString().slice(0, 10);
+  const set = (id, v) => { const el = document.getElementById(id); if (el && !el.value) el.value = v; };
+  set('ga-a-from', d(14)); set('ga-a-to', d(0));
+}
 
 async function loadGaProducts() {
   const status = document.getElementById('ga-status');
   const table = document.getElementById('ga-table');
   const summary = document.getElementById('ga-summary');
   if (!status) return;
-  status.style.display = ''; status.textContent = '불러오는 중…';
+  _gaDefaultDates();
+  status.style.display = ''; status.textContent = '불러오는 중… (두 기간을 비교하면 시간이 좀 걸립니다)';
   table.style.display = 'none'; summary.style.display = 'none';
 
-  const from = document.getElementById('ga-from')?.value || '';
-  const to = document.getElementById('ga-to')?.value || '';
-  const qs = new URLSearchParams();
-  if (from) qs.set('start_date', from);
-  if (to) qs.set('end_date', to);
-  if (!document.getElementById('ga-gift-only')?.checked) qs.set('scope', 'all');
+  const v = (id) => document.getElementById(id)?.value || '';
+  const qs = new URLSearchParams({ a_start: v('ga-a-from'), a_end: v('ga-a-to') });
+  if (v('ga-b-from') && v('ga-b-to')) { qs.set('b_start', v('ga-b-from')); qs.set('b_end', v('ga-b-to')); }
+  if (v('ga-site')) qs.set('sites', v('ga-site'));
   try {
-    const r = await fetch(`${API}/api/ga/products?${qs}`);
+    const r = await fetch(`${API}/api/ga/funnel?${qs}`);
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-    if (!j.configured) {
-      // 자격증명이 없을 때 '데이터 없음' 으로 보이면 원인을 못 찾는다 — 무엇이 빠졌는지 그대로 쓴다.
-      //   등록했는데도 안 잡히는 경우가 실제로 있었다 (이름 오타·따옴표 혼입·재배포 누락).
-      //   그래서 env 상태를 값 없이 함께 띄운다.
-      const e = j.config?.env;
-      let detail = '';
-      if (e) {
-        const rows = Object.entries(e.vars).map(([k, v]) => {
-          if (!v.present) return `<tr><td style="padding:2px 8px">${k}</td><td style="padding:2px 8px;color:#b91c1c">없음</td></tr>`;
-          const flags = [
-            v.empty_after_trim ? '값이 비어 있음' : `${v.length}자`,
-            v.quoted ? '따옴표 포함 (제거됨)' : '',
-            v.has_outer_space ? '앞뒤 공백' : '',
-            v.has_hash ? '# 포함 — 주석줄이 섞였는지 확인' : '',
-          ].filter(Boolean);
-          return `<tr><td style="padding:2px 8px">${k}</td><td style="padding:2px 8px;color:${v.empty_after_trim ? '#b91c1c' : '#047857'}">${esc(flags.join(' · '))}</td></tr>`;
-        }).join('');
-        const typos = (e.unexpected_ga_vars || []).length
-          ? `<div style="margin-top:6px;color:#b45309">이름이 다른 GA 변수: ${esc(e.unexpected_ga_vars.join(', '))} — 오타인지 확인하세요</div>` : '';
-        detail = `<div style="margin-top:14px;display:inline-block;text-align:left;font-size:12px">
-            <table style="border-collapse:collapse">${rows}</table>${typos}
-            <div style="margin-top:8px;color:var(--gray-500)">모두 정상인데도 이 화면이면, 환경변수 등록 후 <b>컨테이너를 재배포</b>했는지 확인하세요 — 환경변수는 시작할 때만 읽습니다.</div>
-          </div>`;
-      }
-      status.innerHTML = `GA 연동이 아직 설정되지 않았습니다.<br>
-        <span style="font-size:12px;color:var(--gray-500)">${esc(j.config?.hint || '')}</span>${detail}`;
-      return;
-    }
+    if (!j.configured) { _gaRenderUnconfigured(j); return; }
     _gaRender(j);
   } catch (e) {
     status.innerHTML = `<span style="color:#b91c1c">불러오지 못했습니다 — ${esc(e.message)}</span>`;
   }
 }
 
+function _gaRenderUnconfigured(j) {
+  const status = document.getElementById('ga-status');
+  // 자격증명이 없을 때 '데이터 없음' 으로 보이면 원인을 못 찾는다 — env 상태를 값 없이 띄운다
+  const e = j.config?.env;
+  let detail = '';
+  if (e) {
+    const rows = Object.entries(e.vars).map(([k, v]) => {
+      if (!v.present) return `<tr><td style="padding:2px 8px">${k}</td><td style="padding:2px 8px;color:#b91c1c">없음</td></tr>`;
+      const flags = [
+        v.empty_after_trim ? '값이 비어 있음' : `${v.length}자`,
+        v.quoted ? '따옴표 포함 (제거됨)' : '',
+        v.has_outer_space ? '앞뒤 공백' : '',
+        v.has_hash ? '# 포함 — 주석줄이 섞였는지 확인' : '',
+      ].filter(Boolean);
+      return `<tr><td style="padding:2px 8px">${k}</td><td style="padding:2px 8px;color:${v.empty_after_trim ? '#b91c1c' : '#047857'}">${esc(flags.join(' · '))}</td></tr>`;
+    }).join('');
+    const typos = (e.unexpected_ga_vars || []).length
+      ? `<div style="margin-top:6px;color:#b45309">이름이 다른 GA 변수: ${esc(e.unexpected_ga_vars.join(', '))} — 오타인지 확인하세요</div>` : '';
+    detail = `<div style="margin-top:14px;display:inline-block;text-align:left;font-size:12px">
+        <table style="border-collapse:collapse">${rows}</table>${typos}
+        <div style="margin-top:8px;color:var(--gray-500)">모두 정상인데도 이 화면이면, 환경변수 등록 후 <b>컨테이너를 재배포</b>했는지 확인하세요 — 환경변수는 시작할 때만 읽습니다.</div>
+      </div>`;
+  }
+  status.innerHTML = `GA 연동이 아직 설정되지 않았습니다.<br>
+    <span style="font-size:12px;color:var(--gray-500)">${esc(j.config?.hint || '')}</span>${detail}`;
+}
+
+function _gaDelta(diff, suffix = '') {
+  if (diff == null) return '<span style="color:var(--gray-300)">-</span>';
+  if (diff === 0) return '<span style="color:var(--gray-400)">0' + suffix + '</span>';
+  const up = diff > 0;
+  return `<span style="color:${up ? '#047857' : '#dc2626'}">${up ? '▲' : '▼'} ${Math.abs(diff).toLocaleString()}${suffix}</span>`;
+}
+
 function _gaRender(j) {
   const status = document.getElementById('ga-status');
   const table = document.getElementById('ga-table');
+  const thead = document.getElementById('ga-thead');
   const tbody = document.getElementById('ga-tbody');
   const summary = document.getElementById('ga-summary');
+  const hasB = !!j.b;
 
-  const cards = (j.sites || []).map(s => `
-    <div style="flex:1;min-width:190px;padding:10px 12px;border:1px solid var(--gray-200);border-radius:8px;background:var(--gray-50)">
-      <div style="font-size:12px;color:var(--gray-500);margin-bottom:4px">${esc(GA_SITE_LABEL[s.site] || s.site)}</div>
-      <div style="font-size:13px">세션 <b>${(s.sessions ?? 0).toLocaleString()}</b>
-        · 구매 <b>${(s.transactions ?? 0).toLocaleString()}</b>
-        · 전환율 <b style="color:#047857">${s.conversion_rate != null ? s.conversion_rate + '%' : '-'}</b></div>
-      ${s.note ? `<div style="margin-top:5px;font-size:11px;color:#b45309">${esc(s.note)}</div>` : ''}
-    </div>`).join('');
+  // 요약 카드 — 기간 합계 + GA 쪽 주의사항
+  const totCard = (label, p, accent) => p?.totals ? `
+    <div style="flex:1;min-width:220px;padding:10px 12px;border:1px solid ${accent ? '#bfdbfe' : 'var(--gray-200)'};border-radius:8px;background:${accent ? '#eff6ff' : 'var(--gray-50)'}">
+      <div style="font-size:12px;color:var(--gray-500);margin-bottom:4px"><b>${label}</b> ${p.start} ~ ${p.end}</div>
+      <div style="font-size:13px">조회 <b>${p.totals.views.toLocaleString()}</b>
+        · 주문 <b>${p.totals.orders.toLocaleString()}</b>
+        · 전환율 <b style="color:#047857">${p.totals.conversion_rate != null ? p.totals.conversion_rate + '%' : '-'}</b></div>
+    </div>` : '';
+  const notes = (j.sites || []).filter(s => s.note).map(s => `
+    <div style="flex-basis:100%;padding:8px 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;font-size:12px;color:#92400e">
+      ${esc(GA_SITE_LABEL[s.site] || s.site)}: ${esc(s.note)}</div>`).join('');
   const errs = (j.errors || []).map(e => `
-    <div style="flex:1;min-width:190px;padding:10px 12px;border:1px solid #fde68a;border-radius:8px;background:#fffbeb;font-size:12px;color:#92400e">
+    <div style="flex-basis:100%;padding:8px 10px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:12px;color:#b91c1c">
       ${esc(GA_SITE_LABEL[e.site] || e.site)} 조회 실패 — ${esc(e.message)}</div>`).join('');
-  summary.innerHTML = cards + errs;
+  summary.innerHTML = totCard('A', j.a, true) + (hasB ? totCard('B', j.b, false) : '')
+    + `<div style="flex-basis:100%;font-size:11px;color:var(--gray-400)">${esc(j.note || '')}</div>` + notes + errs;
   summary.style.display = 'flex';
 
   const rows = j.rows || [];
@@ -5827,19 +5849,32 @@ function _gaRender(j) {
     table.style.display = 'none';
     return;
   }
-  const num = (v) => (v == null ? '<span style="color:var(--gray-300)">-</span>' : Number(v).toLocaleString());
-  tbody.innerHTML = rows.slice(0, 200).map((r, i) => `
+
+  const th = (t, right) => `<th style="padding:8px 10px;${right ? 'text-align:right' : 'text-align:left'}">${t}</th>`;
+  thead.innerHTML = `<tr style="border-bottom:2px solid var(--gray-200);color:var(--gray-500);font-size:12px">
+    ${th('순위')}${th('사이트')}${th('상품')}
+    ${th('A 조회', 1)}${th('A 주문', 1)}${th('A 전환율', 1)}
+    ${hasB ? th('B 조회', 1) + th('B 주문', 1) + th('B 전환율', 1) + th('조회 증감', 1) + th('전환 증감', 1) : ''}
+  </tr>`;
+
+  const num = (x) => (x == null ? '<span style="color:var(--gray-300)">-</span>' : Number(x).toLocaleString());
+  const cr = (x) => (x == null ? '<span style="color:var(--gray-300)">-</span>'
+    : `<b style="color:${x >= 3 ? '#047857' : '#b45309'}">${x}%</b>`);
+  tbody.innerHTML = rows.slice(0, 150).map((r, i) => `
     <tr style="border-bottom:1px solid var(--gray-100)">
       <td style="padding:7px 10px;color:var(--gray-500)">${i + 1}</td>
-      <td style="padding:7px 10px">${esc(GA_SITE_LABEL[r.site] || r.site)}</td>
-      <td style="padding:7px 10px">${esc(r.name || r.path || r.item_id || '-')}
-        ${r.item_id ? `<span style="color:var(--gray-400);font-size:11px;margin-left:6px">${esc(r.item_id)}</span>` : ''}</td>
-      <td style="padding:7px 10px;text-align:right">${num(r.viewed)}</td>
-      <td style="padding:7px 10px;text-align:right">${num(r.added_to_cart)}</td>
-      <td style="padding:7px 10px;text-align:right">${num(r.purchased)}</td>
-      <td style="padding:7px 10px;text-align:right;font-weight:600;color:${r.conversion_rate == null ? 'var(--gray-300)' : (r.conversion_rate >= 3 ? '#047857' : '#b45309')}"
-          ${r.conversion_rate == null ? 'title="이 사이트는 구매가 상품과 연결돼 있지 않습니다 — 값이 없는 것이지 0%가 아닙니다"' : ''}>
-        ${r.conversion_rate == null ? '측정없음' : r.conversion_rate + '%'}</td>
+      <td style="padding:7px 10px">${esc(r.site_label)}</td>
+      <td style="padding:7px 10px">${esc(r.name || r.code)}
+        <span style="color:var(--gray-400);font-size:11px;margin-left:6px">${esc(r.code)}</span></td>
+      <td style="padding:7px 10px;text-align:right">${num(r.a?.views)}</td>
+      <td style="padding:7px 10px;text-align:right">${num(r.a?.orders)}</td>
+      <td style="padding:7px 10px;text-align:right">${cr(r.a?.conversion_rate)}</td>
+      ${hasB ? `
+      <td style="padding:7px 10px;text-align:right;color:var(--gray-500)">${num(r.b?.views)}</td>
+      <td style="padding:7px 10px;text-align:right;color:var(--gray-500)">${num(r.b?.orders)}</td>
+      <td style="padding:7px 10px;text-align:right">${cr(r.b?.conversion_rate)}</td>
+      <td style="padding:7px 10px;text-align:right">${_gaDelta(r.delta?.views_diff)}</td>
+      <td style="padding:7px 10px;text-align:right">${_gaDelta(r.delta?.cr_diff_pt, '%p')}</td>` : ''}
     </tr>`).join('');
   status.style.display = 'none';
   table.style.display = '';

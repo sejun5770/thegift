@@ -55,6 +55,7 @@ code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px
   <a href="#dash-aux" class="h3">3-2. 보조지표 1·2</a>
   <a href="#dash-products" class="h3">3-3. 상품별 판매통계</a>
   <a href="#sales-group" class="h3">3-4. 매출 그룹 (상품 묶기)</a>
+  <a href="#ga-funnel" class="h3">3-4½. 유입·구매전환 (GA)</a>
   <a href="#dash-vendor" class="h3">3-5. 위탁 대시보드·정산</a>
   <a href="#orders" class="h2">4. 주문조회</a>
   <a href="#orders-sync" class="h3">4-1. 채널 동기화</a>
@@ -157,6 +158,18 @@ code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px
   <li>이미 다른 그룹에 속한 항목을 다시 묶으면 새 그룹으로 이동합니다 (한 상품 = 한 그룹).</li>
   <li>그룹을 삭제하면 묶였던 항목들은 다시 개별 표시됩니다 (매출 데이터 자체는 변하지 않음).</li>
 </ul>
+
+<h3 id="ga-funnel">3-4½. 유입 · 구매전환 (Google Analytics)</h3>
+<div class="img-wrap"><img src="manual-assets/ga-funnel.png" alt="유입 구매전환"><div class="img-cap">상품별 판매통계 탭 — GA 조회수 × 우리 DB 주문으로 상품별 전환율, 기간 A vs B 비교</div></div>
+<p>상품 상세페이지가 <b>얼마나 노출되고 그중 몇 명이 실제로 샀는지</b>를 봅니다. 대시보드 → 상품별 판매통계 탭 안에 있습니다.</p>
+<ul>
+  <li><b>계산 방식</b>: 전환율 = <b>우리 DB 주문 건수 ÷ GA 상품 조회수</b>. GA의 구매 데이터는 쓰지 않습니다 — 바른손카드는 구매가 상품코드로 기록되지 않고, GA 구매수는 '수량' 기준이라 조회수와 단위가 맞지 않습니다. 우리 DB가 취소·환불까지 반영된 정답입니다.</li>
+  <li><b>기간 A vs B</b>: A만 넣으면 단일 기간, B까지 넣으면 두 기간을 나란히 비교합니다. <b>가격 변경 전후</b>를 넣으면 조회수(관심)와 전환율(구매 결심)이 각각 어떻게 움직였는지 갈라 볼 수 있습니다 — 조회는 그대로인데 전환만 떨어졌다면 가격 저항, 조회부터 줄었다면 노출 문제입니다.</li>
+  <li><b>증감 표시</b>: 조회 증감은 건수(▲▼), 전환 증감은 <b>%p</b>(퍼센트포인트)입니다. 0.6% → 0.2%면 "▼ 0.4%p".</li>
+  <li><b>사이트 구분</b>: 바른손카드 / 바른손몰을 따로 집계하며, 셀렉터로 한쪽만 볼 수 있습니다. 쿠팡·네이버 등 마켓 주문은 GA에 잡히지 않으므로 이 화면 대상이 아닙니다.</li>
+  <li><b>대상 상품</b>: 답례품(상품코드 <code>TGJ</code>)만 나옵니다. 신규·단종 상품처럼 한 기간에만 있는 상품도 행으로 나옵니다.</li>
+</ul>
+<div class="tip">GA 조회수는 쿠키 동의 거부·광고차단 때문에 실제보다 적게 잡힙니다. 전환율의 절대값보다 <b>기간 간 비교</b>와 <b>상품 간 비교</b>로 읽으세요.</div>
 
 <h3 id="dash-vendor">3-5. 위탁 대시보드·정산</h3>
 <div class="img-wrap"><img src="manual-assets/dashboard-vendor.png" alt="위탁 대시보드"><div class="img-cap">위탁 — 거래처별 매출·수수료·정산 현황 + 정산 처리</div></div>

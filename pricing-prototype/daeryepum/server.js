@@ -14451,6 +14451,29 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/ga/funnel' && req.method === 'GET') {
+        // 유입 → 구매 전환, 기간 A vs B. 분모는 GA 조회수, 분자는 우리 DB 주문 건수.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          const q = parsed.query;
+          const sitesRaw = String(q.sites || '').trim();
+          data = await require('./ga/funnel').compare({
+            a: { start: q.a_start, end: q.a_end },
+            b: (q.b_start && q.b_end) ? { start: q.b_start, end: q.b_end } : null,
+            sites: sitesRaw ? sitesRaw.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+            // 주문은 기존 조회 경로를 그대로 쓴다 — 집계 규칙이 화면과 어긋나지 않게.
+            fetchOrders: async (start, end) => {
+              const r = await apiOrders({ start_date: start, end_date: end, category: 'daeryepum' });
+              return Array.isArray(r) ? r : (r.orders || r.rows || []);
+            },
+          });
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
       } else if (pathname === '/api/ga/products' && req.method === 'GET') {
         // 상품별 유입·구매전환 (바른손카드·바른손몰)
         if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
