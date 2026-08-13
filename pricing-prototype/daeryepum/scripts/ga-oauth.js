@@ -15,7 +15,11 @@
  *      · 만들어진 클라이언트 ID / 보안 비밀번호를 아래 실행에 쓴다
  *
  * ── 실행 ──────────────────────────────────────────────
- *   node scripts/ga-oauth.js <CLIENT_ID> <CLIENT_SECRET>
+ *   node scripts/ga-oauth.js                      ← 실행 후 화면에서 입력 (권장)
+ *   node scripts/ga-oauth.js <ID> <SECRET>        ← 인자로 넘겨도 된다
+ *
+ *   인자 없이 실행하면 값을 직접 입력받는다. 보안 비밀번호가 명령 기록(shell history)에
+ *   남지 않아 이쪽이 낫다.
  *
  *   브라우저가 열리면 GA 권한이 있는 계정으로 로그인·동의한다.
  *   끝나면 ga-oauth-result.txt 파일이 생기고, 거기 적힌 환경변수를 서버에 넣으면 된다.
@@ -35,16 +39,21 @@ const SCOPE = 'https://www.googleapis.com/auth/analytics.readonly';
 const PORT = 8731;                       // 데스크톱 앱 loopback 리디렉션용
 const REDIRECT = `http://localhost:${PORT}`;
 
-const [, , CLIENT_ID, CLIENT_SECRET] = process.argv;
-if (!CLIENT_ID || !CLIENT_SECRET) {
-  console.error('사용법: node scripts/ga-oauth.js <CLIENT_ID> <CLIENT_SECRET>');
-  process.exit(1);
+/** 인자가 없으면 직접 입력받는다 — 보안 비밀번호를 명령 기록에 남기지 않기 위해서다 */
+function ask(question) {
+  return new Promise((resolve) => {
+    const rl = require('readline').createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(question, (a) => { rl.close(); resolve(String(a || '').trim()); });
+  });
 }
+
+let CLIENT_ID = process.argv[2] || '';
+let CLIENT_SECRET = process.argv[3] || '';
 
 // CSRF 방지 — 돌아온 요청이 우리가 보낸 것인지 확인한다
 const STATE = crypto.randomBytes(16).toString('hex');
 
-const authUrl = 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
+const buildAuthUrl = () => 'https://accounts.google.com/o/oauth2/v2/auth?' + new URLSearchParams({
   client_id: CLIENT_ID,
   redirect_uri: REDIRECT,
   response_type: 'code',
@@ -115,12 +124,21 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log('\n브라우저에서 GA 권한이 있는 계정으로 로그인·동의하세요.');
-  console.log('창이 안 열리면 아래 주소를 직접 여세요:\n');
-  console.log(authUrl + '\n');
-  // Windows 기본 브라우저로 열기 (다른 OS 도 대비)
-  const cmd = process.platform === 'win32' ? `start "" "${authUrl}"`
-    : process.platform === 'darwin' ? `open "${authUrl}"` : `xdg-open "${authUrl}"`;
-  exec(cmd, () => { /* 실패해도 위 주소를 직접 열면 된다 */ });
-});
+(async () => {
+  if (!CLIENT_ID) CLIENT_ID = await ask('클라이언트 ID 붙여넣기: ');
+  if (!CLIENT_SECRET) CLIENT_SECRET = await ask('클라이언트 보안 비밀번호 붙여넣기: ');
+  if (!CLIENT_ID || !CLIENT_SECRET) {
+    console.error('클라이언트 ID / 보안 비밀번호가 필요합니다.');
+    process.exit(1);
+  }
+  const authUrl = buildAuthUrl();
+  server.listen(PORT, () => {
+    console.log('\n브라우저에서 GA 권한이 있는 계정으로 로그인·동의하세요.');
+    console.log('창이 안 열리면 아래 주소를 직접 여세요:\n');
+    console.log(authUrl + '\n');
+    // Windows 기본 브라우저로 열기 (다른 OS 도 대비)
+    const cmd = process.platform === 'win32' ? `start "" "${authUrl}"`
+      : process.platform === 'darwin' ? `open "${authUrl}"` : `xdg-open "${authUrl}"`;
+    exec(cmd, () => { /* 실패해도 위 주소를 직접 열면 된다 */ });
+  });
+})();
