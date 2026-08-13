@@ -1316,10 +1316,11 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- 필터 — 기본 접힘. 걸린 조건 수를 배지로 보여 접어 둬도 놓치지 않게 한다. -->
+  <!-- 주문상태 필터 — 무엇을 빼고 볼지 (주문 자체의 상태) -->
   <details class="ord-sec" id="ord-sec-filter">
-    <summary>필터 <span class="ord-badge" id="ord-filter-badge" style="display:none"></span></summary>
+    <summary>주문상태 필터 <span class="ord-badge" id="ord-filter-badge" style="display:none"></span></summary>
     <div class="ord-sec-body">
-      <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
         <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
           <input type="checkbox" id="exclude-cancel" onchange="renderOrderTable()"> 취소주문 제외
         </label>
@@ -1330,10 +1331,15 @@ nav.nav-loading a[href^="#"] {
           <input type="checkbox" id="hide-collected" onchange="renderOrderTable()"> 수집완료 숨기기
         </label>
       </div>
-  <!-- 주문사이트 필터 (체크박스 그룹) — 답례품 카테고리 전용. 데코/꽃다발/더기프트 탭에서는 숨김.
-       초기값 flex (default currentCategory='daeryepum'). switchCategory 가 카테고리에 따라 조정. -->
-  <div id="ord-site-filter" style="display:flex;gap:14px;align-items:center;padding:9px 12px;background:#f8fafc;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:10px;font-size:13px;flex-wrap:wrap">
-    <span style="color:var(--gray-600);font-weight:500">주문사이트:</span>
+    </div>
+  </details>
+
+  <!-- 주문사이트 필터 — 어느 채널을 볼지. 답례품 카테고리 전용이라 구역 자체를 카테고리에 따라 감춘다
+       (switchCategory 가 #ord-sec-site 의 display 를 조정). -->
+  <details class="ord-sec" id="ord-sec-site">
+    <summary>주문사이트 필터 <span class="ord-badge" id="ord-site-badge" style="display:none"></span></summary>
+    <div class="ord-sec-body">
+  <div id="ord-site-filter" style="display:flex;gap:14px;align-items:center;font-size:13px;flex-wrap:wrap">
     <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
       <input type="checkbox" data-ord-site="card" checked onchange="renderOrderTable()"> 바른손카드
     </label>
@@ -4504,8 +4510,10 @@ function switchCategory(cat) {
   if (bhgBackfillBtn) bhgBackfillBtn.style.display = showCsvUpload ? '' : 'none';
   // 주문사이트 필터 — 답례품 카테고리 (여러 채널 UNION) 에서만 노출.
   //   데코/꽃다발은 채널 단일이라 불필요, 더기프트는 MANUAL 만이라 불필요.
-  const siteFilter = document.getElementById('ord-site-filter');
-  if (siteFilter) siteFilter.style.display = showMarketplaceSync ? 'flex' : 'none';
+  //   구역(details) 째로 감춘다. 안쪽 #ord-site-filter 는 display 를 건드리지 않는다 —
+  //   getFilteredOrders 가 그 값으로 '필터가 살아 있는가' 를 판정하기 때문.
+  const siteSec = document.getElementById('ord-sec-site');
+  if (siteSec) siteSec.style.display = showMarketplaceSync ? '' : 'none';
   _ordUpdateFilterBadge();
   loadOrders();
 }
@@ -4517,7 +4525,7 @@ const ORD_SEC_KEY = 'ord-sections-open';
 function _ordSecRestore() {
   let open = {};
   try { open = JSON.parse(localStorage.getItem(ORD_SEC_KEY) || '{}'); } catch {}
-  ['ord-sec-filter', 'ord-sec-cols'].forEach(id => {
+  ['ord-sec-filter', 'ord-sec-site', 'ord-sec-cols'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     el.open = !!open[id];
@@ -4541,13 +4549,17 @@ function _ordUpdateFilterBadge() {
   if (badge) {
     const excl = ['exclude-cancel', 'exclude-pending', 'hide-collected']
       .filter(id => document.getElementById(id)?.checked).length;
+    badge.textContent = excl ? `제외 ${excl}` : '';
+    badge.style.display = excl ? '' : 'none';
+  }
+  const sb = document.getElementById('ord-site-badge');
+  if (sb) {
     const sites = [...document.querySelectorAll('#ord-site-filter input[data-ord-site]')];
-    const off = sites.filter(cb => !cb.checked).length;
-    const parts = [];
-    if (excl) parts.push(`제외 ${excl}`);
-    if (off) parts.push(`사이트 −${off}`);
-    badge.textContent = parts.join(' · ');
-    badge.style.display = parts.length ? '' : 'none';
+    const on = sites.filter(cb => cb.checked).length;
+    // 전부 켠 상태가 기본이라 그때는 배지를 숨긴다 — 좁혀 봤을 때만 눈에 띄면 된다
+    const narrowed = sites.length && on < sites.length;
+    sb.textContent = narrowed ? `${on}/${sites.length}` : '';
+    sb.style.display = narrowed ? '' : 'none';
   }
   const cb = document.getElementById('ord-cols-badge');
   if (cb) {
@@ -4683,7 +4695,9 @@ function getFilteredOrders() {
     { key: 'cafe24',  match: o => o.order_type === 'CAFE24' },
     { key: 'manual',  match: o => o.order_type === 'MANUAL' },
   ];
-  const siteFilterVisible = document.getElementById('ord-site-filter')?.style.display !== 'none';
+  // 구역이 감춰진 카테고리(데코·꽃다발·더기프트)에서는 사이트 필터를 적용하지 않는다.
+  //   답례품 외 카테고리는 채널이 하나뿐이라 필터가 의미 없고, 켜 두면 전부 걸러질 수 있다.
+  const siteFilterVisible = document.getElementById('ord-sec-site')?.style.display !== 'none';
   const activeOrdSiteKeys = siteFilterVisible
     ? new Set([...document.querySelectorAll('#ord-site-filter input:checked')].map(cb => cb.dataset.ordSite))
     : null;
