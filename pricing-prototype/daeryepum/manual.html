@@ -56,6 +56,7 @@ code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px
   <a href="#dash-products" class="h3">3-3. 상품별 판매통계</a>
   <a href="#sales-group" class="h3">3-4. 매출 그룹 (상품 묶기)</a>
   <a href="#ga-funnel" class="h3">3-4½. 유입·구매전환 (GA)</a>
+  <a href="#clickmap" class="h3">3-4¾. 상세페이지 클릭맵</a>
   <a href="#dash-vendor" class="h3">3-5. 위탁 대시보드·정산</a>
   <a href="#orders" class="h2">4. 주문조회</a>
   <a href="#orders-sync" class="h3">4-1. 채널 동기화</a>
@@ -170,6 +171,18 @@ code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px
   <li><b>대상 상품</b>: 답례품(상품코드 <code>TGJ</code>)만 나옵니다. 신규·단종 상품처럼 한 기간에만 있는 상품도 행으로 나옵니다.</li>
 </ul>
 <div class="tip">GA 조회수는 쿠키 동의 거부·광고차단 때문에 실제보다 적게 잡힙니다. 전환율의 절대값보다 <b>기간 간 비교</b>와 <b>상품 간 비교</b>로 읽으세요.</div>
+
+<h3 id="clickmap">3-4¾. 상세페이지 클릭맵 (바른손카드)</h3>
+<div class="img-wrap"><img src="manual-assets/clickmap.png" alt="상세페이지 클릭맵"><div class="img-cap">실제 상세페이지 스냅샷 위에 요소별 클릭수 배지 — 바로주문 · 옵션(맛) · 구매후기 등</div></div>
+<p>상세페이지 안에서 <b>고객이 실제로 무엇을 누르는지</b>를 봅니다. 페이지 스냅샷 위에 빨간 배지로 클릭수가 표시됩니다.</p>
+<ul>
+  <li><b>여는 법</b>: 상품별 판매통계 탭 → 🖱 상세페이지 클릭맵 → 상품 페이지 선택 → [클릭맵 보기]. 페이지 목록은 기간 내 조회수 순입니다.</li>
+  <li><b>읽는 법</b>: 배지 숫자가 그 요소의 클릭수입니다. 예를 들어 옵션 배지(다크초코맛 116 vs 녹차맛 60)로 <b>어느 맛에 관심이 몰리는지</b>, 바로주문 vs 장바구니 비율, 구매후기를 얼마나 보는지를 알 수 있습니다.</li>
+  <li><b>오른쪽 목록</b>: 전체 클릭 순위입니다. 배지 위치는 버튼 문구로 맞추기 때문에, 문구가 바뀌었거나 팝업 안에만 있는 요소는 <b>"목록만"</b>으로 표시됩니다 — 숫자는 그대로 유효합니다.</li>
+  <li><b>바른손카드 전용</b>: 요소 클릭 추적(element_click)이 바른손카드에만 심어져 있습니다. 바른손몰은 대상이 아닙니다.</li>
+  <li>같은 클릭이 두 종류 이벤트(element_click·all_link_click)에 함께 잡힐 수 있어 <b>두 수를 합산하지 않습니다</b> — 배지는 한쪽 값만 씁니다.</li>
+</ul>
+<div class="tip">스냅샷은 실제 사이트에서 10분 캐시로 가져오며, 스크립트를 제거한 정적 화면이라 팝업·슬라이더는 동작하지 않습니다. 위치 참고용이고 숫자가 본질입니다.</div>
 
 <h3 id="dash-vendor">3-5. 위탁 대시보드·정산</h3>
 <div class="img-wrap"><img src="manual-assets/dashboard-vendor.png" alt="위탁 대시보드"><div class="img-cap">위탁 — 거래처별 매출·수수료·정산 현황 + 정산 처리</div></div>

@@ -6043,9 +6043,15 @@ async function loadClickmap() {
     document.getElementById('cm-note').textContent =
       `${j.start_date} ~ ${j.end_date} · ${path} · ${j.note || ''}`;
 
-    // 스냅샷 iframe 로드 → onload 에서 배지 부착
+    // 스냅샷 iframe 로드 → onload 에서 배지 부착.
+    //   로드가 영영 안 오면 (스냅샷 5xx 등) '불러오는 중' 에 갇힌다 — 타임아웃으로 풀어준다.
     const frame = document.getElementById('cm-frame');
+    const timeout = setTimeout(() => {
+      frame.removeEventListener('load', onload);
+      status.innerHTML = '<span style="color:#b91c1c">페이지 스냅샷 로드가 오래 걸립니다 — 잠시 후 다시 시도하세요</span>';
+    }, 30000);
     const onload = () => {
+      clearTimeout(timeout);
       frame.removeEventListener('load', onload);
       // 먼저 보이게 해야 레이아웃이 잡힌다 — 숨긴 채 재면 크기가 전부 0 이라
       //   배율이 음수가 되고 요소 위치도 못 잡는다 (2026-08-13 실측)
