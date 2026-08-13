@@ -761,6 +761,43 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- ============================================
+       GA 유입·구매전환 — 자사몰(바른손카드·바른손몰) 상품 페이지
+       GA 는 자사몰만 잡힌다 (쿠팡·네이버 주문은 그쪽 플랫폼 안에서 일어난다).
+       매출의 정답은 언제나 우리 DB 이고, 여기 값은 '얼마나 보고 얼마나 샀는가' 비율용.
+       ============================================ -->
+  <div class="section" data-dash-section="4" data-dash-only="daeryepum">
+    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span>🔎 유입 · 구매전환 <span style="font-size:11px;font-weight:400;color:var(--gray-500);margin-left:4px">Google Analytics · 자사몰만</span></span>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;font-weight:400">
+        <input type="date" id="ga-from" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px">
+        <span style="color:var(--gray-400)">~</span>
+        <input type="date" id="ga-to" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px">
+        <button class="btn btn-sm" onclick="loadGaProducts()">조회</button>
+      </div>
+    </div>
+    <div class="card" style="padding:16px">
+      <div id="ga-summary" style="display:none;gap:10px;flex-wrap:wrap;margin-bottom:12px"></div>
+      <div id="ga-body" style="overflow-x:auto">
+        <div id="ga-status" style="padding:36px 20px;text-align:center;color:var(--gray-400);font-size:13px">조회를 누르면 표시됩니다</div>
+        <table id="ga-table" style="width:100%;border-collapse:collapse;font-size:13px;display:none">
+          <thead>
+            <tr style="border-bottom:2px solid var(--gray-200);text-align:left;color:var(--gray-500);font-size:12px">
+              <th style="padding:8px 10px;width:56px">순위</th>
+              <th style="padding:8px 10px;width:110px">사이트</th>
+              <th style="padding:8px 10px">상품 / 페이지</th>
+              <th style="padding:8px 10px;width:100px;text-align:right">조회</th>
+              <th style="padding:8px 10px;width:100px;text-align:right">장바구니</th>
+              <th style="padding:8px 10px;width:100px;text-align:right">구매</th>
+              <th style="padding:8px 10px;width:100px;text-align:right">구매전환율</th>
+            </tr>
+          </thead>
+          <tbody id="ga-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================
        상품별 판매 통계 — 썸네일 선택 + 다상품 비교
        ============================================ -->
   <div class="section">
@@ -5704,6 +5741,83 @@ function onPsCustomDate() {
 }
 
 // ============================================================
+// ============================================
+// 🔎 GA 유입·구매전환 (자사몰)
+// ============================================
+const GA_SITE_LABEL = { card: '바른손카드', etc: '바른손몰', mall: '바른손몰' };
+
+async function loadGaProducts() {
+  const status = document.getElementById('ga-status');
+  const table = document.getElementById('ga-table');
+  const summary = document.getElementById('ga-summary');
+  if (!status) return;
+  status.style.display = ''; status.textContent = '불러오는 중…';
+  table.style.display = 'none'; summary.style.display = 'none';
+
+  const from = document.getElementById('ga-from')?.value || '';
+  const to = document.getElementById('ga-to')?.value || '';
+  const qs = new URLSearchParams();
+  if (from) qs.set('start_date', from);
+  if (to) qs.set('end_date', to);
+  try {
+    const r = await fetch(`${API}/api/ga/products?${qs}`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    if (!j.configured) {
+      // 자격증명이 없을 때 '데이터 없음' 으로 보이면 원인을 못 찾는다 — 무엇이 빠졌는지 그대로 쓴다
+      status.innerHTML = `GA 연동이 아직 설정되지 않았습니다.<br>
+        <span style="font-size:12px;color:var(--gray-500)">${esc(j.config?.hint || '')}</span>`;
+      return;
+    }
+    _gaRender(j);
+  } catch (e) {
+    status.innerHTML = `<span style="color:#b91c1c">불러오지 못했습니다 — ${esc(e.message)}</span>`;
+  }
+}
+
+function _gaRender(j) {
+  const status = document.getElementById('ga-status');
+  const table = document.getElementById('ga-table');
+  const tbody = document.getElementById('ga-tbody');
+  const summary = document.getElementById('ga-summary');
+
+  const cards = (j.sites || []).map(s => `
+    <div style="flex:1;min-width:190px;padding:10px 12px;border:1px solid var(--gray-200);border-radius:8px;background:var(--gray-50)">
+      <div style="font-size:12px;color:var(--gray-500);margin-bottom:4px">${esc(GA_SITE_LABEL[s.site] || s.site)}</div>
+      <div style="font-size:13px">세션 <b>${(s.sessions ?? 0).toLocaleString()}</b>
+        · 구매 <b>${(s.transactions ?? 0).toLocaleString()}</b>
+        · 전환율 <b style="color:#047857">${s.conversion_rate != null ? s.conversion_rate + '%' : '-'}</b></div>
+      ${s.note ? `<div style="margin-top:5px;font-size:11px;color:#b45309">${esc(s.note)}</div>` : ''}
+    </div>`).join('');
+  const errs = (j.errors || []).map(e => `
+    <div style="flex:1;min-width:190px;padding:10px 12px;border:1px solid #fde68a;border-radius:8px;background:#fffbeb;font-size:12px;color:#92400e">
+      ${esc(GA_SITE_LABEL[e.site] || e.site)} 조회 실패 — ${esc(e.message)}</div>`).join('');
+  summary.innerHTML = cards + errs;
+  summary.style.display = 'flex';
+
+  const rows = j.rows || [];
+  if (!rows.length) {
+    status.style.display = ''; status.textContent = '해당 기간에 데이터가 없습니다';
+    table.style.display = 'none';
+    return;
+  }
+  const num = (v) => (v == null ? '<span style="color:var(--gray-300)">-</span>' : Number(v).toLocaleString());
+  tbody.innerHTML = rows.slice(0, 200).map((r, i) => `
+    <tr style="border-bottom:1px solid var(--gray-100)">
+      <td style="padding:7px 10px;color:var(--gray-500)">${i + 1}</td>
+      <td style="padding:7px 10px">${esc(GA_SITE_LABEL[r.site] || r.site)}</td>
+      <td style="padding:7px 10px">${esc(r.name || r.path || r.item_id || '-')}
+        ${r.item_id ? `<span style="color:var(--gray-400);font-size:11px;margin-left:6px">${esc(r.item_id)}</span>` : ''}</td>
+      <td style="padding:7px 10px;text-align:right">${num(r.viewed)}</td>
+      <td style="padding:7px 10px;text-align:right">${num(r.added_to_cart)}</td>
+      <td style="padding:7px 10px;text-align:right">${num(r.purchased)}</td>
+      <td style="padding:7px 10px;text-align:right;font-weight:600;color:${r.conversion_rate == null ? 'var(--gray-300)' : (r.conversion_rate >= 3 ? '#047857' : '#b45309')}">
+        ${r.conversion_rate == null ? '-' : r.conversion_rate + '%'}</td>
+    </tr>`).join('');
+  status.style.display = 'none';
+  table.style.display = '';
+}
+
 //  🏆 상품 판매 순위 — 일/주/월 기간별 전체 채널 순위
 // ============================================================
 function _prTodayMidnightMs() {

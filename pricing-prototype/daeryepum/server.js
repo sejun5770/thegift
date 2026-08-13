@@ -14439,6 +14439,36 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/ga/probe' && req.method === 'GET') {
+        // GA4 연결 진단 — 자격증명·속성·집계 방식·itemId 실제 값 확인 (읽기 전용)
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          data = await require('./ga/report').probe({ days: parsed.query.days || 28 });
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/ga/products' && req.method === 'GET') {
+        // 상품별 유입·구매전환 (바른손카드·바른손몰)
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          const sitesRaw = String(parsed.query.sites || '').trim();
+          data = await require('./ga/report').productReport({
+            sites: sitesRaw ? sitesRaw.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+            startDate: parsed.query.start_date || null,
+            endDate: parsed.query.end_date || null,
+            mode: ['item', 'page', 'auto'].includes(parsed.query.mode) ? parsed.query.mode : 'auto',
+          });
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
       } else if (pathname === '/api/dispatch/pending' && req.method === 'GET') {
         // 출고상태 전송 대기 목록 — 채널에서 아직 '발송 전' 인 주문 + 우리 송장 매칭 결과.
         if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {

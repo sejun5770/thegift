@@ -15,6 +15,7 @@ COPY pricing-prototype/daeryepum/barungift/ ./barungift/
 COPY pricing-prototype/daeryepum/coupang/ ./coupang/
 COPY pricing-prototype/daeryepum/naver/ ./naver/
 COPY pricing-prototype/daeryepum/cafe24/ ./cafe24/
+COPY pricing-prototype/daeryepum/ga/ ./ga/
 COPY pricing-prototype/daeryepum/manual.html ./
 COPY pricing-prototype/daeryepum/manual-assets/ ./manual-assets/
 
