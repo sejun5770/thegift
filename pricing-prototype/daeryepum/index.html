@@ -13134,8 +13134,9 @@ function renderBgStickers() {
     <td style="padding:6px 10px;max-width:280px">${productHtml(s)}</td>
     <td style="padding:6px 10px;text-align:center"><span class="badge ${s.is_active ? 'badge-up' : 'badge-neutral'}">${s.is_active ? '활성' : '비활성'}</span></td>
     <td style="padding:6px 10px;text-align:center;white-space:nowrap">
-      <button class="btn btn-sm" onclick="editBgSticker('${s.id}')" title="수정"></button>
-      <button class="btn btn-sm" onclick="deleteBgSticker('${s.id}', '${(s.name || '').replace(/'/g, '\\\'')}', '${s.sticker_code || ''}')" title="삭제 (영구)" style="color:var(--red)"></button>
+      <!-- 아이콘 정리 때 이모지만 있던 라벨이 비어버렸다 — 텍스트로 복원 -->
+      <button class="btn btn-sm" onclick="editBgSticker('${s.id}')" title="수정">수정</button>
+      <button class="btn btn-sm" onclick="deleteBgSticker('${s.id}', '${(s.name || '').replace(/'/g, '\\\'')}', '${s.sticker_code || ''}')" title="삭제 (영구)" style="color:var(--red)">삭제</button>
     </td>
   </tr>`;
 
@@ -13672,8 +13673,9 @@ function renderBgProducts() {
       <td>${(s.available_sticker_ids||[]).length}개</td>
       ${vendorCells}
       <td>
-        <button class="btn btn-sm" onclick="openBgProductForm('${s.product_id}')" title="편집"></button>
-        <button class="btn btn-sm" onclick="deleteBgProduct('${s.product_id}')" title="삭제" style="color:var(--red)"></button>
+        <!-- 아이콘 정리 때 이모지만 있던 라벨이 비어버렸다 — 텍스트로 복원 -->
+        <button class="btn btn-sm" onclick="openBgProductForm('${s.product_id}')" title="편집">편집</button>
+        <button class="btn btn-sm" onclick="deleteBgProduct('${s.product_id}')" title="삭제" style="color:var(--red)">삭제</button>
       </td>
     </tr>`;
   }).join('');
