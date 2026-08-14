@@ -4038,6 +4038,8 @@ let _dispatchRows = [];
 
 const DISPATCH_CH = { coupang: { label: '쿠팡', bg: '#fef2f2', fg: '#b91c1c' },
                       naver: { label: '네이버', bg: '#ecfdf5', fg: '#047857' } };
+// 채널 코드 변환은 서버가 한다 — 여기선 이름만 고른다 (송장 모달과 같은 목록)
+const DISPATCH_COURIERS = ['CJ대한통운', '한진택배', '롯데택배', '우체국택배', '로젠택배'];
 
 async function openDispatchModal() {
   let el = document.getElementById('dispatch-modal');
@@ -4081,6 +4083,7 @@ function _dispatchRender(j) {
   if (!body) return;
   const rows = _dispatchRows;
   const notes = [];
+  for (const w of (j.warnings || [])) notes.push(w);
   for (const s of (j.skipped || [])) notes.push(`${DISPATCH_CH[s.channel]?.label || s.channel}: ${s.reason}`);
   for (const e of (j.errors || [])) notes.push(`${DISPATCH_CH[e.channel]?.label || e.channel} 조회 실패 — ${e.message}`);
   const noteHtml = notes.length
@@ -4098,7 +4101,7 @@ function _dispatchRender(j) {
     const ch = DISPATCH_CH[r.channel] || { label: r.channel, bg: '#f3f4f6', fg: '#374151' };
     return `<tr style="${r.ready ? '' : 'background:#fafafa;color:var(--gray-400)'}">
       <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100)">
-        <input type="checkbox" data-dispatch-idx="${i}" ${r.ready ? 'checked' : 'disabled'} onchange="_dispatchUpdateCount()">
+        <input type="checkbox" data-dispatch-idx="${i}" ${r.ready ? 'checked' : ''} onchange="_dispatchUpdateCount()">
       </td>
       <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100)">
         <span style="padding:1px 6px;border-radius:4px;font-size:11px;background:${ch.bg};color:${ch.fg}">${ch.label}</span>
@@ -4107,8 +4110,16 @@ function _dispatchRender(j) {
       <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);font-size:12px">${esc(r.status_label || '')}</td>
       <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);font-size:12px">${esc((r.product_name || '').slice(0, 28))}</td>
       <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);text-align:right;font-size:12px">${r.item_count || ''}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);font-size:12px">${esc(r.delivery_company || '')}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:12px">${esc(r.invoice_number || '')}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);font-size:12px">${
+        r.ready ? esc(r.delivery_company || '')
+          : `<select data-dispatch-co="${i}" onchange="_dispatchUpdateCount()" style="padding:2px 4px;font-size:11px;border:1px solid var(--gray-200);border-radius:4px">
+               <option value="">택배사</option>
+               ${DISPATCH_COURIERS.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+             </select>`}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:12px">${
+        r.ready ? esc(r.invoice_number || '')
+          : `<input data-dispatch-no="${i}" oninput="_dispatchUpdateCount()" placeholder="송장번호"
+                    style="width:120px;padding:2px 6px;font-size:11px;border:1px solid var(--gray-200);border-radius:4px">`}</td>
       <td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);font-size:11px;color:${r.ready ? '#047857' : '#b45309'}">${r.ready ? '전송 가능' : esc(r.blocked_reason || '')}</td>
     </tr>`;
   }).join('');
@@ -4151,7 +4162,15 @@ function _dispatchToggleAll(on) {
 
 function _dispatchSelected() {
   return [...document.querySelectorAll('#dispatch-body input[data-dispatch-idx]:checked')]
-    .map(cb => _dispatchRows[Number(cb.dataset.dispatchIdx)])
+    .map(cb => {
+      const i = Number(cb.dataset.dispatchIdx);
+      const row = _dispatchRows[i];
+      if (!row) return null;
+      // 직접 입력한 송장이 있으면 함께 보낸다 — 채널 코드 변환은 서버 몫
+      const no = document.querySelector(`#dispatch-body input[data-dispatch-no="${i}"]`)?.value.trim();
+      const co = document.querySelector(`#dispatch-body select[data-dispatch-co="${i}"]`)?.value;
+      return (no || co) ? { ...row, manual_invoice_number: no || '', manual_delivery_company: co || '' } : row;
+    })
     .filter(Boolean);
 }
 
@@ -4159,14 +4178,25 @@ function _dispatchUpdateCount() {
   const el = document.getElementById('dispatch-count');
   const btn = document.getElementById('dispatch-send-btn');
   if (!el) return;
-  const n = _dispatchSelected().length;
-  el.textContent = `${n}건 선택`;
-  if (btn) { btn.disabled = n === 0; btn.style.opacity = n === 0 ? '.5' : '1'; }
+  const sel = _dispatchSelected();
+  // 선택했지만 송장이 없는 건은 보내도 걸러진다 — 미리 알려준다
+  const sendable = sel.filter(r => (r.invoice_number && r.courier_code)
+    || (r.manual_invoice_number && r.manual_delivery_company));
+  const short = sel.length - sendable.length;
+  el.innerHTML = `${sel.length}건 선택`
+    + (short ? ` <span style="color:#b45309">· 송장 미입력 ${short}건은 제외됩니다</span>` : '');
+  if (btn) {
+    btn.disabled = sendable.length === 0;
+    btn.style.opacity = sendable.length === 0 ? '.5' : '1';
+    btn.textContent = sendable.length ? `채널로 전송 (${sendable.length})` : '채널로 전송';
+  }
 }
 
 async function _dispatchSend() {
-  const items = _dispatchSelected();
-  if (!items.length) { showToast('전송할 주문을 선택하세요'); return; }
+  const all = _dispatchSelected();
+  const items = all.filter(r => (r.invoice_number && r.courier_code)
+    || (r.manual_invoice_number && r.manual_delivery_company));
+  if (!items.length) { showToast('송장번호와 택배사를 입력한 주문만 전송할 수 있습니다'); return; }
   const byCh = {};
   for (const it of items) byCh[it.channel] = (byCh[it.channel] || 0) + 1;
   const summary = Object.entries(byCh)

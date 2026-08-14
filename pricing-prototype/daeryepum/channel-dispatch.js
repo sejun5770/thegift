@@ -88,9 +88,16 @@ async function courierCode(channel, name) {
 // ============================================
 // 우리 쪽 송장 조회
 // ============================================
-/** order_id 여러 건의 송장을 한 번에 — order_id → 최신 송장 1건 */
+/**
+ * order_id 여러 건의 송장을 한 번에 — order_id → 최신 송장 1건.
+ *
+ * 테이블이 아직 없으면(마이그레이션 017 미적용) 목록 자체를 실패시키지 않는다.
+ *   송장이 없을 뿐 '출고 처리가 필요한 주문' 은 그대로 보여줘야 하고, 화면에서
+ *   직접 송장을 입력해 보낼 수도 있기 때문이다. 대신 사유를 함께 올린다.
+ */
 async function invoicesByOrderIds(orderIds) {
   const out = new Map();
+  out._warning = null;
   if (!USE || !orderIds.length) return out;
   for (let i = 0; i < orderIds.length; i += 200) {
     const chunk = orderIds.slice(i, i + 200);
@@ -98,11 +105,41 @@ async function invoicesByOrderIds(orderIds) {
     const res = await fetch(
       `${REST}/bg_order_invoices?select=order_id,invoice_number,delivery_company,shipped_at&order_id=in.(${inList})&order=shipped_at.asc`,
       { headers: HDR });
-    if (!res.ok) throw new Error(`Supabase bg_order_invoices [${res.status}]: ${(await res.text()).slice(0, 200)}`);
+    if (!res.ok) {
+      const body = (await res.text()).slice(0, 300);
+      if (res.status === 404 || /PGRST205|does not exist|schema cache/i.test(body)) {
+        out._warning = '송장 테이블(bg_order_invoices)이 아직 없습니다 — 마이그레이션 017 을 실행하세요. '
+          + '그때까지는 이 화면에서 송장번호를 직접 입력해 전송할 수 있습니다.';
+        return out;
+      }
+      throw new Error(`Supabase bg_order_invoices [${res.status}]: ${body}`);
+    }
     // asc 로 받아 덮어쓰면 마지막(=최신) 이 남는다
     for (const r of await res.json()) out.set(String(r.order_id), r);
   }
   return out;
+}
+
+/** 우리 송장 기록 — 채널 전송에 성공한 건을 남긴다. 테이블이 없으면 조용히 건너뛴다. */
+async function recordInvoice({ orderId, invoiceNumber, deliveryCompany, by }) {
+  if (!USE) return { saved: false, reason: 'supabase_not_configured' };
+  const res = await fetch(`${REST}/bg_order_invoices?on_conflict=order_id,invoice_number`, {
+    method: 'POST',
+    headers: { ...HDR, Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify([{
+      order_id: orderId,
+      invoice_number: String(invoiceNumber),
+      delivery_company: deliveryCompany || null,
+      shipped_at: new Date().toISOString(),
+      shipped_by: by || 'channel-dispatch',
+      notes: '출고상태 전송 화면에서 직접 입력',
+    }]),
+  });
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 200);
+    return { saved: false, reason: `[${res.status}] ${body}` };
+  }
+  return { saved: true };
 }
 
 const ymd = (ms) => new Date(ms + 9 * 3600 * 1000).toISOString().slice(0, 10);
@@ -169,7 +206,7 @@ async function pendingCoupang({ daysBack = 14 } = {}) {
     });
   }
   rows.sort((a, b) => String(a.ordered_at || '').localeCompare(String(b.ordered_at || '')));
-  return { rows };
+  return { rows, warning: invoices._warning || null };
 }
 
 /**
@@ -249,7 +286,7 @@ async function pendingNaver({ daysBack = 14 } = {}) {
     });
   }
   rows.sort((a, b) => String(a.ordered_at || '').localeCompare(String(b.ordered_at || '')));
-  return { rows };
+  return { rows, warning: invoices._warning || null };
 }
 
 /** 네이버 발송처리 — 스토어별로 나눠 호출한다 (스토어마다 토큰이 다르다) */
@@ -304,11 +341,13 @@ async function listPending({ daysBack = 14, channels = ['coupang', 'naver'] } = 
   const days = Math.min(Math.max(parseInt(daysBack, 10) || 14, 1), 60);
   const out = { days, rows: [], skipped: [], errors: [] };
   const fns = { coupang: pendingCoupang, naver: pendingNaver };
+  const warnings = new Set();
   for (const ch of channels) {
     if (!fns[ch]) continue;
     try {
       const r = await fns[ch]({ daysBack: days });
       if (r.skipped) { out.skipped.push({ channel: ch, reason: r.skipped }); continue; }
+      if (r.warning) warnings.add(r.warning);
       out.rows.push(...r.rows);
     } catch (e) {
       // 한 채널이 죽어도 다른 채널 목록은 보여야 한다
@@ -317,6 +356,7 @@ async function listPending({ daysBack = 14, channels = ['coupang', 'naver'] } = 
   }
   out.ready = out.rows.filter(r => r.ready).length;
   out.blocked = out.rows.length - out.ready;
+  out.warnings = [...warnings];
   return out;
 }
 
@@ -330,10 +370,33 @@ async function sendDispatch({ items = [], confirm = false, by = 'system' } = {})
   const list = Array.isArray(items) ? items : [];
   if (!list.length) throw new Error('전송할 주문이 없습니다');
 
+  // 화면에서 직접 입력한 송장이 있으면 그것으로 채운다 (송장 테이블이 없거나 미등록인 경우).
+  //   택배사 이름 → 채널 코드 변환은 서버에서 한다 — 클라이언트가 코드를 지어내면 안 된다.
+  const prepared = [];
+  for (const it of list) {
+    const manualNo = String(it.manual_invoice_number || '').trim();
+    const manualCo = String(it.manual_delivery_company || '').trim();
+    if (manualNo && manualCo) {
+      const code = await courierCode(it.channel, manualCo);
+      prepared.push({
+        ...it,
+        invoice_number: manualNo,
+        delivery_company: manualCo,
+        courier_code: code,
+        manual: true,
+        blocked_reason: code ? null : `택배사 코드 없음 (${manualCo})`,
+      });
+    } else if (manualNo || manualCo) {
+      prepared.push({ ...it, blocked_reason: '송장번호와 택배사를 모두 입력하세요' });
+    } else {
+      prepared.push(it);
+    }
+  }
+
   // 보낼 수 없는 건을 미리 걷어낸다 — 채널에 던져 놓고 에러를 받는 것보다 낫다
-  const skipped = list.filter(it => !it.invoice_number || !it.courier_code)
+  const skipped = prepared.filter(it => !it.invoice_number || !it.courier_code)
     .map(it => ({ ...it, ok: false, message: it.blocked_reason || '송장번호·택배사 코드 필요' }));
-  const sendable = list.filter(it => it.invoice_number && it.courier_code);
+  const sendable = prepared.filter(it => it.invoice_number && it.courier_code);
 
   if (!confirm) {
     return {
@@ -366,6 +429,20 @@ async function sendDispatch({ items = [], confirm = false, by = 'system' } = {})
     }
   }
   if (nv.length) results.push(...await sendNaver(nv));
+
+  // 화면에서 직접 입력한 송장은 우리 기록에도 남긴다 — 채널에만 있고 우리는 모르는 상태를
+  //   만들면 다음에 또 입력하게 된다. 테이블이 없으면 실패 사유만 담고 전송 결과는 건드리지 않는다.
+  for (const r of results) {
+    if (!r.ok || !r.manual) continue;
+    const saved = await recordInvoice({
+      orderId: r.channel === 'coupang' ? `CP-${r.order_id}` : `NV-${r.order_id}`,
+      invoiceNumber: r.invoice_number,
+      deliveryCompany: r.delivery_company,
+      by,
+    });
+    r.invoice_saved = saved.saved;
+    if (!saved.saved) r.invoice_save_error = saved.reason;
+  }
 
   // 성공한 건은 로컬 상태도 앞으로 당겨 둔다 — 다음 동기화 전까지 목록에 남아 헷갈리지 않게.
   const okCp = results.filter(r => r.ok && r.channel === 'coupang');
