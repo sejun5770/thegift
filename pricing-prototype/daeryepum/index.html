@@ -6113,17 +6113,51 @@ function _ptRender(j) {
       ${esc(j.caution || '')}</div>
     <div style="margin-bottom:12px;font-size:11px;color:var(--gray-500)">${esc(j.note || '')}</div>
     ${products.map((p, i) => {
+      // 가격 구간 막대 — 폭은 기간(일수), 색은 전환율 (옵션 블록에서도 재사용)
+      const barOf = (segs, withCr = true) => {
+        const totalDays = segs.reduce((s, x) => s + x.days, 0) || 1;
+        return segs.map(s => {
+          const w = Math.max(6, Math.round((s.days / totalDays) * 100));
+          const good = withCr ? (s.conversion_rate != null && s.conversion_rate >= 3) : true;
+          return `<div title="${esc(won(s.price))} · ${esc(s.start)}~${esc(s.end)}${withCr ? ` · 전환율 ${s.conversion_rate ?? '-'}%` : ''}"
+               style="width:${w}%;padding:5px 4px;text-align:center;font-size:11px;white-space:nowrap;overflow:hidden;
+                      background:${good ? '#dcfce7' : '#fef3c7'};border-right:1px solid #fff;color:${good ? '#047857' : '#92400e'}">
+               ${won(s.price)}</div>`;
+        }).join('');
+      };
       const segs = p.segments || [];
-      // 가격 구간을 막대로 — 폭은 기간(일수), 색은 전환율
-      const totalDays = segs.reduce((s, x) => s + x.days, 0) || 1;
-      const bar = segs.map(s => {
-        const w = Math.max(6, Math.round((s.days / totalDays) * 100));
-        const good = s.conversion_rate != null && s.conversion_rate >= 3;
-        return `<div title="${esc(won(s.price))} · ${esc(s.start)}~${esc(s.end)} · 전환율 ${s.conversion_rate ?? '-'}%"
-             style="width:${w}%;padding:5px 4px;text-align:center;font-size:11px;white-space:nowrap;overflow:hidden;
-                    background:${good ? '#dcfce7' : '#fef3c7'};border-right:1px solid #fff;color:${good ? '#047857' : '#92400e'}">
-             ${won(s.price)}</div>`;
-      }).join('');
+      const bar = barOf(segs);
+
+      // ── 옵션이 여럿인 상품 (수건 등) — 코드 합계 대신 옵션별로 보여준다 ──
+      if (p.multi_option) {
+        const optChanged = (p.options || []).filter(o => o.changed).length;
+        return `
+      <div style="margin-bottom:18px;padding-bottom:14px;${i < products.length - 1 ? 'border-bottom:1px solid var(--gray-200)' : ''}">
+        <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+          <b style="font-size:14px">${esc(p.name)}</b>
+          <span style="font-family:monospace;font-size:11px;color:var(--gray-400)">${esc(p.code)}</span>
+          <span style="font-size:11px;padding:1px 6px;border-radius:4px;background:#eef2ff;color:#4338ca">옵션 ${p.options.length}개</span>
+          <span style="font-size:11px;color:var(--gray-500)">가격 변경 있는 옵션 ${optChanged}개</span>
+        </div>
+        <div style="font-size:12px;color:var(--gray-600);margin-bottom:8px">
+          상품 전체: 조회 ${Number(p.totals.views).toLocaleString()} · 주문 ${Number(p.totals.orders).toLocaleString()}
+          · 전환율 ${p.totals.conversion_rate != null ? p.totals.conversion_rate + '%' : '-'}
+          <span style="color:var(--gray-400);margin-left:6px">— 조회는 옵션으로 가를 수 없어(한 페이지에서 선택) 옵션에는 주문 비중만 표시합니다</span>
+        </div>
+        ${p.options.map(o => `
+          <div style="margin:6px 0 10px 10px;padding-left:10px;border-left:3px solid var(--gray-200)">
+            <div style="display:flex;align-items:baseline;gap:8px;font-size:12px;margin-bottom:4px;flex-wrap:wrap">
+              <b>${esc(o.name)}</b>
+              <span style="color:var(--gray-500)">주문 ${Number(o.orders).toLocaleString()}건 · 비중 ${o.share_pct != null ? o.share_pct + '%' : '-'}</span>
+              ${o.changed ? '<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:#fef3c7;color:#92400e">가격 변경</span>' : ''}
+            </div>
+            <div style="display:flex;border-radius:5px;overflow:hidden;max-width:640px">${barOf(o.segments, false)}</div>
+            ${o.changed ? `<div style="font-size:11px;color:var(--gray-500);margin-top:3px">
+              ${o.segments.map(s => `${won(s.price)} (${esc(s.start.slice(5))}~${esc(s.end.slice(5))} · ${s.orders}건)`).join(' → ')}</div>` : ''}
+          </div>`).join('')}
+      </div>`;
+      }
+
       return `
       <div style="margin-bottom:18px;padding-bottom:14px;${i < products.length - 1 ? 'border-bottom:1px solid var(--gray-200)' : ''}">
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">

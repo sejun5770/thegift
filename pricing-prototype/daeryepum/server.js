@@ -14517,6 +14517,19 @@ const server = http.createServer(async (req, res) => {
               const r = await apiOrders({ start_date: start, end_date: end, category: 'daeryepum' });
               return Array.isArray(r) ? r : (r.orders || r.rows || []);
             },
+            // 옵션명 — 주문 rows 의 card_name 은 코드 대표명이라 옵션(색상·종류)을 못 가른다.
+            //   S2_CARD 에서 판매단위 이름을 직접 읽는다.
+            resolveSeqNames: async (seqList) => {
+              const p = await getPool();
+              const req = p.request();
+              const inClause = seqList.slice(0, 500).map((s, i) => {
+                req.input(`s${i}`, Number(s));
+                return `@s${i}`;
+              }).join(',');
+              const rs = await req.query(
+                `SELECT Card_Seq, Card_Name FROM S2_CARD WITH (NOLOCK) WHERE Card_Seq IN (${inClause})`);
+              return new Map(rs.recordset.map(r => [Number(r.Card_Seq), String(r.Card_Name || '')]));
+            },
           });
         } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
