@@ -14482,6 +14482,27 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/ga/price-trend' && req.method === 'GET') {
+        // 가격 변경 × 유입·전환. 가격은 주문 단가로 되살린다 (가격 이력 테이블이 없다).
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          const q = parsed.query;
+          data = await require('./ga/price-trend').priceTrend({
+            startDate: q.start_date,
+            endDate: q.end_date,
+            code: q.code || null,
+            fetchOrders: async (start, end) => {
+              const r = await apiOrders({ start_date: start, end_date: end, category: 'daeryepum' });
+              return Array.isArray(r) ? r : (r.orders || r.rows || []);
+            },
+          });
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
       } else if (pathname === '/api/ga/clickmap/pages' && req.method === 'GET') {
         // 클릭맵 페이지 목록 — 상세페이지 경로 + 상품코드 + 조회수
         if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
