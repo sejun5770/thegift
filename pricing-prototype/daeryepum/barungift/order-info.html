@@ -568,12 +568,15 @@
          - 하단 액션바: padding-bottom 에 env(safe-area-inset-bottom) + 여유 16px 적용
          - 이미지 max-h 도 65vh → 50dvh 로 낮춰 좁은 화면에서 하단 영역 가리지 않게.
   -->
-<div id="stickerModal" class="fixed inset-0 z-[100]" style="display:none;height:100dvh">
+<!-- dvh 는 인앱 브라우저(카카오톡 등 구형 WebView)가 몰라서 무시된다 — 그러면 높이
+     제한이 전부 풀려 이미지가 원본 크기로 커지며 이름을 덮는다 (2026-08-14 고객 화면).
+     vh 를 먼저 쓰고 dvh 는 지원 브라우저에서만 덮어쓰게 이중 선언한다. -->
+<div id="stickerModal" class="fixed inset-0 z-[100]" style="display:none;height:100vh;height:100dvh">
   <!-- 배경 딤 -->
   <div class="absolute inset-0 bg-black bg-opacity-80" data-action="closeStickerModal"></div>
 
   <!-- 콘텐츠 -->
-  <div class="relative flex flex-col pointer-events-none" style="height:100dvh">
+  <div class="relative flex flex-col pointer-events-none" style="height:100vh;height:100dvh">
     <!-- 상단: 닫기 — 노치/상단 영역 safe-area-inset-top 적용 -->
     <div class="flex justify-between items-center p-4 pointer-events-auto" style="padding-top:max(1rem, env(safe-area-inset-top))">
       <span id="stickerModalCounter" class="text-white text-sm opacity-75">1 / 1</span>
@@ -583,12 +586,18 @@
     </div>
 
     <!-- 중앙: 이미지 + 좌우 버튼 -->
-    <div id="stickerModalSwipeArea" class="flex-1 flex items-center justify-center relative px-2 pointer-events-auto" style="min-height:0">
+    <div id="stickerModalSwipeArea" class="flex-1 flex items-center justify-center relative px-2 pointer-events-auto" style="min-height:0;overflow:hidden">
       <button type="button" data-action="stickerModalPrev" id="stickerModalPrev" class="absolute left-2 text-white text-4xl w-12 h-12 flex items-center justify-center rounded-full bg-black/30 hover:bg-black/50 transition z-10">
         ‹
       </button>
-      <div class="max-w-full max-h-full flex items-center justify-center">
-        <img id="stickerModalImg" alt="" class="max-w-[90vw] object-contain select-none pointer-events-none" style="max-height:50dvh" draggable="false" />
+      <!-- 이미지 영역 = 상단바/하단 입력부를 뺀 '남는 공간' 전체로 고정하고, 이미지는 그
+           안에 contain 으로 맞춘다. 고정 vh 값을 쓰면 짧은 화면(인앱 브라우저)에서 다시
+           넘치므로 flex 가 계산한 높이를 그대로 쓴다 — 어떤 화면 높이에서도 이름/입력을
+           덮을 수 없다. (원인: 기존 max-height:50dvh 는 dvh 미지원 인앱 브라우저에서
+           통째로 무시돼 이미지가 원본 크기로 커졌다) -->
+      <div class="w-full h-full flex items-center justify-center" style="min-height:0">
+        <img id="stickerModalImg" alt="" class="select-none pointer-events-none"
+             style="max-width:min(92vw,440px);max-height:100%;width:auto;height:auto;object-fit:contain" draggable="false" />
       </div>
       <button type="button" data-action="stickerModalNext" id="stickerModalNext" class="absolute right-2 text-white text-4xl w-12 h-12 flex items-center justify-center rounded-full bg-black/30 hover:bg-black/50 transition z-10">
         ›
