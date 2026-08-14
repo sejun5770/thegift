@@ -1304,6 +1304,7 @@ nav.nav-loading a[href^="#"] {
         title="채널에서 문의를 가져와 저장합니다. 쿠팡은 조회기간이 7일이라 창을 쪼개 여러 번 호출합니다.">📥 채널에서 가져오기</button>
     </div>
     <div style="font-size:11px;color:var(--gray-500);margin-top:8px">
+      네이버 고객문의는 <b>문의 1건 + 답변 1건</b> 구조입니다 — 대화가 오가는 스레드가 아니라 주고받은 이력이 따로 없습니다.
       쿠팡 고객센터 문의는 <b>조회기간이 최대 7일</b>이라, 지난 이력을 남기려면 주기적으로 가져와야 합니다.
       정수당은 카페24 앱 권한(scope)이 확보되면 탭이 추가됩니다.
     </div>
@@ -18101,26 +18102,63 @@ function renderInquiries() {
     const p = n => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   };
-  wrap.innerHTML = `<table class="data-table" style="font-size:12px;min-width:1100px">
+  // 답변까지 걸린 시간 — '언제 달렸는지' 를 숫자로 보이게
+  const gapOf = (a, b) => {
+    if (!a || !b) return null;
+    const h = (new Date(b) - new Date(a)) / 3600000;
+    if (!isFinite(h) || h < 0) return null;
+    return h < 24 ? `${Math.round(h)}시간 후` : `${Math.round(h / 24)}일 후`;
+  };
+  const nl2br = (s) => esc(String(s || '')).replace(/\r?\n/g, '<br>');
+  const oldDate = rows.some(r => !r.inquired_at || (r.answered && !r.answered_at));
+
+  wrap.innerHTML = (oldDate ? `
+    <div style="margin-bottom:8px;padding:8px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:12px;color:#1e40af">
+      일시가 비어 있는 문의가 있습니다 — 날짜 필드를 고치기 전에 수집된 건입니다.
+      기간에 상관없이 목록에는 표시되며, 해당 기간으로 <b>채널에서 가져오기</b>를 다시 하면 채워집니다.</div>` : '')
+    + `<table class="data-table" style="font-size:12px;min-width:1080px">
     <thead><tr>
-      <th style="width:90px">채널</th><th style="width:130px">문의일시</th>
-      <th style="width:120px">주문번호</th><th style="width:180px">상품</th>
-      <th>내용</th><th style="width:80px">상태</th><th style="width:90px">확인</th>
+      <th style="width:78px">채널</th><th style="width:66px">분류</th>
+      <th style="width:170px">상품</th>
+      <th>문의 / 답변</th>
+      <th style="width:96px">상태</th><th style="width:80px">확인</th>
     </tr></thead><tbody>` + rows.map(r => {
       const ch = CIQ_CHANNEL[r.channel] || { label: r.channel, color: 'var(--gray-500)' };
-      // 제목과 본문이 따로 오는 채널이 있어 둘 다 보여준다
-      const body = [r.title, r.content].filter(Boolean).join(' — ') || '(내용 없음)';
+      const cat = r.raw_payload?.category || '';
+      // 제목이 본문의 앞부분과 같으면 한 번만 보여준다 (네이버는 제목=본문 요약인 경우가 많다)
+      const title = String(r.title || '').trim();
+      const content = String(r.content || '').trim();
+      const sameish = title && content && (title === content || content.startsWith(title));
+      const gap = gapOf(r.inquired_at, r.answered_at);
       return `<tr${r.answered ? '' : ' style="background:#fffbeb"'}>
-        <td><span style="color:${ch.color};font-weight:600">${esc(ch.label)}</span></td>
-        <td style="white-space:nowrap;color:var(--gray-600)">${fmtWhen(r.inquired_at)}</td>
-        <td style="font-family:monospace;font-size:11px">${r.order_id ? esc(r.order_id) : '<span style="color:var(--gray-300)">-</span>'}</td>
-        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.product_name || '')}">${esc(r.product_name || '-')}</td>
-        <td style="white-space:normal;line-height:1.5">${esc(String(body).slice(0, 300))}
-          ${r.answer_content ? `<div style="margin-top:4px;padding:6px 8px;background:var(--gray-50);border-radius:4px;color:var(--gray-600)">↳ ${esc(String(r.answer_content).slice(0, 300))}</div>` : ''}</td>
-        <td>${r.answered
+        <td style="vertical-align:top"><span style="color:${ch.color};font-weight:600">${esc(ch.label)}</span></td>
+        <td style="vertical-align:top;color:var(--gray-500)">${esc(cat || '-')}</td>
+        <td style="vertical-align:top;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.product_name || '')}">
+          ${esc(r.product_name || '-')}
+          ${r.order_id ? `<div style="font-family:monospace;font-size:10px;color:var(--gray-400);margin-top:2px">${esc(r.order_id)}</div>` : ''}</td>
+        <td style="white-space:normal;line-height:1.55;padding:8px 10px">
+          <!-- 문의 -->
+          <div style="display:flex;gap:6px;align-items:baseline">
+            <span style="flex-shrink:0;font-size:10px;font-weight:700;color:#1d4ed8;background:#eff6ff;border-radius:3px;padding:1px 5px">문의</span>
+            <span style="flex-shrink:0;font-size:11px;color:var(--gray-500)">${fmtWhen(r.inquired_at)}</span>
+            ${title && !sameish ? `<b style="color:var(--gray-800)">${esc(title)}</b>` : ''}
+          </div>
+          <div style="margin:3px 0 0 4px;color:var(--gray-700)">${nl2br(content || title) || '(내용 없음)'}</div>
+          ${r.answer_content ? `
+          <!-- 답변 -->
+          <div style="margin-top:8px;padding:7px 9px;background:var(--gray-50);border-left:3px solid #16a34a;border-radius:0 4px 4px 0">
+            <div style="display:flex;gap:6px;align-items:baseline;margin-bottom:2px">
+              <span style="flex-shrink:0;font-size:10px;font-weight:700;color:#047857;background:#dcfce7;border-radius:3px;padding:1px 5px">답변</span>
+              <span style="flex-shrink:0;font-size:11px;color:var(--gray-500)">${fmtWhen(r.answered_at)}</span>
+              ${gap ? `<span style="font-size:11px;color:#b45309">${esc(gap)}</span>` : ''}
+            </div>
+            <div style="color:var(--gray-600)">${nl2br(r.answer_content)}</div>
+          </div>` : ''}
+        </td>
+        <td style="vertical-align:top">${r.answered
           ? '<span style="color:#16a34a;font-weight:600">답변완료</span>'
           : '<span style="color:#dc2626;font-weight:600">미답변</span>'}</td>
-        <td style="text-align:center">${r.checked_at
+        <td style="vertical-align:top;text-align:center">${r.checked_at
           ? `<span style="font-size:11px;color:var(--gray-500)" title="${esc(r.checked_by || '')}">✔ 확인</span>`
           : `<button class="btn" style="padding:2px 8px;font-size:11px" onclick="markInquiryChecked('${esc(r.id)}')">확인</button>`}</td>
       </tr>`;

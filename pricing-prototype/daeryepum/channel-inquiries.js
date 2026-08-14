@@ -233,8 +233,17 @@ async function listInquiries({ channel, answered, startDate, endDate, limit = 30
   if (channel) f.push(`channel=eq.${encodeURIComponent(channel)}`);
   if (answered === true) f.push('answered=is.true');
   if (answered === false) f.push('answered=is.false');
-  if (startDate) f.push(`inquired_at=gte.${startDate}`);
-  if (endDate) f.push(`inquired_at=lte.${endDate}T23:59:59+09:00`);
+  // 기간 필터에 문의일시가 빈 건이 걸리면 화면에서 통째로 사라진다 — 수집은 됐는데
+  //   '안 가져와진 것' 처럼 보인다 (실제로 3건 중 2건이 그렇게 숨어 있었다).
+  //   날짜가 없는 건은 어느 기간에도 속하지 않으므로 항상 포함시키고, 화면에서
+  //   '날짜 없음 — 재수집하면 채워집니다' 로 안내한다.
+  if (startDate && endDate) {
+    f.push(`or=(and(inquired_at.gte.${startDate},inquired_at.lte.${endDate}T23:59:59+09:00),inquired_at.is.null)`);
+  } else if (startDate) {
+    f.push(`or=(inquired_at.gte.${startDate},inquired_at.is.null)`);
+  } else if (endDate) {
+    f.push(`or=(inquired_at.lte.${endDate}T23:59:59+09:00,inquired_at.is.null)`);
+  }
   const res = await fetch(`${REST}/channel_inquiries?select=*&${f.join('&')}`, { headers: HDR });
   if (!res.ok) throw new Error(`Supabase channel_inquiries [${res.status}]: ${(await res.text()).slice(0, 200)}`);
   return res.json();
