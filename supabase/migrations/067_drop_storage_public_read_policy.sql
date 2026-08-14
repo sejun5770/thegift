@@ -1,0 +1,24 @@
+-- ============================================
+-- 067_drop_storage_public_read_policy.sql
+--
+-- bg-customer-logos 버킷의 broad SELECT 정책 제거.
+--
+-- 배경 (2026-08-14, Supabase Security Advisor 경고):
+--   "Clients can list all files in this bucket" — storage.objects 에 대한 넓은 SELECT
+--   정책(027 의 bg_customer_logos_public_read)이 있으면 anon key 만으로 버킷의
+--   전체 파일 목록을 열거할 수 있다. 경로에 주문번호가 들어가므로
+--   ({order_id}/{product}_{group}_{ts}.png) 주문번호 열거 통로가 된다.
+--
+-- 왜 지워도 되는가 (2026-08-14 코드 전수 확인):
+--   · 읽기: 화면은 public URL(/object/public/…)로만 접근한다. public 버킷의 파일
+--     다운로드는 RLS 를 타지 않으므로 SELECT 정책이 필요 없다.
+--   · 목록: storage list API 를 부르는 코드가 어디에도 없다.
+--   · 업로드/삭제: 별도 정책(anon_insert / anon_delete)이라 영향 없다.
+--   027 의 주석("공개 읽기 — 직접 다운로드")이 상정한 용도 자체가 public URL 로
+--   충족되고 있었다 — 이 정책은 처음부터 불필요했다.
+--
+-- 대시보드에서 Remove policy 를 눌렀다면 이 파일은 그 결정을 코드에 남기는 것이고,
+-- 새 환경에서는 027 이 만든 정책을 이 파일이 되돌린다.
+-- ============================================
+
+DROP POLICY IF EXISTS "bg_customer_logos_public_read" ON storage.objects;
