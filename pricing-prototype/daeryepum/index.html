@@ -5927,7 +5927,10 @@ function _gaRender(j) {
     </div>` : '';
   const notes = (j.sites || []).filter(s => s.note).map(s => `
     <div style="flex-basis:100%;padding:8px 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;font-size:12px;color:#92400e">
-      ${esc(GA_SITE_LABEL[s.site] || s.site)}: ${esc(s.note)}</div>`).join('');
+      ${esc(GA_SITE_LABEL[s.site] || s.site)}: ${esc(s.note)}</div>`).join('')
+    + (j.cart_notes || []).map(c => `
+    <div style="flex-basis:100%;padding:8px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;font-size:12px;color:#1e40af">
+      ${esc(c.note)}</div>`).join('');
   const errs = (j.errors || []).map(e => `
     <div style="flex-basis:100%;padding:8px 10px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;font-size:12px;color:#b91c1c">
       ${esc(GA_SITE_LABEL[e.site] || e.site)} 조회 실패 — ${esc(e.message)}</div>`).join('');
@@ -6043,6 +6046,8 @@ let _cmLoadGen = 0;        // 조회 세대 — 연타 시 이전 조회의 onlo
 let _cmOnload = null;      // 현재 걸려 있는 load 리스너 (새 조회 시작 시 뗀다)
 let _cmLoadTimeout = null;
 let _cmDevice = 'desktop'; // PC/모바일 — 스냅샷 UA·iframe 폭·클릭 필터가 함께 바뀐다
+let _cmPlaced = new Map(); // 요소키 → { el, badge } — 목록에서 눌러 찾아가기 위해
+let _cmHighlighted = null; // 현재 강조 중인 것 (다음 선택 때 원복)
 
 function setCmDevice(dev) {
   _cmDevice = dev === 'mobile' ? 'mobile' : 'desktop';
@@ -6133,11 +6138,11 @@ async function loadClickmap() {
       //   배율이 음수가 되고 요소 위치도 못 잡는다 (2026-08-13 실측)
       status.style.display = 'none';
       wrap.style.display = 'flex';
-      requestAnimationFrame(() => {
-        if (gen !== _cmLoadGen) return;
-        try { _cmPlaceBadges(frame, j.rows || []); }
-        catch (e) { console.warn('clickmap badge 실패:', e); _cmRenderList(j.rows || [], new Set()); }
-      });
+      // 레이아웃을 강제로 확정시킨 뒤 잰다. requestAnimationFrame 으로 미루면 그 사이에
+      //   다른 조회가 시작될 때 세대 검사에 걸려 배지도 목록도 안 그려지는 창이 생긴다.
+      void wrap.offsetWidth;
+      try { _cmPlaceBadges(frame, j.rows || []); }
+      catch (e) { console.warn('clickmap badge 실패:', e); _cmRenderList(j.rows || [], new Set()); }
     };
     _cmOnload = onload;
     frame.addEventListener('load', onload);
@@ -6199,6 +6204,7 @@ function _cmPlaceBadges(frame, rows) {
   })[0];
 
   const matched = new Set();
+  _cmPlaced = new Map();   // 목록에서 눌렀을 때 찾아갈 수 있게 요소·배지를 기억한다
   let rank = 0;
   for (const row of rows) {
     if (!row.count) continue;
@@ -6226,8 +6232,57 @@ function _cmPlaceBadges(frame, rows) {
       + 'border-radius:99px;box-shadow:0 1px 4px rgba(0,0,0,.35);white-space:nowrap;'
       + `top:${rect.top + win.scrollY - 10}px;left:${rect.right + win.scrollX - 14}px`;
     doc.body.appendChild(badge);
+    _cmPlaced.set(row.text || row.click_id, { el, badge });
   }
   _cmRenderList(rows, matched);
+}
+
+/**
+ * 목록에서 요소를 고르면 스냅샷의 그 위치로 이동해 하이라이트한다.
+ *   iframe 안의 좌표는 축소 배율을 곱해야 바깥 컨테이너의 스크롤 값이 된다.
+ */
+function _cmFocus(key) {
+  const hit = _cmPlaced.get(key);
+  if (!hit) { showToast('스냅샷에서 위치를 찾지 못한 요소입니다 — 수치는 유효합니다'); return; }
+  const frame = document.getElementById('cm-frame');
+  const outer = document.getElementById('cm-frame-outer');
+  const doc = frame.contentDocument;
+  const win = frame.contentWindow;
+  if (!doc || !win) return;
+
+  const scale = parseFloat((document.getElementById('cm-frame-scaler').style.transform
+    .match(/scale\(([\d.]+)\)/) || [])[1] || '1');
+  const rect = hit.el.getBoundingClientRect();
+  const top = (rect.top + win.scrollY) * scale;
+  const left = (rect.left + win.scrollX) * scale;
+  // 요소가 화면 위쪽 1/3 지점에 오도록 — 위아래 맥락이 함께 보인다.
+  //   가로·세로를 한 번에 준다. 두 번 나눠 부르면 뒤 호출이 앞 애니메이션을 덮어
+  //   엉뚱한 위치로 간다 (실측: 세로 이동이 통째로 취소됨).
+  //   상세페이지는 3만px 이 넘어 부드러운 스크롤이 한참 걸린다 — 멀면 즉시 이동한다.
+  const targetTop = Math.max(0, top - outer.clientHeight / 3);
+  const targetLeft = outer.scrollWidth > outer.clientWidth
+    ? Math.max(0, left - outer.clientWidth / 3) : outer.scrollLeft;
+  const far = Math.abs(targetTop - outer.scrollTop) > 2000;
+  outer.scrollTo({ top: targetTop, left: targetLeft, behavior: far ? 'auto' : 'smooth' });
+
+  // 이전 강조 해제 후 새로 강조 — 겹쳐 두면 어디를 보는지 알 수 없다
+  if (_cmHighlighted) {
+    _cmHighlighted.el.style.outline = _cmHighlighted.outline || '';
+    _cmHighlighted.el.style.outlineOffset = '';
+    _cmHighlighted.badge.style.transform = '';
+    _cmHighlighted.badge.style.background = '#dc2626';
+  }
+  const prevOutline = hit.el.style.outline;
+  hit.el.style.outline = '3px solid #2563eb';
+  hit.el.style.outlineOffset = '2px';
+  hit.badge.style.transform = 'scale(1.35)';
+  hit.badge.style.background = '#2563eb';
+  _cmHighlighted = { ...hit, outline: prevOutline };
+
+  // 목록 쪽 선택 표시
+  document.querySelectorAll('#cm-list tr').forEach(tr => {
+    tr.style.background = tr.dataset.cmKey === key ? '#eff6ff' : '';
+  });
 }
 
 function _cmRenderList(rows, matched) {
@@ -6235,13 +6290,15 @@ function _cmRenderList(rows, matched) {
   tbody.innerHTML = rows.filter(r => r.count > 0).slice(0, 60).map((r, i) => {
     const key = r.text || r.click_id;
     const on = matched.has(key);
-    return `<tr style="border-bottom:1px solid var(--gray-100);${on ? '' : 'color:var(--gray-400)'}">
+    return `<tr data-cm-key="${esc(key || '')}"
+        ${on ? `onclick="_cmFocus(${JSON.stringify(String(key)).replace(/"/g, '&quot;')})" style="border-bottom:1px solid var(--gray-100);cursor:pointer"`
+             : 'style="border-bottom:1px solid var(--gray-100);color:var(--gray-400)"'}>
       <td style="padding:5px 8px">${i + 1}</td>
       <td style="padding:5px 8px" title="${esc(key || '')}">${esc((key || '(문구 없음)').length > 42 ? key.slice(0, 42) + '…' : (key || '(문구 없음)'))}
         ${r.click_id && r.text ? `<span style="color:var(--gray-400);font-size:10px;margin-left:4px">#${esc(r.click_id)}</span>` : ''}</td>
       <td style="padding:5px 8px;text-align:right;font-weight:600">${Number(r.count).toLocaleString()}</td>
       <td style="padding:5px 8px;text-align:right;color:var(--gray-600)">${r.users ? Number(r.users).toLocaleString() : '-'}</td>
-      <td style="padding:5px 8px;font-size:11px">${on ? '🔴 배지' : '목록만'}</td>
+      <td style="padding:5px 8px;font-size:11px">${on ? '🔴 <span style="color:#2563eb">찾아보기</span>' : '목록만'}</td>
     </tr>`;
   }).join('') || '<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--gray-400)">클릭 데이터가 없습니다</td></tr>';
 }
