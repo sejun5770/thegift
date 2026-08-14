@@ -14482,6 +14482,26 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/price-snapshot' && req.method === 'POST') {
+        // 판매가 스냅샷 — 동기화 주기에 얹혀 자동으로 돌지만 수동 실행도 열어 둔다.
+        //   dry_run 이면 무엇이 바뀌었는지만 보고 쓰지 않는다.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const body = await new Promise((resolve) => {
+          let raw = '';
+          req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+        });
+        try {
+          data = await require('./barungift/price-watch').snapshotPrices({
+            getPool, dryRun: body.dry_run === true,
+          });
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
       } else if (pathname === '/api/ga/price-trend' && req.method === 'GET') {
         // 가격 변경 × 유입·전환. 가격은 주문 단가로 되살린다 (가격 이력 테이블이 없다).
         if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
@@ -15533,6 +15553,55 @@ function scheduleCoupangSync(baseUrl) {
 }
 
 /**
+ * 답례품 판매가 스냅샷 — 값이 바뀐 것만 남긴다.
+ *
+ * 왜 이게 필요한가 (2026-08-14 조사):
+ *   원본 상품 DB(S2_CARD)에는 '지금 얼마인지' 만 있고 '언제 바뀌었는지' 가 없다.
+ *   가격 변경 로그(ADMIN_PRICE_LOGINFO)는 청첩장만 3,299건 쌓이고 답례품은 0건이다.
+ *   그래서 우리가 주기적으로 읽어 변화를 기록해 둬야 '가격 변경 × 전환율' 이 정확해진다
+ *   (지금은 주문 단가로 역산하는데, 주문이 없는 날은 가격을 알 수 없다).
+ *
+ * 새 크론(컨테이너·스케줄)을 만들지 않고 기존 인-프로세스 스케줄러에 얹는다.
+ * 쿠팡 자동동기화와 묶지 않은 이유: 쿠팡 키가 없거나 자동동기화를 끄면 가격 추적까지
+ *   조용히 멈춘다. 서로 무관한 작업이라 따로 돈다.
+ *
+ * 값이 그대로면 아무것도 쓰지 않으므로 비용은 조회 한 번이다. 끄려면 PRICE_SNAPSHOT_DISABLED=1.
+ */
+function schedulePriceSnapshot() {
+  if (process.env.PRICE_SNAPSHOT_DISABLED === '1') {
+    console.log('[price-snapshot] 비활성 (PRICE_SNAPSHOT_DISABLED=1)');
+    return;
+  }
+  const minutes = Math.min(Math.max(parseInt(process.env.PRICE_SNAPSHOT_INTERVAL_MIN, 10) || 30, 5), 1440);
+  let running = false;
+
+  async function tick() {
+    if (running) return;
+    running = true;
+    try {
+      const snap = await require('./barungift/price-watch').snapshotPrices({ getPool });
+      if (snap.skipped) return;
+      if (snap.error) { console.warn('[price-snapshot]', snap.error); return; }
+      if (snap.changed) {
+        console.log(`[price-snapshot] 가격변경 ${snap.changed}건: `
+          + snap.details.map(d => `${d.code} ${d.from}→${d.to}`).join(', '));
+      } else if (snap.baseline) {
+        console.log(`[price-snapshot] 기준선 ${snap.baseline}건 기록`);
+      }
+    } catch (e) {
+      console.warn('[price-snapshot] 오류:', e.message);
+    } finally {
+      running = false;
+    }
+  }
+
+  // 기동 직후는 피한다 — 부팅 중 MSSQL/Supabase 가 아직 안 붙었을 수 있다
+  setTimeout(() => { tick().catch(() => {}); }, 90000);
+  setInterval(() => { tick().catch(() => {}); }, minutes * 60000);
+  console.log(`[price-snapshot] ${minutes}분 주기 시작 (끄려면 PRICE_SNAPSHOT_DISABLED=1)`);
+}
+
+/**
  * 네이버 구매확정일 소급 채우기 — 하루 한 번.
  *
  * 네이버는 배송완료 한참 뒤에 자동으로 구매확정을 건다(배송완료 07-29 → 자동확정 08-06).
@@ -15611,6 +15680,7 @@ server.listen(PORT, '0.0.0.0', () => {
     .scheduleDailyStockAlert(`http://localhost:${PORT}${BASE_PATH || ''}`);
   scheduleCoupangSync(`http://localhost:${PORT}${BASE_PATH || ''}`);
   scheduleNaverConfirmBackfill();
+  schedulePriceSnapshot();
 });
 
 // 서버 크래시 방지

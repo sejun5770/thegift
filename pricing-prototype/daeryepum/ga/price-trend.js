@@ -138,6 +138,26 @@ async function priceTrend({ startDate, endDate, fetchOrders, code = null, sites 
   const orderRows = await fetchOrders(startDate, endDate);
   const { byCode, names } = dailyPrices(orderRows);
 
+  // 기록된 가격 이력이 있으면 그날의 가격을 그것으로 덮는다.
+  //   주문 역산은 '주문이 있는 날' 만 알고 변경 시각도 그만큼 늦게 잡힌다.
+  //   스냅샷은 주문이 없어도 값을 알기 때문에 있는 날짜만큼은 이쪽이 정확하다.
+  let historyDays = 0;
+  try {
+    const hist = await require('../barungift/price-watch').listPriceHistory({ startDate, endDate });
+    for (const h of hist) {
+      const code = toBase(h.product_code || h.card_code);
+      const d = day(h.captured_at);
+      if (!code || !d || !h.sale_price) continue;
+      if (!byCode.has(code)) byCode.set(code, new Map());
+      // 그날의 대표 단가를 기록값으로 확정한다 (건수를 크게 줘 최빈값 선정에서 이긴다)
+      byCode.get(code).set(d, new Map([[Number(h.sale_price), 9999]]));
+      if (h.product_name && !names.has(code)) names.set(code, h.product_name);
+      historyDays++;
+    }
+  } catch (e) {
+    console.warn('[price-trend] 가격 이력 조회 실패 — 주문 역산만 사용:', e.message);
+  }
+
   // GA 조회수는 사이트별 속성이라 각각 받아 합친다 (자사몰 두 곳의 조회를 합쳐야
   //   주문 합계와 축이 맞는다 — 주문 rows 도 CARD+ETC 합산이다)
   const viewMaps = [];
@@ -199,8 +219,13 @@ async function priceTrend({ startDate, endDate, fetchOrders, code = null, sites 
     configured: true,
     start_date: startDate, end_date: endDate,
     products,
-    note: '가격은 주문의 단가(주문총액÷수량, 쿠폰 적용 전)로 되살린 값입니다. 주문이 없는 날은 알 수 없어 '
-      + '구간에서 빠집니다. 전환율 = 우리 DB 주문 건수 ÷ GA 조회수.',
+    history_days: historyDays,
+    note: historyDays
+      ? `가격은 기록된 스냅샷(${historyDays}건)을 우선 쓰고, 없는 날은 주문 단가(주문총액÷수량, `
+        + '쿠폰 적용 전)로 되살립니다. 전환율 = 우리 DB 주문 건수 ÷ GA 조회수.'
+      : '가격은 주문의 단가(주문총액÷수량, 쿠폰 적용 전)로 되살린 값입니다. 주문이 없는 날은 알 수 없어 '
+        + '구간에서 빠집니다. 스냅샷이 쌓이면 그때부터는 주문이 없는 날의 가격도 잡힙니다. '
+        + '전환율 = 우리 DB 주문 건수 ÷ GA 조회수.',
     caution: '가격 구간이 보통 2~4개뿐이라 상관계수 같은 통계는 내지 않습니다. '
       + '답례품은 예식 성수기 영향이 커서, 가격을 바꾼 시점이 비수기와 겹치면 가격 탓으로 보이기 쉽습니다 — '
       + '구간 비교는 참고로 보시고 시즌을 함께 감안하세요.',
