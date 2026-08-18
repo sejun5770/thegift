@@ -14706,10 +14706,16 @@ const server = http.createServer(async (req, res) => {
               const m = ps.channel_product_codes?.coupang;
               if (!m) continue;
               const unit = parseInt(ps.channel_sales_units?.coupang, 10);
+              const num = (v) => (v === null || v === undefined || v === '' ? null
+                : (Number.isFinite(Number(v)) ? Number(v) : null));
               const info = {
                 code: ps.product_id,
                 sticker: ps.channel_stickers?.coupang || null,
                 unit: unit > 1 ? unit : 1,   // 060 — 이 채널 1 주문 = 실제 상품 몇 개
+                // 원가 (068) — NULL(미입력) 은 그대로 넘긴다. 0 으로 바꾸면 원가를
+                //   모르는 상품이 '원가 0 = 마진 100%' 로 보인다.
+                unit_cost: num(ps.unit_cost),
+                inbound_unit_cost: num(ps.inbound_unit_cost),
               };
               const pIds = Array.isArray(m) ? m : (m.product_ids || []);
               for (const c of pIds) byProduct.set(String(c).trim(), info);
@@ -14732,6 +14738,24 @@ const server = http.createServer(async (req, res) => {
               //   미매핑이면 단위를 알 수 없어 1 로 둔다 — 주문수량과 같아진다.
               r.sales_unit = hit?.unit || 1;
               r.item_qty = (Number(r.sales_qty) || 0) * r.sales_unit;
+              // 원가·마진 (068) — 원가는 '상품 1개당' 이므로 주문수량이 아니라 상품수량을 곱한다.
+              //   원가가 미입력(NULL)이면 마진을 만들지 않는다 — 화면에서 '원가 미입력' 으로 구분.
+              r.unit_cost = hit?.unit_cost ?? null;
+              r.inbound_unit_cost = hit?.inbound_unit_cost ?? null;
+              const costPer = (r.unit_cost === null && r.inbound_unit_cost === null)
+                ? null : (Number(r.unit_cost || 0) + Number(r.inbound_unit_cost || 0));
+              r.cost_total = costPer === null ? null : costPer * (Number(r.item_qty) || 0);
+              if (r.cost_total === null) {
+                r.margin = null;
+                r.margin_rate = null;
+              } else {
+                // 정산금액(매출−수수료−물류비) 에서 원가를 뺀 값이 실제로 남는 돈이다
+                const settle = (Number(r.settlement_amount) || 0)
+                  - (Number(r.inout_fee) || 0) - (Number(r.shipping_fee) || 0);
+                r.margin = settle - r.cost_total;
+                const sales = Number(r.sales_amount) || 0;
+                r.margin_rate = sales > 0 ? Math.round((r.margin / sales) * 1000) / 10 : null;
+              }
             }
           } catch (e) {
             console.warn('[rfm/lines] 상품코드 매핑 실패 (원본만 표시):', e.message);

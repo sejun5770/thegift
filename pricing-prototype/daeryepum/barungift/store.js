@@ -288,6 +288,13 @@ function _normChannelSalesUnits(v) {
 
 /** 채널 배열 정규화 — 알 수 없는 값은 버리고, 비면 'own'.
  *  빈 배열이면 DB CHECK 에 걸려 저장이 통째로 실패하므로 여기서 반드시 하나는 남긴다. */
+/** 숫자만 통과 — '' / null / NaN 은 NULL (미입력). 0 은 유효한 값이라 살린다. */
+function _numOrNull(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 function _normChannels(v) {
   const list = (Array.isArray(v) ? v : [v]).map(c => String(c ?? '').trim())
     .filter(c => PRODUCT_CHANNELS.includes(c));
@@ -350,6 +357,10 @@ async function upsertProductSettings(productId, data) {
     decoration_label: data.decoration_label ?? null,  // 고객 화면 장식 명칭 (NULL → '스티커' fallback)
     vendor_id: data.vendor_id ?? null,                // 위탁 거래처 (NULL = 자체매입)
     commission_rate: data.commission_rate !== undefined ? data.commission_rate : null,  // 상품 단위 수수료율 override
+    // 원가 (068) — 마진 계산용. NULL(미입력) 과 0(원가 없음) 을 구분해야 하므로
+    //   빈 문자열은 NULL 로 떨어뜨리고 숫자만 통과시킨다.
+    unit_cost: _numOrNull(data.unit_cost),
+    inbound_unit_cost: _numOrNull(data.inbound_unit_cost),
     shipping_group_id: data.shipping_group_id ?? null,
     express_available: data.express_available ?? (data.shipping_type === 'today_shipping'),
     express_fee: data.express_fee ?? 0,

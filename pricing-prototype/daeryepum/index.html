@@ -3019,6 +3019,22 @@ nav.nav-loading a[href^="#"] {
         </div>
       </div>
 
+      <!-- 원가 (068) — 로켓그로스 실질 마진 계산에 쓰인다 -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;background:#f9fafb;padding:10px;border-radius:8px;border:1px dashed var(--gray-300)">
+        <div>
+          <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:4px" title="상품 1개당 매입 원가. 비워두면 마진 계산에서 제외됩니다.">💰 상품 원가 (개당, VAT 별도)</label>
+          <input type="number" id="bg-p-meta-unit-cost" min="0" step="1" placeholder="미입력 시 마진 계산 제외" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:4px" title="창고 입고 배송비 등 부대비용을 개당으로 환산한 값. 입고 회차 실비 ÷ 입고 수량.">📦 입고 부대비 (개당, VAT 별도)</label>
+          <input type="number" id="bg-p-meta-inbound-cost" min="0" step="1" placeholder="입고 배송비 등 (선택)" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
+        </div>
+        <div style="grid-column:1/-1;font-size:11px;color:var(--gray-500);line-height:1.5">
+          로켓그로스 탭에서 <b>마진 = 정산금액 − (원가 + 입고 부대비) × 상품수량</b> 으로 계산합니다.
+          입고 부대비는 회차·박스 단위로 드는 실비를 개당으로 나눈 근사치입니다.
+        </div>
+      </div>
+
       <!-- 출고일 그룹 선택 -->
       <div>
         <label style="display:block;font-size:13px;font-weight:600;color:var(--gray-700);margin-bottom:6px">📅 출고일 그룹</label>
@@ -13779,6 +13795,13 @@ async function openBgProductForm(productId) {
       const cInput = document.getElementById('bg-p-meta-commission');
       if (cInput) {
         cInput.value = (s?.commission_rate !== null && s?.commission_rate !== undefined) ? s.commission_rate : '';
+      }
+      // 원가 (068) — NULL 은 빈 칸으로 (0 과 구분)
+      {
+        const uc = document.getElementById('bg-p-meta-unit-cost');
+        const ic = document.getElementById('bg-p-meta-inbound-cost');
+        if (uc) uc.value = (s?.unit_cost !== null && s?.unit_cost !== undefined) ? s.unit_cost : '';
+        if (ic) ic.value = (s?.inbound_unit_cost !== null && s?.inbound_unit_cost !== undefined) ? s.inbound_unit_cost : '';
         const v = vendors.find(vv => vv.id === s?.vendor_id);
         cInput.placeholder = v ? `거래처 기본 ${Number(v.default_commission_rate || 0).toFixed(1)}%` : '거래처 선택 시 기본 노출';
       }
@@ -14329,6 +14352,14 @@ async function saveBgProduct() {
   const customGuide = (document.getElementById('bg-p-meta-custom-guide')?.value || '').trim().slice(0, 3000) || null;
   const customGuideTitle = (document.getElementById('bg-p-meta-custom-guide-title')?.value || '').trim().slice(0, 60) || null;
 
+  // 원가 (068) — 빈 칸은 null (미입력). 0 은 유효한 값이라 살린다.
+  const _costOf = (id) => {
+    const raw = (document.getElementById(id)?.value || '').trim();
+    if (raw === '') return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+
   const body = {
     brand: brand || null,
     product_name: productName || null,
@@ -14342,6 +14373,8 @@ async function saveBgProduct() {
     decoration_label: decorationLabel,
     vendor_id: vendorId,
     commission_rate: commissionRate,
+    unit_cost: _costOf('bg-p-meta-unit-cost'),
+    inbound_unit_cost: _costOf('bg-p-meta-inbound-cost'),
     shipping_group_id: shippingGroupId,
     allow_logo_upload: allowLogoUpload,
     canonical_group_key: canonKey,
@@ -18110,7 +18143,12 @@ function renderRgLines() {
     sales: a.sales + n(r.sales_amount), fee: a.fee + n(r.commission),
     inout: a.inout + n(r.inout_fee), ship: a.ship + n(r.shipping_fee),
     settle: a.settle + n(r.settlement_amount),
-  }), { sales: 0, fee: 0, inout: 0, ship: 0, settle: 0 });
+    // 원가는 입력된 행만 더한다 — 미입력 행까지 0 으로 세면 마진이 부풀려진다
+    cost: a.cost + (r.cost_total === null || r.cost_total === undefined ? 0 : n(r.cost_total)),
+    costedSales: a.costedSales + (r.cost_total === null || r.cost_total === undefined ? 0 : n(r.sales_amount)),
+    costedSettle: a.costedSettle + (r.cost_total === null || r.cost_total === undefined ? 0
+      : n(r.settlement_amount) - n(r.inout_fee) - n(r.shipping_fee)),
+  }), { sales: 0, fee: 0, inout: 0, ship: 0, settle: 0, cost: 0, costedSales: 0, costedSettle: 0 });
   // 정산금액 = 매출 − 수수료 − 입출고비 − 배송비.
   //   쿠팡 리포트의 '정산대상액'(settlement_amount)은 매출−수수료까지만 반영된 값이라
   //   그대로 쓰면 옆 컬럼의 물류비가 계산에서 빠진다 (2026-08-18 운영 지적).
@@ -18124,6 +18162,13 @@ function renderRgLines() {
     $sum.innerHTML = `${fmtNum(_rgLines.length)}건 · 매출 <b>${fmtNum(Math.round(t.sales))}</b>`
       + ` · 수수료 ${fmtNum(Math.round(t.fee))} · 물류비 ${fmtNum(Math.round(t.inout + t.ship))}`
       + ` · <b style="color:#047857">정산금액 ${fmtNum(Math.round(net))}</b>`
+      + (t.cost > 0
+        ? ` · 원가 ${fmtNum(Math.round(t.cost))}`
+          + ` · <b style="color:#7c3aed" title="원가가 입력된 상품만 집계했습니다 (매출 ${fmtNum(Math.round(t.costedSales))} 기준)">`
+          + `마진 ${fmtNum(Math.round(t.costedSettle - t.cost))}`
+          + (t.costedSales > 0 ? ` (${(Math.round(((t.costedSettle - t.cost) / t.costedSales) * 1000) / 10)}%)` : '')
+          + '</b>'
+        : '')
       + ` <span style="color:var(--gray-400)" title="쿠팡 리포트의 정산대상액 — 매출−수수료까지만 반영된 원본 값입니다. 물류비를 뺀 값이 위의 정산금액입니다.">(정산대상액 ${fmtNum(Math.round(t.settle))})</span>`
       + (unmapped ? ` · <span style="color:#b45309">미매핑 ${fmtNum(unmapped)}건</span>` : '')
       + (sellerCnt ? ` · <span style="color:var(--gray-500)" title="판매자배송 주문 — 쿠팡 채널에서 집계되므로 로켓그로스 매출에서는 빠집니다">판매자배송 ${fmtNum(sellerCnt)}건</span>` : '')
@@ -18145,12 +18190,37 @@ function renderRgLines() {
     return `<td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);text-align:right;font-weight:600${pending ? ';color:#b45309' : ''}" title="${esc(tip)}">`
       + `${fmtNum(Math.round(raw - logi))}${pending ? '<span style="font-size:9px;margin-left:2px">*</span>' : ''}</td>`;
   };
-  $w.innerHTML = `<table class="data-table" style="font-size:12px;min-width:1220px">
+  // 원가·마진·마진율 — 원가 미입력 상품은 계산하지 않는다 (0 으로 두면 마진 100% 로 보인다)
+  const marginCells = (r) => {
+    const td = (html, style = '') =>
+      `<td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);text-align:right;${style}">${html}</td>`;
+    if (r.cost_total === null || r.cost_total === undefined) {
+      const why = r.internal_product_code
+        ? '상품설정에 원가가 입력되지 않았습니다'
+        : '상품 매핑이 없어 원가를 찾을 수 없습니다';
+      const mark = `<span style="color:var(--gray-300);font-size:11px" title="${esc(why)}">미입력</span>`;
+      return td(mark) + td(mark) + td(mark);
+    }
+    const m = n(r.margin);
+    const rate = r.margin_rate;
+    const color = m < 0 ? '#dc2626' : '#7c3aed';
+    const tip = `정산금액 ${fmtNum(Math.round(n(r.settlement_amount) - n(r.inout_fee) - n(r.shipping_fee)))}`
+      + ` − 원가 ${fmtNum(Math.round(n(r.cost_total)))}`
+      + ` (개당 ${fmtNum(Math.round(n(r.unit_cost) + n(r.inbound_unit_cost)))} × ${fmtNum(n(r.item_qty))}개)`;
+    return td(fmtNum(Math.round(n(r.cost_total))))
+      + td(`<span title="${esc(tip)}">${fmtNum(Math.round(m))}</span>`, `font-weight:600;color:${color}`)
+      + td(rate === null || rate === undefined ? '<span style="color:var(--gray-300)">-</span>' : `${rate}%`,
+           `color:${color}`);
+  };
+  $w.innerHTML = `<table class="data-table" style="font-size:12px;min-width:1460px">
     <thead><tr>
       <th>결제완료일</th><th>배송완료일</th><th>상품코드</th><th>스티커</th><th>상품명</th>
       <th style="text-align:right" title="쿠팡 리포트의 판매수량 — 주문 단위">주문수량</th><th style="text-align:right" title="주문수량 × 채널 판매단위 — 실제 출고 개수">상품수량</th><th style="text-align:right">매출</th>
       <th style="text-align:right">수수료</th><th style="text-align:right">입출고비</th>
       <th style="text-align:right">배송비</th><th style="text-align:right" title="매출 − 수수료 − 입출고비 − 배송비">정산금액</th>
+      <th style="text-align:right" title="(상품 원가 + 입고 부대비) × 상품수량 — 상품설정에서 입력">원가</th>
+      <th style="text-align:right" title="정산금액 − 원가">마진</th>
+      <th style="text-align:right" title="마진 ÷ 매출">마진율</th>
     </tr></thead><tbody>` + _rgLines.map(r => {
       // 한쪽 리포트만 올라온 행은 반대쪽 날짜가 비어 있다 — 어느 파일이 빠졌는지 바로 보이게 한다
       const miss = 'color:#b45309';
@@ -18167,7 +18237,7 @@ function renderRgLines() {
           r.fulfillment === 'seller'
             ? '<span style="font-size:10px;color:var(--gray-500);border:1px solid var(--gray-300);border-radius:3px;padding:0 3px;margin-right:4px" title="판매자배송 — 로켓그로스 매출에서 제외">판매자</span>'
             : ''}${esc(r.product_name || '-')}${r.is_cancel ? ' <span style="color:#dc2626;font-size:10px">취소</span>' : ''}</td>
-        ${cell(r.sales_qty)}${cell(r.item_qty ?? r.sales_qty, (r.sales_unit > 1 ? 'font-weight:600' : 'color:var(--gray-400)'))}${cell(r.sales_amount)}${cell(r.commission)}${cell(r.inout_fee)}${cell(r.shipping_fee)}${settleCell(r)}
+        ${cell(r.sales_qty)}${cell(r.item_qty ?? r.sales_qty, (r.sales_unit > 1 ? 'font-weight:600' : 'color:var(--gray-400)'))}${cell(r.sales_amount)}${cell(r.commission)}${cell(r.inout_fee)}${cell(r.shipping_fee)}${settleCell(r)}${marginCells(r)}
       </tr>`;
     }).join('') + '</tbody></table>';
 }
@@ -18556,7 +18626,7 @@ async function syncRgWorkflow() {
 
 function downloadRgLinesXlsx() {
   if (!_rgLines.length) { alert('내려받을 데이터가 없습니다.'); return; }
-  const header = ['결제완료일', '배송완료일', '상품코드', '스티커코드', '등록상품ID', '옵션ID', '주문ID', '상품명', '주문수량', '판매단위', '상품수량', '매출', '수수료', '입출고비', '배송비', '정산대상액', '정산금액', '취소'];
+  const header = ['결제완료일', '배송완료일', '상품코드', '스티커코드', '등록상품ID', '옵션ID', '주문ID', '상품명', '주문수량', '판매단위', '상품수량', '매출', '수수료', '입출고비', '배송비', '정산대상액', '정산금액', '개당원가', '원가합계', '마진', '마진율(%)', '취소'];
   const body = _rgLines.map(r => [
     r.paid_date || '', r.delivered_date || '',
     r.internal_product_code || '', r.sticker_code || '',
@@ -18566,6 +18636,11 @@ function downloadRgLinesXlsx() {
     // 정산대상액(쿠팡 원본) 과 물류비까지 뺀 정산금액을 함께 — 대조가 가능해야 한다
     Number(r.settlement_amount) || 0,
     (Number(r.settlement_amount) || 0) - (Number(r.inout_fee) || 0) - (Number(r.shipping_fee) || 0),
+    // 원가 미입력은 빈 칸 — 0 으로 내보내면 엑셀에서 합산될 때 마진이 부풀려진다
+    r.cost_total === null || r.cost_total === undefined ? '' : (Number(r.unit_cost || 0) + Number(r.inbound_unit_cost || 0)),
+    r.cost_total === null || r.cost_total === undefined ? '' : Number(r.cost_total),
+    r.margin === null || r.margin === undefined ? '' : Number(r.margin),
+    r.margin_rate === null || r.margin_rate === undefined ? '' : Number(r.margin_rate),
     r.is_cancel ? 'Y' : '',
   ]);
   const basis = document.getElementById('rgl-basis')?.value === 'delivered' ? '배송완료일' : '결제완료일';
