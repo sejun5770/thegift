@@ -3298,7 +3298,8 @@ nav.nav-loading a[href^="#"] {
     날짜 기본값: 최근 6개월 (MSSQL 부담 회피).
     customer_info 가 있는 옛날 주문은 date range 밖이어도 자동 추가 fetch (by-IDs) — 누락 없음.
   -->
-  <div class="toolbar" style="margin-bottom:12px;gap:12px">
+  <!-- 1단 조회 — 매번 쓰는 것만 펼쳐 둔다 (주문조회와 같은 3단 구조) -->
+  <div class="toolbar" style="margin-bottom:10px;gap:12px">
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex:1;min-width:0">
       <input type="date" id="uni-start" />
       <span>~</span>
@@ -3306,19 +3307,26 @@ nav.nav-loading a[href^="#"] {
       <button class="btn btn-primary" onclick="loadBgUnified()">조회</button>
       <span style="font-size:11px;color:var(--gray-400)">CI 매칭 옛날 주문은 자동 포함</span>
     </div>
-    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
-      <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
-        <input type="checkbox" id="uni-hide-cancel" onchange="renderBgUnified()"> 취소 제외
-      </label>
-      <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px" title="결제 미완료 상태인 주문 제외 (status_seq=1 결제대기 또는 9 초안컨펌완료/결제대기, settle_date 비어있음)">
-        <input type="checkbox" id="uni-hide-pending" onchange="renderBgUnified()"> 결제대기 제외
-      </label>
-      <label id="uni-hide-processed-wrap" style="font-size:13px;cursor:pointer;display:none;align-items:center;gap:4px">
-        <input type="checkbox" id="uni-hide-processed" onchange="renderBgUnified()"> 수집완료 숨기기
-      </label>
-      <button class="btn" onclick="loadBgUnified()" title="목록 새로고침" style="padding:4px 10px;font-size:12px">🔄 새로고침</button>
-    </div>
+    <button class="btn" onclick="loadBgUnified()" title="목록 새로고침" style="padding:4px 10px;font-size:12px">🔄 새로고침</button>
   </div>
+
+  <!-- 2단 설정 — 성격이 다른 것끼리 따로 접는다. 접은 상태는 브라우저에 기억한다. -->
+  <details class="ord-sec" id="uni-sec-status">
+    <summary>주문상태 필터 <span class="ord-badge" id="uni-status-badge" style="display:none"></span></summary>
+    <div class="ord-sec-body">
+      <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
+          <input type="checkbox" id="uni-hide-cancel" onchange="renderBgUnified()"> 취소 제외
+        </label>
+        <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px" title="결제 미완료 상태인 주문 제외 (status_seq=1 결제대기 또는 9 초안컨펌완료/결제대기, settle_date 비어있음)">
+          <input type="checkbox" id="uni-hide-pending" onchange="renderBgUnified()"> 결제대기 제외
+        </label>
+        <label id="uni-hide-processed-wrap" style="font-size:13px;cursor:pointer;display:none;align-items:center;gap:4px">
+          <input type="checkbox" id="uni-hide-processed" onchange="renderBgUnified()"> 수집완료 숨기기
+        </label>
+      </div>
+    </div>
+  </details>
 
   <!-- 탭: 7단계 워크플로우 (미입력 → 출고완료) -->
   <div id="uni-tab-strip" style="display:flex;gap:2px;border-bottom:2px solid var(--gray-200);margin-bottom:12px;flex-wrap:wrap;overflow-x:auto">
@@ -3359,8 +3367,10 @@ nav.nav-loading a[href^="#"] {
   <!-- 현재 활성 탭 상태 (내부) -->
   <input type="hidden" id="uni-active-tab" value="unsubmitted">
 
-  <!-- 전체 탭 전용: 복사 컬럼 선택 UI (주문조회 페이지와 유사) -->
-  <div id="uni-all-col-selector" class="col-selector" style="display:none;margin-bottom:12px"></div>
+  <!-- 전체 탭 전용 구역 — 조건 필터(희망출고일·기타출고)와 주문사이트, 표시 컬럼을 각각 접는다 -->
+  <details class="ord-sec" id="uni-sec-cond" style="display:none">
+    <summary>조건 필터 <span class="ord-badge" id="uni-cond-badge" style="display:none"></span></summary>
+    <div class="ord-sec-body">
 
   <!-- 희망출고일 필터 (라디오) — 전체 탭 전용, row 단위 desired_ship_date 판정 -->
   <div id="uni-ship-date-filter" style="display:none;gap:14px;align-items:center;padding:9px 12px;background:#f8fafc;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:10px;font-size:13px;flex-wrap:wrap">
@@ -3389,6 +3399,13 @@ nav.nav-loading a[href^="#"] {
       <input type="radio" name="uni-special-shipping" value="normal" onchange="renderBgUnified()"> 정상만
     </label>
   </div>
+
+    </div>
+  </details>
+
+  <details class="ord-sec" id="uni-sec-site" style="display:none">
+    <summary>주문사이트 필터 <span class="ord-badge" id="uni-site-badge" style="display:none"></span></summary>
+    <div class="ord-sec-body">
 
   <!-- 주문사이트 필터 (체크박스 그룹) — 전체 탭 전용, 다른 탭에 영향 없음 -->
   <div id="uni-site-filter" style="display:none;gap:14px;align-items:center;padding:9px 12px;background:#f8fafc;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:10px;font-size:13px;flex-wrap:wrap">
@@ -3421,6 +3438,16 @@ nav.nav-loading a[href^="#"] {
     <button class="btn" onclick="document.querySelectorAll('#uni-site-filter input').forEach(c=>c.checked=true);renderBgUnified()" style="padding:3px 8px;font-size:11px" title="모든 사이트 체크">전체선택</button>
     <button class="btn" onclick="document.querySelectorAll('#uni-site-filter input').forEach(c=>c.checked=false);renderBgUnified()" style="padding:3px 8px;font-size:11px" title="모두 해제">해제</button>
   </div>
+
+    </div>
+  </details>
+
+  <details class="ord-sec" id="uni-sec-cols" style="display:none">
+    <summary>표시 컬럼 <span class="ord-badge" id="uni-cols-badge" style="display:none"></span></summary>
+    <div class="ord-sec-body">
+      <div id="uni-all-col-selector" class="col-selector" style="display:none;margin-bottom:0"></div>
+    </div>
+  </details>
 
   <!-- 정렬 옵션 — 입력완료 ~ 출고완료 탭 (미입력 제외) -->
   <div id="uni-sort-options" style="display:none;align-items:center;gap:10px;margin-bottom:10px;font-size:12px;color:var(--gray-600)">
@@ -4531,6 +4558,7 @@ function init() {
 
   buildColSelector();
   _ordSecRestore();
+  _uniSecRestore();
   // GNB 설정 적용 — 페이지 로드 직후 (네비 깜빡임 최소화). 실패해도 페이지 진행.
   fetchAndApplyNavConfig().catch(() => {});
   // 배경 패턴 복원 (localStorage)
@@ -19456,6 +19484,62 @@ async function loadBgUnified() {
 }
 
 /** 정보입력현황 탭 전환 (7단계 워크플로우) */
+// ── 정보입력현황 접이식 구역 (주문조회와 같은 방식) ──────────────
+//   접어 둔 채로도 무엇이 걸려 있는지 보이도록 제목 옆에 배지를 단다.
+const UNI_SEC_KEY = 'uni-sections-open';
+
+function _uniSecRestore() {
+  let open = {};
+  try { open = JSON.parse(localStorage.getItem(UNI_SEC_KEY) || '{}'); } catch {}
+  ['uni-sec-status', 'uni-sec-cond', 'uni-sec-site', 'uni-sec-cols'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.open = !!open[id];
+    el.addEventListener('toggle', () => {
+      let cur = {};
+      try { cur = JSON.parse(localStorage.getItem(UNI_SEC_KEY) || '{}'); } catch {}
+      cur[id] = el.open;
+      try { localStorage.setItem(UNI_SEC_KEY, JSON.stringify(cur)); } catch {}
+    });
+  });
+}
+
+function _uniUpdateBadges() {
+  const set = (id, text) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text || '';
+    el.style.display = text ? '' : 'none';
+  };
+  // 주문상태 — 켜진 제외 옵션 수 (숨겨진 '수집완료 숨기기' 는 세지 않는다)
+  const excl = ['uni-hide-cancel', 'uni-hide-pending', 'uni-hide-processed']
+    .filter(id => {
+      const el = document.getElementById(id);
+      if (!el || !el.checked) return false;
+      const wrap = el.closest('label');
+      return !wrap || wrap.style.display !== 'none';
+    }).length;
+  set('uni-status-badge', excl ? `제외 ${excl}` : '');
+
+  // 조건 — 희망출고일 / 기타출고 중 '전체' 가 아닌 것
+  const radio = (name) => document.querySelector(`input[name="${name}"]:checked`)?.value || 'all';
+  const conds = [];
+  const shipV = radio('uni-ship-date');
+  if (shipV !== 'all') conds.push(shipV === 'filled' ? '희망출고일 입력만' : '희망출고일 미입력만');
+  const spV = radio('uni-special-shipping');
+  if (spV !== 'all') conds.push(spV === 'special' ? '기타출고만' : '정상만');
+  set('uni-cond-badge', conds.join(' · '));
+
+  // 사이트 — 전부 켠 기본 상태에서는 배지를 숨긴다
+  const sites = [...document.querySelectorAll('#uni-site-filter input[data-site]')];
+  const on = sites.filter(cb => cb.checked).length;
+  set('uni-site-badge', (sites.length && on < sites.length) ? `${on}/${sites.length}` : '');
+
+  // 컬럼 — 켜진 개수
+  const cols = [...document.querySelectorAll('#uni-all-col-selector input[data-key]')];
+  set('uni-cols-badge', cols.length ? `${cols.filter(c => c.checked).length}/${cols.length}` : '');
+}
+
 function switchUniTab(tab) {
   document.getElementById('uni-active-tab').value = tab;
   document.querySelectorAll('#uni-tab-strip .uni-tab').forEach(btn => {
@@ -19472,7 +19556,9 @@ function switchUniTab(tab) {
     document.getElementById('uni-loading').style.display = 'none';
     ['uni-site-filter', 'uni-ship-date-filter', 'uni-special-shipping-filter',
      'uni-submitted-subfilter', 'uni-hide-processed-wrap', 'uni-sort-options',
-     'uni-all-col-selector'].forEach(id => {
+     'uni-all-col-selector',
+     // 접이식 구역도 함께 — 안쪽만 숨기면 빈 제목줄이 남는다
+     'uni-sec-cond', 'uni-sec-site', 'uni-sec-cols'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = 'none';
     });
@@ -19513,6 +19599,12 @@ function switchUniTab(tab) {
     if (tab === 'all' && !colSelectorEl.innerHTML) buildUniAllColSelector();
     colSelectorEl.style.display = (tab === 'all') ? '' : 'none';
   }
+  // 접이식 구역 — 전체 탭에서만 노출. 안쪽 요소의 display 는 기존 로직이 계속 관리한다
+  //   (renderBgUnified 가 그 값으로 '필터가 살아 있는가' 를 판정하는 곳이 있어 건드리지 않는다).
+  ['uni-sec-cond', 'uni-sec-site', 'uni-sec-cols'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = (tab === 'all') ? '' : 'none';
+  });
   const btnManualOrder = document.getElementById('uni-btn-manual-order');
   if (btnManualOrder) btnManualOrder.style.display = (tab === 'all') ? 'none' : '';
   // 주문사이트 필터 UI — 전체 탭에서만 노출 (다른 탭과 격리)
@@ -19527,6 +19619,7 @@ function switchUniTab(tab) {
   // 정렬 옵션 — 미입력 외 모든 탭 노출. 기본 정렬 힌트는 탭별로 다름.
   const sortOpts = document.getElementById('uni-sort-options');
   if (sortOpts) sortOpts.style.display = (tab !== 'unsubmitted') ? 'flex' : 'none';
+  _uniUpdateBadges();
   const hintEl = document.getElementById('uni-sort-default-hint');
   if (hintEl) {
     if (tab === 'submitted') {
@@ -19623,6 +19716,7 @@ function toggleRfmList() {
 }
 
 function renderBgUnified() {
+  _uniUpdateBadges();
   const hideCancel = document.getElementById('uni-hide-cancel')?.checked;
   const hidePending = document.getElementById('uni-hide-pending')?.checked;
   // 탭 상태 = 필터 소스 (submitted / unsubmitted). 기존 '전체' 옵션은 제거됨.
