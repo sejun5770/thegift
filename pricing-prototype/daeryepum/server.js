@@ -14718,7 +14718,22 @@ const server = http.createServer(async (req, res) => {
                 inbound_unit_cost: num(ps.inbound_unit_cost),
               };
               const pIds = Array.isArray(m) ? m : (m.product_ids || []);
-              for (const c of pIds) byProduct.set(String(c).trim(), info);
+              // 같은 등록상품ID 를 두 상품이 등록하면 그 ID 만으로는 어느 상품인지 정할 수 없다.
+              //   예전엔 나중 것이 조용히 이겨(Map.set 덮어쓰기) 화이트 주문이 통째로 블루 코드로
+              //   들어갔다 (TGJSD04D1/D2 가 16191414384 를 공유, 2026-08-18 발견).
+              //   그래서 모호한 ID 는 매핑하지 않고 표시해 옵션ID 등록을 유도한다.
+              for (const c of pIds) {
+                const k = String(c).trim();
+                if (byProduct.has(k)) {
+                  const prev = byProduct.get(k);
+                  if (prev && prev.code !== info.code) {
+                    prev.ambiguous = true;
+                    prev.rivals = [...new Set([...(prev.rivals || [prev.code]), info.code])];
+                  }
+                } else {
+                  byProduct.set(k, info);
+                }
+              }
               for (const c of (Array.isArray(m) ? [] : (m.option_ids || []))) {
                 byOption.set(String(c).trim(), info);
               }
@@ -14731,9 +14746,18 @@ const server = http.createServer(async (req, res) => {
               const vid = String(r.vendor_item_id || '').trim();
               const spid = String(r.seller_product_id || '').trim() || optToProduct.get(vid) || '';
               if (!r.seller_product_id && spid) r.seller_product_id = spid;   // 화면에 근거를 남긴다
-              const hit = byOption.get(vid) || byProduct.get(spid);
+              // 옵션ID 매핑이 우선 — 등록상품ID 는 옵션을 구분하지 못한다
+              const byOpt = byOption.get(vid);
+              const byProd = byProduct.get(spid);
+              // 등록상품ID 가 여러 상품에 걸쳐 있으면 그걸로는 확정할 수 없다.
+              //   틀린 코드로 집계하느니 미매핑으로 두고 사유를 알린다.
+              const ambiguous = !byOpt && !!byProd?.ambiguous;
+              const hit = byOpt || (ambiguous ? null : byProd);
               r.internal_product_code = hit?.code || null;
               r.sticker_code = hit?.sticker || null;
+              r.map_conflict = ambiguous
+                ? `등록상품ID ${spid} 를 ${(byProd.rivals || []).join(' / ')} 가 함께 쓰고 있어 옵션ID 등록이 필요합니다`
+                : null;
               // 주문수량(엑셀 그대로) × 판매단위 = 상품수량(실제 출고 개수).
               //   미매핑이면 단위를 알 수 없어 1 로 둔다 — 주문수량과 같아진다.
               r.sales_unit = hit?.unit || 1;

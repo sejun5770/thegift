@@ -18155,6 +18155,9 @@ function renderRgLines() {
   const net = t.settle - t.inout - t.ship;
   // 상품설정에 채널 코드가 안 들어간 건 — 이게 남아 있으면 상품코드·스티커가 빈다
   const unmapped = _rgLines.filter(r => !r.internal_product_code).length;
+  // 등록상품ID 를 여러 상품이 공유해 확정 불가한 건 — 원인이 달라 따로 센다
+  const conflicts = _rgLines.filter(r => r.map_conflict);
+  const conflictMsg = conflicts.length ? conflicts[0].map_conflict : '';
   // 리포트엔 판매자배송도 섞여 있다 — 그쪽은 쿠팡 채널에서 집계되므로 여기 매출에서 빠진다 (064)
   const sellerCnt = _rgLines.filter(r => r.fulfillment === 'seller').length;
   const unknownCnt = _rgLines.filter(r => !r.fulfillment).length;
@@ -18171,6 +18174,9 @@ function renderRgLines() {
         : '')
       + ` <span style="color:var(--gray-400)" title="쿠팡 리포트의 정산대상액 — 매출−수수료까지만 반영된 원본 값입니다. 물류비를 뺀 값이 위의 정산금액입니다.">(정산대상액 ${fmtNum(Math.round(t.settle))})</span>`
       + (unmapped ? ` · <span style="color:#b45309">미매핑 ${fmtNum(unmapped)}건</span>` : '')
+      + (conflicts.length
+        ? ` · <span style="color:#dc2626" title="${esc(conflictMsg)}">코드충돌 ${fmtNum(conflicts.length)}건</span>`
+        : '')
       + (sellerCnt ? ` · <span style="color:var(--gray-500)" title="판매자배송 주문 — 쿠팡 채널에서 집계되므로 로켓그로스 매출에서는 빠집니다">판매자배송 ${fmtNum(sellerCnt)}건</span>` : '')
       + (unknownCnt ? ` · <span style="color:#b45309" title="쿠팡 주문 정보가 없어 판매 방식을 확정하지 못했습니다. 그 기간까지 '주문 가져오기' 를 돌리면 채워집니다. 지금은 로켓그로스 매출에 포함됩니다">방식 미확인 ${fmtNum(unknownCnt)}건</span>` : '');
   }
@@ -18228,9 +18234,11 @@ function renderRgLines() {
         <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);white-space:nowrap">${r.paid_date ? esc(r.paid_date) : `<span style="${miss}">미등록</span>`}</td>
         <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);white-space:nowrap">${r.delivered_date ? esc(r.delivered_date) : `<span style="${miss}">미등록</span>`}</td>
         <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px;white-space:nowrap"
-            title="등록상품ID ${esc(r.seller_product_id || '-')} / 옵션ID ${esc(r.vendor_item_id || '-')}">${
+            title="${esc(r.map_conflict || `등록상품ID ${r.seller_product_id || '-'} / 옵션ID ${r.vendor_item_id || '-'}`)}">${
           r.internal_product_code ? esc(r.internal_product_code)
-            : `<span style="${miss}">미매핑</span>`}</td>
+            : (r.map_conflict
+              ? '<span style="color:#dc2626">코드충돌</span>'
+              : `<span style="${miss}">미매핑</span>`)}</td>
         <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px;white-space:nowrap">${
           r.sticker_code ? esc(r.sticker_code) : '<span style="color:var(--gray-300)">-</span>'}</td>
         <td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.product_name || '')}">${
