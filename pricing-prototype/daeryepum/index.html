@@ -748,7 +748,6 @@ nav.nav-loading a[href^="#"] {
               <th style="padding:8px 10px;width:56px">순위</th>
               <th style="padding:8px 10px;width:64px">변동</th>
               <th style="padding:8px 10px">상품명</th>
-              <th style="padding:8px 10px;width:140px">채널</th>
               <th style="padding:8px 10px;width:100px;text-align:right">판매수량</th>
               <th style="padding:8px 10px;width:130px;text-align:right">매출액</th>
               <th style="padding:8px 10px;width:80px;text-align:right">비중%</th>
@@ -6749,16 +6748,15 @@ async function loadProductRanking() {
       prevAll.filter(p => (p.scope || 'own') === g.key).sort(sortFn)
         .forEach((p, i) => prevRankByName.set(String(p.name || '').trim().toLowerCase(), i + 1));
       const totalBase = prods.reduce((s, p) => s + (Number(p[sortBy]) || 0), 0);
-      html += `<tr><td colspan="8" style="padding:9px 10px;background:${g.color}14;border-top:2px solid ${g.color};font-weight:700;color:${g.color};font-size:13px">${g.title} <span style="font-weight:400;color:var(--gray-400);font-size:11px">· ${prods.length}개 상품</span></td></tr>`;
+      html += `<tr><td colspan="7" style="padding:9px 10px;background:${g.color}14;border-top:2px solid ${g.color};font-weight:700;color:${g.color};font-size:13px">${g.title} <span style="font-weight:400;color:var(--gray-400);font-size:11px">· ${prods.length}개 상품</span></td></tr>`;
       if (!prods.length) {
-        html += `<tr><td colspan="8" style="padding:14px;text-align:center;color:var(--gray-400);font-size:12px">해당 기간 판매 없음</td></tr>`;
+        html += `<tr><td colspan="7" style="padding:14px;text-align:center;color:var(--gray-400);font-size:12px">해당 기간 판매 없음</td></tr>`;
         continue;
       }
       html += prods.map((p, i) => {
         const rank = i + 1;
         const medal = rank <= 3 ? ['🥇', '🥈', '🥉'][rank - 1] : String(rank);
         const share = totalBase > 0 ? (Number(p[sortBy]) || 0) / totalBase * 100 : 0;
-        const channels = (p.channels || []).join(', ');
         const nm = String(p.name || '').trim().toLowerCase();
         const prevRank = prevRankByName.has(nm) ? prevRankByName.get(nm) : null;
         const gi = allProducts.indexOf(p);
@@ -6767,7 +6765,6 @@ async function loadProductRanking() {
           <td style="padding:8px 10px;text-align:center;font-weight:600">${medal}</td>
           <td style="padding:8px 10px;text-align:center;font-size:12px">${_prChangeBadge(rank, prevRank)}</td>
           <td style="padding:8px 10px">${esc(p.name || '-')}</td>
-          <td style="padding:8px 10px;color:var(--gray-500);font-size:12px">${esc(channels)}</td>
           <td style="padding:8px 10px;text-align:right">${(Number(p.qty) || 0).toLocaleString('ko-KR')}</td>
           <td style="padding:8px 10px;text-align:right">${fmtKRW(p.revenue)}</td>
           <td style="padding:8px 10px;text-align:right;color:var(--gray-600)">${share.toFixed(1)}%</td>
