@@ -1345,6 +1345,8 @@ nav.nav-loading a[href^="#"] {
         <span style="font-weight:400;font-size:11px;color:var(--gray-500)">(행을 직접 추가해 판매단위별 마진 비교 · 저장됨)</span></div>
       <div style="flex:1"></div>
       <button class="btn" style="padding:5px 12px;font-size:12px" onclick="addRgPlanRow()">＋ 행 추가</button>
+      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="sortRgPlan()"
+        title="상품 · 판매단위 순으로 행을 정렬합니다 (편집 중에는 자동 정렬하지 않습니다)">↕ 정렬</button>
       <button class="btn btn-primary" id="rgp-save-btn" style="padding:5px 12px;font-size:12px" onclick="saveRgPlan()">💾 저장</button>
       <button class="btn" style="padding:5px 12px;font-size:12px" onclick="loadRgPlan()"
         title="저장된 행과 실적 기본값을 다시 불러옵니다 (저장 안 한 새 행은 유지)">🔄 새로고침</button>
@@ -19519,12 +19521,19 @@ function rgpApplyDefaults(key, silent) {
   renderRgPlan();
 }
 
+const RGP_TEXT_FIELDS = ['product_name', 'plan_label', 'memo'];
+
 function rgpSet(key, field, raw) {
   const r = _rgPlans.find(x => _rgpKey(x) === key);
   if (!r) return;
-  if (field === 'product_name' || field === 'plan_label' || field === 'memo') {
+  if (RGP_TEXT_FIELDS.includes(field)) {
+    // 글자 입력마다 표를 다시 그리면 커서가 튄다. 모델만 고치고 요약줄만 갱신한다.
+    //   중복/미저장 배지는 칸을 벗어날 때(onchange) 다시 그린다.
     r[field] = String(raw);
-  } else {
+    _rgpRefreshSummary();
+    return;
+  }
+  {
     const v = _rgNumIn(raw);
     if (v === undefined) { r['_bad_' + field] = true; renderRgPlan(); return; }   // 숫자로 못 읽음
     delete r['_bad_' + field];
@@ -19545,6 +19554,15 @@ function rgpSet(key, field, raw) {
   }
 }
 
+/** 상품 · 판매단위 순 정렬 — 편집 중 자동으로 하면 행이 튀므로 버튼으로만 부른다 */
+function sortRgPlan() {
+  _rgPlans.sort((a, b) =>
+    String(a.product_name || '').localeCompare(String(b.product_name || ''))
+    || (a.sales_unit || 0) - (b.sales_unit || 0)
+    || String(a.plan_label || '').localeCompare(String(b.plan_label || '')));
+  renderRgPlan();
+}
+
 function _rgpCompute(r) {
   return _rgMargin({
     price: r.price,
@@ -19557,15 +19575,14 @@ function _rgpCompute(r) {
   });
 }
 
-function renderRgPlan() {
-  const $w = document.getElementById('rgp-table-wrap');
+/** 요약줄 + 저장 버튼만 갱신 (표는 건드리지 않는다) */
+function _rgpRefreshSummary() {
   const $s = document.getElementById('rgp-summary');
-  if (!$w) return;
+  if (!$s) return;
   const dirty = _rgpDirtyCount();
   const dupN = _rgpDupKeys().size;
   const $btn = document.getElementById('rgp-save-btn');
   if ($btn) { $btn.textContent = dirty ? `💾 저장 (${dirty})` : '💾 저장'; $btn.disabled = !dirty; }
-
   const pr = _rgPlanDefaults?.paid_range;
   $s.innerHTML = `행 <b>${_rgPlans.length}</b>개`
     + (dirty ? ` · <span style="color:#dc2626;font-weight:600">저장 안 됨 ${dirty}개</span>` : '')
@@ -19573,6 +19590,14 @@ function renderRgPlan() {
           : ` · <span style="color:#b45309">물류비 유료 청구 실적이 없습니다 — 값을 직접 넣어야 합니다</span>`)
     + ` · <span style="color:var(--gray-500)">${_rgVatOn() ? '공급가(부가세 제외) 기준' : '부가세 미반영'}</span>`
     + (dupN ? ` · <span style="color:#dc2626;font-weight:600">조합 중복 ${dupN}행 — 안 이름을 다르게 지어주세요</span>` : '');
+}
+
+function renderRgPlan() {
+  const $w = document.getElementById('rgp-table-wrap');
+  const $s = document.getElementById('rgp-summary');
+  if (!$w) return;
+  _rgpRefreshSummary();
+  const dupKeys0 = _rgpDupKeys();
 
   if (!_rgPlans.length) {
     $w.innerHTML = '<div style="padding:16px;color:var(--gray-400);font-size:12px">'
@@ -19597,15 +19622,15 @@ function renderRgPlan() {
     `<input type="text" value="${esc(r[field] || '')}" placeholder="${esc(ph || '')}"
       data-rgpkey="${esc(_rgpKey(r))}" data-rgpfield="${field}"
       oninput="rgpSet(this.dataset.rgpkey, this.dataset.rgpfield, this.value)"
+      onchange="renderRgPlan()"
       style="width:${width}px;padding:3px 5px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">`;
 
-  const dupKeys = _rgpDupKeys();
+  const dupKeys = dupKeys0;
   const prods = _rgPlanDefaults?.products || [];
-  // 같은 상품끼리 붙여 보여준다 — 판매단위 비교가 이 도구의 목적
-  const sorted = [..._rgPlans].sort((a, b) =>
-    String(a.product_name || '').localeCompare(String(b.product_name || ''))
-    || (a.sales_unit || 0) - (b.sales_unit || 0)
-    || String(a.plan_label || '').localeCompare(String(b.plan_label || '')));
+  // ⚠ 여기서 정렬하지 않는다. 렌더는 매 입력마다 도는데 정렬까지 하면
+  //   상품명을 한 글자 칠 때마다 행이 자리를 옮겨 편집이 불가능해진다.
+  //   정렬은 불러올 때(서버가 상품·판매단위 순으로 준다)와 ↕ 버튼에서만.
+  const sorted = _rgPlans;
 
   $w.innerHTML = `<table style="width:100%;font-size:12px;border-collapse:collapse;min-width:1720px">
     <thead><tr style="background:var(--gray-50)">
