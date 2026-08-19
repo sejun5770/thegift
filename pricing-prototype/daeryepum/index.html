@@ -19369,6 +19369,27 @@ const RGP_FIELDS = ['product_code', 'product_name', 'sales_unit', 'plan_label', 
 
 function _rgpKey(r) { return r.id || r._tmp; }
 
+/** 070 의 plan_key 생성컬럼과 같은 규칙. 저장 전에 중복을 잡기 위해 화면에서도 만든다. */
+function _rgpPlanKey(r) {
+  const c = String(r.product_code || '').trim();
+  const head = c || ('이름:' + String(r.product_name || '').trim());
+  return `${head}|${Math.max(1, parseInt(r.sales_unit, 10) || 1)}|${String(r.plan_label || '기본안').trim()}`;
+}
+
+/** 같은 (상품, 판매단위, 안) 조합인 행들의 화면 키 집합.
+ *   한 요청에 같은 plan_key 가 둘 이상이면 Postgres upsert 가 21000 으로 죽는다. */
+function _rgpDupKeys() {
+  const byPlan = new Map();
+  for (const r of _rgPlans) {
+    const pk = _rgpPlanKey(r);
+    if (!byPlan.has(pk)) byPlan.set(pk, []);
+    byPlan.get(pk).push(_rgpKey(r));
+  }
+  const dup = new Set();
+  for (const ks of byPlan.values()) if (ks.length > 1) ks.forEach(k => dup.add(k));
+  return dup;
+}
+
 function _rgpIsDirty(r) {
   if (!r.id) return true;                       // 새 행은 항상 미저장
   const b = _rgPlanSaved[r.id];
@@ -19427,8 +19448,17 @@ function _rgpDefaultsFor(code) {
 
 function addRgPlanRow(copyFrom) {
   const src = copyFrom ? _rgPlans.find(r => _rgpKey(r) === copyFrom) : null;
+  const uniqLabel = (base, code, name, unit) => {
+    let label = base, n = 2;
+    const taken = new Set(_rgPlans.map(_rgpPlanKey));
+    while (taken.has(_rgpPlanKey({ product_code: code, product_name: name, sales_unit: unit, plan_label: label }))) {
+      label = `${base} ${n++}`;
+    }
+    return label;
+  };
   const row = src
-    ? { ...src, id: null, _tmp: 'new' + (++_rgPlanSeq), plan_label: (src.plan_label || '기본안') + ' 사본' }
+    ? { ...src, id: null, _tmp: 'new' + (++_rgPlanSeq),
+        plan_label: uniqLabel((src.plan_label || '기본안') + ' 사본', src.product_code, src.product_name, src.sales_unit) }
     : {
       _tmp: 'new' + (++_rgPlanSeq), id: null,
       product_code: null, product_name: '', sales_unit: 1, plan_label: '기본안',
@@ -19532,6 +19562,7 @@ function renderRgPlan() {
   const $s = document.getElementById('rgp-summary');
   if (!$w) return;
   const dirty = _rgpDirtyCount();
+  const dupN = _rgpDupKeys().size;
   const $btn = document.getElementById('rgp-save-btn');
   if ($btn) { $btn.textContent = dirty ? `💾 저장 (${dirty})` : '💾 저장'; $btn.disabled = !dirty; }
 
@@ -19540,7 +19571,8 @@ function renderRgPlan() {
     + (dirty ? ` · <span style="color:#dc2626;font-weight:600">저장 안 됨 ${dirty}개</span>` : '')
     + (pr ? ` · <span style="color:var(--gray-500)">물류비 유료 청구 실적 ${pr.from} ~ ${pr.to}</span>`
           : ` · <span style="color:#b45309">물류비 유료 청구 실적이 없습니다 — 값을 직접 넣어야 합니다</span>`)
-    + ` · <span style="color:var(--gray-500)">${_rgVatOn() ? '공급가(부가세 제외) 기준' : '부가세 미반영'}</span>`;
+    + ` · <span style="color:var(--gray-500)">${_rgVatOn() ? '공급가(부가세 제외) 기준' : '부가세 미반영'}</span>`
+    + (dupN ? ` · <span style="color:#dc2626;font-weight:600">조합 중복 ${dupN}행 — 안 이름을 다르게 지어주세요</span>` : '');
 
   if (!_rgPlans.length) {
     $w.innerHTML = '<div style="padding:16px;color:var(--gray-400);font-size:12px">'
@@ -19567,6 +19599,7 @@ function renderRgPlan() {
       oninput="rgpSet(this.dataset.rgpkey, this.dataset.rgpfield, this.value)"
       style="width:${width}px;padding:3px 5px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">`;
 
+  const dupKeys = _rgpDupKeys();
   const prods = _rgPlanDefaults?.products || [];
   // 같은 상품끼리 붙여 보여준다 — 판매단위 비교가 이 도구의 목적
   const sorted = [..._rgPlans].sort((a, b) =>
@@ -19601,6 +19634,7 @@ function renderRgPlan() {
       const k = _rgpKey(r);
       const m = _rgpCompute(r);
       const isDirty = _rgpIsDirty(r);
+      const isDup = dupKeys.has(k);
       const estBadge = r.fulfill_estimated
         ? `<span style="font-size:10px;color:#b45309;margin-left:4px" title="${esc(r.fulfill_basis || '')}">추정</span>` : '';
       const basisTip = r.fulfill_basis || '';
@@ -19615,11 +19649,12 @@ function renderRgPlan() {
         <div style="font-size:10px;color:${isDirty ? '#dc2626' : 'var(--gray-400)'};margin-top:2px">
           ${isDirty ? '● 미저장' : '✓ 저장됨'}${estBadge}
           ${basisTip ? `<span title="${esc(basisTip)}" style="cursor:help"> ⓘ</span>` : ''}
+          ${isDup ? '<span style="color:#dc2626" title="같은 (상품, 판매단위, 안) 조합이 다른 행에도 있습니다 — 안 이름을 다르게 지어야 저장됩니다"> ⚠ 조합 중복</span>' : ''}
         </div>`;
       return `<tr style="border-bottom:1px solid var(--gray-100)">
         <td style="padding:6px 8px;min-width:200px">${prodCell}</td>
         <td style="padding:6px 8px;${R}">${inp(r, 'sales_unit', 1, 56, '판매단위 — 낱개 몇 개가 한 주문인가')}</td>
-        <td style="padding:6px 8px">${txt(r, 'plan_label', 90, '기본안')}</td>
+        <td style="padding:6px 8px;${isDup ? 'background:#fef2f2' : ''}">${txt(r, 'plan_label', 90, '기본안')}</td>
         <td style="padding:6px 8px;${R}background:#fefce8">${inp(r, 'price', 100, 88)}</td>
         <td style="padding:6px 8px;${R}background:#f5f9ff">${inp(r, 'unit_cost', 10, 78)}</td>
         <td style="padding:6px 8px;${R}background:#f5f9ff">${inp(r, 'inbound_cost', 10, 70)}</td>
@@ -19657,6 +19692,16 @@ async function saveRgPlan() {
   if (!dirty.length) { showToast('바뀐 값이 없습니다'); return; }
   const noName = dirty.filter(r => !String(r.product_name || '').trim());
   if (noName.length) { alert(`상품명이 빈 행이 ${noName.length}개 있습니다 — 이름을 넣어야 저장됩니다.`); return; }
+  // (상품, 판매단위, 안) 이 겹치면 DB 가 같은 행을 두 번 고치려다 실패한다. 미리 막고 어디가 겹쳤는지 알려준다.
+  const dupKeys = _rgpDupKeys();
+  if (dupKeys.size) {
+    const names = [...new Set(_rgPlans.filter(r => dupKeys.has(_rgpKey(r)))
+      .map(r => `${r.product_name || '(이름 없음)'} / ${r.sales_unit}개 / ${r.plan_label || '기본안'}`))];
+    const NL = String.fromCharCode(10);
+    alert(['같은 (상품, 판매단위, 안) 조합이 겹칩니다:', '', ...names, '',
+      "같은 상품·판매단위를 여러 안으로 비교하려면 '안' 이름을 다르게 지어주세요 (예: 기본안 / 인상안)."].join(NL));
+    return;
+  }
   const rows = dirty.map(r => ({
     id: r.id || undefined,
     product_code: r.product_code || null,

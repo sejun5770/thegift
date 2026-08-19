@@ -446,6 +446,14 @@ const PLAN_NUM_FIELDS = [
   'deduct_rate', 'target_margin_rate',
 ];
 
+/** 070 의 plan_key 생성컬럼과 같은 규칙 — 한 요청 안의 중복을 미리 잡기 위해 JS 로도 만든다.
+ *    COALESCE(NULLIF(btrim(product_code),''), '이름:'||btrim(product_name)) || '|' || sales_unit || '|' || btrim(plan_label) */
+function _planKey(code, name, unit, label) {
+  const c = String(code || '').trim();
+  const head = c || ('이름:' + String(name || '').trim());
+  return `${head}|${unit}|${String(label || '기본안').trim()}`;
+}
+
 function _planNum(v) {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(String(v).replace(/[,\s원]/g, ''));
@@ -493,6 +501,20 @@ async function saveUnitPlans(rows, by = null) {
     recs.push(rec);
   }
   if (!recs.length) return { saved: 0 };
+  // 한 요청에 plan_key 가 같은 행이 둘 이상이면 Postgres 가
+  //   'ON CONFLICT DO UPDATE command cannot affect row a second time' (21000) 로 죽는다.
+  //   원문 대신 어느 조합이 겹쳤는지 알려준다 — 화면에서 안 이름만 바꾸면 되기 때문.
+  const seen = new Map();
+  const dups = [];
+  for (const rec of recs) {
+    const k = _planKey(rec.product_code, rec.product_name, rec.sales_unit, rec.plan_label);
+    if (seen.has(k)) dups.push(`${rec.product_name} / ${rec.sales_unit}개 / ${rec.plan_label}`);
+    else seen.set(k, rec);
+  }
+  if (dups.length) {
+    throw new Error(`같은 조합이 여러 행에 있습니다 — ${[...new Set(dups)].join(', ')}. `
+      + `같은 상품·판매단위를 여러 안으로 비교하려면 '안' 이름을 다르게 지어주세요.`);
+  }
   const res = await fetch(`${REST}/coupang_rg_unit_plan?on_conflict=plan_key`, {
     method: 'POST',
     headers: { ...HDR, Prefer: 'resolution=merge-duplicates,return=representation' },
