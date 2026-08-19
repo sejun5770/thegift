@@ -442,7 +442,7 @@ async function saveMarginSims(rows, by = null) {
 //   아직 없는 판매단위를 설계해 마진을 비교하는 표. 069(실재 옵션 실적)와 축이 다르다.
 
 const PLAN_NUM_FIELDS = [
-  'price', 'unit_cost', 'inbound_cost', 'inout_fee', 'ship_fee',
+  'price', 'list_price_per_item', 'unit_cost', 'inbound_cost', 'inout_fee', 'ship_fee',
   'commission_rate', 'deduct_rate', 'target_margin_rate',
 ];
 

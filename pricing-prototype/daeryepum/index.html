@@ -19429,7 +19429,7 @@ let _rgPlanSeq = 0;
 // price_per_item 은 price 에서 파생되는 표시용이라 dirty 판정에 넣지 않는다
 const RGP_FIELDS = ['product_code', 'product_name', 'sales_unit', 'plan_label', 'price',
   'unit_cost', 'inbound_cost', 'inout_fee', 'ship_fee', 'etc_cost',
-  'commission_rate', 'deduct_rate', 'target_margin_rate', 'memo'];
+  'list_price_per_item', 'commission_rate', 'deduct_rate', 'target_margin_rate', 'memo'];
 
 function _rgpKey(r) { return r.id || r._tmp; }
 
@@ -19483,7 +19483,7 @@ async function loadRgPlan() {
       r.deduct_rate = row.deduct_rate == null ? null : Number(row.deduct_rate) * 100;      // 화면은 %
       r.commission_rate = row.commission_rate == null ? null : Number(row.commission_rate) * 100;
       r.target_margin_rate = row.target_margin_rate == null ? null : Number(row.target_margin_rate) * 100;
-      for (const f of ['price', 'unit_cost', 'inbound_cost', 'inout_fee', 'ship_fee', 'etc_cost', 'sales_unit']) {
+      for (const f of ['price', 'list_price_per_item', 'unit_cost', 'inbound_cost', 'inout_fee', 'ship_fee', 'etc_cost', 'sales_unit']) {
         r[f] = row[f] == null ? null : Number(row[f]);
       }
       // 개당 판매가는 저장하지 않고 판매가에서 파생한다 — 정본을 둘로 두면 어긋난다
@@ -19530,7 +19530,7 @@ function addRgPlanRow(copyFrom) {
     : {
       _tmp: 'new' + (++_rgPlanSeq), id: null,
       product_code: null, product_name: '', sales_unit: 1, plan_label: '기본안',
-      price: null, price_per_item: null, unit_cost: null, inbound_cost: null,
+      price: null, price_per_item: null, list_price_per_item: null, unit_cost: null, inbound_cost: null,
       commission_rate: null,
       inout_fee: null, ship_fee: null, etc_cost: 0,
       deduct_rate: null, target_margin_rate: null, memo: null,
@@ -19643,6 +19643,13 @@ function sortRgPlan() {
   renderRgPlan();
 }
 
+/** 정가 = 개당 정가 × 판매단위. 판매가와 같은 방식으로 곱한다 (마진 계산에는 쓰지 않는다). */
+function _rgpListPrice(r) {
+  const per = Number(r.list_price_per_item);
+  if (!Number.isFinite(per)) return null;
+  return per * Math.max(1, Number(r.sales_unit) || 1);
+}
+
 function _rgpCompute(r) {
   return _rgMargin({
     price: r.price,
@@ -19715,9 +19722,12 @@ function renderRgPlan() {
 
   $w.innerHTML = `<table style="width:100%;font-size:12px;border-collapse:collapse;min-width:1720px">
     <thead><tr style="background:var(--gray-50)">
+      ${th('', 'text-align:center;width:60px')}
       ${th('상품', 'text-align:left')}
       ${th('판매단위', R, '이 1주문에 들어가는 상품 낱개 수')}
       ${th('안', 'text-align:left', '같은 판매단위의 여러 가격안을 비교할 때 이름을 다르게')}
+      ${th('개당 정가', R + 'background:#f6f6f9', '낱개 1개 정가 (할인 전, 부가세 포함). 정가 = 개당 정가 × 판매단위')}
+      ${th('정가', R + 'background:#f6f6f9', '개당 정가 × 판매단위. 마진 계산에는 쓰지 않고 판매가와 비교해 할인율을 보여줍니다')}
       ${th('개당 판매가', R + 'background:#fef9c3', '낱개 1개 가격 (부가세 포함). 여기를 넣으면 판매가 = 개당 × 판매단위 로 자동 계산됩니다')}
       ${th('판매가(VAT 포함)', R + 'background:#fef9c3', '원/주문 1건 (= 판매단위 1개를 파는 가격). 쿠팡 판매가 그대로 부가세 포함으로 넣으세요. 쿠팡지원할인이 있으면 차감 후 금액입니다')}
       ${th('부가세', R + 'background:#fef9c3', '판매가 − 공급가')}
@@ -19754,22 +19764,36 @@ function renderRgPlan() {
         <select data-rgpkey="${esc(k)}" onchange="rgpPickProduct(this.dataset.rgpkey, this.value)"
                 style="width:190px;padding:3px 4px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
           <option value="">— 직접 입력 (신상품·미등록) —</option>
+          ${(r.product_code && !prods.some(p => p.product_id === r.product_code))
+            ? `<option value="${esc(r.product_code)}" selected>${esc(r.product_name || r.product_code)} (설정에 없음)</option>` : ''}
           ${prods.map(p => `<option value="${esc(p.product_id)}"${r.product_code === p.product_id ? ' selected' : ''}>`
             + `${esc(p.product_name)}${p.unit_cost == null ? ' ⚠원가없음' : ''}</option>`).join('')}
         </select>
-        ${r.product_code
-          ? `<div style="margin-top:3px;font-size:11px;color:var(--gray-500);max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
-               title="${esc(r.product_name || '')}">${esc(r.product_name || '')}</div>`
-          : `<div style="margin-top:3px">${txt(r, 'product_name', 190, '상품명 직접 입력')}</div>`}
+        ${r.product_code ? '' : `<div style="margin-top:3px">${txt(r, 'product_name', 190, '상품명 직접 입력')}</div>`}
         <div style="font-size:10px;color:${isDirty ? '#dc2626' : 'var(--gray-400)'};margin-top:2px">
           ${isDirty ? '● 미저장' : '✓ 저장됨'}${estBadge}
           ${basisTip ? `<span title="${esc(basisTip)}" style="cursor:help"> ⓘ</span>` : ''}
           ${isDup ? '<span style="color:#dc2626" title="같은 (상품, 판매단위, 안) 조합이 다른 행에도 있습니다 — 안 이름을 다르게 지어야 저장됩니다"> ⚠ 조합 중복</span>' : ''}
         </div>`;
       return `<tr style="border-bottom:1px solid var(--gray-100)">
+        <td style="padding:6px 4px;text-align:center;white-space:nowrap;vertical-align:top">
+          <button onclick="addRgPlanRow('${esc(k)}')" title="이 행을 복사해 다른 판매단위 안 만들기"
+            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 5px">⧉</button>
+          <button onclick="removeRgPlanRow('${esc(k)}')" title="행 삭제"
+            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 5px;color:#dc2626;margin-left:2px">🗑</button>
+        </td>
         <td style="padding:6px 8px;min-width:200px">${prodCell}</td>
         <td style="padding:6px 8px;${R}">${inp(r, 'sales_unit', 1, 56, '판매단위 — 낱개 몇 개가 한 주문인가')}</td>
         <td style="padding:6px 8px;${isDup ? 'background:#fef2f2' : ''}">${txt(r, 'plan_label', 90, '기본안')}</td>
+        <td style="padding:6px 8px;${R}background:#fafafc">${inp(r, 'list_price_per_item', 10, 78, '낱개 1개 정가 (할인 전) — 판매단위를 곱해 정가가 됩니다')}</td>
+        <td style="padding:6px 8px;${R}background:#fafafc;color:var(--gray-600)">${won(_rgpListPrice(r))}
+          ${(() => {
+            const lp = _rgpListPrice(r), pv = Number(r.price);
+            if (lp == null || !isFinite(pv) || lp <= 0 || pv <= 0) return '';
+            const dc = Math.round((1 - pv / lp) * 1000) / 10;
+            return `<div style="font-size:10px;color:${dc > 0 ? '#b45309' : dc < 0 ? '#dc2626' : 'var(--gray-400)'};margin-top:2px"
+              title="정가 대비 판매가. ${dc < 0 ? '판매가가 정가보다 높습니다 — 값을 확인하세요.' : '할인율입니다.'}">${dc > 0 ? '−' : dc < 0 ? '+' : ''}${Math.abs(dc)}%</div>`;
+          })()}</td>
         <td style="padding:6px 8px;${R}background:#fefce8">${inp(r, 'price_per_item', 10, 78, '낱개 1개 가격 — 판매단위를 곱해 판매가가 됩니다')}</td>
         <td style="padding:6px 8px;${R}background:#fefce8;font-weight:600">${inp(r, 'price', 100, 88, '주문 1건 가격 (부가세 포함). 고치면 개당 판매가가 다시 계산됩니다')}</td>
         <td style="padding:6px 8px;${R}background:#fefce8;color:var(--gray-500)">${m.vat_applied ? won(r.price == null ? null : Number(r.price) - m.price_net) : '<span style="color:var(--gray-300)" title="부가세 반영 토글이 꺼져 있습니다">-</span>'}</td>
@@ -19801,10 +19825,6 @@ function renderRgPlan() {
         <td style="padding:6px 8px;text-align:center;white-space:nowrap">
           <button onclick="rgpApplyDefaults('${esc(k)}')" title="이 상품의 실적 물류비·차감율을 다시 끌어옵니다"
             style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 5px">↻</button>
-          <button onclick="addRgPlanRow('${esc(k)}')" title="이 행을 복사해 다른 판매단위 안 만들기"
-            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 5px;margin-left:2px">⧉</button>
-          <button onclick="removeRgPlanRow('${esc(k)}')" title="행 삭제"
-            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 5px;color:#dc2626;margin-left:2px">🗑</button>
         </td>
       </tr>`;
     }).join('')}
@@ -19832,7 +19852,8 @@ async function saveRgPlan() {
     product_name: r.product_name,
     sales_unit: r.sales_unit || 1,
     plan_label: r.plan_label || '기본안',
-    price: r.price, unit_cost: r.unit_cost, inbound_cost: r.inbound_cost,
+    price: r.price, list_price_per_item: r.list_price_per_item,
+    unit_cost: r.unit_cost, inbound_cost: r.inbound_cost,
     inout_fee: r.inout_fee, ship_fee: r.ship_fee, etc_cost: r.etc_cost ?? 0,
     deduct_rate: r.deduct_rate == null ? null : Number(r.deduct_rate) / 100,
     commission_rate: r.commission_rate == null ? null : Number(r.commission_rate) / 100,
@@ -19862,7 +19883,7 @@ async function saveRgPlan() {
 function downloadRgPlanXlsx() {
   if (!_rgPlans.length) { alert('내려받을 데이터가 없습니다.'); return; }
   const n = v => (v == null || !isFinite(v)) ? '' : Math.round(v * 100) / 100;
-  const header = ['상품', '상품코드', '판매단위', '안', '개당 판매가(VAT 포함)', '판매가(VAT 포함)', '부가세', '공급가(VAT 제외)',
+  const header = ['상품', '상품코드', '판매단위', '안', '개당 정가', '정가', '할인율(%)', '개당 판매가(VAT 포함)', '판매가(VAT 포함)', '부가세', '공급가(VAT 제외)',
     '원가/낱개', '입고비/낱개', '입출고비(원/주문)', '배송비(원/주문)', '기타(원/주문)', '수수료율(%)', '수수료', '차감율(%)', '차감 총액', '그 외 차감', '참고: 실적 수수료율(%)',
     '주문원가', '고정비/주문', '물류비/낱개', '마진/주문', '마진율(%)', '마진/낱개', '낱개판매가',
     '손익분기가', '목표율(%)', '목표가', '풀필먼트 기준', '추정여부', '부가세기준', '메모'];
@@ -19870,6 +19891,9 @@ function downloadRgPlanXlsx() {
     const m = _rgpCompute(r);
     return [
       r.product_name || '', r.product_code || '', r.sales_unit, r.plan_label || '',
+      n(r.list_price_per_item), n(_rgpListPrice(r)),
+      (() => { const lp = _rgpListPrice(r), pv = Number(r.price);
+        return (lp && lp > 0 && isFinite(pv) && pv > 0) ? n((1 - pv / lp) * 100) : ''; })(),
       n(r.price_per_item), n(r.price),
       (r.price == null || !m.vat_applied) ? '' : n(Number(r.price) - m.price_net), n(m.price_net), n(r.unit_cost), n(r.inbound_cost), n(r.inout_fee), n(r.ship_fee), n(r.etc_cost),
       n(r.commission_rate), n(m.commission_amt), n(r.deduct_rate), n(m.deduct_total), n(m.etc_deduct_amt),
