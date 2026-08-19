@@ -1603,6 +1603,19 @@ async function updateSiteSettings(patch, updatedBy = null) {
   if ('stock_alert_enabled' in patch) {
     clean.stock_alert_enabled = patch.stock_alert_enabled == null ? null : !!patch.stock_alert_enabled;
   }
+  // 구분별 경고 기준일 (073) — JSONB. 키는 ITEM_KINDS 만, 값은 1~365 정수만 남긴다.
+  if ('stock_alert_warn_days' in patch) {
+    const src = patch.stock_alert_warn_days;
+    if (src == null) clean.stock_alert_warn_days = null;
+    else {
+      const out = {};
+      for (const k of ITEM_KINDS) {
+        const n = parseInt(src[k], 10);
+        if (Number.isFinite(n) && n >= 1 && n <= 365) out[k] = n;
+      }
+      clean.stock_alert_warn_days = Object.keys(out).length ? out : null;
+    }
+  }
   clean.updated_at = new Date().toISOString();
   if (updatedBy) clean.updated_by = updatedBy;
   const updated = await sbUpdate('bg_site_settings', 'id=eq.1', clean);
@@ -1863,10 +1876,23 @@ function _normCodeList(v) {
 // 소진코드(consumption_codes) 는 050 에서 폐기됐다. 구성·소요수량은 bg_stock_bom 이
 //   유일한 기준이며, 재고품목에는 더 이상 같은 의미의 필드를 두지 않는다.
 
+/**
+ * 품목 구분 (073) — product=원물 / material=부자재 / package=포장재 / etc=기타.
+ *   BOM 의 component_role 과 같은 값 체계를 쓴다. 값이 없거나 이상하면 코드 접미로 추정한다
+ *   ('O' 계열은 원물) — 화면·마이그레이션과 같은 규칙.
+ */
+const ITEM_KINDS = ['product', 'material', 'package', 'etc'];
+function _normItemKind(v, stockCode) {
+  const s = String(v || '').trim();
+  if (ITEM_KINDS.includes(s)) return s;
+  return /^[A-Z]+\d+O/i.test(String(stockCode || '')) ? 'product' : 'material';
+}
+
 function _normStockItem(m, createdBy) {
   return {
     stock_code: String(m.stock_code ?? '').trim(),
     sales_codes: _normCodeList(m.sales_codes),
+    item_kind: _normItemKind(m.item_kind, m.stock_code),
     label: m.label ? String(m.label) : null,
     threshold: (m.threshold === '' || m.threshold == null) ? null : Math.max(0, parseInt(m.threshold, 10) || 0),
     sort_order: parseInt(m.sort_order, 10) || 0,
@@ -1914,6 +1940,11 @@ async function updateStockItem(id, data) {
   if ('label' in data) patch.label = data.label ? String(data.label) : null;
   if ('memo' in data) patch.memo = data.memo ? String(data.memo) : null;
   if ('sales_codes' in data) patch.sales_codes = _normCodeList(data.sales_codes);
+  if ('item_kind' in data) {
+    const k = String(data.item_kind || '').trim();
+    if (!ITEM_KINDS.includes(k)) throw new Error(`구분은 ${ITEM_KINDS.join('/')} 중 하나여야 합니다`);
+    patch.item_kind = k;
+  }
   if ('stock_code' in data) {
     const s = String(data.stock_code ?? '').trim();
     if (!s) throw new Error('재고코드는 비울 수 없습니다');
@@ -2228,6 +2259,7 @@ module.exports = {
   updateIncident,
   deleteIncident,
   BOM_ROLES,
+  ITEM_KINDS,
   listBomRows,
   addBomRows,
   saveBomGroup,

@@ -36,10 +36,14 @@ async function loadAlertConfig() {
     enabled: row.stock_alert_enabled == null
       ? (process.env.BG_STOCK_ALERT_ENABLED === '1')
       : !!row.stock_alert_enabled,
+    // 구분별 소진예상 경고 기준일 (073). 없으면 전부 30 — 예전과 같은 동작.
+    warn_days: { product: 30, material: 30, package: 30, etc: 30,
+      ...(row.stock_alert_warn_days && typeof row.stock_alert_warn_days === 'object' ? row.stock_alert_warn_days : {}) },
     from_db: {
       channel: !!String(row.stock_alert_channel || '').trim(),
       time: !!String(row.stock_alert_time || '').trim(),
       enabled: row.stock_alert_enabled != null,
+      warn_days: !!row.stock_alert_warn_days,
     },
   };
   _cfgCache = { at: Date.now(), val };
@@ -185,18 +189,24 @@ async function buildStockReport(baseUrl, { codes = null } = {}) {
   const byCode = new Map();
   for (const it of (data.items || [])) byCode.set(it.stock_code, it);
 
+  const cfg = await loadAlertConfig();
   const rows = [];
   const missing = [];
   for (const t of targets) {
     const it = byCode.get(t.stock_code);
     if (!it) { missing.push(t.stock_code); continue; }
-    // 경고 판정 — threshold 가 있으면 가용재고 기준, 없으면 소진예상 30일 기준
+    // 구분 (073) — 등록값이 없으면 API 가 코드로 추정해 준 값
+    const kind = t.item_kind || it.item_kind || 'material';
+    const warnDays = Number(cfg.warn_days?.[kind]) || 30;
+    // 경고 판정 — threshold 가 있으면 가용재고 기준, 없으면 구분별 소진예상 기준일
     const warn = t.threshold != null
       ? it.available_qty <= t.threshold
-      : (it.days_to_soldout !== null && it.days_to_soldout <= 30);
+      : (it.days_to_soldout !== null && it.days_to_soldout <= warnDays);
     rows.push({
       stock_code: it.stock_code,
       product_name: it.product_name || t.label || '',
+      kind,
+      warn_days: warnDays,
       threshold: t.threshold,
       current_qty: it.current_qty,
       available_qty: it.available_qty,
@@ -238,9 +248,25 @@ async function buildStockReport(baseUrl, { codes = null } = {}) {
       + `　　\`${r.stock_code}\``;
   };
 
-  const section = (title, rs) => rs.length
-    ? [title, '', ...rs.flatMap(r => [itemBlock(r), ''])]
-    : [];
+  const KIND_LABEL = { product: '원물', material: '부자재', package: '포장재', etc: '기타' };
+  const KIND_ORDER = ['product', 'material', 'package', 'etc'];
+  /**
+   * 섹션 안에서 구분별로 다시 묶는다 — 원물과 부자재는 발주처·리드타임이 달라
+   * 담당자가 갈리므로 섞여 있으면 각자 자기 것을 골라 읽어야 한다 (2026-08-19 요청).
+   * 한 구분만 있으면 소제목을 붙이지 않는다.
+   */
+  const section = (title, rs) => {
+    if (!rs.length) return [];
+    const kinds = KIND_ORDER.filter(k => rs.some(r => r.kind === k));
+    if (kinds.length <= 1) return [title, '', ...rs.flatMap(r => [itemBlock(r), ''])];
+    const out = [title, ''];
+    for (const k of kinds) {
+      const sub = rs.filter(r => r.kind === k);
+      out.push(`▸ ${KIND_LABEL[k]} ${sub.length}`, '');
+      out.push(...sub.flatMap(r => [itemBlock(r), '']));
+    }
+    return out;
+  };
 
   const soldoutRows = rows.filter(r => r.soldout);
   const warnRows = rows.filter(r => !r.soldout && r.warn);

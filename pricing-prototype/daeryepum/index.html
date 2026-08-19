@@ -2508,6 +2508,13 @@ nav.nav-loading a[href^="#"] {
         <option value="d01">자체 답례품 (D01)</option>
         <option value="com">위탁 답례품 (COM_)</option>
       </select>
+      <select id="stock-filter-kind" onchange="renderStockTable()" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px" title="품목 구분 — 등록 정보(✎)에서 바꿀 수 있습니다">
+        <option value="">전체 구분</option>
+        <option value="product">원물</option>
+        <option value="material">부자재</option>
+        <option value="package">포장재</option>
+        <option value="etc">기타</option>
+      </select>
       <select id="stock-filter-status" onchange="renderStockTable()" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
         <option value="">전체 상태</option>
         <option value="urgent">⚠️ 30일 내 소진</option>
@@ -2555,9 +2562,23 @@ nav.nav-loading a[href^="#"] {
         <button class="btn" style="padding:5px 12px;font-size:12px;margin-bottom:1px" onclick="saveStockAlertConfig()">저장</button>
         <span id="sa-cfg-msg" style="font-size:11px;padding-bottom:6px"></span>
       </div>
+      <!-- 구분별 경고 기준일 (073) — 임계치가 없는 품목의 '소진예상 N일 이하' 기준 -->
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:10px;padding-top:10px;border-top:1px dashed var(--gray-200)">
+        <span style="font-size:12px;color:var(--gray-600);padding-bottom:6px;font-weight:600">경고 기준일 (소진예상 ≤ N일)</span>
+        <label style="font-size:12px"><span style="color:var(--gray-500);display:block;margin-bottom:3px">원물</span>
+          <input type="number" id="sa-cfg-wd-product" min="1" max="365" placeholder="30" style="width:64px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px"></label>
+        <label style="font-size:12px"><span style="color:var(--gray-500);display:block;margin-bottom:3px">부자재</span>
+          <input type="number" id="sa-cfg-wd-material" min="1" max="365" placeholder="30" style="width:64px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px"></label>
+        <label style="font-size:12px"><span style="color:var(--gray-500);display:block;margin-bottom:3px">포장재</span>
+          <input type="number" id="sa-cfg-wd-package" min="1" max="365" placeholder="30" style="width:64px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px"></label>
+        <label style="font-size:12px"><span style="color:var(--gray-500);display:block;margin-bottom:3px">기타</span>
+          <input type="number" id="sa-cfg-wd-etc" min="1" max="365" placeholder="30" style="width:64px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px"></label>
+        <span style="font-size:11px;color:var(--gray-500);padding-bottom:6px">품목에 임계치가 있으면 그쪽이 우선 · 비우면 30일</span>
+      </div>
       <div style="font-size:11px;color:var(--gray-500);margin-top:6px;line-height:1.6">
         채널 ID 는 슬랙에서 채널 우클릭 → 채널 세부정보 보기 → 맨 아래에서 복사합니다.
         비워두면 서버 환경변수 값을 사용합니다. <b>봇을 해당 채널에 초대</b>해야 발송됩니다.
+        구분(원물/부자재)은 각 품목의 등록 정보(✎)에서 정하며, 슬랙 스레드에서도 구분별로 나뉘어 나갑니다.
       </div>
     </div>
     <div id="stock-alert-list" style="font-size:12px;color:var(--gray-500)">불러오는 중…</div>
@@ -2651,6 +2672,16 @@ nav.nav-loading a[href^="#"] {
         <span style="color:var(--gray-500)">표시명</span>
         <input type="text" id="se-label" placeholder="비우면 상품명 자동"
                style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;margin-top:3px">
+      </label>
+
+      <label style="display:block;font-size:12px;margin-bottom:10px">
+        <span style="color:var(--gray-500)">구분 <span style="color:var(--gray-400)">(BOM 을 짤 때 이 값이 역할 기본값으로 들어갑니다)</span></span>
+        <select id="se-kind" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;margin-top:3px">
+          <option value="product">원물</option>
+          <option value="material">부자재</option>
+          <option value="package">포장재</option>
+          <option value="etc">기타</option>
+        </select>
       </label>
 
       <label style="display:block;font-size:12px;margin-bottom:10px">
@@ -15905,8 +15936,10 @@ function renderStockTable() {
   if (!$tbody) return;
   const q = (document.getElementById('stock-search')?.value || '').trim().toLowerCase();
   const src = document.getElementById('stock-filter-source')?.value || '';
+  const kind = document.getElementById('stock-filter-kind')?.value || '';
   const status = document.getElementById('stock-filter-status')?.value || '';
   let items = _stockData;
+  if (kind) items = items.filter(it => (it.item_kind || _guessBomRole(it.stock_code)) === kind);
   if (q) items = items.filter(it =>
     (it.stock_code || '').toLowerCase().includes(q) ||
     (it.sales_codes || []).join(' ').toLowerCase().includes(q) ||
@@ -15960,7 +15993,7 @@ function _stockItemRow(it) {
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px">${_stockErpCodeCell(it)}${usedIn}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);font-family:monospace;font-size:11px;color:var(--gray-500)">${_stockSalesCodeCell(it)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100)">${esc(it.product_name || '-')}</td>
-        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center;font-size:10px;color:var(--gray-500)">${it.is_com ? '위탁' : '자체'}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center;font-size:10px;color:var(--gray-500);white-space:nowrap">${it.is_com ? '위탁' : '자체'}<br>${_stockKindBadge(it)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;${it.available_qty <= 0 ? 'color:#dc2626;font-weight:600' : ''}"${it.stock_breakdown ? ` title="창고별: ${esc(it.stock_breakdown)}"` : ''}>${fmtNum(it.available_qty)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${_stockCoupangCell(it)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;color:var(--gray-600)">${_stockSalePriceCell(it)}</td>
@@ -16204,6 +16237,24 @@ function _syncStockSelectionBar() {
     codes.slice(0, 6).join(', ') + (codes.length > 6 ? ` 외 ${codes.length - 6}` : '');
 }
 
+/** 품목 구분 라벨/색 — BOM 역할과 같은 값 체계 */
+const STOCK_KIND_LABEL = { product: '원물', material: '부자재', package: '포장재', etc: '기타' };
+const STOCK_KIND_STYLE = {
+  product: 'background:#ecfdf5;color:#047857',
+  material: 'background:#eff6ff;color:#1d4ed8',
+  package: 'background:#fff7ed;color:#c2410c',
+  etc: 'background:var(--gray-100);color:var(--gray-600)',
+};
+function _stockKindBadge(it) {
+  const k = it.item_kind || _guessBomRole(it.stock_code);
+  return `<span style="display:inline-block;margin-top:2px;padding:0 5px;border-radius:99px;font-size:9px;font-weight:600;${STOCK_KIND_STYLE[k] || STOCK_KIND_STYLE.etc}" title="구분 — 등록 정보(✎)에서 바꿀 수 있습니다">${STOCK_KIND_LABEL[k] || k}</span>`;
+}
+/** 재고코드 → 등록된 구분. 등록돼 있지 않으면 코드로 추정한다 */
+function _stockKindOf(code) {
+  const it = (_stockData || []).find(x => x.stock_code === code);
+  return (it && it.item_kind) || _guessBomRole(code);
+}
+
 /** 코드 접미로 역할 추정 — O 계열은 원물, 나머지는 부자재. 등록 후 화면에서 바꿀 수 있다. */
 function _guessBomRole(code) {
   return /^[A-Z]+\d+O/i.test(String(code || '')) ? 'product' : 'material';
@@ -16223,7 +16274,8 @@ function groupSelectedStockItems() {
   openBomGroupModal({
     groupKey: null,
     parentCodes: salesCodes,
-    components: codes.map(c => ({ component_code: c, qty: 1, component_role: _guessBomRole(c) })),
+    // 역할 기본값 = 품목 구분 (073). 등록 때 정해 둔 값이 있으면 코드 추정보다 우선.
+    components: codes.map(c => ({ component_code: c, qty: 1, component_role: _stockKindOf(c) })),
   });
 }
 
@@ -16423,6 +16475,10 @@ async function saveStockAlertConfig() {
         channel: document.getElementById('sa-cfg-channel').value,
         time: document.getElementById('sa-cfg-time').value,
         enabled: document.getElementById('sa-cfg-enabled').checked,
+        // 구분별 경고 기준일 — 비운 칸은 보내지 않는다 (서버가 30 으로 본다)
+        warn_days: Object.fromEntries(['product', 'material', 'package', 'etc']
+          .map(k => [k, document.getElementById(`sa-cfg-wd-${k}`).value.trim()])
+          .filter(([, v]) => v !== '')),
       }),
     });
     const d = await r.json();
@@ -16450,6 +16506,11 @@ async function loadStockAlerts() {
       document.getElementById('sa-cfg-channel').value = cfg.from_db?.channel ? cfg.channel : '';
       document.getElementById('sa-cfg-time').value = cfg.time || '';
       document.getElementById('sa-cfg-enabled').checked = !!cfg.enabled;
+      // 구분별 기준일 — DB 에 저장된 값만 채운다 (기본 30 은 placeholder 로 보인다)
+      for (const k of ['product', 'material', 'package', 'etc']) {
+        const el = document.getElementById(`sa-cfg-wd-${k}`);
+        if (el) el.value = (cfg.from_db?.warn_days && cfg.warn_days?.[k]) ? cfg.warn_days[k] : '';
+      }
     }
     if ($status) {
       const sched = d.schedule
@@ -16905,6 +16966,7 @@ function openStockEditModal(id) {
   document.getElementById('se-stock-code').value = a.stock_code || '';
   document.getElementById('se-label').value = a.label || '';
   document.getElementById('se-sales').value = a.sales_codes || '';
+  document.getElementById('se-kind').value = a.item_kind || _guessBomRole(a.stock_code);
   document.getElementById('se-threshold').value = a.threshold ?? '';
   document.getElementById('se-alert').checked = a.alert_enabled !== false;
   document.getElementById('se-msg').textContent = '';
@@ -16931,6 +16993,7 @@ async function saveStockEditModal() {
     stock_code: stockCode,
     label: document.getElementById('se-label').value.trim(),
     sales_codes: document.getElementById('se-sales').value,
+    item_kind: document.getElementById('se-kind').value,
     threshold: thrRaw === '' ? null : parseInt(thrRaw, 10),
     alert_enabled: document.getElementById('se-alert').checked,
   };

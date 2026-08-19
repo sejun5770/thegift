@@ -8591,6 +8591,9 @@ const server = http.createServer(async (req, res) => {
                 : [],
               threshold: reg.threshold ?? null,
               alert_enabled: reg.alert_enabled !== false,
+              // 품목 구분 (073) — 마이그레이션 전이라 컬럼이 없으면 코드로 추정한다
+              item_kind: reg.item_kind
+                || (/^[A-Z]+\d+O/i.test(String(reg.stock_code || '')) ? 'product' : 'material'),
             };
           }).sort((a, b) => (a.days_to_soldout ?? 99999) - (b.days_to_soldout ?? 99999));
           data = {

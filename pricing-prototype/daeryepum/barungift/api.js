@@ -1047,6 +1047,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         patch.stock_alert_time = t || null;
       }
       if ('enabled' in body) patch.stock_alert_enabled = body.enabled == null ? null : !!body.enabled;
+      // 구분별 경고 기준일 (073) — 값 검증은 store 가 한다 (ITEM_KINDS 키, 1~365)
+      if ('warn_days' in body) patch.stock_alert_warn_days = body.warn_days;
       await store.updateSiteSettings(patch, session?.email || null);
       stockAlert.invalidateAlertConfig();
       return json(res, { ok: true, config: await stockAlert.loadAlertConfig() });
