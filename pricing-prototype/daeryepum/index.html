@@ -19602,9 +19602,12 @@ function addRgPlanRow(copyFrom) {
     }
     return label;
   };
+  // '기본안 사본' 을 또 복사하면 '기본안 사본 사본' 이 된다 — 이미 붙은 사본 꼬리를 떼고
+  //   다시 붙여 '기본안 사본 2', '기본안 사본 3' 으로 이어지게 한다.
+  const baseLabel = String(src?.plan_label || '기본안').replace(/\s*사본(\s*\d+)?\s*$/, '') || '기본안';
   const row = src
     ? { ...src, id: null, _tmp: 'new' + (++_rgPlanSeq),
-        plan_label: uniqLabel((src.plan_label || '기본안') + ' 사본', src.product_code, src.product_name, src.sales_unit) }
+        plan_label: uniqLabel(baseLabel + ' 사본', src.product_code, src.product_name, src.sales_unit) }
     : {
       _tmp: 'new' + (++_rgPlanSeq), id: null,
       product_code: null, product_name: '', sales_unit: 1, plan_label: '기본안',
@@ -19614,7 +19617,11 @@ function addRgPlanRow(copyFrom) {
       deduct_rate: null, target_margin_rate: null, memo: null,
       fulfill_basis: null, fulfill_estimated: false,
     };
-  _rgPlans.push(row);
+  // 복사는 원본 바로 아래에 꽂는다 — 맨 끝에 붙으면 같은 상품의 다른 판매단위 안을
+  //   만들 때마다 표 끝까지 스크롤해 찾아가야 한다. 새 빈 행만 맨 끝에 붙인다.
+  const at = src ? _rgPlans.findIndex(r => _rgpKey(r) === copyFrom) : -1;
+  if (at >= 0) _rgPlans.splice(at + 1, 0, row);
+  else _rgPlans.push(row);
   renderRgPlan();
 }
 
