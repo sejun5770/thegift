@@ -14617,6 +14617,29 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/orders/work-drift' && req.method === 'POST') {
+        // 작업 후 주문 변경 감지 — 화면에 뜬 주문번호만 받아 케이스별로 가른다.
+        //   body: { order_seqs: number[], category: 'deco' }
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const body = await new Promise((resolve) => {
+          let raw = '';
+          req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+        });
+        try {
+          const cat = CATEGORY_FILTERS[body.category] || CATEGORY_FILTERS.deco;
+          data = await require('./barungift/work-drift').detectWorkDrift({
+            getPool,
+            orderSeqs: Array.isArray(body.order_seqs) ? body.order_seqs.slice(0, 3000) : [],
+            categorySql: cat.filter,
+          });
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
       } else if (pathname === '/api/dispatch/pending' && req.method === 'GET') {
         // 출고상태 전송 대기 목록 — 채널에서 아직 '발송 전' 인 주문 + 우리 송장 매칭 결과.
         if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
@@ -14680,6 +14703,37 @@ const server = http.createServer(async (req, res) => {
             endDate: body.end_date || null,
             by: `rg-sync:${session?.email || 'system'}`,
           });
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/coupang/rfm/margin-sim' && req.method === 'GET') {
+        // 판매단위별 마진 시뮬레이션 저장값 (069) — 옵션ID → 가정치
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          data = { sims: await require('./coupang/rfm-store').listMarginSims() };
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/coupang/rfm/margin-sim' && req.method === 'PUT') {
+        // 가정치 일괄 저장 — 화면의 시뮬 칸을 그대로 보낸다. 네 값이 모두 비면 그 행은 삭제.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const body = await new Promise((resolve) => {
+          let raw = '';
+          req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+        });
+        const rows = Array.isArray(body.rows) ? body.rows : [];
+        logAdminAccess(session, req, 'coupang-rg-margin-sim-save', { count: rows.length });
+        try {
+          data = await require('./coupang/rfm-store').saveMarginSims(rows, session?.email || null);
         } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: e.message }));

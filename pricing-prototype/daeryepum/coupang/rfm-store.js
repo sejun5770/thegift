@@ -365,7 +365,82 @@ async function listAllOrderLines({ startDate, endDate, limit = 20000 } = {}) {
   return res.json();
 }
 
+// ── 마진 시뮬레이션 저장값 (migration 069) ─────────────────────────────
+//   판매단위(옵션ID)별 판매가·원가·입고비 가정치와 목표 마진율.
+//   NULL 컬럼은 '기본값(실적/상품설정) 사용' 이므로 upsert 시 빈 값도 명시적으로 NULL 로 보낸다 —
+//   빼먹으면 merge-duplicates 가 이전 값을 남겨 지운 가정치가 되살아난다.
+
+const SIM_FIELDS = ['sim_price', 'sim_unit_cost', 'sim_inbound_cost', 'target_margin_rate'];
+
+function _simNum(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** 옵션ID → 저장된 가정치 */
+async function listMarginSims() {
+  if (!USE) return [];
+  const res = await fetch(`${REST}/coupang_rg_margin_sim?select=*&limit=5000`, { headers: HDR });
+  if (!res.ok) {
+    const t = await res.text();
+    // 테이블이 아직 없으면(069 미실행) 빈 목록 — 화면은 저장 없이도 동작해야 한다
+    if (res.status === 404 || /relation .* does not exist|PGRST205/.test(t)) return [];
+    throw new Error(`Supabase list rg_margin_sim [${res.status}]: ${t.slice(0, 300)}`);
+  }
+  return res.json();
+}
+
+/**
+ * 가정치 일괄 저장 — 옵션ID 기준 upsert.
+ *   rows: [{ vendor_item_id, sim_price, sim_unit_cost, sim_inbound_cost, target_margin_rate, memo,
+ *            seller_product_id, internal_product_code, product_name }]
+ *   네 가정치가 모두 NULL 이고 memo 도 없으면 행을 지운다 (빈 행이 쌓이지 않게).
+ */
+async function saveMarginSims(rows, by = null) {
+  if (!USE) throw new Error('Supabase 미설정 — 시뮬레이션 저장은 Supabase 가 필요합니다');
+  const upserts = [];
+  const deletes = [];
+  for (const r of rows || []) {
+    const vid = String(r.vendor_item_id || '').trim();
+    if (!vid) continue;
+    const rec = {
+      vendor_item_id: vid,
+      seller_product_id: r.seller_product_id ? String(r.seller_product_id) : null,
+      internal_product_code: r.internal_product_code ? String(r.internal_product_code) : null,
+      product_name: r.product_name ? String(r.product_name).slice(0, 300) : null,
+      memo: r.memo ? String(r.memo).slice(0, 500) : null,
+      updated_by: by,
+      updated_at: new Date().toISOString(),
+    };
+    for (const f of SIM_FIELDS) rec[f] = _simNum(r[f]);
+    const empty = SIM_FIELDS.every(f => rec[f] === null) && !rec.memo;
+    (empty ? deletes : upserts).push(empty ? vid : rec);
+  }
+  let saved = 0, removed = 0;
+  if (upserts.length) {
+    const res = await fetch(`${REST}/coupang_rg_margin_sim?on_conflict=vendor_item_id`, {
+      method: 'POST',
+      headers: { ...HDR, Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(upserts),
+    });
+    if (!res.ok) throw new Error(`Supabase upsert rg_margin_sim [${res.status}]: ${(await res.text()).slice(0, 300)}`);
+    saved = upserts.length;
+  }
+  if (deletes.length) {
+    const inList = deletes.map(v => `"${v.replace(/"/g, '')}"`).join(',');
+    const res = await fetch(`${REST}/coupang_rg_margin_sim?vendor_item_id=in.(${encodeURIComponent(inList)})`, {
+      method: 'DELETE', headers: { ...HDR, Prefer: 'return=minimal' },
+    });
+    if (!res.ok) throw new Error(`Supabase delete rg_margin_sim [${res.status}]: ${(await res.text()).slice(0, 300)}`);
+    removed = deletes.length;
+  }
+  return { saved, removed };
+}
+
 module.exports = {
+  listMarginSims,
+  saveMarginSims,
   upsertOrderLines,
   insertOrderLinesIfMissing,
   classifyOrderLines,

@@ -1315,13 +1315,19 @@ nav.nav-loading a[href^="#"] {
       <label style="font-size:12px;display:flex;align-items:center;gap:6px">
         <input type="checkbox" id="rgm-cost-only" onchange="renderRgMargin()"> 원가 입력된 것만
       </label>
-      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="rgmResetSim()">↺ 시뮬 초기화</button>
-      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="downloadRgMarginXlsx()">📥 엑셀</button>
+      <button class="btn btn-primary" id="rgm-save-btn" style="padding:5px 12px;font-size:12px" onclick="rgmSaveAll()"
+        title="바꾼 판매가·원가·입고비·목표율·메모를 판매단위별로 저장합니다. 다음에 열 때 그대로 불러옵니다.">💾 저장</button>
+      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="rgmResetSim()"
+        title="저장 안 한 편집을 버리고 마지막 저장값으로 되돌립니다">↺ 되돌리기</button>
+      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="rgmClearSaved()"
+        title="이 화면에 보이는 판매단위의 저장값을 모두 지웁니다 (실적·상품설정 기본값으로)">🗑 저장값 삭제</button>
+      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="downloadRgMarginXlsx()">📥 스프레드시트</button>
     </div>
     <div style="font-size:11px;color:var(--gray-500);line-height:1.7;margin-bottom:10px">
       <b>실적</b> 열은 정산 리포트 그대로입니다. <b>판매가·원가·입고비</b> 칸을 고치면 <b>시뮬</b> 열이 바로 다시 계산됩니다 —
       수수료율·입출고비·배송비는 그 판매단위의 <b>실적에서 나온 개당 평균</b>을 그대로 적용합니다 (쿠팡 요율표가 아니라 실제 청구된 값).
-      원가·입고비는 상품설정(⚙)의 값이 기본이고, 여기서 바꾼 값은 저장되지 않는 가정치입니다.
+      원가·입고비는 상품설정(⚙)의 값이 기본이고, 여기서 바꾼 값은 <b>💾 저장</b>하면 판매단위별로 남아 다음에 그대로 불러옵니다 (상품설정 원가는 바뀌지 않습니다).
+      <b>목표율</b>을 넣으면 그 마진율이 되는 <b>목표가</b>를 역산해 보여줍니다.
       <span style="color:#b45309">마진 = 판매가 − 수수료 − 입출고비 − 배송비 − (원가+입고비)×판매단위</span>, 마진율은 판매가 대비입니다.
     </div>
     <div id="rgm-summary" style="font-size:12px;color:var(--gray-600);margin-bottom:8px"></div>
@@ -19040,20 +19046,26 @@ function renderRgMargin() {
   const totSimMargin = withCost.reduce((s, r) => s + (r.sim.margin != null ? r.sim.margin * r.qty : 0), 0);
   const totSimSales = withCost.reduce((s, r) => s + r.sim.price * r.qty, 0);
   const touched = rows.filter(r => r.sim.touched).length;
+  const dirtyN = _rgmDirtyCount();
   $s.innerHTML =
     `판매단위 <b>${rows.length}</b>개 · 매출 <b>${won(totSales)}</b>원`
     + (withCost.length ? ` · 원가 입력 ${withCost.length}개 기준 실적 마진 <b>${won(totMargin)}</b>원 (${pctc(totSalesWithCost > 0 ? totMargin / totSalesWithCost : null)})` : '')
     + (touched ? ` · <span style="color:#1d4ed8">시뮬 ${touched}개 변경 → 마진 <b>${won(totSimMargin)}</b>원 (${pctc(totSimSales > 0 ? totSimMargin / totSimSales : null)})</span>` : '')
-    + (noCost ? ` · <span style="color:#b45309" title="상품설정에서 원가·입고비를 입력하면 마진이 계산됩니다">원가 미입력 ${noCost}개</span>` : '');
+    + (noCost ? ` · <span style="color:#b45309" title="상품설정에서 원가·입고비를 입력하면 마진이 계산됩니다">원가 미입력 ${noCost}개</span>` : '')
+    + (dirtyN ? ` · <span style="color:#dc2626;font-weight:600">저장 안 됨 ${dirtyN}개</span>` : (Object.keys(_rgmSaved).length ? ` · <span style="color:#047857">저장값 ${Object.keys(_rgmSaved).length}개 적용</span>` : ''));
+  const $btn = document.getElementById('rgm-save-btn');
+  if ($btn) { $btn.textContent = dirtyN ? `💾 저장 (${dirtyN})` : '💾 저장'; $btn.disabled = !dirtyN; }
 
   const th = (t, extra = '') => `<th style="padding:6px 8px;white-space:nowrap;border-bottom:2px solid var(--gray-200);color:var(--gray-500);font-weight:600;${extra}">${t}</th>`;
   const R = 'text-align:right;';
-  const inp = (vid, field, val, step, title) => {
+  const inp = (vid, field, val, step, title, width = 82) => {
     const touched = _rgmSim[vid]?.[field] != null;
-    return `<input type="number" step="${step}" value="${val == null || !isFinite(val) ? '' : Math.round(val)}"
+    // 목표율은 소수 한 자리까지 — 나머지는 원 단위 반올림
+    const shown = val == null || !isFinite(val) ? '' : (field === 'target' ? Math.round(val * 10) / 10 : Math.round(val));
+    return `<input type="number" step="${step}" value="${shown}"
        data-vid="${esc(vid)}" data-field="${field}"
        oninput="rgmSetSim(this.dataset.vid, this.dataset.field, this.value)" title="${esc(title)}"
-       style="width:82px;padding:3px 5px;border:1px solid ${touched ? '#3b82f6' : 'var(--gray-300)'};border-radius:4px;font-size:12px;text-align:right;background:${touched ? '#eff6ff' : '#fff'}">`;
+       style="width:${width}px;padding:3px 5px;border:1px solid ${touched ? '#3b82f6' : 'var(--gray-300)'};border-radius:4px;font-size:12px;text-align:right;background:${touched ? '#eff6ff' : '#fff'}">`;
   };
 
   $w.innerHTML = `<table style="width:100%;font-size:12px;border-collapse:collapse;min-width:1500px">
@@ -19068,11 +19080,16 @@ function renderRgMargin() {
         ${th('시뮬 판매가', R + 'background:#eff6ff')}${th('시뮬 원가', R + 'background:#eff6ff')}${th('시뮬 입고비', R + 'background:#eff6ff')}
         ${th('시뮬 마진/개', R + 'background:#eff6ff')}${th('시뮬 마진율', R + 'background:#eff6ff')}${th('변화', R + 'background:#eff6ff')}
         ${th('손익분기가', R)}
+        ${th('목표율', R + 'background:#fdf4ff')}${th('목표가', R + 'background:#fdf4ff')}
+        ${th('메모', 'text-align:left;background:#fdf4ff')}
       </tr>
     </thead>
     <tbody>${rows.map(r => {
+      const state = r.sim.dirty
+        ? '<span style="font-size:10px;color:#dc2626;margin-left:6px" title="저장 안 된 편집">● 미저장</span>'
+        : (r.sim.saved ? '<span style="font-size:10px;color:#047857;margin-left:6px" title="저장된 가정치 적용 중">✓ 저장됨</span>' : '');
       const nameCell = `
-        <div style="font-weight:600">${esc(r.product_name || r.vendor_item_id)}</div>
+        <div style="font-weight:600">${esc(r.product_name || r.vendor_item_id)}${state}</div>
         <div style="font-size:11px;color:var(--gray-500);font-family:monospace">
           ${r.internal_product_code ? esc(r.internal_product_code) : '<span style="color:#b45309" title="상품설정에 옵션ID/등록상품ID 가 없어 상품코드를 붙이지 못했습니다">미매핑</span>'}
           · 옵션 ${esc(r.vendor_item_id)}
@@ -19106,6 +19123,14 @@ function renderRgMargin() {
         ${td(pctc(r.sim.margin_rate), R + 'background:#f5f9ff')}
         ${td(deltaCell, R + 'background:#f5f9ff')}
         ${td(won(r.sim.be_price), R + 'color:var(--gray-500)')}
+        ${td(inp(r.vendor_item_id, 'target', r.sim.target == null ? null : r.sim.target * 100, 1, '목표 마진율 (%) — 이 값이 되는 판매가를 목표가에 보여줍니다', 60), R + 'background:#fdf4ff')}
+        ${td(r.sim.target == null ? '<span style="color:var(--gray-300)">-</span>'
+             : (r.sim.target_price == null
+                ? '<span style="color:#dc2626" title="수수료율+목표율이 100% 이상이거나 원가가 없어 계산할 수 없습니다">불가</span>'
+                : `<b>${won(r.sim.target_price)}</b>`), R + 'background:#fdf4ff')}
+        ${td(`<input type="text" value="${esc(r.sim.memo || '')}" data-vid="${esc(r.vendor_item_id)}" data-field="memo" placeholder="메모"
+                oninput="rgmSetSim(this.dataset.vid, this.dataset.field, this.value)"
+                style="width:140px;padding:3px 5px;border:1px solid ${_rgmSim[r.vendor_item_id]?.memo ? '#a855f7' : 'var(--gray-300)'};border-radius:4px;font-size:11px">`, 'background:#fdf4ff')}
       </tr>`;
     }).join('')}</tbody>
   </table>`;
@@ -19114,7 +19139,8 @@ function renderRgMargin() {
 function rgmSetSim(vid, field, raw) {
   if (!_rgmSim[vid]) _rgmSim[vid] = {};
   const v = String(raw).trim();
-  if (v === '') delete _rgmSim[vid][field]; else _rgmSim[vid][field] = Number(v);
+  if (v === '') delete _rgmSim[vid][field];
+  else _rgmSim[vid][field] = field === 'memo' ? String(raw) : Number(v);
   if (!Object.keys(_rgmSim[vid]).length) delete _rgmSim[vid];
   // 표를 통째로 다시 그리므로 입력 중인 칸의 포커스와 커서를 복원한다.
   const active = document.activeElement;
@@ -19127,9 +19153,85 @@ function rgmSetSim(vid, field, raw) {
   }
 }
 
+/** 저장 안 한 편집을 버리고 마지막 저장값으로 */
 function rgmResetSim() {
+  const n = _rgmDirtyCount();
+  if (n && !confirm(`저장하지 않은 편집 ${n}개를 버리고 마지막 저장값으로 되돌릴까요?`)) return;
   _rgmSim = {};
+  for (const [vid, o] of Object.entries(_rgmSaved)) _rgmSim[vid] = { ...o };
   renderRgMargin();
+}
+
+/** 화면의 가정치를 서버에 저장 — 편집된(dirty) 판매단위만 보낸다. 값을 다 비운 행은 삭제된다. */
+async function rgmSaveAll() {
+  const vids = new Set([...Object.keys(_rgmSim), ...Object.keys(_rgmSaved)]);
+  const dirty = [...vids].filter(v => _rgmIsDirty(v));
+  if (!dirty.length) { showToast('바뀐 값이 없습니다'); return; }
+  const byVid = new Map(_rgmRows.map(r => [r.vendor_item_id, r]));
+  // 화면 필터로 숨겨진 행도 편집이 남아 있을 수 있어 _rgmAggregate 원본에서 찾는다
+  const all = new Map(_rgmAggregate().map(r => [r.vendor_item_id, r]));
+  const rows = dirty.map(vid => {
+    const s = _rgmSim[vid] || {};
+    const meta = byVid.get(vid) || all.get(vid) || {};
+    return {
+      vendor_item_id: vid,
+      seller_product_id: meta.seller_product_id || null,
+      internal_product_code: meta.internal_product_code || null,
+      product_name: meta.product_name || null,
+      sim_price: s.price ?? null,
+      sim_unit_cost: s.unit_cost ?? null,
+      sim_inbound_cost: s.inbound ?? null,
+      target_margin_rate: s.target == null ? null : Number(s.target) / 100,
+      memo: s.memo || null,
+    };
+  });
+  const btn = document.getElementById('rgm-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '저장 중…'; }
+  try {
+    const r = await fetch(`${API}/api/coupang/rfm/margin-sim`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    // 서버 기준으로 다시 맞춘다 — 삭제된 행은 _rgmSaved 에서도 빠져야 dirty 가 풀린다
+    for (const row of rows) {
+      const o = {};
+      if (row.sim_price != null) o.price = row.sim_price;
+      if (row.sim_unit_cost != null) o.unit_cost = row.sim_unit_cost;
+      if (row.sim_inbound_cost != null) o.inbound = row.sim_inbound_cost;
+      if (row.target_margin_rate != null) o.target = row.target_margin_rate * 100;
+      if (row.memo) o.memo = row.memo;
+      if (Object.keys(o).length) { _rgmSaved[row.vendor_item_id] = o; _rgmSim[row.vendor_item_id] = { ...o }; }
+      else { delete _rgmSaved[row.vendor_item_id]; delete _rgmSim[row.vendor_item_id]; }
+    }
+    showToast(`저장했습니다 — ${d.saved || 0}개 저장${d.removed ? `, ${d.removed}개 삭제` : ''}`);
+  } catch (e) {
+    alert(`저장 실패: ${e.message}${/relation|does not exist|PGRST205/i.test(e.message) ? '\n\n마이그레이션 069 를 아직 실행하지 않았을 수 있습니다.' : ''}`);
+  } finally {
+    renderRgMargin();
+  }
+}
+
+/** 화면에 보이는 판매단위의 저장값을 모두 삭제 */
+async function rgmClearSaved() {
+  const vids = _rgmRows.map(r => r.vendor_item_id).filter(v => _rgmSaved[v] || _rgmSim[v]);
+  if (!vids.length) { showToast('지울 저장값이 없습니다'); return; }
+  if (!confirm(`화면의 판매단위 ${vids.length}개의 저장값(판매가·원가·입고비·목표율·메모)을 모두 지울까요?\n실적·상품설정 기본값으로 돌아갑니다.`)) return;
+  try {
+    const r = await fetch(`${API}/api/coupang/rfm/margin-sim`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows: vids.map(vendor_item_id => ({ vendor_item_id })) }),   // 전부 NULL → 삭제
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    for (const v of vids) { delete _rgmSaved[v]; delete _rgmSim[v]; }
+    showToast(`저장값 ${d.removed || 0}개를 지웠습니다`);
+  } catch (e) {
+    alert(`삭제 실패: ${e.message}`);
+  } finally {
+    renderRgMargin();
+  }
 }
 
 function downloadRgMarginXlsx() {
@@ -19138,12 +19240,15 @@ function downloadRgMarginXlsx() {
   const header = ['상품명', '상품코드', '옵션ID', '등록상품ID', '판매단위', '기간시작', '기간끝',
     '주문수', '판매수량', '상품수량', '매출', '평균단가', '수수료', '수수료율(%)', '입출고비', '입출고비/개', '배송비', '배송비/개',
     '정산금액(물류비 차감)', '원가/개', '입고비/개', '원가합계', '실적 마진', '실적 마진율(%)',
-    '시뮬 판매가', '시뮬 원가/개', '시뮬 입고비/개', '시뮬 수수료', '시뮬 정산/개', '시뮬 원가/판매단위', '시뮬 마진/개', '시뮬 마진율(%)', '손익분기 판매가'];
+    '시뮬 판매가', '시뮬 원가/개', '시뮬 입고비/개', '시뮬 수수료', '시뮬 정산/개', '시뮬 원가/판매단위', '시뮬 마진/개', '시뮬 마진율(%)', '마진율 변화(%p)', '손익분기 판매가',
+    '목표 마진율(%)', '목표 판매가', '메모', '저장상태'];
   const body = _rgmRows.map(r => [
     r.product_name || '', r.internal_product_code || '', r.vendor_item_id, r.seller_product_id || '', r.sales_unit, r.first || '', r.last || '',
     r.order_count, r.qty, r.item_qty, n(r.sales), n(r.avg_price), n(r.commission), n(r.comm_rate * 100), n(r.inout), n(r.inout_per), n(r.shipping), n(r.ship_per),
     n(r.settle_net), n(r.unit_cost), n(r.inbound_unit_cost), n(r.cost_total), n(r.margin), r.margin_rate == null ? '' : n(r.margin_rate * 100),
-    n(r.sim.price), n(r.sim.unit_cost), n(r.sim.inbound), n(r.sim.commission), n(r.sim.settle), n(r.sim.cost_per_unit), n(r.sim.margin), r.sim.margin_rate == null ? '' : n(r.sim.margin_rate * 100), n(r.sim.be_price),
+    n(r.sim.price), n(r.sim.unit_cost), n(r.sim.inbound), n(r.sim.commission), n(r.sim.settle), n(r.sim.cost_per_unit), n(r.sim.margin), r.sim.margin_rate == null ? '' : n(r.sim.margin_rate * 100), n(r.sim.delta_pt), n(r.sim.be_price),
+    r.sim.target == null ? '' : n(r.sim.target * 100), n(r.sim.target_price), r.sim.memo || '',
+    r.sim.dirty ? '미저장' : (r.sim.saved ? '저장됨' : ''),
   ]);
   downloadXlsxRows([header, ...body], `로켓그로스_마진시뮬_${new Date().toISOString().slice(0, 10)}`, '마진시뮬');
 }
