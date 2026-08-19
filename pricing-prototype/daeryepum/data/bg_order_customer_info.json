@@ -11,5 +11,44 @@
     "receipt_number": "001010101",
     "submitted_at": "2026-04-15T09:31:36.229Z",
     "created_at": "2026-04-15T09:31:36.229Z"
+  },
+  {
+    "id": "db89f1e2-6d55-4f03-b2f6-c933baec0cab",
+    "order_id": "ETC-3244602",
+    "is_express": false,
+    "express_fee": 0,
+    "desired_ship_date": "2026-04-30",
+    "sticker_selections": [],
+    "cash_receipt_yn": false,
+    "receipt_type": null,
+    "receipt_number": null,
+    "customer_request": null,
+    "submitted_at": "2026-04-23T06:04:22.241Z",
+    "created_at": "2026-04-23T06:04:22.243Z"
+  },
+  {
+    "id": "7d05aeb0-e9ee-4cbf-84e6-605bcefc6039",
+    "order_id": "ETC-3244611",
+    "is_express": false,
+    "express_fee": 0,
+    "desired_ship_date": "2026-04-29",
+    "sticker_selections": [
+      {
+        "product_code": "TGJSD04D1",
+        "product_name": "[24%할인가]비타민 답례품",
+        "quantity": 40,
+        "sticker_id": null,
+        "sticker_name": null,
+        "custom_values": {},
+        "box_code": "TGJSD04B1",
+        "box_name": "화이트"
+      }
+    ],
+    "cash_receipt_yn": false,
+    "receipt_type": null,
+    "receipt_number": null,
+    "customer_request": null,
+    "submitted_at": "2026-04-23T06:04:33.820Z",
+    "created_at": "2026-04-23T06:04:33.820Z"
   }
 ]

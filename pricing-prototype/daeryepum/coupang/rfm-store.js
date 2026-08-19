@@ -438,7 +438,216 @@ async function saveMarginSims(rows, by = null) {
   return { saved, removed };
 }
 
+// ── 판매단위 기획 (migration 070) ──────────────────────────────────────
+//   아직 없는 판매단위를 설계해 마진을 비교하는 표. 069(실재 옵션 실적)와 축이 다르다.
+
+const PLAN_NUM_FIELDS = [
+  'price', 'unit_cost', 'inbound_cost', 'inout_fee', 'ship_fee',
+  'deduct_rate', 'target_margin_rate',
+];
+
+function _planNum(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(String(v).replace(/[,\s원]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+async function listUnitPlans() {
+  if (!USE) return [];
+  const res = await fetch(`${REST}/coupang_rg_unit_plan?select=*&order=product_name.asc,sales_unit.asc,plan_label.asc&limit=2000`, { headers: HDR });
+  if (!res.ok) {
+    const t = await res.text();
+    // 070 미실행이면 빈 목록 — 화면은 저장 없이도 동작해야 한다
+    if (res.status === 404 || /does not exist|PGRST205/.test(t)) return [];
+    throw new Error(`Supabase list rg_unit_plan [${res.status}]: ${t.slice(0, 300)}`);
+  }
+  return res.json();
+}
+
+/** 행 일괄 저장 (upsert). plan_key = (상품, 판매단위, 안 이름) 중복은 갱신. */
+async function saveUnitPlans(rows, by = null) {
+  if (!USE) throw new Error('Supabase 미설정 — 기획 저장은 Supabase 가 필요합니다');
+  const recs = [];
+  for (const r of rows || []) {
+    const name = String(r.product_name || '').trim();
+    if (!name) continue;                       // 이름 없는 행은 저장하지 않는다
+    const unit = Math.max(1, parseInt(r.sales_unit, 10) || 1);
+    const rec = {
+      product_code: r.product_code ? String(r.product_code).trim() : null,
+      product_name: name.slice(0, 200),
+      sales_unit: unit,
+      plan_label: String(r.plan_label || '기본안').trim().slice(0, 60) || '기본안',
+      etc_cost: _planNum(r.etc_cost) ?? 0,
+      vat_rate: _planNum(r.vat_rate) ?? 0.1,
+      price_vat_included: r.price_vat_included !== false,
+      fulfill_basis: r.fulfill_basis ? String(r.fulfill_basis).slice(0, 400) : null,
+      fulfill_estimated: !!r.fulfill_estimated,
+      memo: r.memo ? String(r.memo).slice(0, 500) : null,
+      sort_order: parseInt(r.sort_order, 10) || 0,
+      updated_by: by,
+      updated_at: new Date().toISOString(),
+    };
+    // 빈 값도 명시적으로 NULL 로 보낸다 — merge-duplicates 가 지운 값을 되살리지 않게
+    for (const f of PLAN_NUM_FIELDS) rec[f] = _planNum(r[f]);
+    if (r.id) rec.id = String(r.id);
+    recs.push(rec);
+  }
+  if (!recs.length) return { saved: 0 };
+  const res = await fetch(`${REST}/coupang_rg_unit_plan?on_conflict=plan_key`, {
+    method: 'POST',
+    headers: { ...HDR, Prefer: 'resolution=merge-duplicates,return=representation' },
+    body: JSON.stringify(recs),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    if (/23505|duplicate key/.test(t)) {
+      throw new Error('같은 (상품, 판매단위, 안 이름) 조합이 이미 있습니다 — 안 이름을 다르게 지어주세요');
+    }
+    throw new Error(`Supabase upsert rg_unit_plan [${res.status}]: ${t.slice(0, 300)}`);
+  }
+  return { saved: recs.length, rows: await res.json() };
+}
+
+async function deleteUnitPlan(id) {
+  if (!USE) throw new Error('Supabase 미설정');
+  const res = await fetch(`${REST}/coupang_rg_unit_plan?id=eq.${encodeURIComponent(id)}`, {
+    method: 'DELETE', headers: { ...HDR, Prefer: 'return=minimal' },
+  });
+  if (!res.ok) throw new Error(`Supabase delete rg_unit_plan [${res.status}]: ${(await res.text()).slice(0, 300)}`);
+  return { ok: true };
+}
+
+/**
+ * 상품별 풀필먼트 기본값 — "상품 기준으로 부과된 기존 값" 의 구현.
+ *
+ * ⚠ 유료 청구 라인만 표본으로 쓴다.
+ *   쿠팡이 물류비를 전액 할인해 주는 기간이 있고(파서가 '최종비용'=실부담액을 읽는다),
+ *   그 구간 라인은 0원이 정상값이다. 이걸 섞으면 최빈값이 0원으로 고정돼
+ *   물류비가 통째로 사라진 마진이 나온다 (실측: 855행 중 780행이 0원 구간).
+ *
+ * 옵션 간 평균을 내지 않고 대표 옵션 하나를 고른다.
+ *   실측상 물류비는 부피·무게 등급표라(10세트 1,650/2,200 · 낱개 980/1,125 · 액자 800/1,350)
+ *   등급이 다른 옵션을 평균하면 실제로 청구된 적 없는 중간값이 나온다.
+ *
+ * 반환: { defaults: {상품코드: {...}}, fallback: {...}, sampled_from, paid_from }
+ */
+async function fulfillmentDefaults(lines) {
+  const byProduct = new Map();
+  let paidFrom = null, paidTo = null;
+  for (const l of lines || []) {
+    if (l.is_cancel) continue;
+    const code = String(l.internal_product_code || '').trim();
+    if (!code) continue;
+    if (!byProduct.has(code)) {
+      byProduct.set(code, { code, paid: [], all: 0, zero: 0, sales: 0, commission: 0, settlement: 0, salesLines: 0 });
+    }
+    const g = byProduct.get(code);
+    // 수수료·차감율은 매출이 있는 라인 전체에서 (물류비 유무와 무관)
+    if (Number(l.sales_amount) > 0) {
+      g.sales += Number(l.sales_amount) || 0;
+      g.commission += Number(l.commission) || 0;
+      g.settlement += Number(l.settlement_amount) || 0;
+      g.salesLines++;
+    }
+    const inout = Number(l.inout_fee);
+    const ship = Number(l.shipping_fee);
+    const qty = Number(l.sales_qty);
+    if (l.inout_fee == null && l.shipping_fee == null) continue;   // 물류비 리포트 미도착
+    g.all++;
+    if (!(inout > 0) && !(ship > 0)) { g.zero++; continue; }        // 전액할인 구간
+    if (!(qty > 0)) continue;                                       // 0 나눗셈 방지
+    g.paid.push({ vid: String(l.vendor_item_id || ''), inout, ship, qty, date: l.delivered_date || null });
+    if (l.delivered_date) {
+      if (!paidFrom || l.delivered_date < paidFrom) paidFrom = l.delivered_date;
+      if (!paidTo || l.delivered_date > paidTo) paidTo = l.delivered_date;
+    }
+  }
+
+  const mode = (arr) => {
+    const c = new Map();
+    for (const v of arr) {
+      const k = Math.round(v);
+      if (!Number.isFinite(k)) continue;
+      c.set(k, (c.get(k) || 0) + 1);
+    }
+    let best = null, bestN = 0;
+    for (const [k, n] of c) if (n > bestN) { best = k; bestN = n; }
+    return best;
+  };
+
+  const defaults = {};
+  const paidInouts = [], paidShips = [];
+  for (const g of byProduct.values()) {
+    // 매출 대비 실효 차감율 — 수수료 외 판매자 부담(쿠팡 할인 분담 등)까지 포함한다.
+    //   Σ수수료÷Σ매출 만 쓰면 정산에서 더 빠지는 항목이 모델에 없어 마진이 낙관적으로 나온다.
+    const commRate = g.sales > 0 ? g.commission / g.sales : null;
+    const deductRate = (g.sales > 0 && g.settlement > 0) ? (g.sales - g.settlement) / g.sales : commRate;
+
+    if (!g.paid.length) {
+      defaults[g.code] = {
+        inout_fee: null, ship_fee: null,
+        deduct_rate: deductRate, comm_rate: commRate,
+        estimated: true,
+        basis: g.all
+          ? `유료 청구 표본 0건 — 물류비 전액할인 구간만 ${g.zero}건`
+          : '물류비 정산 리포트 없음',
+      };
+      continue;
+    }
+    // 대표 옵션 = 유료 표본의 판매수량 합이 가장 큰 옵션
+    const byOpt = new Map();
+    for (const p of g.paid) {
+      if (!byOpt.has(p.vid)) byOpt.set(p.vid, { vid: p.vid, qty: 0, rows: [] });
+      const o = byOpt.get(p.vid);
+      o.qty += p.qty;
+      o.rows.push(p);
+    }
+    const rep = [...byOpt.values()].sort((a, b) => b.qty - a.qty)[0];
+    const inoutPerUnit = mode(rep.rows.map(p => p.inout / p.qty));
+    // 배송비는 주문(배송)건당이라 수량으로 나누지 않는다 — qty=1 라인이 있으면 그 값이 정확하다
+    const q1 = rep.rows.filter(p => p.qty === 1).map(p => p.ship);
+    const shipPerOrder = q1.length ? mode(q1)
+      : Math.round(rep.rows.reduce((s, p) => s + p.ship, 0) / rep.rows.length);
+    if (Number.isFinite(inoutPerUnit)) paidInouts.push(inoutPerUnit);
+    if (Number.isFinite(shipPerOrder)) paidShips.push(shipPerOrder);
+    const dates = rep.rows.map(p => p.date).filter(Boolean).sort();
+    defaults[g.code] = {
+      inout_fee: Number.isFinite(inoutPerUnit) ? inoutPerUnit : null,
+      ship_fee: Number.isFinite(shipPerOrder) ? shipPerOrder : null,
+      deduct_rate: deductRate, comm_rate: commRate,
+      estimated: false,
+      basis: `옵션 ${rep.vid} · 유료 ${rep.rows.length}건`
+        + (q1.length ? ` (수량1 ${q1.length}건)` : ' (수량1 라인 없음 — 평균)')
+        + (dates.length ? ` ${dates[0]}~${dates[dates.length - 1]}` : '')
+        + (g.zero ? ` · 전액할인 ${g.zero}건 제외` : ''),
+    };
+  }
+
+  const median = (a) => {
+    if (!a.length) return null;
+    const s = [...a].sort((x, y) => x - y);
+    return s[Math.floor(s.length / 2)];
+  };
+  return {
+    defaults,
+    fallback: {
+      inout_fee: median(paidInouts),
+      ship_fee: median(paidShips),
+      deduct_rate: 0.11,
+      estimated: true,
+      basis: paidInouts.length
+        ? `채널 유료 청구 중앙값 (상품 ${paidInouts.length}종) — 이 상품 실적 없음`
+        : '유료 청구 실적이 채널 전체에 없음 — 값을 직접 넣어야 합니다',
+    },
+    paid_range: paidFrom ? { from: paidFrom, to: paidTo } : null,
+  };
+}
+
 module.exports = {
+  listUnitPlans,
+  saveUnitPlans,
+  deleteUnitPlan,
+  fulfillmentDefaults,
   listMarginSims,
   saveMarginSims,
   upsertOrderLines,

@@ -1322,6 +1322,10 @@ nav.nav-loading a[href^="#"] {
       <button class="btn" style="padding:5px 12px;font-size:12px" onclick="rgmClearSaved()"
         title="이 화면에 보이는 판매단위의 저장값을 모두 지웁니다 (실적·상품설정 기본값으로)">🗑 저장값 삭제</button>
       <button class="btn" style="padding:5px 12px;font-size:12px" onclick="downloadRgMarginXlsx()">📥 스프레드시트</button>
+      <label style="font-size:12px;display:flex;align-items:center;gap:5px;padding-left:6px;border-left:1px solid var(--gray-300)"
+        title="쿠팡 판매가·수수료는 부가세 포함이고 물류비·원가는 부가세 별도라, 그대로 빼면 마진이 과대 계산됩니다. 켜면 판매가·수수료를 공급가로 환산해 같은 기준에서 뺍니다.">
+        <input type="checkbox" id="rg-vat-toggle" checked onchange="rgToggleVat()"> 부가세 반영
+      </label>
     </div>
     <div style="font-size:11px;color:var(--gray-500);line-height:1.7;margin-bottom:10px">
       <b>실적</b> 열은 정산 리포트 그대로입니다. <b>판매가·원가·입고비</b> 칸을 고치면 <b>시뮬</b> 열이 바로 다시 계산됩니다 —
@@ -1332,6 +1336,30 @@ nav.nav-loading a[href^="#"] {
     </div>
     <div id="rgm-summary" style="font-size:12px;color:var(--gray-600);margin-bottom:8px"></div>
     <div id="rgm-table-wrap" style="overflow-x:auto"></div>
+  </div>
+
+  <!-- 판매단위 기획 (migration 070) — 아직 없는 판매단위를 설계해 비교한다 -->
+  <div class="card" style="margin-bottom:16px;padding:16px;border:1px solid #ddd6fe;background:#fbfaff">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+      <div style="font-weight:700;font-size:14px">🧮 판매단위 기획
+        <span style="font-weight:400;font-size:11px;color:var(--gray-500)">(행을 직접 추가해 판매단위별 마진 비교 · 저장됨)</span></div>
+      <div style="flex:1"></div>
+      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="addRgPlanRow()">＋ 행 추가</button>
+      <button class="btn btn-primary" id="rgp-save-btn" style="padding:5px 12px;font-size:12px" onclick="saveRgPlan()">💾 저장</button>
+      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="loadRgPlan()"
+        title="저장된 행과 실적 기본값을 다시 불러옵니다 (저장 안 한 새 행은 유지)">🔄 새로고침</button>
+      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="downloadRgPlanXlsx()">📥 스프레드시트</button>
+    </div>
+    <div style="font-size:11px;color:var(--gray-500);line-height:1.7;margin-bottom:10px">
+      상품을 고르고 <b>판매단위</b>를 넣으면 원가·입고비는 상품설정(⚙)에서, <b>입출고비·배송비·차감율</b>은 그 상품의 정산 실적에서 채워집니다.
+      같은 상품을 여러 판매단위로 만들려면 <b>⧉</b> 로 행을 복사하세요.<br>
+      <b>원가·입고비는 낱개(상품 1개) 기준</b>으로 넣습니다 — 판매단위를 곱해 주문 원가를 냅니다.
+      <b>입출고비·배송비는 주문 1건당</b>이라 판매단위를 곱하지 않습니다. 그래서 판매단위를 키우면 <b>물류비/낱개</b>가 줄어듭니다.<br>
+      <span style="color:#b45309">⚠ 실적 물류비는 지금 팔고 있는 판매단위에서 나온 값입니다. 10개 묶음 물류비는 낱개의 1.7배지 10배가 아니라,
+      판매단위를 바꾸면 포장 등급이 달라져 실제 물류비도 달라집니다 — 새 판매단위의 값은 확인 후 직접 넣어주세요.</span>
+    </div>
+    <div id="rgp-summary" style="font-size:12px;color:var(--gray-600);margin-bottom:8px"></div>
+    <div id="rgp-table-wrap" style="overflow-x:auto"></div>
   </div>
 
 </div>
@@ -18362,6 +18390,8 @@ async function loadRgLines() {
     //   저장된 가정치(069)를 먼저 깔고, 아직 저장 안 한 편집이 있으면 그 위에 남긴다.
     await rgmLoadSaved();
     renderRgMargin();
+    // 판매단위 기획은 조회 기간과 무관한 영구 데이터라 별도 경로로 불러온다
+    loadRgPlan();
   } catch (e) {
     $w.innerHTML = `<div style="padding:16px;color:#dc2626;font-size:12px">조회 실패: ${esc(e.message)}</div>`;
   }
@@ -18882,6 +18912,12 @@ async function syncRgWorkflow() {
 //
 //   ⚠ 취소 라인은 뺀다. 매출이 음수로 잡혀 평균 판매가와 요율을 흔든다.
 //   ⚠ 원가는 '상품 1개당' 이라 판매단위(1주문 = 상품 N개)를 곱한다 (068 · 060).
+// 부가세 처리 토글 — 쿠팡 판매가·수수료는 VAT 포함, 물류비(055)·원가(068)는 VAT 별도라
+//   그대로 빼면 마진이 과대 계산된다. 두 카드가 같은 토글을 쓴다.
+const _RG_VAT = 0.1;
+function _rgVatOn() { return document.getElementById('rg-vat-toggle')?.checked !== false; }
+function rgToggleVat() { renderRgMargin(); if (typeof renderRgPlan === 'function') renderRgPlan(); }
+
 let _rgmSim = {};      // vendor_item_id → { price, unit_cost, inbound, target, memo } 화면 가정치
 let _rgmSaved = {};    // vendor_item_id → 서버에 저장된 가정치 (dirty 판정 기준)
 let _rgmRows = [];     // 마지막 렌더 결과 (엑셀 다운로드용)
@@ -18925,6 +18961,80 @@ function _rgmDirtyCount() {
   const vids = new Set([...Object.keys(_rgmSim), ...Object.keys(_rgmSaved)]);
   let n = 0; for (const v of vids) if (_rgmIsDirty(v)) n++;
   return n;
+}
+
+// ── 마진 계산 공통식 ────────────────────────────────────────────────
+//   📐 실적 시뮬 카드와 🧮 판매단위 기획 카드가 같은 함수를 쓴다. 갈라지면 같은 상품의
+//   마진율이 두 표에서 다르게 나온다.
+//
+//   인자 이름에 단위를 박아 둔다. PerOrder 가 붙은 값에는 salesUnit 을 곱하지 않는다.
+//     price            원/주문 1건 (= 판매단위 1개)
+//     deductRate       매출 대비 차감율 (수수료+VAT, 그 외 정산 차감 포함)
+//     inoutPerOrder    원/주문 1건   ← 곱하지 않음
+//     shipPerOrder     원/주문 1건   ← 곱하지 않음
+//     etcPerOrder      원/주문 1건   ← 곱하지 않음
+//     unitCostPerItem  원/상품 1개(낱개)  ← salesUnit 을 곱한다
+//     inboundPerItem   원/상품 1개(낱개)  ← salesUnit 을 곱한다
+//     salesUnit        낱개 / 판매단위 1개
+//     vatRate          부가세율. 0 이면 부가세를 고려하지 않는다(예전 동작)
+//     priceVatIncluded price·수수료가 VAT 포함인가
+//
+//   ⚠ 부가세: 쿠팡 판매가·판매수수료는 VAT 포함이고 물류비(055)·원가(068)는 VAT 별도다.
+//     그대로 빼면 마진이 과대 계산된다. vatRate > 0 이면 판매가와 수수료를 공급가로
+//     환산해 VAT 별도 비용과 같은 기준에서 뺀다.
+//       공급가 마진 = P/(1+v) − P·d/(1+v) − 고정비 − 원가×N
+function _rgMargin(o) {
+  const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0);
+  const N = Math.max(1, num(o.salesUnit) || 1);
+  const vat = num(o.vatRate);
+  const div = (o.priceVatIncluded === false || vat <= 0) ? 1 : (1 + vat);
+  const P = num(o.price);
+  const d = num(o.deductRate);
+  const Pnet = P / div;
+  const comm = (P * d) / div;
+  // 원가는 '미입력(null)' 과 '0원' 을 구분해야 한다. Number(null)===0 이라 그대로 쓰면
+  //   미입력이 0원으로 둔갑해 마진 100% 가 나온다. NaN(예: '1,200' 붙여넣기 실패)도 같이 막는다.
+  const cost = (x) => {
+    if (x === null || x === undefined || x === '') return null;
+    const n = Number(x);
+    return Number.isFinite(n) ? n : null;
+  };
+  const uc = cost(o.unitCostPerItem);
+  const ib = cost(o.inboundPerItem);
+  const hasCost = uc !== null || ib !== null;
+  const costPerItem = hasCost ? (uc || 0) + (ib || 0) : null;
+  const costPerOrder = hasCost ? costPerItem * N : null;
+  const fixed = num(o.inoutPerOrder) + num(o.shipPerOrder) + num(o.etcPerOrder);
+  const settle = Pnet - comm - fixed;
+  const margin = hasCost ? settle - costPerOrder : null;
+  const denom = hasCost ? fixed + costPerOrder : null;
+  const t = (o.target === null || o.target === undefined || !Number.isFinite(Number(o.target)))
+    ? null : Number(o.target);
+  // 역산: 마진율 분모도 공급가라 (1−d)/div 계수로 이항된다.
+  //   P·(1−d)/div − denom = t·P/div   →   P = denom·div / (1 − d − t)
+  const k = 1 - d;
+  return {
+    price_net: Pnet,
+    comm, fixed_per_order: fixed, settle,
+    cost_per_item: costPerItem, cost_per_order: costPerOrder,
+    margin,
+    margin_rate: (hasCost && Pnet > 0) ? margin / Pnet : null,
+    margin_per_item: hasCost ? margin / N : null,
+    price_per_item: P > 0 ? P / N : null,
+    logistics_per_item: fixed / N,
+    be_price: (hasCost && k > 0) ? (denom * div) / k : null,
+    target_price: (t !== null && hasCost && (k - t) > 0) ? (denom * div) / (k - t) : null,
+    has_cost: hasCost,
+    vat_applied: div !== 1,
+  };
+}
+
+/** 입력 문자열 → 숫자. '1,200' 같은 붙여넣기를 받아들이고, 못 읽으면 undefined. */
+function _rgNumIn(raw) {
+  const t = String(raw == null ? '' : raw).replace(/[,\s원%]/g, '');
+  if (t === '') return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 function _rgmAggregate() {
@@ -18989,16 +19099,22 @@ function _rgmAggregate() {
     const sHasCost = !((sUnitCost == null) && (sInbound == null));
     const sCostPerItem = sHasCost ? Number(sUnitCost || 0) + Number(sInbound || 0) : null;
     const sCostPerUnit = sHasCost ? sCostPerItem * g.sales_unit : null;   // 판매단위 1개에 든 원가
-    const sComm = sPrice * commRate;
-    const sSettle = sPrice - sComm - inoutPer - shipPer;
-    const sMargin = sHasCost ? sSettle - sCostPerUnit : null;
-    const sMarginRate = sHasCost && sPrice > 0 ? sMargin / sPrice : null;
-    // 손익분기 판매가 — 마진 0 이 되는 가격.  P(1−c) − in − sh − cost = 0
-    const bePrice = sHasCost && commRate < 1 ? (inoutPer + shipPer + sCostPerUnit) / (1 - commRate) : null;
-    // 목표 마진율 t 를 맞추는 판매가 — P(1−c) − in − sh − cost = tP  →  P = (in+sh+cost)/(1−c−t)
     const target = sim.target != null ? Number(sim.target) / 100 : null;
-    const targetPrice = (target != null && sHasCost && (1 - commRate - target) > 0)
-      ? (inoutPer + shipPer + sCostPerUnit) / (1 - commRate - target) : null;
+    // 계산은 🧮 기획 카드와 같은 공통식을 쓴다 (갈라지면 두 표의 마진율이 달라진다).
+    //   vatRate 는 화면 토글값 — 0 이면 예전과 완전히 같은 숫자가 나온다.
+    const _m = _rgMargin({
+      price: sPrice, deductRate: commRate,
+      inoutPerOrder: inoutPer, shipPerOrder: shipPer,
+      unitCostPerItem: sUnitCost, inboundPerItem: sInbound,
+      salesUnit: g.sales_unit, target,
+      vatRate: _rgVatOn() ? _RG_VAT : 0, priceVatIncluded: true,
+    });
+    const sComm = _m.comm;
+    const sSettle = _m.settle;
+    const sMargin = _m.margin;
+    const sMarginRate = _m.margin_rate;
+    const bePrice = _m.be_price;
+    const targetPrice = _m.target_price;
 
     rows.push({
       ...g, order_count: g.orders.size,
@@ -19232,6 +19348,362 @@ async function rgmClearSaved() {
   } finally {
     renderRgMargin();
   }
+}
+
+// ── 🧮 판매단위 기획 (migration 070) ────────────────────────────────
+//   "호두정과 / 10개, 호두정과 / 5개, 레몬즙 / 1개·3개·5개" 처럼 행을 직접 만들어
+//   판매단위별 마진을 비교한다. 위 📐 카드가 '실재하는 옵션의 실적' 이라면
+//   이 카드는 '아직 없는 판매단위의 설계' 다.
+//
+//   단위 규약 (070 COMMENT 와 동일):
+//     원가·입고비   원/상품 1개(낱개)  → 판매단위를 곱한다
+//     입출고비·배송비 원/주문 1건       → 곱하지 않는다
+let _rgPlans = [];        // 화면의 행들 (id 없으면 아직 저장 안 된 새 행)
+let _rgPlanSaved = {};    // id → 서버 저장 스냅샷 (dirty 판정)
+let _rgPlanDefaults = null;   // { defaults, fallback, products, paid_range }
+let _rgPlanSeq = 0;
+
+const RGP_FIELDS = ['product_code', 'product_name', 'sales_unit', 'plan_label', 'price',
+  'unit_cost', 'inbound_cost', 'inout_fee', 'ship_fee', 'etc_cost',
+  'deduct_rate', 'target_margin_rate', 'memo'];
+
+function _rgpKey(r) { return r.id || r._tmp; }
+
+function _rgpIsDirty(r) {
+  if (!r.id) return true;                       // 새 행은 항상 미저장
+  const b = _rgPlanSaved[r.id];
+  if (!b) return true;
+  return RGP_FIELDS.some(f => (r[f] ?? null) !== (b[f] ?? null));
+}
+function _rgpDirtyCount() { return _rgPlans.filter(_rgpIsDirty).length; }
+
+/** 서버에서 저장된 기획 행 + 상품별 풀필먼트 기본값을 함께 불러온다 */
+async function loadRgPlan() {
+  const $w = document.getElementById('rgp-table-wrap');
+  if (!$w) return;
+  try {
+    const [dRes, pRes] = await Promise.all([
+      fetch(`${API}/api/coupang/rfm/fulfillment-defaults?days=180`),
+      fetch(`${API}/api/coupang/rfm/unit-plan`),
+    ]);
+    const d = await dRes.json();
+    const p = await pRes.json();
+    if (d.error) throw new Error(d.error);
+    if (p.error) throw new Error(p.error);
+    _rgPlanDefaults = d;
+    const dirtyNew = _rgPlans.filter(r => !r.id);        // 저장 안 한 새 행은 유지
+    _rgPlanSaved = {};
+    _rgPlans = (p.plans || []).map(row => {
+      const r = { ...row };
+      r.deduct_rate = row.deduct_rate == null ? null : Number(row.deduct_rate) * 100;      // 화면은 %
+      r.target_margin_rate = row.target_margin_rate == null ? null : Number(row.target_margin_rate) * 100;
+      for (const f of ['price', 'unit_cost', 'inbound_cost', 'inout_fee', 'ship_fee', 'etc_cost', 'sales_unit']) {
+        r[f] = row[f] == null ? null : Number(row[f]);
+      }
+      _rgPlanSaved[r.id] = { ...r };
+      return r;
+    }).concat(dirtyNew);
+    renderRgPlan();
+  } catch (e) {
+    $w.innerHTML = `<div style="padding:14px;color:#dc2626;font-size:12px">불러오기 실패: ${esc(e.message)}`
+      + `${/does not exist|PGRST205/i.test(e.message) ? ' — 마이그레이션 070 을 아직 실행하지 않았을 수 있습니다.' : ''}</div>`;
+  }
+}
+
+/** 상품 선택 → 그 상품의 실적 기본값으로 행을 채운다 */
+function _rgpDefaultsFor(code) {
+  if (!_rgPlanDefaults) return null;
+  const d = _rgPlanDefaults.defaults?.[code];
+  if (d && (d.inout_fee != null || d.ship_fee != null)) return d;
+  // 이 상품에 유료 청구 실적이 없으면 채널 중앙값(추정)으로 — 빈칸이면 마진이 아예 안 나온다
+  const fb = _rgPlanDefaults.fallback || {};
+  return {
+    inout_fee: fb.inout_fee, ship_fee: fb.ship_fee,
+    deduct_rate: d?.deduct_rate ?? fb.deduct_rate,
+    estimated: true,
+    basis: (d?.basis ? d.basis + ' → ' : '') + (fb.basis || '추정값'),
+  };
+}
+
+function addRgPlanRow(copyFrom) {
+  const src = copyFrom ? _rgPlans.find(r => _rgpKey(r) === copyFrom) : null;
+  const row = src
+    ? { ...src, id: null, _tmp: 'new' + (++_rgPlanSeq), plan_label: (src.plan_label || '기본안') + ' 사본' }
+    : {
+      _tmp: 'new' + (++_rgPlanSeq), id: null,
+      product_code: null, product_name: '', sales_unit: 1, plan_label: '기본안',
+      price: null, unit_cost: null, inbound_cost: null,
+      inout_fee: null, ship_fee: null, etc_cost: 0,
+      deduct_rate: null, target_margin_rate: null, memo: null,
+      fulfill_basis: null, fulfill_estimated: false,
+    };
+  _rgPlans.push(row);
+  renderRgPlan();
+}
+
+function removeRgPlanRow(key) {
+  const i = _rgPlans.findIndex(r => _rgpKey(r) === key);
+  if (i < 0) return;
+  const r = _rgPlans[i];
+  const label = `${r.product_name || '(이름 없음)'} / ${r.sales_unit}개 / ${r.plan_label}`;
+  if (!confirm(`${label}\n\n이 행을 삭제할까요?`)) return;
+  const doRemove = () => { _rgPlans.splice(i, 1); renderRgPlan(); };
+  if (!r.id) { doRemove(); return; }
+  fetch(`${API}/api/coupang/rfm/unit-plan/${encodeURIComponent(r.id)}`, { method: 'DELETE' })
+    .then(res => res.json())
+    .then(d => { if (d.error) throw new Error(d.error); delete _rgPlanSaved[r.id]; doRemove(); showToast('삭제했습니다'); })
+    .catch(e => alert(`삭제 실패: ${e.message}`));
+}
+
+/** 상품을 고르면 원가·입고비(상품설정)와 물류비·차감율(실적)을 한 번에 채운다 */
+function rgpPickProduct(key, code) {
+  const r = _rgPlans.find(x => _rgpKey(x) === key);
+  if (!r) return;
+  const prod = (_rgPlanDefaults?.products || []).find(p => p.product_id === code);
+  r.product_code = code || null;
+  if (prod) {
+    r.product_name = prod.product_name || code;
+    if (r.unit_cost == null) r.unit_cost = prod.unit_cost;
+    if (r.inbound_cost == null) r.inbound_cost = prod.inbound_unit_cost;
+    if (prod.sales_unit && (!r.sales_unit || r.sales_unit === 1)) r.sales_unit = prod.sales_unit;
+  }
+  rgpApplyDefaults(key, true);
+}
+
+/** 풀필먼트 기본값(실적)을 이 행에 적용 */
+function rgpApplyDefaults(key, silent) {
+  const r = _rgPlans.find(x => _rgpKey(x) === key);
+  if (!r) return;
+  if (!r.product_code) { if (!silent) showToast('상품을 먼저 고르세요'); renderRgPlan(); return; }
+  const d = _rgpDefaultsFor(r.product_code);
+  if (!d) { if (!silent) showToast('실적 기본값이 없습니다'); renderRgPlan(); return; }
+  if (!silent && !confirm('이 행의 입출고비·배송비·차감율을 실적 기본값으로 덮어쓸까요?')) return;
+  r.inout_fee = d.inout_fee ?? null;
+  r.ship_fee = d.ship_fee ?? null;
+  if (d.deduct_rate != null) r.deduct_rate = Math.round(d.deduct_rate * 10000) / 100;   // %
+  r.fulfill_basis = d.basis || null;
+  r.fulfill_estimated = !!d.estimated;
+  renderRgPlan();
+}
+
+function rgpSet(key, field, raw) {
+  const r = _rgPlans.find(x => _rgpKey(x) === key);
+  if (!r) return;
+  if (field === 'product_name' || field === 'plan_label' || field === 'memo') {
+    r[field] = String(raw);
+  } else {
+    const v = _rgNumIn(raw);
+    if (v === undefined) { r['_bad_' + field] = true; renderRgPlan(); return; }   // 숫자로 못 읽음
+    delete r['_bad_' + field];
+    r[field] = v;
+    if (field === 'sales_unit' && v != null) r[field] = Math.max(1, Math.round(v));
+  }
+  // 물류비를 손으로 고치면 근거를 '수기' 로 바꾼다 — 나중에 출처를 되짚을 수 있게
+  if (field === 'inout_fee' || field === 'ship_fee') {
+    r.fulfill_basis = '수기 입력';
+    r.fulfill_estimated = false;
+  }
+  const a = document.activeElement;
+  const keep = a && a.dataset?.rgpkey ? { k: a.dataset.rgpkey, f: a.dataset.rgpfield, pos: a.selectionStart } : null;
+  renderRgPlan();
+  if (keep) {
+    const el = document.querySelector(`#rgp-table-wrap [data-rgpkey="${CSS.escape(keep.k)}"][data-rgpfield="${keep.f}"]`);
+    if (el) { el.focus(); try { el.setSelectionRange(keep.pos, keep.pos); } catch {} }
+  }
+}
+
+function _rgpCompute(r) {
+  return _rgMargin({
+    price: r.price,
+    deductRate: r.deduct_rate == null ? 0 : Number(r.deduct_rate) / 100,
+    inoutPerOrder: r.inout_fee, shipPerOrder: r.ship_fee, etcPerOrder: r.etc_cost,
+    unitCostPerItem: r.unit_cost, inboundPerItem: r.inbound_cost,
+    salesUnit: r.sales_unit,
+    target: r.target_margin_rate == null ? null : Number(r.target_margin_rate) / 100,
+    vatRate: _rgVatOn() ? _RG_VAT : 0, priceVatIncluded: true,
+  });
+}
+
+function renderRgPlan() {
+  const $w = document.getElementById('rgp-table-wrap');
+  const $s = document.getElementById('rgp-summary');
+  if (!$w) return;
+  const dirty = _rgpDirtyCount();
+  const $btn = document.getElementById('rgp-save-btn');
+  if ($btn) { $btn.textContent = dirty ? `💾 저장 (${dirty})` : '💾 저장'; $btn.disabled = !dirty; }
+
+  const pr = _rgPlanDefaults?.paid_range;
+  $s.innerHTML = `행 <b>${_rgPlans.length}</b>개`
+    + (dirty ? ` · <span style="color:#dc2626;font-weight:600">저장 안 됨 ${dirty}개</span>` : '')
+    + (pr ? ` · <span style="color:var(--gray-500)">물류비 유료 청구 실적 ${pr.from} ~ ${pr.to}</span>`
+          : ` · <span style="color:#b45309">물류비 유료 청구 실적이 없습니다 — 값을 직접 넣어야 합니다</span>`)
+    + ` · <span style="color:var(--gray-500)">${_rgVatOn() ? '공급가(부가세 제외) 기준' : '부가세 미반영'}</span>`;
+
+  if (!_rgPlans.length) {
+    $w.innerHTML = '<div style="padding:16px;color:var(--gray-400);font-size:12px">'
+      + '행이 없습니다. <b>＋ 행 추가</b> 를 눌러 상품과 판매단위를 넣어보세요.</div>';
+    return;
+  }
+
+  const won = v => (v == null || !isFinite(v)) ? '<span style="color:var(--gray-300)">-</span>' : Math.round(v).toLocaleString();
+  const pct = v => (v == null || !isFinite(v)) ? '<span style="color:var(--gray-300)">-</span>'
+    : `<b style="color:${v >= 0.2 ? '#047857' : v >= 0.1 ? '#b45309' : '#dc2626'}">${(v * 100).toFixed(1)}%</b>`;
+  const R = 'text-align:right;';
+  const th = (t, extra = '', tip = '') => `<th style="padding:6px 8px;white-space:nowrap;border-bottom:2px solid var(--gray-200);color:var(--gray-500);font-weight:600;${extra}"${tip ? ` title="${esc(tip)}"` : ''}>${t}</th>`;
+  const inp = (r, field, step, width, tip) => {
+    const bad = r['_bad_' + field];
+    const v = r[field];
+    return `<input type="text" inputmode="decimal" value="${v == null || !isFinite(v) ? '' : Math.round(v * 100) / 100}"
+      data-rgpkey="${esc(_rgpKey(r))}" data-rgpfield="${field}" title="${esc(tip || '')}"
+      oninput="rgpSet(this.dataset.rgpkey, this.dataset.rgpfield, this.value)"
+      style="width:${width}px;padding:3px 5px;border:1px solid ${bad ? '#dc2626' : 'var(--gray-300)'};border-radius:4px;font-size:12px;text-align:right;background:${bad ? '#fef2f2' : '#fff'}">`;
+  };
+  const txt = (r, field, width, ph) =>
+    `<input type="text" value="${esc(r[field] || '')}" placeholder="${esc(ph || '')}"
+      data-rgpkey="${esc(_rgpKey(r))}" data-rgpfield="${field}"
+      oninput="rgpSet(this.dataset.rgpkey, this.dataset.rgpfield, this.value)"
+      style="width:${width}px;padding:3px 5px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">`;
+
+  const prods = _rgPlanDefaults?.products || [];
+  // 같은 상품끼리 붙여 보여준다 — 판매단위 비교가 이 도구의 목적
+  const sorted = [..._rgPlans].sort((a, b) =>
+    String(a.product_name || '').localeCompare(String(b.product_name || ''))
+    || (a.sales_unit || 0) - (b.sales_unit || 0)
+    || String(a.plan_label || '').localeCompare(String(b.plan_label || '')));
+
+  $w.innerHTML = `<table style="width:100%;font-size:12px;border-collapse:collapse;min-width:1720px">
+    <thead><tr style="background:var(--gray-50)">
+      ${th('상품', 'text-align:left')}
+      ${th('판매단위', R, '이 1주문에 들어가는 상품 낱개 수')}
+      ${th('안', 'text-align:left', '같은 판매단위의 여러 가격안을 비교할 때 이름을 다르게')}
+      ${th('판매가', R + 'background:#fef9c3', '원/주문 1건. 쿠팡지원할인 차감 후 매출인식액 기준')}
+      ${th('원가/개', R + 'background:#eff6ff', '원/상품 1개(낱개) · VAT 별도 — 판매단위를 곱합니다')}
+      ${th('입고비/개', R + 'background:#eff6ff', '원/상품 1개(낱개) · VAT 별도 — 판매단위를 곱합니다')}
+      ${th('입출고비', R + 'background:#f0fdf4', '원/주문 1건 · VAT 별도 — 판매단위를 곱하지 않습니다')}
+      ${th('배송비', R + 'background:#f0fdf4', '원/주문 1건 · VAT 별도 — 실측상 수량이 늘어도 동일합니다')}
+      ${th('기타', R + 'background:#f0fdf4', '원/주문 1건')}
+      ${th('차감율', R, '매출 대비 정산 차감율 (판매수수료+VAT 및 쿠팡 할인 분담 등)')}
+      ${th('주문원가', R, '(원가+입고비) × 판매단위')}
+      ${th('물류비/낱개', R, '주문당 고정비를 낱개로 나눈 값 — 판매단위를 키우면 줄어듭니다')}
+      ${th('마진/주문', R + 'background:#ecfdf5')}
+      ${th('마진율', R + 'background:#ecfdf5')}
+      ${th('마진/낱개', R + 'background:#ecfdf5', '판매단위가 다른 안끼리 비교할 때 이 열을 보세요')}
+      ${th('손익분기가', R)}
+      ${th('목표율', R + 'background:#fdf4ff')}
+      ${th('목표가', R + 'background:#fdf4ff')}
+      ${th('메모', 'text-align:left')}
+      ${th('', 'text-align:center')}
+    </tr></thead><tbody>
+    ${sorted.map(r => {
+      const k = _rgpKey(r);
+      const m = _rgpCompute(r);
+      const isDirty = _rgpIsDirty(r);
+      const estBadge = r.fulfill_estimated
+        ? `<span style="font-size:10px;color:#b45309;margin-left:4px" title="${esc(r.fulfill_basis || '')}">추정</span>` : '';
+      const basisTip = r.fulfill_basis || '';
+      const prodCell = `
+        <select data-rgpkey="${esc(k)}" onchange="rgpPickProduct(this.dataset.rgpkey, this.value)"
+                style="width:190px;padding:3px 4px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+          <option value="">— 직접 입력 —</option>
+          ${prods.map(p => `<option value="${esc(p.product_id)}"${r.product_code === p.product_id ? ' selected' : ''}>`
+            + `${esc(p.product_name)}${p.unit_cost == null ? ' ⚠원가없음' : ''}</option>`).join('')}
+        </select>
+        <div style="margin-top:3px">${txt(r, 'product_name', 190, '상품명')}</div>
+        <div style="font-size:10px;color:${isDirty ? '#dc2626' : 'var(--gray-400)'};margin-top:2px">
+          ${isDirty ? '● 미저장' : '✓ 저장됨'}${estBadge}
+          ${basisTip ? `<span title="${esc(basisTip)}" style="cursor:help"> ⓘ</span>` : ''}
+        </div>`;
+      return `<tr style="border-bottom:1px solid var(--gray-100)">
+        <td style="padding:6px 8px;min-width:200px">${prodCell}</td>
+        <td style="padding:6px 8px;${R}">${inp(r, 'sales_unit', 1, 56, '판매단위 — 낱개 몇 개가 한 주문인가')}</td>
+        <td style="padding:6px 8px">${txt(r, 'plan_label', 90, '기본안')}</td>
+        <td style="padding:6px 8px;${R}background:#fefce8">${inp(r, 'price', 100, 88)}</td>
+        <td style="padding:6px 8px;${R}background:#f5f9ff">${inp(r, 'unit_cost', 10, 78)}</td>
+        <td style="padding:6px 8px;${R}background:#f5f9ff">${inp(r, 'inbound_cost', 10, 70)}</td>
+        <td style="padding:6px 8px;${R}background:#f7fdf9">${inp(r, 'inout_fee', 10, 74)}</td>
+        <td style="padding:6px 8px;${R}background:#f7fdf9">${inp(r, 'ship_fee', 10, 74)}</td>
+        <td style="padding:6px 8px;${R}background:#f7fdf9">${inp(r, 'etc_cost', 10, 60)}</td>
+        <td style="padding:6px 8px;${R}">${inp(r, 'deduct_rate', 0.1, 60, '% 단위로 입력')}<span style="color:var(--gray-400)">%</span></td>
+        <td style="padding:6px 8px;${R}color:var(--gray-500)">${won(m.cost_per_order)}</td>
+        <td style="padding:6px 8px;${R}color:var(--gray-600)">${won(m.logistics_per_item)}</td>
+        <td style="padding:6px 8px;${R}background:#f0fdf4;font-weight:600">${won(m.margin)}</td>
+        <td style="padding:6px 8px;${R}background:#f0fdf4">${pct(m.margin_rate)}</td>
+        <td style="padding:6px 8px;${R}background:#f0fdf4">${won(m.margin_per_item)}</td>
+        <td style="padding:6px 8px;${R}color:var(--gray-500)">${won(m.be_price)}</td>
+        <td style="padding:6px 8px;${R}background:#fdf4ff">${inp(r, 'target_margin_rate', 1, 54)}<span style="color:var(--gray-400)">%</span></td>
+        <td style="padding:6px 8px;${R}background:#fdf4ff">${r.target_margin_rate == null ? '<span style="color:var(--gray-300)">-</span>'
+          : (m.target_price == null ? '<span style="color:#dc2626" title="차감율+목표율이 100% 이상이거나 원가가 없어 계산할 수 없습니다">불가</span>' : `<b>${won(m.target_price)}</b>`)}</td>
+        <td style="padding:6px 8px">${txt(r, 'memo', 110, '')}</td>
+        <td style="padding:6px 8px;text-align:center;white-space:nowrap">
+          <button onclick="rgpApplyDefaults('${esc(k)}')" title="이 상품의 실적 물류비·차감율을 다시 끌어옵니다"
+            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 5px">↻</button>
+          <button onclick="addRgPlanRow('${esc(k)}')" title="이 행을 복사해 다른 판매단위 안 만들기"
+            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 5px;margin-left:2px">⧉</button>
+          <button onclick="removeRgPlanRow('${esc(k)}')" title="행 삭제"
+            style="border:1px solid var(--gray-300);background:#fff;border-radius:4px;cursor:pointer;font-size:11px;padding:1px 5px;color:#dc2626;margin-left:2px">🗑</button>
+        </td>
+      </tr>`;
+    }).join('')}
+    </tbody></table>`;
+}
+
+async function saveRgPlan() {
+  const dirty = _rgPlans.filter(_rgpIsDirty);
+  if (!dirty.length) { showToast('바뀐 값이 없습니다'); return; }
+  const noName = dirty.filter(r => !String(r.product_name || '').trim());
+  if (noName.length) { alert(`상품명이 빈 행이 ${noName.length}개 있습니다 — 이름을 넣어야 저장됩니다.`); return; }
+  const rows = dirty.map(r => ({
+    id: r.id || undefined,
+    product_code: r.product_code || null,
+    product_name: r.product_name,
+    sales_unit: r.sales_unit || 1,
+    plan_label: r.plan_label || '기본안',
+    price: r.price, unit_cost: r.unit_cost, inbound_cost: r.inbound_cost,
+    inout_fee: r.inout_fee, ship_fee: r.ship_fee, etc_cost: r.etc_cost ?? 0,
+    deduct_rate: r.deduct_rate == null ? null : Number(r.deduct_rate) / 100,
+    target_margin_rate: r.target_margin_rate == null ? null : Number(r.target_margin_rate) / 100,
+    vat_rate: _RG_VAT, price_vat_included: true,
+    fulfill_basis: r.fulfill_basis, fulfill_estimated: !!r.fulfill_estimated,
+    memo: r.memo,
+  }));
+  const btn = document.getElementById('rgp-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '저장 중…'; }
+  try {
+    const res = await fetch(`${API}/api/coupang/rfm/unit-plan`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows }),
+    });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    showToast(`저장했습니다 — ${d.saved || 0}개`);
+    await loadRgPlan();     // 서버가 준 id·plan_key 로 다시 맞춘다
+  } catch (e) {
+    alert(`저장 실패: ${e.message}`
+      + (/does not exist|PGRST205/i.test(e.message) ? '\n\n마이그레이션 070 을 아직 실행하지 않았을 수 있습니다.' : ''));
+    renderRgPlan();
+  }
+}
+
+function downloadRgPlanXlsx() {
+  if (!_rgPlans.length) { alert('내려받을 데이터가 없습니다.'); return; }
+  const n = v => (v == null || !isFinite(v)) ? '' : Math.round(v * 100) / 100;
+  const header = ['상품', '상품코드', '판매단위', '안', '판매가(원/주문)',
+    '원가/낱개', '입고비/낱개', '입출고비(원/주문)', '배송비(원/주문)', '기타(원/주문)', '차감율(%)',
+    '주문원가', '고정비/주문', '물류비/낱개', '마진/주문', '마진율(%)', '마진/낱개', '낱개판매가',
+    '손익분기가', '목표율(%)', '목표가', '풀필먼트 기준', '추정여부', '부가세기준', '메모'];
+  const body = _rgPlans.map(r => {
+    const m = _rgpCompute(r);
+    return [
+      r.product_name || '', r.product_code || '', r.sales_unit, r.plan_label || '',
+      n(r.price), n(r.unit_cost), n(r.inbound_cost), n(r.inout_fee), n(r.ship_fee), n(r.etc_cost),
+      n(r.deduct_rate), n(m.cost_per_order), n(m.fixed_per_order), n(m.logistics_per_item),
+      n(m.margin), m.margin_rate == null ? '' : n(m.margin_rate * 100), n(m.margin_per_item), n(m.price_per_item),
+      n(m.be_price), n(r.target_margin_rate), n(m.target_price),
+      r.fulfill_basis || '', r.fulfill_estimated ? '추정' : '', m.vat_applied ? '공급가(VAT 제외)' : 'VAT 미반영',
+      r.memo || '',
+    ];
+  });
+  downloadXlsxRows([header, ...body], `로켓그로스_판매단위기획_${new Date().toISOString().slice(0, 10)}`, '판매단위기획');
 }
 
 function downloadRgMarginXlsx() {

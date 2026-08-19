@@ -1866,6 +1866,106 @@ async function _loadSalesGroupIndex(category = 'daeryepum') {
   }
 }
 
+
+/**
+ * 로켓그로스 정산 라인에 내부 상품코드·판매단위·원가를 붙인다 (058 — 조회 시점 매핑).
+ *   /api/coupang/rfm/lines 와 /api/coupang/rfm/fulfillment-defaults 가 함께 쓴다.
+ *   복붙하면 두 화면의 상품코드가 갈라지므로 반드시 이 함수 하나만 쓴다.
+ *   rows 를 제자리에서 수정한다.
+ */
+async function attachRgLineMeta(rows) {
+// 내부 상품코드·스티커코드는 저장하지 않고 조회 시점에 붙인다 (058).
+//   상품설정이 바뀌면 과거 라인 표시도 함께 따라가야 하기 때문.
+//   옵션ID 매핑 > 등록상품ID 매핑 (057 과 같은 우선순위).
+try {
+  const byOption = new Map();
+  const byProduct = new Map();
+  for (const ps of (await require('./barungift/store').getAllProductSettings()) || []) {
+    const m = ps.channel_product_codes?.coupang;
+    if (!m) continue;
+    const unit = parseInt(ps.channel_sales_units?.coupang, 10);
+    const num = (v) => (v === null || v === undefined || v === '' ? null
+      : (Number.isFinite(Number(v)) ? Number(v) : null));
+    const info = {
+      code: ps.product_id,
+      sticker: ps.channel_stickers?.coupang || null,
+      unit: unit > 1 ? unit : 1,   // 060 — 이 채널 1 주문 = 실제 상품 몇 개
+      // 원가 (068) — NULL(미입력) 은 그대로 넘긴다. 0 으로 바꾸면 원가를
+      //   모르는 상품이 '원가 0 = 마진 100%' 로 보인다.
+      unit_cost: num(ps.unit_cost),
+      inbound_unit_cost: num(ps.inbound_unit_cost),
+    };
+    const pIds = Array.isArray(m) ? m : (m.product_ids || []);
+    // 같은 등록상품ID 를 두 상품이 등록하면 그 ID 만으로는 어느 상품인지 정할 수 없다.
+    //   예전엔 나중 것이 조용히 이겨(Map.set 덮어쓰기) 화이트 주문이 통째로 블루 코드로
+    //   들어갔다 (TGJSD04D1/D2 가 16191414384 를 공유, 2026-08-18 발견).
+    //   그래서 모호한 ID 는 매핑하지 않고 표시해 옵션ID 등록을 유도한다.
+    for (const c of pIds) {
+      const k = String(c).trim();
+      if (byProduct.has(k)) {
+        const prev = byProduct.get(k);
+        if (prev && prev.code !== info.code) {
+          prev.ambiguous = true;
+          prev.rivals = [...new Set([...(prev.rivals || [prev.code]), info.code])];
+        }
+      } else {
+        byProduct.set(k, info);
+      }
+    }
+    for (const c of (Array.isArray(m) ? [] : (m.option_ids || []))) {
+      byOption.set(String(c).trim(), info);
+    }
+  }
+  // 옵션ID → 등록상품ID (063) — 정산 전 주문은 등록상품ID 가 비어 있다
+  let optToProduct = new Map();
+  try { optToProduct = await require('./coupang/option-map').getOptionToProduct(); }
+  catch (e) { console.warn('[rfm/lines] 옵션맵 로드 실패:', e.message); }
+  for (const r of rows) {
+    const vid = String(r.vendor_item_id || '').trim();
+    const spid = String(r.seller_product_id || '').trim() || optToProduct.get(vid) || '';
+    if (!r.seller_product_id && spid) r.seller_product_id = spid;   // 화면에 근거를 남긴다
+    // 옵션ID 매핑이 우선 — 등록상품ID 는 옵션을 구분하지 못한다
+    const byOpt = byOption.get(vid);
+    const byProd = byProduct.get(spid);
+    // 등록상품ID 가 여러 상품에 걸쳐 있으면 그걸로는 확정할 수 없다.
+    //   틀린 코드로 집계하느니 미매핑으로 두고 사유를 알린다.
+    const ambiguous = !byOpt && !!byProd?.ambiguous;
+    const hit = byOpt || (ambiguous ? null : byProd);
+    r.internal_product_code = hit?.code || null;
+    r.sticker_code = hit?.sticker || null;
+    r.map_conflict = ambiguous
+      ? `등록상품ID ${spid} 를 ${(byProd.rivals || []).join(' / ')} 가 함께 쓰고 있어 옵션ID 등록이 필요합니다`
+      : null;
+    // 주문수량(엑셀 그대로) × 판매단위 = 상품수량(실제 출고 개수).
+    //   미매핑이면 단위를 알 수 없어 1 로 둔다 — 주문수량과 같아진다.
+    r.sales_unit = hit?.unit || 1;
+    r.item_qty = (Number(r.sales_qty) || 0) * r.sales_unit;
+    // 원가·마진 (068) — 원가는 '상품 1개당' 이므로 주문수량이 아니라 상품수량을 곱한다.
+    //   원가가 미입력(NULL)이면 마진을 만들지 않는다 — 화면에서 '원가 미입력' 으로 구분.
+    r.unit_cost = hit?.unit_cost ?? null;
+    r.inbound_unit_cost = hit?.inbound_unit_cost ?? null;
+    const costPer = (r.unit_cost === null && r.inbound_unit_cost === null)
+      ? null : (Number(r.unit_cost || 0) + Number(r.inbound_unit_cost || 0));
+    r.cost_total = costPer === null ? null : costPer * (Number(r.item_qty) || 0);
+    if (r.cost_total === null) {
+      r.margin = null;
+      r.margin_rate = null;
+    } else {
+      // 정산금액(매출−수수료−물류비) 에서 원가를 뺀 값이 실제로 남는 돈이다
+      const settle = (Number(r.settlement_amount) || 0)
+        - (Number(r.inout_fee) || 0) - (Number(r.shipping_fee) || 0);
+      r.margin = settle - r.cost_total;
+      const sales = Number(r.sales_amount) || 0;
+      r.margin_rate = sales > 0 ? Math.round((r.margin / sales) * 1000) / 10 : null;
+    }
+  }
+} catch (e) {
+  console.warn('[rfm/lines] 상품코드 매핑 실패 (원본만 표시):', e.message);
+}
+  return rows;
+}
+
+
 async function apiProductRanking(query = {}) {
   const startStr = query.start_date;
   const endStr = query.end_date;
@@ -14708,6 +14808,84 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/coupang/rfm/fulfillment-defaults' && req.method === 'GET') {
+        // 상품별 풀필먼트 기본값 (070) — 판매단위 기획 행을 추가할 때 채울 값.
+        //   화면의 조회 기간과 무관해야 한다: 기획 데이터는 기간과 상관없는 영구 자산이고,
+        //   기간을 안 잡으면 기본값이 통째로 비어 버린다.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          const days = Math.min(365, Math.max(7, parseInt(parsed.query.days, 10) || 180));
+          const start = new Date(Date.now() - days * 86400000 + 9 * 3600000).toISOString().slice(0, 10);
+          const rfmStore = require('./coupang/rfm-store');
+          const lines = await rfmStore.listAllOrderLines({ startDate: start, endDate: null });
+          await attachRgLineMeta(lines);
+          const out = await rfmStore.fulfillmentDefaults(lines);
+          // 상품 선택 목록 — 원가 입력 여부까지 함께 내려 화면이 전역 상태에 의존하지 않게 한다.
+          //   (로켓그로스 탭으로 바로 들어오면 bgProductSettings 가 아직 비어 있다)
+          const products = [];
+          try {
+            for (const ps of (await require('./barungift/store').getAllProductSettings()) || []) {
+              if (!ps.channel_product_codes?.coupang) continue;
+              const u = parseInt(ps.channel_sales_units?.coupang, 10);
+              products.push({
+                product_id: ps.product_id,
+                product_name: ps.product_name || ps.product_id,
+                unit_cost: ps.unit_cost ?? null,
+                inbound_unit_cost: ps.inbound_unit_cost ?? null,
+                sales_unit: u > 1 ? u : null,   // null = 상품설정에 판매단위 미지정
+              });
+            }
+          } catch (e) { console.warn('[rfm/fulfillment-defaults] 상품설정 로드 실패:', e.message); }
+          data = { ...out, products, days };
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/coupang/rfm/unit-plan' && req.method === 'GET') {
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          data = { plans: await require('./coupang/rfm-store').listUnitPlans() };
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/coupang/rfm/unit-plan' && req.method === 'PUT') {
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const body = await new Promise((resolve) => {
+          let raw = '';
+          req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+        });
+        const rows = Array.isArray(body.rows) ? body.rows : [];
+        logAdminAccess(session, req, 'coupang-rg-unit-plan-save', { count: rows.length });
+        try {
+          data = await require('./coupang/rfm-store').saveUnitPlans(rows, session?.email || null);
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname.match(/^\/api\/coupang\/rfm\/unit-plan\/[^/]+$/) && req.method === 'DELETE') {
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const planId = decodeURIComponent(pathname.split('/').pop());
+        logAdminAccess(session, req, 'coupang-rg-unit-plan-delete', { id: planId });
+        try {
+          data = await require('./coupang/rfm-store').deleteUnitPlan(planId);
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
       } else if (pathname === '/api/coupang/rfm/margin-sim' && req.method === 'GET') {
         // 판매단위별 마진 시뮬레이션 저장값 (069) — 옵션ID → 가정치
         if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
@@ -14750,94 +14928,7 @@ const server = http.createServer(async (req, res) => {
             startDate: parsed.query.start_date || null,
             endDate: parsed.query.end_date || null,
           });
-          // 내부 상품코드·스티커코드는 저장하지 않고 조회 시점에 붙인다 (058).
-          //   상품설정이 바뀌면 과거 라인 표시도 함께 따라가야 하기 때문.
-          //   옵션ID 매핑 > 등록상품ID 매핑 (057 과 같은 우선순위).
-          try {
-            const byOption = new Map();
-            const byProduct = new Map();
-            for (const ps of (await require('./barungift/store').getAllProductSettings()) || []) {
-              const m = ps.channel_product_codes?.coupang;
-              if (!m) continue;
-              const unit = parseInt(ps.channel_sales_units?.coupang, 10);
-              const num = (v) => (v === null || v === undefined || v === '' ? null
-                : (Number.isFinite(Number(v)) ? Number(v) : null));
-              const info = {
-                code: ps.product_id,
-                sticker: ps.channel_stickers?.coupang || null,
-                unit: unit > 1 ? unit : 1,   // 060 — 이 채널 1 주문 = 실제 상품 몇 개
-                // 원가 (068) — NULL(미입력) 은 그대로 넘긴다. 0 으로 바꾸면 원가를
-                //   모르는 상품이 '원가 0 = 마진 100%' 로 보인다.
-                unit_cost: num(ps.unit_cost),
-                inbound_unit_cost: num(ps.inbound_unit_cost),
-              };
-              const pIds = Array.isArray(m) ? m : (m.product_ids || []);
-              // 같은 등록상품ID 를 두 상품이 등록하면 그 ID 만으로는 어느 상품인지 정할 수 없다.
-              //   예전엔 나중 것이 조용히 이겨(Map.set 덮어쓰기) 화이트 주문이 통째로 블루 코드로
-              //   들어갔다 (TGJSD04D1/D2 가 16191414384 를 공유, 2026-08-18 발견).
-              //   그래서 모호한 ID 는 매핑하지 않고 표시해 옵션ID 등록을 유도한다.
-              for (const c of pIds) {
-                const k = String(c).trim();
-                if (byProduct.has(k)) {
-                  const prev = byProduct.get(k);
-                  if (prev && prev.code !== info.code) {
-                    prev.ambiguous = true;
-                    prev.rivals = [...new Set([...(prev.rivals || [prev.code]), info.code])];
-                  }
-                } else {
-                  byProduct.set(k, info);
-                }
-              }
-              for (const c of (Array.isArray(m) ? [] : (m.option_ids || []))) {
-                byOption.set(String(c).trim(), info);
-              }
-            }
-            // 옵션ID → 등록상품ID (063) — 정산 전 주문은 등록상품ID 가 비어 있다
-            let optToProduct = new Map();
-            try { optToProduct = await require('./coupang/option-map').getOptionToProduct(); }
-            catch (e) { console.warn('[rfm/lines] 옵션맵 로드 실패:', e.message); }
-            for (const r of rows) {
-              const vid = String(r.vendor_item_id || '').trim();
-              const spid = String(r.seller_product_id || '').trim() || optToProduct.get(vid) || '';
-              if (!r.seller_product_id && spid) r.seller_product_id = spid;   // 화면에 근거를 남긴다
-              // 옵션ID 매핑이 우선 — 등록상품ID 는 옵션을 구분하지 못한다
-              const byOpt = byOption.get(vid);
-              const byProd = byProduct.get(spid);
-              // 등록상품ID 가 여러 상품에 걸쳐 있으면 그걸로는 확정할 수 없다.
-              //   틀린 코드로 집계하느니 미매핑으로 두고 사유를 알린다.
-              const ambiguous = !byOpt && !!byProd?.ambiguous;
-              const hit = byOpt || (ambiguous ? null : byProd);
-              r.internal_product_code = hit?.code || null;
-              r.sticker_code = hit?.sticker || null;
-              r.map_conflict = ambiguous
-                ? `등록상품ID ${spid} 를 ${(byProd.rivals || []).join(' / ')} 가 함께 쓰고 있어 옵션ID 등록이 필요합니다`
-                : null;
-              // 주문수량(엑셀 그대로) × 판매단위 = 상품수량(실제 출고 개수).
-              //   미매핑이면 단위를 알 수 없어 1 로 둔다 — 주문수량과 같아진다.
-              r.sales_unit = hit?.unit || 1;
-              r.item_qty = (Number(r.sales_qty) || 0) * r.sales_unit;
-              // 원가·마진 (068) — 원가는 '상품 1개당' 이므로 주문수량이 아니라 상품수량을 곱한다.
-              //   원가가 미입력(NULL)이면 마진을 만들지 않는다 — 화면에서 '원가 미입력' 으로 구분.
-              r.unit_cost = hit?.unit_cost ?? null;
-              r.inbound_unit_cost = hit?.inbound_unit_cost ?? null;
-              const costPer = (r.unit_cost === null && r.inbound_unit_cost === null)
-                ? null : (Number(r.unit_cost || 0) + Number(r.inbound_unit_cost || 0));
-              r.cost_total = costPer === null ? null : costPer * (Number(r.item_qty) || 0);
-              if (r.cost_total === null) {
-                r.margin = null;
-                r.margin_rate = null;
-              } else {
-                // 정산금액(매출−수수료−물류비) 에서 원가를 뺀 값이 실제로 남는 돈이다
-                const settle = (Number(r.settlement_amount) || 0)
-                  - (Number(r.inout_fee) || 0) - (Number(r.shipping_fee) || 0);
-                r.margin = settle - r.cost_total;
-                const sales = Number(r.sales_amount) || 0;
-                r.margin_rate = sales > 0 ? Math.round((r.margin / sales) * 1000) / 10 : null;
-              }
-            }
-          } catch (e) {
-            console.warn('[rfm/lines] 상품코드 매핑 실패 (원본만 표시):', e.message);
-          }
+          await attachRgLineMeta(rows);
           data = { lines: rows };
         } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
