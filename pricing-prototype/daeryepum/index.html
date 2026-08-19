@@ -19561,6 +19561,7 @@ function rgpPickProduct(key, code) {
   const prod = (_rgPlanDefaults?.products || []).find(p => p.product_id === code);
   r.product_code = code || null;
   if (prod) {
+    // 이름 칸이 없는 행이므로 드롭다운 선택이 곧 이름이다
     r.product_name = prod.product_name || code;
     if (r.unit_cost == null) r.unit_cost = prod.unit_cost;
     if (r.inbound_cost == null) r.inbound_cost = prod.inbound_unit_cost;
@@ -19752,11 +19753,14 @@ function renderRgPlan() {
       const prodCell = `
         <select data-rgpkey="${esc(k)}" onchange="rgpPickProduct(this.dataset.rgpkey, this.value)"
                 style="width:190px;padding:3px 4px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
-          <option value="">— 직접 입력 —</option>
+          <option value="">— 직접 입력 (신상품·미등록) —</option>
           ${prods.map(p => `<option value="${esc(p.product_id)}"${r.product_code === p.product_id ? ' selected' : ''}>`
             + `${esc(p.product_name)}${p.unit_cost == null ? ' ⚠원가없음' : ''}</option>`).join('')}
         </select>
-        <div style="margin-top:3px">${txt(r, 'product_name', 190, '상품명')}</div>
+        ${r.product_code
+          ? `<div style="margin-top:3px;font-size:11px;color:var(--gray-500);max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+               title="${esc(r.product_name || '')}">${esc(r.product_name || '')}</div>`
+          : `<div style="margin-top:3px">${txt(r, 'product_name', 190, '상품명 직접 입력')}</div>`}
         <div style="font-size:10px;color:${isDirty ? '#dc2626' : 'var(--gray-400)'};margin-top:2px">
           ${isDirty ? '● 미저장' : '✓ 저장됨'}${estBadge}
           ${basisTip ? `<span title="${esc(basisTip)}" style="cursor:help"> ⓘ</span>` : ''}
