@@ -1,7 +1,7 @@
 -- ============================================
 -- 073_bg_stock_items_item_kind.sql
 --
--- 재고 관리 품목에 구분(원물/부자재/포장재/기타)을 둔다.
+-- 재고 관리 품목에 구분(원물/부자재/포장재/세트/기타)을 둔다.
 --
 -- 배경 (운영 요청 2026-08-19):
 --   원물인지 부자재인지 구분값이 있으면 재고 임계치를 달리 가져가거나 BOM 을 짤 때
@@ -12,8 +12,10 @@
 --   그룹에 안 들어간 품목은 원물인지 부자재인지 알 길이 없었다.
 --   품목 자체에 두면 BOM 은 그 값을 기본으로 끌어오면 된다.
 --
--- 값 체계는 component_role 과 같다 (product / material / package / etc).
---   두 곳이 다른 말을 쓰면 화면마다 다른 라벨이 붙는다.
+-- 값 체계는 component_role 을 그대로 쓰고 'set'(세트) 하나를 더한다.
+--   세트 = 완성된 묶음 상품 자체가 재고로 잡히는 품목 (구성품이 아니라 판매 단위).
+--   BOM 구성품 역할로는 쓰이지 않으므로 component_role 에는 넣지 않는다.
+--   두 곳이 다른 말을 쓰면 화면마다 다른 라벨이 붙는다 — 겹치는 4개는 반드시 같은 값.
 --
 -- 기존 행 채우기:
 --   1) 이미 BOM 에 구성품으로 들어가 있으면 그 role 을 가져온다 (여러 그룹에서 다르면 가장 많이 쓰인 것).
@@ -26,10 +28,10 @@ ALTER TABLE bg_stock_items
 
 ALTER TABLE bg_stock_items DROP CONSTRAINT IF EXISTS bg_si_item_kind_chk;
 ALTER TABLE bg_stock_items ADD CONSTRAINT bg_si_item_kind_chk
-  CHECK (item_kind IN ('product', 'material', 'package', 'etc'));
+  CHECK (item_kind IN ('product', 'material', 'package', 'set', 'etc'));
 
 COMMENT ON COLUMN bg_stock_items.item_kind IS
-  '품목 구분 — product=원물 / material=부자재 / package=포장재 / etc=기타. bg_stock_bom.component_role 과 같은 값 체계. BOM 역할 기본값·임계치 기준으로 쓴다';
+  '품목 구분 — product=원물 / material=부자재 / package=포장재 / set=세트 / etc=기타. bg_stock_bom.component_role 과 같은 값 체계. BOM 역할 기본값·임계치 기준으로 쓴다';
 
 -- 1) BOM 에 이미 역할이 있으면 그것을 (최다 사용 role)
 WITH role_votes AS (
@@ -55,7 +57,7 @@ CREATE INDEX IF NOT EXISTS idx_bg_si_item_kind ON bg_stock_items (item_kind);
 -- ── 구분별 경고 기준일 (슬랙 데일리 알림) ──
 --   품목에 임계치(threshold)가 없을 때 '소진예상 N일 이하' 를 경고로 보는데, 지금은 전 품목
 --   30일 고정이다. 원물은 발주 리드타임이 길어 더 일찍, 부자재는 더 늦게 잡고 싶다는 요청.
---   {"product":30,"material":30,"package":30,"etc":30} 형태. 비면 30.
+--   {"product":30,"material":30,"package":30,"set":30,"etc":30} 형태. 비면 30.
 ALTER TABLE bg_site_settings
   ADD COLUMN IF NOT EXISTS stock_alert_warn_days JSONB;
 COMMENT ON COLUMN bg_site_settings.stock_alert_warn_days IS

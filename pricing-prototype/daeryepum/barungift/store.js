@@ -1877,11 +1877,12 @@ function _normCodeList(v) {
 //   유일한 기준이며, 재고품목에는 더 이상 같은 의미의 필드를 두지 않는다.
 
 /**
- * 품목 구분 (073) — product=원물 / material=부자재 / package=포장재 / etc=기타.
+ * 품목 구분 (073) — product=원물 / material=부자재 / package=포장재 / set=세트 / etc=기타.
  *   BOM 의 component_role 과 같은 값 체계를 쓴다. 값이 없거나 이상하면 코드 접미로 추정한다
  *   ('O' 계열은 원물) — 화면·마이그레이션과 같은 규칙.
  */
-const ITEM_KINDS = ['product', 'material', 'package', 'etc'];
+// 'set'(세트) 는 품목 구분에만 있다 — 완성 묶음 자체가 재고인 품목. BOM 구성품 역할로는 안 쓴다.
+const ITEM_KINDS = ['product', 'material', 'package', 'set', 'etc'];
 function _normItemKind(v, stockCode) {
   const s = String(v || '').trim();
   if (ITEM_KINDS.includes(s)) return s;

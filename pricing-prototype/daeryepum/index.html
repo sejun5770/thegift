@@ -2513,6 +2513,7 @@ nav.nav-loading a[href^="#"] {
         <option value="product">원물</option>
         <option value="material">부자재</option>
         <option value="package">포장재</option>
+        <option value="set">세트</option>
         <option value="etc">기타</option>
       </select>
       <select id="stock-filter-status" onchange="renderStockTable()" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
@@ -2571,6 +2572,8 @@ nav.nav-loading a[href^="#"] {
           <input type="number" id="sa-cfg-wd-material" min="1" max="365" placeholder="30" style="width:64px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px"></label>
         <label style="font-size:12px"><span style="color:var(--gray-500);display:block;margin-bottom:3px">포장재</span>
           <input type="number" id="sa-cfg-wd-package" min="1" max="365" placeholder="30" style="width:64px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px"></label>
+        <label style="font-size:12px"><span style="color:var(--gray-500);display:block;margin-bottom:3px">세트</span>
+          <input type="number" id="sa-cfg-wd-set" min="1" max="365" placeholder="30" style="width:64px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px"></label>
         <label style="font-size:12px"><span style="color:var(--gray-500);display:block;margin-bottom:3px">기타</span>
           <input type="number" id="sa-cfg-wd-etc" min="1" max="365" placeholder="30" style="width:64px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px"></label>
         <span style="font-size:11px;color:var(--gray-500);padding-bottom:6px">품목에 임계치가 있으면 그쪽이 우선 · 비우면 30일</span>
@@ -2680,6 +2683,7 @@ nav.nav-loading a[href^="#"] {
           <option value="product">원물</option>
           <option value="material">부자재</option>
           <option value="package">포장재</option>
+          <option value="set">세트</option>
           <option value="etc">기타</option>
         </select>
       </label>
@@ -15900,7 +15904,7 @@ async function loadDaeryepumStock() {
     const s = d.summary || {};
     $summary.innerHTML = `
       <span style="padding:4px 10px;background:#e0e7ff;color:#4338ca;border-radius:4px;font-weight:600" title="bg_stock_items 에 등록된 관리 품목">등록 품목 ${s.total || 0}개</span>
-      ${s.from_xerp !== undefined ? `<span style="padding:4px 10px;background:#eef2ff;color:#4338ca;border-radius:4px" title="XERP ${esc(d.stock_warehouse || '')} 창고 원본에서 조회한 품목 수">XERP 재고 ${s.from_xerp}개</span>` : ''}
+      ${s.from_xerp !== undefined ? `<span style="padding:4px 10px;background:#eef2ff;color:#4338ca;border-radius:4px" title="XERP 원본에서 조회한 품목 수 — 아래 창고들의 재고를 합산합니다. 창고이동은 XERP 가 출고/입고 짝으로 기록하므로 다른 창고로 나간 물량은 MF01 에서 이미 빠져 있습니다 (다시 빼지 않습니다)">XERP 재고 ${s.from_xerp}개 <span style="opacity:.75;font-size:11px">· 창고 ${esc(d.stock_warehouse || 'MF01')}</span></span>` : ''}
       ${s.not_found ? `<span style="padding:4px 10px;background:#fee2e2;color:#991b1b;border-radius:4px;font-weight:600" title="등록한 코드로 ERP 재고를 찾지 못했습니다 — 재고코드를 바꿔보세요">❓ 재고 못 찾음 ${s.not_found}개</span>` : ''}
       <span style="padding:4px 10px;background:#dcfce7;color:#166534;border-radius:4px;font-weight:600">재고 있음 ${s.with_stock || 0}개</span>
       <span style="padding:4px 10px;background:#fef3c7;color:#92400e;border-radius:4px;font-weight:600">⚠️ 30일 내 소진 ${s.urgent_30d || 0}개</span>
@@ -16238,11 +16242,12 @@ function _syncStockSelectionBar() {
 }
 
 /** 품목 구분 라벨/색 — BOM 역할과 같은 값 체계 */
-const STOCK_KIND_LABEL = { product: '원물', material: '부자재', package: '포장재', etc: '기타' };
+const STOCK_KIND_LABEL = { product: '원물', material: '부자재', package: '포장재', set: '세트', etc: '기타' };
 const STOCK_KIND_STYLE = {
   product: 'background:#ecfdf5;color:#047857',
   material: 'background:#eff6ff;color:#1d4ed8',
   package: 'background:#fff7ed;color:#c2410c',
+  set: 'background:#f5f3ff;color:#6d28d9',
   etc: 'background:var(--gray-100);color:var(--gray-600)',
 };
 function _stockKindBadge(it) {
@@ -16253,6 +16258,11 @@ function _stockKindBadge(it) {
 function _stockKindOf(code) {
   const it = (_stockData || []).find(x => x.stock_code === code);
   return (it && it.item_kind) || _guessBomRole(code);
+}
+/** BOM 구성품 역할용 — '세트' 는 구성품 역할이 아니므로(완성품이 구성품일 수 없다) 부자재로 */
+function _stockKindAsBomRole(code) {
+  const k = _stockKindOf(code);
+  return (BOM_ROLE_LABEL[k]) ? k : 'material';
 }
 
 /** 코드 접미로 역할 추정 — O 계열은 원물, 나머지는 부자재. 등록 후 화면에서 바꿀 수 있다. */
@@ -16275,7 +16285,7 @@ function groupSelectedStockItems() {
     groupKey: null,
     parentCodes: salesCodes,
     // 역할 기본값 = 품목 구분 (073). 등록 때 정해 둔 값이 있으면 코드 추정보다 우선.
-    components: codes.map(c => ({ component_code: c, qty: 1, component_role: _stockKindOf(c) })),
+    components: codes.map(c => ({ component_code: c, qty: 1, component_role: _stockKindAsBomRole(c) })),
   });
 }
 
@@ -16476,7 +16486,7 @@ async function saveStockAlertConfig() {
         time: document.getElementById('sa-cfg-time').value,
         enabled: document.getElementById('sa-cfg-enabled').checked,
         // 구분별 경고 기준일 — 비운 칸은 보내지 않는다 (서버가 30 으로 본다)
-        warn_days: Object.fromEntries(['product', 'material', 'package', 'etc']
+        warn_days: Object.fromEntries(['product', 'material', 'package', 'set', 'etc']
           .map(k => [k, document.getElementById(`sa-cfg-wd-${k}`).value.trim()])
           .filter(([, v]) => v !== '')),
       }),
@@ -16507,7 +16517,7 @@ async function loadStockAlerts() {
       document.getElementById('sa-cfg-time').value = cfg.time || '';
       document.getElementById('sa-cfg-enabled').checked = !!cfg.enabled;
       // 구분별 기준일 — DB 에 저장된 값만 채운다 (기본 30 은 placeholder 로 보인다)
-      for (const k of ['product', 'material', 'package', 'etc']) {
+      for (const k of ['product', 'material', 'package', 'set', 'etc']) {
         const el = document.getElementById(`sa-cfg-wd-${k}`);
         if (el) el.value = (cfg.from_db?.warn_days && cfg.warn_days?.[k]) ? cfg.warn_days[k] : '';
       }

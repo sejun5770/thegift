@@ -37,7 +37,7 @@ async function loadAlertConfig() {
       ? (process.env.BG_STOCK_ALERT_ENABLED === '1')
       : !!row.stock_alert_enabled,
     // 구분별 소진예상 경고 기준일 (073). 없으면 전부 30 — 예전과 같은 동작.
-    warn_days: { product: 30, material: 30, package: 30, etc: 30,
+    warn_days: { product: 30, material: 30, package: 30, set: 30, etc: 30,
       ...(row.stock_alert_warn_days && typeof row.stock_alert_warn_days === 'object' ? row.stock_alert_warn_days : {}) },
     from_db: {
       channel: !!String(row.stock_alert_channel || '').trim(),
@@ -248,8 +248,8 @@ async function buildStockReport(baseUrl, { codes = null } = {}) {
       + `　　\`${r.stock_code}\``;
   };
 
-  const KIND_LABEL = { product: '원물', material: '부자재', package: '포장재', etc: '기타' };
-  const KIND_ORDER = ['product', 'material', 'package', 'etc'];
+  const KIND_LABEL = { product: '원물', material: '부자재', package: '포장재', set: '세트', etc: '기타' };
+  const KIND_ORDER = ['product', 'material', 'package', 'set', 'etc'];
   /**
    * 섹션 안에서 구분별로 다시 묶는다 — 원물과 부자재는 발주처·리드타임이 달라
    * 담당자가 갈리므로 섞여 있으면 각자 자기 것을 골라 읽어야 한다 (2026-08-19 요청).

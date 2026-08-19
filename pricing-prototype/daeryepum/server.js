@@ -487,6 +487,13 @@ let _poolInitPromise = null; // 동시 초기화 요청 중복 방지 (race-cond
 // ============================================
 //   창고는 콤마로 여러 개 지정 가능 (합산). MF01 만 보면 답례품 203품목 중
 //   27개가 MF24 에만 있어 0 으로 보이고, 34개가 음수로 나온다 (2026-08-05 확인).
+//
+//   ⚠ MF24 / MF26 을 '차감' 하면 안 된다 (2026-08-19 원장 확인).
+//     XERP 는 창고이동을 SO(MF01 출고) + SR(MF24/MF26 입고) 짝 전표로 기록한다 —
+//     예) 2026-08-18 SC2608-B07076 MF01 −1200 / SR2608-B00381 MF26 +1200 (TGJSD03O3).
+//     즉 MF26 에 물건이 있으면 MF01 은 이미 그만큼 줄어 있다. 다시 빼면 이중차감이다.
+//     MF26 (쿠팡 출고분) 을 '우리 가용재고' 에서 제외하고 싶으면 목록에서 빼면 된다 —
+//     합산 대상에 넣지 않는 것이 곧 제외다.
 const XERP_WAREHOUSES = String(process.env.XERP_WAREHOUSE || 'MF01')
   .split(',').map(s => s.trim().replace(/[^A-Za-z0-9_]/g, '')).filter(Boolean);
 const XERP_WAREHOUSE = XERP_WAREHOUSES.join(',');
