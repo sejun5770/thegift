@@ -443,7 +443,7 @@ async function saveMarginSims(rows, by = null) {
 
 const PLAN_NUM_FIELDS = [
   'price', 'unit_cost', 'inbound_cost', 'inout_fee', 'ship_fee',
-  'deduct_rate', 'target_margin_rate',
+  'commission_rate', 'deduct_rate', 'target_margin_rate',
 ];
 
 /** 070 의 plan_key 생성컬럼과 같은 규칙 — 한 요청 안의 중복을 미리 잡기 위해 JS 로도 만든다.

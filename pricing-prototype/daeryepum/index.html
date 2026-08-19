@@ -18994,14 +18994,20 @@ function _rgMargin(o) {
   const P = num(o.price);
   const d = num(o.deductRate);
   const Pnet = P / div;
-  const comm = (P * d) / div;
-  // 원가는 '미입력(null)' 과 '0원' 을 구분해야 한다. Number(null)===0 이라 그대로 쓰면
-  //   미입력이 0원으로 둔갑해 마진 100% 가 나온다. NaN(예: '1,200' 붙여넣기 실패)도 같이 막는다.
+  const comm = (P * d) / div;                       // 총 차감액 (정산에서 빠지는 전부)
+  // 수수료율을 따로 받으면 총 차감을 '수수료' 와 '그 외' 로 나눠 보여줄 수 있다.
+  //   마진 계산은 어디까지나 총 차감(d)을 쓴다 — 나누기는 표시용이다.
   const cost = (x) => {
     if (x === null || x === undefined || x === '') return null;
     const n = Number(x);
     return Number.isFinite(n) ? n : null;
   };
+  //   Number(null)===0 이라 그대로 쓰면 '수수료율 미입력' 이 0% 로 둔갑한다 (원가와 같은 함정).
+  const cr = cost(o.commissionRate);
+  const commissionAmt = cr === null ? null : (P * cr) / div;
+  const etcDeductAmt = cr === null ? null : comm - commissionAmt;
+  // 원가는 '미입력(null)' 과 '0원' 을 구분해야 한다. Number(null)===0 이라 그대로 쓰면
+  //   미입력이 0원으로 둔갑해 마진 100% 가 나온다. NaN(예: '1,200' 붙여넣기 실패)도 같이 막는다.
   const uc = cost(o.unitCostPerItem);
   const ib = cost(o.inboundPerItem);
   const hasCost = uc !== null || ib !== null;
@@ -19018,7 +19024,11 @@ function _rgMargin(o) {
   const k = 1 - d;
   return {
     price_net: Pnet,
-    comm, fixed_per_order: fixed, settle,
+    comm,                                   // 총 차감액
+    deduct_total: comm,                     // 이름을 분명히 (comm 은 예전 호출부 호환)
+    commission_amt: commissionAmt,          // 그중 판매수수료 몫 (수수료율을 준 경우)
+    etc_deduct_amt: etcDeductAmt,           // 그 외 차감 (쿠팡 할인 분담 등)
+    fixed_per_order: fixed, settle,
     cost_per_item: costPerItem, cost_per_order: costPerOrder,
     margin,
     margin_rate: (hasCost && Pnet > 0) ? margin / Pnet : null,
@@ -19369,7 +19379,7 @@ let _rgPlanSeq = 0;
 // price_per_item 은 price 에서 파생되는 표시용이라 dirty 판정에 넣지 않는다
 const RGP_FIELDS = ['product_code', 'product_name', 'sales_unit', 'plan_label', 'price',
   'unit_cost', 'inbound_cost', 'inout_fee', 'ship_fee', 'etc_cost',
-  'deduct_rate', 'target_margin_rate', 'memo'];
+  'commission_rate', 'deduct_rate', 'target_margin_rate', 'memo'];
 
 function _rgpKey(r) { return r.id || r._tmp; }
 
@@ -19421,6 +19431,7 @@ async function loadRgPlan() {
     _rgPlans = (p.plans || []).map(row => {
       const r = { ...row };
       r.deduct_rate = row.deduct_rate == null ? null : Number(row.deduct_rate) * 100;      // 화면은 %
+      r.commission_rate = row.commission_rate == null ? null : Number(row.commission_rate) * 100;
       r.target_margin_rate = row.target_margin_rate == null ? null : Number(row.target_margin_rate) * 100;
       for (const f of ['price', 'unit_cost', 'inbound_cost', 'inout_fee', 'ship_fee', 'etc_cost', 'sales_unit']) {
         r[f] = row[f] == null ? null : Number(row[f]);
@@ -19470,6 +19481,7 @@ function addRgPlanRow(copyFrom) {
       _tmp: 'new' + (++_rgPlanSeq), id: null,
       product_code: null, product_name: '', sales_unit: 1, plan_label: '기본안',
       price: null, price_per_item: null, unit_cost: null, inbound_cost: null,
+      commission_rate: null,
       inout_fee: null, ship_fee: null, etc_cost: 0,
       deduct_rate: null, target_margin_rate: null, memo: null,
       fulfill_basis: null, fulfill_estimated: false,
@@ -19521,6 +19533,7 @@ function rgpApplyDefaults(key, silent) {
   // 순수 수수료율도 함께 들고 있는다 — 차감율과 얼마나 벌어지는지 화면에 보여주기 위함.
   //   저장하지 않는 참고값이라 '_' 로 시작한다 (RGP_FIELDS 에 없어 dirty 판정에도 안 들어간다).
   r._comm_ref = d.comm_rate ?? null;
+  if (d.comm_rate != null) r.commission_rate = Math.round(d.comm_rate * 10000) / 100;   // %
   r.fulfill_basis = d.basis || null;
   r.fulfill_estimated = !!d.estimated;
   renderRgPlan();
@@ -19583,6 +19596,7 @@ function _rgpCompute(r) {
   return _rgMargin({
     price: r.price,
     deductRate: r.deduct_rate == null ? 0 : Number(r.deduct_rate) / 100,
+    commissionRate: r.commission_rate == null ? null : Number(r.commission_rate) / 100,
     inoutPerOrder: r.inout_fee, shipPerOrder: r.ship_fee, etcPerOrder: r.etc_cost,
     unitCostPerItem: r.unit_cost, inboundPerItem: r.inbound_cost,
     salesUnit: r.sales_unit,
@@ -19660,7 +19674,10 @@ function renderRgPlan() {
       ${th('입출고비', R + 'background:#f0fdf4', '원/주문 1건 · VAT 별도 — 판매단위를 곱하지 않습니다')}
       ${th('배송비', R + 'background:#f0fdf4', '원/주문 1건 · VAT 별도 — 실측상 수량이 늘어도 동일합니다')}
       ${th('기타', R + 'background:#f0fdf4', '원/주문 1건')}
-      ${th('차감율', R, '매출 대비 정산 차감율 — 판매수수료+VAT 뿐 아니라 쿠팡 할인 분담 등 정산에서 빠지는 전부입니다. 판매수수료율보다 큽니다.')}
+      ${th('수수료율', R + 'background:#fff7ed', '판매수수료+VAT 요율. 아는 값을 직접 넣으세요. 금액은 옆 칸에 나옵니다')}
+      ${th('수수료', R + 'background:#fff7ed', '판매가 × 수수료율')}
+      ${th('차감율', R, '정산에서 실제로 빠지는 전부 — 판매수수료+VAT 에 쿠팡 할인 분담 등을 더한 값입니다. 마진 계산은 이 값을 씁니다')}
+      ${th('차감 총액', R, '판매가 × 차감율. 수수료보다 크면 그 차이가 수수료 외 차감입니다')}
       ${th('주문원가', R, '(원가+입고비) × 판매단위')}
       ${th('물류비/낱개', R, '주문당 고정비를 낱개로 나눈 값 — 판매단위를 키우면 줄어듭니다')}
       ${th('마진/주문', R + 'background:#ecfdf5')}
@@ -19704,9 +19721,14 @@ function renderRgPlan() {
         <td style="padding:6px 8px;${R}background:#f7fdf9">${inp(r, 'inout_fee', 10, 74)}</td>
         <td style="padding:6px 8px;${R}background:#f7fdf9">${inp(r, 'ship_fee', 10, 74)}</td>
         <td style="padding:6px 8px;${R}background:#f7fdf9">${inp(r, 'etc_cost', 10, 60)}</td>
-        <td style="padding:6px 8px;${R}">${inp(r, 'deduct_rate', 0.1, 60, '% 단위로 입력. 판매수수료율이 아니라 정산에서 빠지는 전체 비율입니다')}<span style="color:var(--gray-400)">%</span>
-          ${r._comm_ref != null ? `<div style="font-size:10px;color:${(r.deduct_rate != null && Math.abs(r.deduct_rate - r._comm_ref * 100) > 0.05) ? '#b45309' : 'var(--gray-400)'};margin-top:2px"
-            title="판매수수료+VAT 만으로 계산한 요율입니다. 차감율이 이보다 크면 쿠팡 할인 분담 등이 정산에서 더 빠지고 있다는 뜻입니다.">수수료 ${(r._comm_ref * 100).toFixed(2)}%</div>` : ''}</td>
+        <td style="padding:6px 8px;${R}background:#fffbf5">${inp(r, 'commission_rate', 0.1, 60, '판매수수료+VAT 요율 (%). 아는 값을 넣으세요')}<span style="color:var(--gray-400)">%</span>
+          ${r._comm_ref != null ? `<div style="font-size:10px;color:var(--gray-400);margin-top:2px"
+            title="이 상품의 정산 실적에서 계산한 판매수수료율입니다. 값이 비어 있으면 ↻ 로 채울 수 있습니다.">실적 ${(r._comm_ref * 100).toFixed(2)}%</div>` : ''}</td>
+        <td style="padding:6px 8px;${R}background:#fffbf5;color:var(--gray-600)">${won(m.commission_amt)}</td>
+        <td style="padding:6px 8px;${R}">${inp(r, 'deduct_rate', 0.1, 60, '정산에서 빠지는 전체 비율 (%). 마진 계산에 쓰입니다')}<span style="color:var(--gray-400)">%</span></td>
+        <td style="padding:6px 8px;${R}font-weight:600">${won(m.deduct_total)}
+          ${(m.etc_deduct_amt != null && Math.abs(m.etc_deduct_amt) >= 1) ? `<div style="font-size:10px;color:${m.etc_deduct_amt > 0 ? '#b45309' : '#dc2626'};margin-top:2px"
+            title="차감 총액 − 수수료. ${m.etc_deduct_amt > 0 ? '쿠팡 할인 분담 등 수수료 외 차감입니다.' : '차감율이 수수료율보다 작습니다 — 값을 확인하세요.'}">그 외 ${Math.round(m.etc_deduct_amt).toLocaleString()}</div>` : ''}</td>
         <td style="padding:6px 8px;${R}color:var(--gray-500)">${won(m.cost_per_order)}</td>
         <td style="padding:6px 8px;${R}color:var(--gray-600)">${won(m.logistics_per_item)}</td>
         <td style="padding:6px 8px;${R}background:#f0fdf4;font-weight:600">${won(m.margin)}</td>
@@ -19754,6 +19776,7 @@ async function saveRgPlan() {
     price: r.price, unit_cost: r.unit_cost, inbound_cost: r.inbound_cost,
     inout_fee: r.inout_fee, ship_fee: r.ship_fee, etc_cost: r.etc_cost ?? 0,
     deduct_rate: r.deduct_rate == null ? null : Number(r.deduct_rate) / 100,
+    commission_rate: r.commission_rate == null ? null : Number(r.commission_rate) / 100,
     target_margin_rate: r.target_margin_rate == null ? null : Number(r.target_margin_rate) / 100,
     vat_rate: _RG_VAT, price_vat_included: true,
     fulfill_basis: r.fulfill_basis, fulfill_estimated: !!r.fulfill_estimated,
@@ -19781,7 +19804,7 @@ function downloadRgPlanXlsx() {
   if (!_rgPlans.length) { alert('내려받을 데이터가 없습니다.'); return; }
   const n = v => (v == null || !isFinite(v)) ? '' : Math.round(v * 100) / 100;
   const header = ['상품', '상품코드', '판매단위', '안', '개당 판매가', '판매가(원/주문)',
-    '원가/낱개', '입고비/낱개', '입출고비(원/주문)', '배송비(원/주문)', '기타(원/주문)', '차감율(%)', '참고: 판매수수료율(%)',
+    '원가/낱개', '입고비/낱개', '입출고비(원/주문)', '배송비(원/주문)', '기타(원/주문)', '수수료율(%)', '수수료', '차감율(%)', '차감 총액', '그 외 차감', '참고: 실적 수수료율(%)',
     '주문원가', '고정비/주문', '물류비/낱개', '마진/주문', '마진율(%)', '마진/낱개', '낱개판매가',
     '손익분기가', '목표율(%)', '목표가', '풀필먼트 기준', '추정여부', '부가세기준', '메모'];
   const body = _rgPlans.map(r => {
@@ -19789,7 +19812,8 @@ function downloadRgPlanXlsx() {
     return [
       r.product_name || '', r.product_code || '', r.sales_unit, r.plan_label || '',
       n(r.price_per_item), n(r.price), n(r.unit_cost), n(r.inbound_cost), n(r.inout_fee), n(r.ship_fee), n(r.etc_cost),
-      n(r.deduct_rate), r._comm_ref == null ? '' : n(r._comm_ref * 100), n(m.cost_per_order), n(m.fixed_per_order), n(m.logistics_per_item),
+      n(r.commission_rate), n(m.commission_amt), n(r.deduct_rate), n(m.deduct_total), n(m.etc_deduct_amt),
+      r._comm_ref == null ? '' : n(r._comm_ref * 100), n(m.cost_per_order), n(m.fixed_per_order), n(m.logistics_per_item),
       n(m.margin), m.margin_rate == null ? '' : n(m.margin_rate * 100), n(m.margin_per_item), n(m.price_per_item),
       n(m.be_price), n(r.target_margin_rate), n(m.target_price),
       r.fulfill_basis || '', r.fulfill_estimated ? '추정' : '', m.vat_applied ? '공급가(VAT 제외)' : 'VAT 미반영',
