@@ -1258,13 +1258,23 @@ nav.nav-loading a[href^="#"] {
     <div>
       <h2 style="margin:0">🟥 쿠팡 로켓그로스 매출</h2>
       <div style="font-size:12px;color:var(--gray-500);margin-top:4px">
-        Wing 셀러센터 정산 리포트를 올려 로켓그로스 주문·매출·정산을 봅니다. 주문은 쿠팡 API 로도 함께 수집됩니다.
+        <b>매출</b> 탭은 정산 리포트로 본 실적, <b>판매가</b> 탭은 마진 분석과 판매단위 기획입니다. 주문은 쿠팡 API 로도 함께 수집됩니다.
         <a href="https://wing.coupang.com/tenants/rfm/rfm-home/view" target="_blank" rel="noopener" style="color:#1d4ed8">Wing RFM 홈 열기 ↗</a>
       </div>
     </div>
     <button class="btn" onclick="loadRgLines()" style="padding:5px 12px;font-size:12px">🔄 새로고침</button>
   </div>
 
+  <!-- 탭 — 매출(정산 실적) / 판매가(마진·기획). 한 페이지에 다 쌓으니 너무 길어졌다. -->
+  <div style="display:flex;gap:4px;border-bottom:2px solid var(--gray-200);margin-bottom:16px">
+    <button id="rgtab-btn-sales" class="rgtab-btn" onclick="showRgTab('sales')"
+      style="padding:8px 18px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:700;border-bottom:2px solid #991b1b;color:#991b1b;margin-bottom:-2px">
+      🧾 매출</button>
+    <button id="rgtab-btn-price" class="rgtab-btn" onclick="showRgTab('price')"
+      style="padding:8px 18px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent;color:var(--gray-500);margin-bottom:-2px">
+      💰 판매가</button>
+  </div>
+  <div id="rgtab-sales">
   <!-- 주문 단위 통합 (migration 055) — 두 리포트를 (주문ID, 옵션ID) 로 합쳐 한 줄로 본다 -->
   <div class="card" style="margin-bottom:16px;padding:16px;border:1px solid #fde68a;background:#fffbeb">
     <div style="font-weight:700;font-size:14px;margin-bottom:6px">🧾 주문 단위 통합 <span style="font-weight:400;font-size:11px;color:var(--gray-500)">(결제완료일 / 배송완료일 · 매출 · 수수료 · 물류비 · 정산금액)</span></div>
@@ -1303,6 +1313,8 @@ nav.nav-loading a[href^="#"] {
     <div id="rgl-table-wrap" style="margin-top:10px;overflow-x:auto"></div>
   </div>
 
+  </div>
+  <div id="rgtab-price" style="display:none">
   <!-- 판매단위별 마진 시뮬레이션 (2026-08-19 요청) — 위 주문 라인을 옵션ID(=판매단위) 로 묶어 본다 -->
   <div class="card" style="margin-bottom:16px;padding:16px;border:1px solid #bfdbfe;background:#f8fafc">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
@@ -1334,6 +1346,7 @@ nav.nav-loading a[href^="#"] {
       <b>목표율</b>을 넣으면 그 마진율이 되는 <b>목표가</b>를 역산해 보여줍니다.
       <span style="color:#b45309">마진 = 판매가 − 수수료 − 입출고비 − 배송비 − (원가+입고비)×판매단위</span>, 마진율은 판매가 대비입니다.
     </div>
+    <div id="rgm-range-note" style="font-size:11px;color:var(--gray-500);margin-bottom:6px"></div>
     <div id="rgm-summary" style="font-size:12px;color:var(--gray-600);margin-bottom:8px"></div>
     <div id="rgm-table-wrap" style="overflow-x:auto"></div>
   </div>
@@ -1366,6 +1379,7 @@ nav.nav-loading a[href^="#"] {
     <div id="rgp-table-wrap" style="overflow-x:auto"></div>
   </div>
 
+  </div>
 </div>
 
 <!-- ========== 상품문의 (외부채널 고객문의 모아보기, 065) ========== -->
@@ -18394,6 +18408,7 @@ async function loadRgLines() {
     //   저장된 가정치(069)를 먼저 깔고, 아직 저장 안 한 편집이 있으면 그 위에 남긴다.
     await rgmLoadSaved();
     renderRgMargin();
+    _rgSyncRangeNote();
     // 판매단위 기획은 조회 기간과 무관한 영구 데이터라 별도 경로로 불러온다
     loadRgPlan();
   } catch (e) {
@@ -19362,6 +19377,40 @@ async function rgmClearSaved() {
   } finally {
     renderRgMargin();
   }
+}
+
+// ── 로켓그로스 탭 전환 ─────────────────────────────────────────────
+//   매출(정산 실적) / 판매가(마진·기획). 한 페이지에 다 쌓으니 스크롤이 너무 길어졌다.
+//   두 탭 모두 같은 _rgLines 를 쓰므로 데이터는 한 번만 불러온다 — 탭은 표시만 가른다.
+let _rgTab = 'sales';
+function showRgTab(name) {
+  _rgTab = name === 'price' ? 'price' : 'sales';
+  const on = (el, active, color) => {
+    if (!el) return;
+    el.style.fontWeight = active ? '700' : '600';
+    el.style.borderBottom = `2px solid ${active ? color : 'transparent'}`;
+    el.style.color = active ? color : 'var(--gray-500)';
+  };
+  const sales = document.getElementById('rgtab-sales');
+  const price = document.getElementById('rgtab-price');
+  if (sales) sales.style.display = _rgTab === 'sales' ? '' : 'none';
+  if (price) price.style.display = _rgTab === 'price' ? '' : 'none';
+  on(document.getElementById('rgtab-btn-sales'), _rgTab === 'sales', '#991b1b');
+  on(document.getElementById('rgtab-btn-price'), _rgTab === 'price', '#6d28d9');
+  if (_rgTab === 'price') _rgSyncRangeNote();
+}
+
+/** 판매가 탭의 📐 카드는 매출 탭에서 고른 기간의 데이터를 쓴다 — 어느 기간인지 보여준다. */
+function _rgSyncRangeNote() {
+  const el = document.getElementById('rgm-range-note');
+  if (!el) return;
+  const basis = document.getElementById('rgl-basis')?.value === 'delivered' ? '배송완료일' : '결제완료일';
+  const from = document.getElementById('rgl-from')?.value || '';
+  const to = document.getElementById('rgl-to')?.value || '';
+  el.innerHTML = (from || to)
+    ? `실적 기간 <b>${esc(from || '처음')} ~ ${esc(to || '지금')}</b> · ${esc(basis)} 기준 `
+      + `<a href="#" onclick="showRgTab('sales');return false" style="color:#1d4ed8">기간 변경 →</a>`
+    : `<a href="#" onclick="showRgTab('sales');return false" style="color:#1d4ed8">매출 탭에서 기간을 지정하세요 →</a>`;
 }
 
 // ── 🧮 판매단위 기획 (migration 070) ────────────────────────────────
