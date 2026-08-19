@@ -515,19 +515,29 @@ async function saveUnitPlans(rows, by = null) {
     throw new Error(`같은 조합이 여러 행에 있습니다 — ${[...new Set(dups)].join(', ')}. `
       + `같은 상품·판매단위를 여러 안으로 비교하려면 '안' 이름을 다르게 지어주세요.`);
   }
-  const res = await fetch(`${REST}/coupang_rg_unit_plan?on_conflict=plan_key`, {
-    method: 'POST',
-    headers: { ...HDR, Prefer: 'resolution=merge-duplicates,return=representation' },
-    body: JSON.stringify(recs),
-  });
-  if (!res.ok) {
-    const t = await res.text();
-    if (/23505|duplicate key/.test(t)) {
-      throw new Error('같은 (상품, 판매단위, 안 이름) 조합이 이미 있습니다 — 안 이름을 다르게 지어주세요');
+  // 이미 저장된 행(id 있음)과 새 행을 나눠 보낸다.
+  //   둘을 한 번에 plan_key 로 upsert 하면, 판매단위·안 이름을 고친 기존 행은 plan_key 가
+  //   달라져 INSERT 로 흘러가고 PK(id) 충돌로 23505 가 난다. id 가 있으면 id 로 갱신해야 한다.
+  const post = async (rows, conflict) => {
+    if (!rows.length) return [];
+    const res = await fetch(`${REST}/coupang_rg_unit_plan?on_conflict=${conflict}`, {
+      method: 'POST',
+      headers: { ...HDR, Prefer: 'resolution=merge-duplicates,return=representation' },
+      body: JSON.stringify(rows),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      if (/23505|duplicate key/.test(t)) {
+        throw new Error('같은 (상품, 판매단위, 안 이름) 조합이 이미 있습니다 — 안 이름을 다르게 지어주세요');
+      }
+      throw new Error(`Supabase upsert rg_unit_plan [${res.status}]: ${t.slice(0, 300)}`);
     }
-    throw new Error(`Supabase upsert rg_unit_plan [${res.status}]: ${t.slice(0, 300)}`);
-  }
-  return { saved: recs.length, rows: await res.json() };
+    return res.json();
+  };
+  const existing = recs.filter(r => r.id);
+  const fresh = recs.filter(r => !r.id);
+  const saved = [...(await post(existing, 'id')), ...(await post(fresh, 'plan_key'))];
+  return { saved: recs.length, rows: saved };
 }
 
 async function deleteUnitPlan(id) {

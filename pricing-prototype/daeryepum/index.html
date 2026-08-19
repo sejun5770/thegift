@@ -19536,7 +19536,7 @@ function _rgpIsDirty(r) {
 function _rgpDirtyCount() { return _rgPlans.filter(_rgpIsDirty).length; }
 
 /** 서버에서 저장된 기획 행 + 상품별 풀필먼트 기본값을 함께 불러온다 */
-async function loadRgPlan() {
+async function loadRgPlan({ keepNew = true } = {}) {
   const $w = document.getElementById('rgp-table-wrap');
   if (!$w) return;
   try {
@@ -19549,7 +19549,10 @@ async function loadRgPlan() {
     if (d.error) throw new Error(d.error);
     if (p.error) throw new Error(p.error);
     _rgPlanDefaults = d;
-    const dirtyNew = _rgPlans.filter(r => !r.id);        // 저장 안 한 새 행은 유지
+    // 아직 저장 안 한 새 행은 조회로 날리지 않는다.
+    //   단 저장 직후에는(keepNew=false) 유지하면 안 된다 — 방금 저장한 새 행은 로컬에서
+    //   여전히 id 가 null 이라, 서버가 돌려준 같은 행과 나란히 남아 두 줄로 보인다.
+    const dirtyNew = keepNew ? _rgPlans.filter(r => !r.id) : [];
     _rgPlanSaved = {};
     _rgPlans = (p.plans || []).map(row => {
       const r = { ...row };
@@ -19945,7 +19948,7 @@ async function saveRgPlan() {
     const d = await res.json();
     if (d.error) throw new Error(d.error);
     showToast(`저장했습니다 — ${d.saved || 0}개`);
-    await loadRgPlan();     // 서버가 준 id·plan_key 로 다시 맞춘다
+    await loadRgPlan({ keepNew: false });   // 서버가 준 id·plan_key 로 다시 맞춘다
   } catch (e) {
     alert(`저장 실패: ${e.message}`
       + (/does not exist|PGRST205/i.test(e.message) ? '\n\n마이그레이션 070 을 아직 실행하지 않았을 수 있습니다.' : ''));
