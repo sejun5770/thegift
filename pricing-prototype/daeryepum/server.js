@@ -455,6 +455,24 @@ async function _connectPool(config, label, onError) {
   throw lastErr;
 }
 
+/**
+ * 연결이 끊겨 실패한 쿼리를 1회만 다시 실행한다.
+ *   getPool() 이 ping 으로 stale 연결을 거르지만, ping 과 본 쿼리 사이에 Azure 가
+ *   연결을 닫으면 본 쿼리가 ECONNCLOSED/ESOCKET 으로 죽는다. 이 경우만 풀을 새로 잡고
+ *   한 번 더 시도한다. 타임아웃·SQL 오류는 재시도해도 같으므로 그대로 올린다.
+ */
+async function runWithPoolRetry(fn, p) {
+  try {
+    return await fn(p || await getPool());
+  } catch (e) {
+    if (!_isRetryableConnErr(e)) throw e;
+    console.warn('[db] 쿼리 중 연결 끊김 — 풀 재생성 후 1회 재시도:', e.message);
+    try { if (pool) await pool.close(); } catch { /* 이미 끊긴 풀 */ }
+    pool = null;
+    return fn(await getPool());
+  }
+}
+
 let pool = null;
 let _poolInitPromise = null; // 동시 초기화 요청 중복 방지 (race-condition 가드)
 
@@ -841,7 +859,7 @@ async function apiOrders(query) {
   const etcCouponDivisorForCategory = etcCouponDivisorJoin(cpdFilter);
   const cardUnitDivisor = skipUnitValue ? '1' : 'ISNULL(NULLIF(c.Unit_Value, 0), 1)';
 
-  const result = await p.request()
+  const runMainQuery = (pp) => pp.request()
     .input('startDate', sql.VarChar, startDate)
     .input('endDate', sql.VarChar, endDate)
     .query(`
@@ -1039,6 +1057,10 @@ async function apiOrders(query) {
 
       ORDER BY order_date DESC, order_seq DESC
     `);
+  // Azure SQL 은 ping 통과 후 본 쿼리 실행 중에도 연결을 끊는 일이 있다.
+  //   그때마다 정보입력현황이 통째로 빈 화면이 됐다 — 연결성 오류에 한해 풀을 새로 잡고 1회만 재시도한다.
+  //   (문법 오류·타임아웃 같은 것은 재시도해도 같으므로 그대로 올린다.)
+  const result = await runWithPoolRetry(runMainQuery, p);
 
   const rows = result.recordset.map(r => ({
     ...r,

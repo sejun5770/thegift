@@ -1354,7 +1354,8 @@ nav.nav-loading a[href^="#"] {
     </div>
     <div style="font-size:11px;color:var(--gray-500);line-height:1.7;margin-bottom:10px">
       상품을 고르고 <b>판매단위</b>를 넣으면 원가·입고비는 상품설정(⚙)에서, <b>입출고비·배송비·차감율</b>은 그 상품의 정산 실적에서 채워집니다.
-      같은 상품을 여러 판매단위로 만들려면 <b>⧉</b> 로 행을 복사하세요.<br>
+      같은 상품을 여러 판매단위로 만들려면 <b>⧉</b> 로 행을 복사하세요.
+      <b>개당 판매가</b>를 넣으면 판매가 = 개당 × 판매단위로 자동 계산되고, 판매가를 직접 고치면 개당이 역산됩니다.<br>
       <b>원가·입고비는 낱개(상품 1개) 기준</b>으로 넣습니다 — 판매단위를 곱해 주문 원가를 냅니다.
       <b>입출고비·배송비는 주문 1건당</b>이라 판매단위를 곱하지 않습니다. 그래서 판매단위를 키우면 <b>물류비/낱개</b>가 줄어듭니다.<br>
       <span style="color:#b45309">⚠ 실적 물류비는 지금 팔고 있는 판매단위에서 나온 값입니다. 10개 묶음 물류비는 낱개의 1.7배지 10배가 아니라,
@@ -19365,6 +19366,7 @@ let _rgPlanSaved = {};    // id → 서버 저장 스냅샷 (dirty 판정)
 let _rgPlanDefaults = null;   // { defaults, fallback, products, paid_range }
 let _rgPlanSeq = 0;
 
+// price_per_item 은 price 에서 파생되는 표시용이라 dirty 판정에 넣지 않는다
 const RGP_FIELDS = ['product_code', 'product_name', 'sales_unit', 'plan_label', 'price',
   'unit_cost', 'inbound_cost', 'inout_fee', 'ship_fee', 'etc_cost',
   'deduct_rate', 'target_margin_rate', 'memo'];
@@ -19423,6 +19425,9 @@ async function loadRgPlan() {
       for (const f of ['price', 'unit_cost', 'inbound_cost', 'inout_fee', 'ship_fee', 'etc_cost', 'sales_unit']) {
         r[f] = row[f] == null ? null : Number(row[f]);
       }
+      // 개당 판매가는 저장하지 않고 판매가에서 파생한다 — 정본을 둘로 두면 어긋난다
+      r.price_per_item = (r.price == null) ? null
+        : Math.round((r.price / Math.max(1, r.sales_unit || 1)) * 100) / 100;
       _rgPlanSaved[r.id] = { ...r };
       return r;
     }).concat(dirtyNew);
@@ -19464,7 +19469,7 @@ function addRgPlanRow(copyFrom) {
     : {
       _tmp: 'new' + (++_rgPlanSeq), id: null,
       product_code: null, product_name: '', sales_unit: 1, plan_label: '기본안',
-      price: null, unit_cost: null, inbound_cost: null,
+      price: null, price_per_item: null, unit_cost: null, inbound_cost: null,
       inout_fee: null, ship_fee: null, etc_cost: 0,
       deduct_rate: null, target_margin_rate: null, memo: null,
       fulfill_basis: null, fulfill_estimated: false,
@@ -19539,6 +19544,17 @@ function rgpSet(key, field, raw) {
     delete r['_bad_' + field];
     r[field] = v;
     if (field === 'sales_unit' && v != null) r[field] = Math.max(1, Math.round(v));
+    // 개당 판매가 ↔ 판매가는 판매단위로 묶여 있다. 어느 쪽을 고쳐도 나머지를 맞춘다.
+    //   운영자는 낱개 단가로 사고하고(원가·입고비도 낱개 기준), 실제 판매가는 그것 × 판매단위다.
+    const unit = Math.max(1, Number(r.sales_unit) || 1);
+    if (field === 'price_per_item') {
+      r.price = v == null ? null : Math.round(v * unit);
+    } else if (field === 'price') {
+      r.price_per_item = v == null ? null : Math.round((v / unit) * 100) / 100;
+    } else if (field === 'sales_unit' && r.price_per_item != null) {
+      // 판매단위를 바꾸면 개당 단가를 유지하고 판매가를 다시 낸다
+      r.price = Math.round(Number(r.price_per_item) * Math.max(1, Number(r.sales_unit) || 1));
+    }
   }
   // 물류비를 손으로 고치면 근거를 '수기' 로 바꾼다 — 나중에 출처를 되짚을 수 있게
   if (field === 'inout_fee' || field === 'ship_fee') {
@@ -19637,7 +19653,8 @@ function renderRgPlan() {
       ${th('상품', 'text-align:left')}
       ${th('판매단위', R, '이 1주문에 들어가는 상품 낱개 수')}
       ${th('안', 'text-align:left', '같은 판매단위의 여러 가격안을 비교할 때 이름을 다르게')}
-      ${th('판매가', R + 'background:#fef9c3', '원/주문 1건. 쿠팡지원할인 차감 후 매출인식액 기준')}
+      ${th('개당 판매가', R + 'background:#fef9c3', '낱개 1개 가격. 여기를 넣으면 판매가 = 개당 × 판매단위 로 자동 계산됩니다')}
+      ${th('판매가', R + 'background:#fef9c3', '원/주문 1건 (= 판매단위 1개를 파는 가격). 쿠팡지원할인 차감 후 매출인식액 기준. 직접 넣으면 개당 판매가가 역산됩니다')}
       ${th('원가/개', R + 'background:#eff6ff', '원/상품 1개(낱개) · VAT 별도 — 판매단위를 곱합니다')}
       ${th('입고비/개', R + 'background:#eff6ff', '원/상품 1개(낱개) · VAT 별도 — 판매단위를 곱합니다')}
       ${th('입출고비', R + 'background:#f0fdf4', '원/주문 1건 · VAT 별도 — 판매단위를 곱하지 않습니다')}
@@ -19680,7 +19697,8 @@ function renderRgPlan() {
         <td style="padding:6px 8px;min-width:200px">${prodCell}</td>
         <td style="padding:6px 8px;${R}">${inp(r, 'sales_unit', 1, 56, '판매단위 — 낱개 몇 개가 한 주문인가')}</td>
         <td style="padding:6px 8px;${isDup ? 'background:#fef2f2' : ''}">${txt(r, 'plan_label', 90, '기본안')}</td>
-        <td style="padding:6px 8px;${R}background:#fefce8">${inp(r, 'price', 100, 88)}</td>
+        <td style="padding:6px 8px;${R}background:#fefce8">${inp(r, 'price_per_item', 10, 78, '낱개 1개 가격 — 판매단위를 곱해 판매가가 됩니다')}</td>
+        <td style="padding:6px 8px;${R}background:#fefce8;font-weight:600">${inp(r, 'price', 100, 88, '주문 1건 가격. 고치면 개당 판매가가 다시 계산됩니다')}</td>
         <td style="padding:6px 8px;${R}background:#f5f9ff">${inp(r, 'unit_cost', 10, 78)}</td>
         <td style="padding:6px 8px;${R}background:#f5f9ff">${inp(r, 'inbound_cost', 10, 70)}</td>
         <td style="padding:6px 8px;${R}background:#f7fdf9">${inp(r, 'inout_fee', 10, 74)}</td>
@@ -19762,7 +19780,7 @@ async function saveRgPlan() {
 function downloadRgPlanXlsx() {
   if (!_rgPlans.length) { alert('내려받을 데이터가 없습니다.'); return; }
   const n = v => (v == null || !isFinite(v)) ? '' : Math.round(v * 100) / 100;
-  const header = ['상품', '상품코드', '판매단위', '안', '판매가(원/주문)',
+  const header = ['상품', '상품코드', '판매단위', '안', '개당 판매가', '판매가(원/주문)',
     '원가/낱개', '입고비/낱개', '입출고비(원/주문)', '배송비(원/주문)', '기타(원/주문)', '차감율(%)', '참고: 판매수수료율(%)',
     '주문원가', '고정비/주문', '물류비/낱개', '마진/주문', '마진율(%)', '마진/낱개', '낱개판매가',
     '손익분기가', '목표율(%)', '목표가', '풀필먼트 기준', '추정여부', '부가세기준', '메모'];
@@ -19770,7 +19788,7 @@ function downloadRgPlanXlsx() {
     const m = _rgpCompute(r);
     return [
       r.product_name || '', r.product_code || '', r.sales_unit, r.plan_label || '',
-      n(r.price), n(r.unit_cost), n(r.inbound_cost), n(r.inout_fee), n(r.ship_fee), n(r.etc_cost),
+      n(r.price_per_item), n(r.price), n(r.unit_cost), n(r.inbound_cost), n(r.inout_fee), n(r.ship_fee), n(r.etc_cost),
       n(r.deduct_rate), r._comm_ref == null ? '' : n(r._comm_ref * 100), n(m.cost_per_order), n(m.fixed_per_order), n(m.logistics_per_item),
       n(m.margin), m.margin_rate == null ? '' : n(m.margin_rate * 100), n(m.margin_per_item), n(m.price_per_item),
       n(m.be_price), n(r.target_margin_rate), n(m.target_price),
@@ -20467,9 +20485,17 @@ async function loadBgUnified() {
     // 정보입력현황은 답례품 + 바른손더기프트 두 카테고리 병합 노출.
     //   apiOrders 는 category 별 분기: daeryepum → MSSQL+쿠팡+네이버 / bhands_gift → bg_manual_orders.
     //   두 결과를 이어 붙여 rawOrders 로 다룸 (동일 스키마 정규화됨).
-    const fetchOrdersForCategory = c => fetch(`${API}/api/orders?start_date=${start}&end_date=${endPlus}&category=${c}`, { signal })
-      .then(r => { if (!r.ok) throw new Error(`orders API ${c} ${r.status}`); return r.json(); })
-      .then(v => Array.isArray(v) ? v : []);
+    const fetchOrdersForCategory = async (c) => {
+      const r = await fetch(`${API}/api/orders?start_date=${start}&end_date=${endPlus}&category=${c}`, { signal });
+      if (!r.ok) {
+        // 서버는 { error } 로 실제 사유를 준다. 상태코드만 보여주면 원인을 알 수 없다.
+        let why = '';
+        try { why = (await r.json())?.error || ''; } catch { why = (await r.text().catch(() => '')).slice(0, 200); }
+        throw new Error(`주문 조회 실패 (${c}, HTTP ${r.status})${why ? ' — ' + why : ''}`);
+      }
+      const v = await r.json();
+      return Array.isArray(v) ? v : [];
+    };
     // 사고건은 주문 조회와 독립이라 실패해도 화면이 죽지 않게 따로 띄운다 (탭 카운트/목록용).
     loadIncidents();
     _bgCodeAlias = new Map();
