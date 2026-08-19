@@ -1303,6 +1303,31 @@ nav.nav-loading a[href^="#"] {
     <div id="rgl-table-wrap" style="margin-top:10px;overflow-x:auto"></div>
   </div>
 
+  <!-- 판매단위별 마진 시뮬레이션 (2026-08-19 요청) — 위 주문 라인을 옵션ID(=판매단위) 로 묶어 본다 -->
+  <div class="card" style="margin-bottom:16px;padding:16px;border:1px solid #bfdbfe;background:#f8fafc">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">
+      <div style="font-weight:700;font-size:14px">📐 판매단위별 마진 시뮬레이션
+        <span style="font-weight:400;font-size:11px;color:var(--gray-500)">(위 조회 기간의 라인을 옵션ID 로 묶음 · 취소 라인 제외)</span></div>
+      <div style="flex:1"></div>
+      <label style="font-size:12px;display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="rgm-mapped-only" onchange="renderRgMargin()"> 상품코드 매핑된 것만
+      </label>
+      <label style="font-size:12px;display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="rgm-cost-only" onchange="renderRgMargin()"> 원가 입력된 것만
+      </label>
+      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="rgmResetSim()">↺ 시뮬 초기화</button>
+      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="downloadRgMarginXlsx()">📥 엑셀</button>
+    </div>
+    <div style="font-size:11px;color:var(--gray-500);line-height:1.7;margin-bottom:10px">
+      <b>실적</b> 열은 정산 리포트 그대로입니다. <b>판매가·원가·입고비</b> 칸을 고치면 <b>시뮬</b> 열이 바로 다시 계산됩니다 —
+      수수료율·입출고비·배송비는 그 판매단위의 <b>실적에서 나온 개당 평균</b>을 그대로 적용합니다 (쿠팡 요율표가 아니라 실제 청구된 값).
+      원가·입고비는 상품설정(⚙)의 값이 기본이고, 여기서 바꾼 값은 저장되지 않는 가정치입니다.
+      <span style="color:#b45309">마진 = 판매가 − 수수료 − 입출고비 − 배송비 − (원가+입고비)×판매단위</span>, 마진율은 판매가 대비입니다.
+    </div>
+    <div id="rgm-summary" style="font-size:12px;color:var(--gray-600);margin-bottom:8px"></div>
+    <div id="rgm-table-wrap" style="overflow-x:auto"></div>
+  </div>
+
 </div>
 
 <!-- ========== 상품문의 (외부채널 고객문의 모아보기, 065) ========== -->
@@ -1494,6 +1519,14 @@ nav.nav-loading a[href^="#"] {
       <div class="col-selector" id="col-selector" style="margin-bottom:0"></div>
     </div>
   </details>
+
+  <!-- 작업 후 변경 감지 알림 — 데코소품 탭에서 초안 작업 뒤 취소/재결제/품목변경된 건이 있을 때만 뜬다 -->
+  <div id="ord-drift-bar" style="display:none;margin:8px 0;padding:8px 12px;border-radius:6px;background:#fff7ed;border:1px solid #fdba74;font-size:12px;color:#9a3412;align-items:center;gap:10px;flex-wrap:wrap">
+    <span id="ord-drift-summary"></span>
+    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-left:auto">
+      <input type="checkbox" id="ord-drift-only" onchange="renderOrderTable()"> 이 건들만 보기
+    </label>
+  </div>
 
   <!-- 통합 액션바: 카운트 + 지능적 액션 버튼 -->
   <div style="display:flex;align-items:center;gap:12px;margin:12px 0 8px;flex-wrap:wrap;font-size:12px;color:var(--gray-500)">
@@ -4684,6 +4717,10 @@ function showPage(name) {
 // --- Category Tabs ---
 function switchCategory(cat) {
   currentCategory = cat;
+  // 이전 카테고리의 감지 결과가 새 목록에 남지 않게 비운다 (loadOrders 가 다시 채운다)
+  _ordDrift = {};
+  const _driftOnly = document.getElementById('ord-drift-only');
+  if (_driftOnly) _driftOnly.checked = false;
   document.querySelectorAll('.cat-tab').forEach(t => t.classList.toggle('active', t.dataset.cat === cat));
   // 마켓플레이스 동기화 버튼은 답례품 카테고리에서만 노출 (꽃다발/데코소품 채널 X)
   const showMarketplaceSync = (cat === 'daeryepum');
@@ -4849,6 +4886,8 @@ async function loadOrders() {
     });
     renderOrderTable();
     document.getElementById('order-count').textContent = ordersData.length;
+    // 작업 후 변경 감지 — 목록이 그려진 뒤 별도 호출. 실패해도 목록엔 영향 없다.
+    _ordLoadDrift(ordersData);
   } catch(e) {
     console.error(e);
     showToast('주문 조회 실패: ' + e.message);
@@ -4866,7 +4905,84 @@ function isExcludePending() {
   return document.getElementById('exclude-pending')?.checked || false;
 }
 
+// ── 작업 후 주문 변경 감지 (데코소품) ──────────────────────
+//   초안 작업(빠른손웹 이미지 업로드) 뒤 취소·재결제·품목변경된 건을 케이스별로 표시한다.
+//   케이스마다 작업자가 할 일이 다르다 — 폐기 / 손대지 말 것 / 재작업.
+let _ordDrift = {};          // order_seq → 판정
+let _ordDriftReqGen = 0;     // 조회 연타 시 늦게 온 응답이 새 목록에 덮이지 않게
+
+async function _ordLoadDrift(rows) {
+  _ordDrift = {};
+  const bar = document.getElementById('ord-drift-bar');
+  if (bar) bar.style.display = 'none';
+  // 데코소품 탭에서만 — 작업 기록(초안 이미지)이 데코 품목에 남는다
+  if (currentCategory !== 'deco') { renderOrderTable(); return; }
+  const seqs = [...new Set((rows || [])
+    .filter(r => r.order_type === 'CARD' || r.order_type === 'ETC')
+    .map(r => Number(r.order_seq)).filter(n => Number.isFinite(n) && n > 0))];
+  if (!seqs.length) return;
+  const gen = ++_ordDriftReqGen;
+  try {
+    const r = await fetch(`${API}/api/orders/work-drift`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_seqs: seqs, category: 'deco' }),
+    });
+    const j = await r.json();
+    if (gen !== _ordDriftReqGen) return;
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    _ordDrift = j.by_order || {};
+    renderOrderTable();
+  } catch (e) {
+    console.warn('[work-drift] 감지 실패:', e.message);
+  }
+}
+
+const DRIFT_STYLE = {
+  danger: { bg: '#fee2e2', fg: '#b91c1c', bd: '#fca5a5' },
+  warn:   { bg: '#ffedd5', fg: '#c2410c', bd: '#fdba74' },
+  ok:     { bg: '#dcfce7', fg: '#15803d', bd: '#86efac' },
+};
+
+/** 행 배지 — 케이스 라벨 + 툴팁(작업일·작업자·변경 이력 원문) */
+function _ordDriftBadge(r) {
+  const d = _ordDrift[String(r.order_seq)];
+  if (!d) return '';
+  const st = DRIFT_STYLE[d.level] || DRIFT_STYLE.warn;
+  const fmt = (v) => v ? String(v).replace('T', ' ').slice(0, 16) : '-';
+  const lines = [
+    `${d.label} — ${d.action}`,
+    `작업: ${fmt(d.worked_at)} (${d.worked_by || '?'}) · ${d.worked_items.map(x => x.name || x.code).join(', ')}`,
+  ];
+  if (d.gone_items?.length) lines.push(`빠진 품목: ${d.gone_items.map(x => x.name || x.code).join(', ')}`);
+  if (d.new_items?.length) lines.push(`새 품목: ${d.new_items.map(x => `${x.name || x.code}×${x.qty}`).join(', ')}`);
+  for (const h of (d.history || []).slice(0, 4)) {
+    lines.push(`[${fmt(h.at)}] ${h.type} (${h.by || ''})${h.memo ? ' · ' + h.memo : ''}`);
+    if (h.detail) lines.push('   ' + h.detail.split(String.fromCharCode(10)).filter(Boolean).slice(0, 4).join(' / '));
+  }
+  return `<span title="${esc(lines.join(String.fromCharCode(10)))}" style="display:inline-block;margin-right:6px;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;background:${st.bg};color:${st.fg};border:1px solid ${st.bd};vertical-align:middle;white-space:nowrap">${esc(d.label)}</span>`;
+}
+
+/** 상단 알림 줄 — 케이스별 건수. 하나도 없으면 숨긴다 */
+function _ordRenderDriftBar() {
+  const bar = document.getElementById('ord-drift-bar');
+  const sum = document.getElementById('ord-drift-summary');
+  if (!bar || !sum) return;
+  const entries = Object.values(_ordDrift);
+  if (!entries.length) { bar.style.display = 'none'; return; }
+  const cnt = {};
+  for (const d of entries) cnt[d.label] = (cnt[d.label] || 0) + 1;
+  const parts = Object.entries(cnt).map(([k, n]) => `${k} ${n}건`);
+  sum.innerHTML = `⚠️ <b>초안 작업 후 변경된 주문 ${entries.length}건</b> — ${esc(parts.join(' · '))}.`
+    + ` <span style="color:#7c2d12">주문번호 앞 배지에 마우스를 올리면 무엇이 바뀌었는지 보입니다.</span>`;
+  bar.style.display = 'flex';
+}
+
 function getFilteredOrders() {
+  const driftOnly = document.getElementById('ord-drift-only')?.checked;
+  const _pre = _getFilteredOrdersInner();
+  return driftOnly ? _pre.filter(r => _ordDrift[String(r.order_seq)]) : _pre;
+}
+function _getFilteredOrdersInner() {
   const q = (document.getElementById('ord-code-search')?.value || '').trim().toLowerCase();
   const excludeCancel = isExcludeCancel();
   const excludePending = isExcludePending();
@@ -4948,11 +5064,12 @@ function renderOrderTable() {
     return `<tr class="${cls}" style="cursor:pointer" onclick="_onOrderRowClick(${i}, event)">` +
       `<td><input type="checkbox" class="row-check" data-idx="${i}" onchange="updateSelectedCount()" onclick="event.stopPropagation()"></td>` +
       actionCell +
-      cols.map(c => `<td class="${c.num?'num':''}">${r[c.key] ?? ''}</td>`).join('') +
+      cols.map(c => `<td class="${c.num?'num':''}">${c.key === 'order_seq' ? _ordDriftBadge(r) + (r[c.key] ?? '') : (r[c.key] ?? '')}</td>`).join('') +
       `</tr>`;
   }).join('');
   document.getElementById('order-count').textContent = filtered.length;
   _ordRenderCoupangMapStatus(filtered);
+  _ordRenderDriftBar();
   // 수집/취소 건수
   const allOrders = getFilteredOrders();
   let collectedCnt = 0, cancelCnt = 0;
@@ -18153,6 +18270,9 @@ async function loadRgLines() {
     if (d.error) throw new Error(d.error);
     _rgLines = d.lines || [];
     renderRgLines();
+    // 판매단위별 마진 시뮬레이션은 같은 라인을 다른 축으로 본다 — 조회마다 함께 갱신
+    _rgmSim = {};
+    renderRgMargin();
   } catch (e) {
     $w.innerHTML = `<div style="padding:16px;color:#dc2626;font-size:12px">조회 실패: ${esc(e.message)}</div>`;
   }
@@ -18658,6 +18778,243 @@ async function syncRgWorkflow() {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '🔗 정보입력현황 연동'; }
   }
+}
+
+// ── 판매단위별 마진 시뮬레이션 (2026-08-19 요청) ────────────────────
+//   _rgLines 를 옵션ID(vendor_item_id) 로 묶는다. 옵션ID 가 곧 쿠팡의 판매단위
+//   (같은 상품이라도 10개 묶음 / 1개 낱개는 옵션ID 가 다르다) 라 이 축이 맞다.
+//
+//   실적: 리포트 그대로 합산. 시뮬: 사용자가 바꾼 판매가·원가·입고비로 재계산.
+//   시뮬의 수수료·입출고비·배송비는 그 판매단위의 실적 평균을 쓴다 —
+//   쿠팡 요율표는 카테고리·프로모션마다 달라 여기서 재현할 수 없고, 실제 청구된 값이 정답이다.
+//     수수료율   = Σ수수료 ÷ Σ매출        (판매가에 비례하므로 율로)
+//     입출고비   = Σ입출고비 ÷ Σ주문수량   (건당 정액에 가까우므로 개당으로)
+//     배송비     = Σ배송비  ÷ Σ주문수량
+//
+//   ⚠ 취소 라인은 뺀다. 매출이 음수로 잡혀 평균 판매가와 요율을 흔든다.
+//   ⚠ 원가는 '상품 1개당' 이라 판매단위(1주문 = 상품 N개)를 곱한다 (068 · 060).
+let _rgmSim = {};      // vendor_item_id → { price, unit_cost, inbound } 사용자 가정치 (미저장)
+let _rgmRows = [];     // 마지막 렌더 결과 (엑셀 다운로드용)
+
+function _rgmAggregate() {
+  const by = new Map();
+  for (const r of _rgLines) {
+    if (r.is_cancel) continue;
+    const vid = String(r.vendor_item_id || '').trim();
+    if (!vid) continue;
+    if (!by.has(vid)) {
+      by.set(vid, {
+        vendor_item_id: vid,
+        seller_product_id: r.seller_product_id || '',
+        product_name: r.product_name || '',
+        internal_product_code: r.internal_product_code || null,
+        map_conflict: r.map_conflict || null,
+        sales_unit: Number(r.sales_unit) || 1,
+        unit_cost: r.unit_cost ?? null,
+        inbound_unit_cost: r.inbound_unit_cost ?? null,
+        orders: new Set(), qty: 0, item_qty: 0,
+        sales: 0, commission: 0, inout: 0, shipping: 0, settlement: 0,
+        // 물류비 리포트가 아직 안 올라온 라인 수 — 있으면 입출고비/배송비 평균이 낮게 잡힌다
+        no_cfs: 0,
+        first: null, last: null,
+      });
+    }
+    const g = by.get(vid);
+    // 이름·코드는 최신 라인 기준 (상품명이 프로모션마다 바뀐다)
+    if (r.product_name) g.product_name = r.product_name;
+    if (r.internal_product_code) g.internal_product_code = r.internal_product_code;
+    if (r.map_conflict) g.map_conflict = r.map_conflict;
+    g.orders.add(String(r.order_id));
+    g.qty += Number(r.sales_qty) || 0;
+    g.item_qty += Number(r.item_qty) || (Number(r.sales_qty) || 0) * g.sales_unit;
+    g.sales += Number(r.sales_amount) || 0;
+    g.commission += Number(r.commission) || 0;
+    g.inout += Number(r.inout_fee) || 0;
+    g.shipping += Number(r.shipping_fee) || 0;
+    g.settlement += Number(r.settlement_amount) || 0;
+    if (r.inout_fee == null && r.shipping_fee == null) g.no_cfs++;
+    const d = r.paid_date || r.delivered_date || null;
+    if (d) { if (!g.first || d < g.first) g.first = d; if (!g.last || d > g.last) g.last = d; }
+  }
+  const rows = [];
+  for (const g of by.values()) {
+    const qty = g.qty;
+    const avgPrice = qty > 0 ? g.sales / qty : 0;                 // 판매단위 1개당 평균 판매가
+    const commRate = g.sales > 0 ? g.commission / g.sales : 0;    // 수수료율
+    const inoutPer = qty > 0 ? g.inout / qty : 0;                 // 개당 입출고비
+    const shipPer = qty > 0 ? g.shipping / qty : 0;               // 개당 배송비
+    const settleNet = g.settlement - g.inout - g.shipping;        // 물류비까지 뺀 정산금액
+    const hasCost = !(g.unit_cost === null && g.inbound_unit_cost === null);
+    const costPerItem = hasCost ? Number(g.unit_cost || 0) + Number(g.inbound_unit_cost || 0) : null;
+    const costTotal = hasCost ? costPerItem * g.item_qty : null;
+    const margin = hasCost ? settleNet - costTotal : null;
+    const marginRate = hasCost && g.sales > 0 ? margin / g.sales : null;
+
+    // 시뮬 — 사용자가 손댄 값 > 실적/설정값
+    const sim = _rgmSim[g.vendor_item_id] || {};
+    const sPrice = sim.price != null ? Number(sim.price) : avgPrice;
+    const sUnitCost = sim.unit_cost != null ? Number(sim.unit_cost) : g.unit_cost;
+    const sInbound = sim.inbound != null ? Number(sim.inbound) : g.inbound_unit_cost;
+    const sHasCost = !((sUnitCost == null) && (sInbound == null));
+    const sCostPerItem = sHasCost ? Number(sUnitCost || 0) + Number(sInbound || 0) : null;
+    const sCostPerUnit = sHasCost ? sCostPerItem * g.sales_unit : null;   // 판매단위 1개에 든 원가
+    const sComm = sPrice * commRate;
+    const sSettle = sPrice - sComm - inoutPer - shipPer;
+    const sMargin = sHasCost ? sSettle - sCostPerUnit : null;
+    const sMarginRate = sHasCost && sPrice > 0 ? sMargin / sPrice : null;
+    // 손익분기 판매가 — 마진 0 이 되는 가격.  P(1−c) − in − sh − cost = 0
+    const bePrice = sHasCost && commRate < 1 ? (inoutPer + shipPer + sCostPerUnit) / (1 - commRate) : null;
+
+    rows.push({
+      ...g, order_count: g.orders.size,
+      avg_price: avgPrice, comm_rate: commRate, inout_per: inoutPer, ship_per: shipPer,
+      settle_net: settleNet, cost_per_item: costPerItem, cost_total: costTotal,
+      margin, margin_rate: marginRate,
+      sim: {
+        price: sPrice, unit_cost: sUnitCost ?? null, inbound: sInbound ?? null,
+        touched: sim.price != null || sim.unit_cost != null || sim.inbound != null,
+        commission: sComm, settle: sSettle, cost_per_unit: sCostPerUnit,
+        margin: sMargin, margin_rate: sMarginRate, be_price: bePrice,
+        // 실적 마진율 대비 변화 (%p)
+        delta_pt: (sMarginRate != null && marginRate != null) ? (sMarginRate - marginRate) * 100 : null,
+      },
+    });
+  }
+  // 매출 큰 순 — 마진 개선 효과가 큰 것부터 보게
+  rows.sort((a, b) => b.sales - a.sales);
+  return rows;
+}
+
+function renderRgMargin() {
+  const $w = document.getElementById('rgm-table-wrap');
+  const $s = document.getElementById('rgm-summary');
+  if (!$w) return;
+  let rows = _rgmAggregate();
+  if (document.getElementById('rgm-mapped-only')?.checked) rows = rows.filter(r => r.internal_product_code);
+  if (document.getElementById('rgm-cost-only')?.checked) rows = rows.filter(r => r.cost_total !== null);
+  _rgmRows = rows;
+  if (!rows.length) {
+    $s.textContent = '';
+    $w.innerHTML = '<div style="padding:16px;color:var(--gray-400);font-size:12px">집계할 라인이 없습니다. 위에서 기간을 조회하거나 리포트를 올려주세요.</div>';
+    return;
+  }
+  const won = v => (v == null || !isFinite(v)) ? '<span style="color:var(--gray-300)">-</span>' : Math.round(v).toLocaleString();
+  const pctc = v => (v == null || !isFinite(v)) ? '<span style="color:var(--gray-300)">-</span>'
+    : `<b style="color:${v >= 0.2 ? '#047857' : v >= 0.1 ? '#b45309' : '#dc2626'}">${(v * 100).toFixed(1)}%</b>`;
+  const noCost = rows.filter(r => r.cost_total === null).length;
+  const totSales = rows.reduce((s, r) => s + r.sales, 0);
+  const withCost = rows.filter(r => r.cost_total !== null);
+  const totMargin = withCost.reduce((s, r) => s + r.margin, 0);
+  const totSalesWithCost = withCost.reduce((s, r) => s + r.sales, 0);
+  const totSimMargin = withCost.reduce((s, r) => s + (r.sim.margin != null ? r.sim.margin * r.qty : 0), 0);
+  const totSimSales = withCost.reduce((s, r) => s + r.sim.price * r.qty, 0);
+  const touched = rows.filter(r => r.sim.touched).length;
+  $s.innerHTML =
+    `판매단위 <b>${rows.length}</b>개 · 매출 <b>${won(totSales)}</b>원`
+    + (withCost.length ? ` · 원가 입력 ${withCost.length}개 기준 실적 마진 <b>${won(totMargin)}</b>원 (${pctc(totSalesWithCost > 0 ? totMargin / totSalesWithCost : null)})` : '')
+    + (touched ? ` · <span style="color:#1d4ed8">시뮬 ${touched}개 변경 → 마진 <b>${won(totSimMargin)}</b>원 (${pctc(totSimSales > 0 ? totSimMargin / totSimSales : null)})</span>` : '')
+    + (noCost ? ` · <span style="color:#b45309" title="상품설정에서 원가·입고비를 입력하면 마진이 계산됩니다">원가 미입력 ${noCost}개</span>` : '');
+
+  const th = (t, extra = '') => `<th style="padding:6px 8px;white-space:nowrap;border-bottom:2px solid var(--gray-200);color:var(--gray-500);font-weight:600;${extra}">${t}</th>`;
+  const R = 'text-align:right;';
+  const inp = (vid, field, val, step, title) => {
+    const touched = _rgmSim[vid]?.[field] != null;
+    return `<input type="number" step="${step}" value="${val == null || !isFinite(val) ? '' : Math.round(val)}"
+       data-vid="${esc(vid)}" data-field="${field}"
+       oninput="rgmSetSim(this.dataset.vid, this.dataset.field, this.value)" title="${esc(title)}"
+       style="width:82px;padding:3px 5px;border:1px solid ${touched ? '#3b82f6' : 'var(--gray-300)'};border-radius:4px;font-size:12px;text-align:right;background:${touched ? '#eff6ff' : '#fff'}">`;
+  };
+
+  $w.innerHTML = `<table style="width:100%;font-size:12px;border-collapse:collapse;min-width:1500px">
+    <thead>
+      <tr style="background:var(--gray-50)">
+        ${th('상품 / 판매단위', 'text-align:left')}
+        ${th('주문', R)}${th('판매수량', R)}${th('상품수량', R)}
+        ${th('평균단가', R + 'background:#fef9c3')}
+        ${th('수수료율', R)}${th('입출고비/개', R)}${th('배송비/개', R)}
+        ${th('원가/개', R)}${th('입고비/개', R)}
+        ${th('실적 마진', R + 'background:#ecfdf5')}${th('실적 마진율', R + 'background:#ecfdf5')}
+        ${th('시뮬 판매가', R + 'background:#eff6ff')}${th('시뮬 원가', R + 'background:#eff6ff')}${th('시뮬 입고비', R + 'background:#eff6ff')}
+        ${th('시뮬 마진/개', R + 'background:#eff6ff')}${th('시뮬 마진율', R + 'background:#eff6ff')}${th('변화', R + 'background:#eff6ff')}
+        ${th('손익분기가', R)}
+      </tr>
+    </thead>
+    <tbody>${rows.map(r => {
+      const nameCell = `
+        <div style="font-weight:600">${esc(r.product_name || r.vendor_item_id)}</div>
+        <div style="font-size:11px;color:var(--gray-500);font-family:monospace">
+          ${r.internal_product_code ? esc(r.internal_product_code) : '<span style="color:#b45309" title="상품설정에 옵션ID/등록상품ID 가 없어 상품코드를 붙이지 못했습니다">미매핑</span>'}
+          · 옵션 ${esc(r.vendor_item_id)}
+          ${r.sales_unit > 1 ? `· <span title="이 옵션 1개 = 상품 ${r.sales_unit}개">×${r.sales_unit}</span>` : ''}
+          ${r.no_cfs ? `<span style="color:#b45309" title="입출고비·배송비 리포트가 아직 안 올라온 라인 ${r.no_cfs}건 — 물류비 평균이 실제보다 낮게 잡힙니다"> ⚠물류비 ${r.no_cfs}건 누락</span>` : ''}
+          ${r.map_conflict ? `<span style="color:#dc2626" title="${esc(r.map_conflict)}"> ⚠</span>` : ''}
+        </div>
+        <div style="font-size:10px;color:var(--gray-400)">${esc(r.first || '')}${r.last && r.last !== r.first ? ' ~ ' + esc(r.last) : ''}</div>`;
+      const delta = r.sim.delta_pt;
+      const deltaCell = delta == null ? '<span style="color:var(--gray-300)">-</span>'
+        : Math.abs(delta) < 0.05 ? '<span style="color:var(--gray-400)">0</span>'
+        : `<span style="color:${delta > 0 ? '#047857' : '#dc2626'}">${delta > 0 ? '▲' : '▼'} ${Math.abs(delta).toFixed(1)}%p</span>`;
+      const td = (v, extra = '') => `<td style="padding:6px 8px;border-bottom:1px solid var(--gray-100);${extra}">${v}</td>`;
+      return `<tr>
+        ${td(nameCell, 'min-width:260px')}
+        ${td(r.order_count.toLocaleString(), R)}
+        ${td(r.qty.toLocaleString(), R)}
+        ${td(r.item_qty.toLocaleString(), R + 'color:var(--gray-500)')}
+        ${td(won(r.avg_price), R + 'background:#fefce8;font-weight:600')}
+        ${td((r.comm_rate * 100).toFixed(1) + '%', R)}
+        ${td(won(r.inout_per), R)}
+        ${td(won(r.ship_per), R)}
+        ${td(r.unit_cost == null ? '<span style="color:#b45309">미입력</span>' : won(r.unit_cost), R)}
+        ${td(r.inbound_unit_cost == null ? '<span style="color:var(--gray-300)">-</span>' : won(r.inbound_unit_cost), R)}
+        ${td(won(r.margin), R + 'background:#f0fdf4')}
+        ${td(pctc(r.margin_rate), R + 'background:#f0fdf4')}
+        ${td(inp(r.vendor_item_id, 'price', r.sim.price, 100, '판매단위 1개당 판매가 (기본 = 실적 평균단가)'), R + 'background:#f5f9ff')}
+        ${td(inp(r.vendor_item_id, 'unit_cost', r.sim.unit_cost, 10, '상품 1개당 원가 (기본 = 상품설정)'), R + 'background:#f5f9ff')}
+        ${td(inp(r.vendor_item_id, 'inbound', r.sim.inbound, 10, '상품 1개당 입고 부대비 (기본 = 상품설정)'), R + 'background:#f5f9ff')}
+        ${td(won(r.sim.margin), R + 'background:#f5f9ff;font-weight:600')}
+        ${td(pctc(r.sim.margin_rate), R + 'background:#f5f9ff')}
+        ${td(deltaCell, R + 'background:#f5f9ff')}
+        ${td(won(r.sim.be_price), R + 'color:var(--gray-500)')}
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+function rgmSetSim(vid, field, raw) {
+  if (!_rgmSim[vid]) _rgmSim[vid] = {};
+  const v = String(raw).trim();
+  if (v === '') delete _rgmSim[vid][field]; else _rgmSim[vid][field] = Number(v);
+  if (!Object.keys(_rgmSim[vid]).length) delete _rgmSim[vid];
+  // 표를 통째로 다시 그리므로 입력 중인 칸의 포커스와 커서를 복원한다.
+  const active = document.activeElement;
+  const restore = active && active.tagName === 'INPUT' && active.dataset.vid
+    ? { vid: active.dataset.vid, field: active.dataset.field, pos: active.selectionStart } : null;
+  renderRgMargin();
+  if (restore) {
+    const el = document.querySelector(`#rgm-table-wrap input[data-vid="${CSS.escape(restore.vid)}"][data-field="${restore.field}"]`);
+    if (el) { el.focus(); try { el.setSelectionRange(restore.pos, restore.pos); } catch {} }
+  }
+}
+
+function rgmResetSim() {
+  _rgmSim = {};
+  renderRgMargin();
+}
+
+function downloadRgMarginXlsx() {
+  if (!_rgmRows.length) { alert('내려받을 데이터가 없습니다.'); return; }
+  const n = v => (v == null || !isFinite(v)) ? '' : Math.round(v * 100) / 100;
+  const header = ['상품명', '상품코드', '옵션ID', '등록상품ID', '판매단위', '기간시작', '기간끝',
+    '주문수', '판매수량', '상품수량', '매출', '평균단가', '수수료', '수수료율(%)', '입출고비', '입출고비/개', '배송비', '배송비/개',
+    '정산금액(물류비 차감)', '원가/개', '입고비/개', '원가합계', '실적 마진', '실적 마진율(%)',
+    '시뮬 판매가', '시뮬 원가/개', '시뮬 입고비/개', '시뮬 수수료', '시뮬 정산/개', '시뮬 원가/판매단위', '시뮬 마진/개', '시뮬 마진율(%)', '손익분기 판매가'];
+  const body = _rgmRows.map(r => [
+    r.product_name || '', r.internal_product_code || '', r.vendor_item_id, r.seller_product_id || '', r.sales_unit, r.first || '', r.last || '',
+    r.order_count, r.qty, r.item_qty, n(r.sales), n(r.avg_price), n(r.commission), n(r.comm_rate * 100), n(r.inout), n(r.inout_per), n(r.shipping), n(r.ship_per),
+    n(r.settle_net), n(r.unit_cost), n(r.inbound_unit_cost), n(r.cost_total), n(r.margin), r.margin_rate == null ? '' : n(r.margin_rate * 100),
+    n(r.sim.price), n(r.sim.unit_cost), n(r.sim.inbound), n(r.sim.commission), n(r.sim.settle), n(r.sim.cost_per_unit), n(r.sim.margin), r.sim.margin_rate == null ? '' : n(r.sim.margin_rate * 100), n(r.sim.be_price),
+  ]);
+  downloadXlsxRows([header, ...body], `로켓그로스_마진시뮬_${new Date().toISOString().slice(0, 10)}`, '마진시뮬');
 }
 
 function downloadRgLinesXlsx() {
