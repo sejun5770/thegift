@@ -63,6 +63,7 @@ code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px
   <a href="#orders-sync" class="h3">4-1. 채널 동기화</a>
   <a href="#orders-thegift" class="h3">4-2. 더기프트 CSV 업로드</a>
   <a href="#dispatch" class="h3">4-3. 출고상태 전송 (쿠팡·네이버)</a>
+  <a href="#work-drift" class="h3">4-4. 작업 후 변경 감지 (데코소품)</a>
   <a href="#unified" class="h2">5. 정보입력현황</a>
   <a href="#incident" class="h3">5-1. 기타출고(사고건)</a>
   <a href="#stickers" class="h2">6. 스티커 관리</a>
@@ -263,6 +264,22 @@ code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px
   <li><b>결과</b>: 건별 성공/실패와 채널이 준 사유가 그대로 표시됩니다. 일부만 실패해도 나머지는 정상 전송됩니다 (예: "이미 출고 처리된 주문입니다").</li>
 </ul>
 <div class="tip">택배사는 송장 등록 때 고른 이름(CJ대한통운·한진택배·롯데택배·우체국택배·로젠택배)을 채널 코드로 바꿔 보냅니다. 그 밖의 택배사로 등록된 건은 코드를 알 수 없어 전송 대상에서 빠지니, 채널 관리자에서 직접 입력해 주세요.</div>
+
+<h3 id="work-drift">4-4. 작업 후 변경 감지 (데코소품)</h3>
+<div class="img-wrap"><img src="manual-assets/orders-work-drift.png" alt="작업 후 변경 감지"><div class="img-cap">데코소품 탭 — 초안 작업 뒤 취소·재결제·품목변경된 주문에 배지, 상단에 알림 줄 (개인정보 블러)</div></div>
+<p>결제완료 → 데코 작업자가 초안 작업 → 그 뒤 주문이 취소되거나, 취소 후 재결제되면서 <b>주문일이 갱신돼 신규처럼 위로 올라오는</b> 경우가 있습니다. 이미 작업한 건인지, 품목이 바뀐 건지 알 수 없어 중복 작업·폐기 누락이 생기던 문제를 자동으로 잡습니다.</p>
+<ul>
+  <li><b>작업 기준</b>: 빠른손웹 커스텀팀 인쇄작업 메뉴에서 <b>초안 이미지(jpg/png)를 올린 시각</b>입니다. 품목 단위로 남아 있어 따로 찍을 것이 없습니다.</li>
+  <li><b>배지 (주문번호 앞)</b>과 그때 할 일:
+    <br>· <span class="badge b-red">취소됨</span> — 작업물 폐기
+    <br>· <span class="badge b-red">품목 빠짐</span> — 재결제에서 작업한 품목이 빠짐 → 폐기
+    <br>· <span class="badge b-amber">품목 교체</span> — 다른 데코 품목으로 바뀜 → 폐기 후 재작업
+    <br>· <span class="badge b-green">재결제(동일)</span> — 취소 후 재결제됐지만 품목 그대로 → <b>기존 작업 유효, 다시 작업하지 마세요</b>. 신규처럼 위로 올라와도 속지 않도록 표시합니다.
+    <br>· <span class="badge b-amber">작업 후 변경</span> — 취소 없이 작업 품목의 수량/옵션이 바뀜 → 변경 내역 확인</li>
+  <li><b>배지에 마우스를 올리면</b> 작업일·작업자와 그 뒤 변경 이력(무엇이 삭제·추가됐는지) 원문이 보입니다.</li>
+  <li>상단 알림 줄에 케이스별 건수가 뜨고, <b>이 건들만 보기</b>를 켜면 해당 주문만 남습니다.</li>
+  <li>데코소품 탭에서만 동작합니다 (작업 기록이 데코 품목에 남습니다). 봉투 추가·청첩장 수량 변경처럼 <b>데코 품목과 무관한 변경은 표시하지 않습니다</b>.</li>
+</ul>
 
 <h2 id="unified">5. 정보입력현황</h2>
 <div class="img-wrap"><img src="manual-assets/bg-unified.png" alt="정보입력현황"><div class="img-cap">정보입력현황 — 조회줄 / 접이식 필터 구역 / 탭 · 표 (개인정보 블러)</div></div>
