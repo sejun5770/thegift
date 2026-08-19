@@ -2510,8 +2510,8 @@ nav.nav-loading a[href^="#"] {
     </div>
     <div id="stock-alert-list" style="font-size:12px;color:var(--gray-500)">불러오는 중…</div>
     <div style="margin-top:8px;font-size:11px;color:var(--gray-500);line-height:1.6">
-      아래 표의 🔔 버튼으로 알림 대상을 추가/제외합니다. <b>대상 보기</b> 를 열면 칩을 눌러 여러 개를 골라
-      임계치를 한 번에 지정하거나 알림을 해제할 수 있습니다.
+      아래 표의 🔔 체크박스로 알림 대상을 켜고 끕니다 — 헤더 체크박스는 화면 전체, 행을 선택하면 위 액션 바에서
+      <b>알림 켜기 / 끄기</b>를 한 번에 할 수 있습니다. <b>대상 보기</b> 를 열면 칩을 눌러 여러 개를 골라 임계치를 한 번에 지정할 수 있습니다.
       임계치를 지정하면 <b>가용재고 ≤ 임계치</b>일 때 경고로 표시되고, 미지정이면 <b>소진예상 30일 이하</b>가 경고 기준입니다.
     </div>
   </div>
@@ -2525,6 +2525,9 @@ nav.nav-loading a[href^="#"] {
     <b style="font-size:12px;color:#3730a3"><span id="stock-selection-count">0</span>개 선택</b>
     <span id="stock-selection-codes" style="font-size:11px;color:#4338ca;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
     <button class="btn" style="padding:5px 12px;font-size:12px" onclick="groupSelectedStockItems()">🧩 그룹으로 묶기</button>
+    <span style="width:1px;height:18px;background:#c7d2fe"></span>
+    <button class="btn" style="padding:5px 12px;font-size:12px;background:#ecfdf5;border-color:#a7f3d0;color:#047857" onclick="bulkSetSelectedAlerts(true)" title="선택한 품목을 슬랙 데일리 알림 대상에 넣습니다">🔔 알림 켜기</button>
+    <button class="btn" style="padding:5px 12px;font-size:12px" onclick="bulkSetSelectedAlerts(false)" title="선택한 품목을 슬랙 데일리 알림에서 뺍니다 (재고 목록에는 남습니다)">🔕 알림 끄기</button>
     <button class="btn" style="padding:5px 12px;font-size:12px" onclick="clearStockSelection()">선택 해제</button>
   </div>
 
@@ -2550,7 +2553,8 @@ nav.nav-loading a[href^="#"] {
           <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="TOTAL_SALE_PRICE_30_DAY">30일 매출액</th>
           <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">일평균</th>
           <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)">소진 예상</th>
-          <th style="text-align:center;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="슬랙 데일리 알림 대상">🔔</th>
+          <th style="text-align:center;padding:8px 12px;border-bottom:1px solid var(--gray-200);white-space:nowrap" title="슬랙 데일리 알림 대상 — 헤더 체크박스로 화면의 등록 품목 전체를 한 번에 켜고 끕니다">
+            <input type="checkbox" id="stock-alert-all" onchange="toggleStockAlertAll(this.checked)" style="cursor:pointer;vertical-align:middle;margin-right:2px"> 🔔</th>
           <th style="text-align:center;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="이 품목의 등록 정보를 수정하거나 목록에서 제거">관리</th>
         </tr>
       </thead>
@@ -15872,6 +15876,7 @@ function renderStockTable() {
   }
   $tbody.innerHTML = _stockGroupedRows(items);
   _syncStockSelectionBar();
+  _syncStockAlertHeaderCb();
   $loading.style.display = 'none';
   $table.style.display = '';
 }
@@ -16445,7 +16450,7 @@ function renderStockAlertList() {
     return;
   }
   if (!on.length) {
-    $list.innerHTML = `<span style="color:var(--gray-500)">등록 품목 ${_stockAlerts.length}개 중 알림 대상이 없습니다. 표의 🔔 을 켜세요.</span>`;
+    $list.innerHTML = `<span style="color:var(--gray-500)">등록 품목 ${_stockAlerts.length}개 중 알림 대상이 없습니다. 표의 🔔 체크박스를 켜세요.</span>`;
     return;
   }
   // 선택은 화면에 보이는 대상만 유효 — 알림이 꺼진 품목이 선택에 남지 않게 정리
@@ -16893,15 +16898,21 @@ async function saveStockEditModal() {
   }
 }
 
-/** 재고 표의 🔔 셀 — 등록 품목의 슬랙 알림 포함 여부 토글 */
+/**
+ * 재고 표의 🔔 셀 — 슬랙 알림 포함 여부 체크박스.
+ *   종 아이콘 클릭 방식은 하나씩 켜고 끄는 데 시간이 오래 걸렸다 (2026-08-13 요청).
+ *   체크박스로 바꾸고, 헤더 체크박스(보이는 행 전체)와 행 선택 → 일괄 켜기/끄기를 같이 둔다.
+ *   단건은 바꾸는 즉시 저장한다 — 예전 종 아이콘과 같은 즉시 반영이다.
+ */
 function _stockBellCell(it) {
   const on = it.alert_enabled !== false;
-  return `<button onclick="toggleStockItemAlert('${esc(it.item_id)}', ${on ? 'false' : 'true'})"
-    title="${on ? '슬랙 알림에서 제외' : '슬랙 알림에 포함'}"
-    style="border:none;background:none;cursor:pointer;font-size:14px;padding:0;opacity:${on ? 1 : 0.25}">🔔</button>`;
+  return `<input type="checkbox" class="stock-alert-cb" data-item-id="${esc(it.item_id)}" ${on ? 'checked' : ''}
+    onchange="toggleStockItemAlert('${esc(it.item_id)}', this.checked, this)"
+    title="${on ? '슬랙 데일리 알림 대상 — 끄려면 체크 해제' : '알림 제외 중 — 켜려면 체크'}"
+    style="cursor:pointer;width:15px;height:15px;vertical-align:middle">`;
 }
 
-async function toggleStockItemAlert(id, turnOn) {
+async function toggleStockItemAlert(id, turnOn, cb) {
   if (!id) { alert('등록 정보를 찾을 수 없습니다. 새로고침 후 다시 시도하세요.'); return; }
   try {
     const r = await fetch(`${API}/api/bg/stock-alerts/${encodeURIComponent(id)}`, {
@@ -16911,8 +16922,79 @@ async function toggleStockItemAlert(id, turnOn) {
     });
     const d = await r.json();
     if (d.error) throw new Error(d.error);
-    await Promise.all([loadDaeryepumStock(), loadStockAlerts()]);
-  } catch (e) { alert(`실패: ${e.message}`); }
+    // 로컬 상태만 갱신하고 표는 다시 그리지 않는다 — 전체 리로드는 체크박스 하나 바꿀 때마다
+    //   화면이 깜빡이고 스크롤이 튄다. 알림 요약 카드만 새로 읽는다.
+    const it = _stockData.find(x => x.item_id === id);
+    if (it) it.alert_enabled = !!turnOn;
+    _syncStockAlertHeaderCb();
+    await loadStockAlerts();
+  } catch (e) {
+    if (cb) cb.checked = !turnOn;   // 실패하면 원래대로 되돌린다
+    alert(`실패: ${e.message}`);
+  }
+}
+
+/** 🔔 헤더 체크박스 — 화면에 보이는 등록 품목 전체를 한 번에 켜거나 끈다 */
+async function toggleStockAlertAll(on) {
+  const cbs = [...document.querySelectorAll('#stock-tbody .stock-alert-cb')];
+  const ids = cbs.map(cb => cb.dataset.itemId).filter(Boolean);
+  if (!ids.length) return;
+  // 이미 그 상태인 것은 건드리지 않는다 — 요청 수를 줄이고 실패 범위를 좁힌다
+  const targets = cbs.filter(cb => cb.checked !== on).map(cb => cb.dataset.itemId);
+  if (!targets.length) { _syncStockAlertHeaderCb(); return; }
+  if (!confirm(`화면의 ${targets.length}개 품목 알림을 ${on ? '켭니다' : '끕니다'}.\n진행할까요?`)) {
+    _syncStockAlertHeaderCb(); return;
+  }
+  await _applyAlertEnabled(targets, on);
+}
+
+/** 선택 액션 바 — 행 선택 체크박스로 고른 품목의 알림을 일괄 켜기/끄기 */
+async function bulkSetSelectedAlerts(on) {
+  const codes = [..._stockSelected];
+  if (!codes.length) return;
+  const ids = codes.map(c => _stockData.find(x => x.stock_code === c)?.item_id).filter(Boolean);
+  if (!ids.length) { showToast('선택한 행에 등록 품목이 없습니다'); return; }
+  const changing = ids.filter(id => {
+    const it = _stockData.find(x => x.item_id === id);
+    return it && (it.alert_enabled !== false) !== on;
+  });
+  if (!changing.length) { showToast(`이미 모두 ${on ? '켜져' : '꺼져'} 있습니다`); return; }
+  await _applyAlertEnabled(changing, on);
+}
+
+/** 여러 품목 alert_enabled 일괄 변경 — 성공한 것만 로컬 반영, 실패는 코드까지 알린다 */
+async function _applyAlertEnabled(ids, on) {
+  const failed = [];
+  for (const id of ids) {
+    try {
+      const r = await fetch(`${API}/api/bg/stock-alerts/${encodeURIComponent(id)}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alert_enabled: !!on }),
+      });
+      const d = await r.json();
+      if (d.error) throw new Error(d.error);
+      const it = _stockData.find(x => x.item_id === id);
+      if (it) it.alert_enabled = !!on;
+    } catch (e) {
+      const it = _stockData.find(x => x.item_id === id);
+      failed.push(`${it ? it.stock_code : id}: ${e.message}`);
+    }
+  }
+  renderStockTable();
+  await loadStockAlerts();
+  const okCount = ids.length - failed.length;
+  if (failed.length) alert(`${okCount}개 ${on ? '켬' : '끔'} · ${failed.length}건 실패\n${failed.join('\n')}`);
+  else showToast(`${okCount}개 품목 알림 ${on ? '켬' : '끔'}`);
+}
+
+/** 헤더 체크박스 상태 = 보이는 행이 전부 켜져 있는가 (일부만이면 indeterminate) */
+function _syncStockAlertHeaderCb() {
+  const head = document.getElementById('stock-alert-all');
+  if (!head) return;
+  const cbs = [...document.querySelectorAll('#stock-tbody .stock-alert-cb')];
+  const onCount = cbs.filter(cb => cb.checked).length;
+  head.checked = cbs.length > 0 && onCount === cbs.length;
+  head.indeterminate = onCount > 0 && onCount < cbs.length;
 }
 
 // 단건 임계치 변경은 표의 ✎ (등록 정보 수정) 과 칩 다중선택 > 임계치 설정 으로 한다.
@@ -18270,8 +18352,9 @@ async function loadRgLines() {
     if (d.error) throw new Error(d.error);
     _rgLines = d.lines || [];
     renderRgLines();
-    // 판매단위별 마진 시뮬레이션은 같은 라인을 다른 축으로 본다 — 조회마다 함께 갱신
-    _rgmSim = {};
+    // 판매단위별 마진 시뮬레이션은 같은 라인을 다른 축으로 본다 — 조회마다 함께 갱신.
+    //   저장된 가정치(069)를 먼저 깔고, 아직 저장 안 한 편집이 있으면 그 위에 남긴다.
+    await rgmLoadSaved();
     renderRgMargin();
   } catch (e) {
     $w.innerHTML = `<div style="padding:16px;color:#dc2626;font-size:12px">조회 실패: ${esc(e.message)}</div>`;
@@ -18793,8 +18876,50 @@ async function syncRgWorkflow() {
 //
 //   ⚠ 취소 라인은 뺀다. 매출이 음수로 잡혀 평균 판매가와 요율을 흔든다.
 //   ⚠ 원가는 '상품 1개당' 이라 판매단위(1주문 = 상품 N개)를 곱한다 (068 · 060).
-let _rgmSim = {};      // vendor_item_id → { price, unit_cost, inbound } 사용자 가정치 (미저장)
+let _rgmSim = {};      // vendor_item_id → { price, unit_cost, inbound, target, memo } 화면 가정치
+let _rgmSaved = {};    // vendor_item_id → 서버에 저장된 가정치 (dirty 판정 기준)
 let _rgmRows = [];     // 마지막 렌더 결과 (엑셀 다운로드용)
+let _rgmSavedLoaded = false;
+
+/** 서버 저장값 → _rgmSaved / _rgmSim. 아직 저장 안 한 편집(dirty)은 덮어쓰지 않는다. */
+async function rgmLoadSaved() {
+  try {
+    const r = await fetch(`${API}/api/coupang/rfm/margin-sim`);
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    const saved = {};
+    for (const x of d.sims || []) {
+      const o = {};
+      if (x.sim_price != null) o.price = Number(x.sim_price);
+      if (x.sim_unit_cost != null) o.unit_cost = Number(x.sim_unit_cost);
+      if (x.sim_inbound_cost != null) o.inbound = Number(x.sim_inbound_cost);
+      if (x.target_margin_rate != null) o.target = Number(x.target_margin_rate) * 100;   // 화면은 %
+      if (x.memo) o.memo = String(x.memo);
+      saved[x.vendor_item_id] = o;
+    }
+    // dirty 인 항목은 유지 — 저장 안 한 편집을 조회가 지우면 안 된다
+    const dirty = new Set(Object.keys(_rgmSim).filter(v => _rgmIsDirty(v)));
+    _rgmSaved = saved;
+    const next = {};
+    for (const [vid, o] of Object.entries(saved)) next[vid] = { ...o };
+    for (const vid of dirty) next[vid] = _rgmSim[vid];
+    _rgmSim = next;
+    _rgmSavedLoaded = true;
+  } catch (e) {
+    console.warn('[rg-margin] 저장값 로드 실패 (편집은 가능, 저장은 재시도 필요):', e.message);
+  }
+}
+
+const RGM_FIELDS = ['price', 'unit_cost', 'inbound', 'target', 'memo'];
+function _rgmIsDirty(vid) {
+  const a = _rgmSim[vid] || {}, b = _rgmSaved[vid] || {};
+  return RGM_FIELDS.some(f => (a[f] ?? null) !== (b[f] ?? null));
+}
+function _rgmDirtyCount() {
+  const vids = new Set([...Object.keys(_rgmSim), ...Object.keys(_rgmSaved)]);
+  let n = 0; for (const v of vids) if (_rgmIsDirty(v)) n++;
+  return n;
+}
 
 function _rgmAggregate() {
   const by = new Map();
@@ -18864,6 +18989,10 @@ function _rgmAggregate() {
     const sMarginRate = sHasCost && sPrice > 0 ? sMargin / sPrice : null;
     // 손익분기 판매가 — 마진 0 이 되는 가격.  P(1−c) − in − sh − cost = 0
     const bePrice = sHasCost && commRate < 1 ? (inoutPer + shipPer + sCostPerUnit) / (1 - commRate) : null;
+    // 목표 마진율 t 를 맞추는 판매가 — P(1−c) − in − sh − cost = tP  →  P = (in+sh+cost)/(1−c−t)
+    const target = sim.target != null ? Number(sim.target) / 100 : null;
+    const targetPrice = (target != null && sHasCost && (1 - commRate - target) > 0)
+      ? (inoutPer + shipPer + sCostPerUnit) / (1 - commRate - target) : null;
 
     rows.push({
       ...g, order_count: g.orders.size,
@@ -18872,9 +19001,11 @@ function _rgmAggregate() {
       margin, margin_rate: marginRate,
       sim: {
         price: sPrice, unit_cost: sUnitCost ?? null, inbound: sInbound ?? null,
-        touched: sim.price != null || sim.unit_cost != null || sim.inbound != null,
+        touched: sim.price != null || sim.unit_cost != null || sim.inbound != null || sim.target != null,
         commission: sComm, settle: sSettle, cost_per_unit: sCostPerUnit,
         margin: sMargin, margin_rate: sMarginRate, be_price: bePrice,
+        target, target_price: targetPrice, memo: sim.memo || '',
+        dirty: _rgmIsDirty(g.vendor_item_id), saved: !!_rgmSaved[g.vendor_item_id],
         // 실적 마진율 대비 변화 (%p)
         delta_pt: (sMarginRate != null && marginRate != null) ? (sMarginRate - marginRate) * 100 : null,
       },
