@@ -5556,9 +5556,15 @@ function _xlsxBlob(rows, sheetName) {
 
   const sheetData = (rows || []).map((row, r) => {
     const cells = (row || []).map((val, c) => {
+      const ref = _xlCol(c) + (r + 1);
+      // 수식 셀 — { f: 'A1*B1' } 로 넘기면 계산식이 그대로 들어간다.
+      //   캐시값(<v>)은 넣지 않는다. 엑셀이 열 때 스스로 계산하므로 낡은 값이 남지 않는다.
+      if (val && typeof val === 'object' && typeof val.f === 'string') {
+        const f = val.f.trim().replace(/^=/, '');
+        return f ? `<c r="${ref}"><f>${_xlEsc(f)}</f></c>` : '';
+      }
       const s = val == null ? '' : String(val);
       if (s === '') return '';
-      const ref = _xlCol(c) + (r + 1);
       // 순수 숫자만 숫자 셀로 (선행 0 / 15자리 초과는 문자로 — 주문번호·전화번호 보존)
       if (/^-?(0|[1-9]\d*)(\.\d+)?$/.test(s) && s.replace(/[-.]/g, '').length <= 15) {
         return `<c r="${ref}"><v>${s}</v></c>`;
@@ -19974,25 +19980,69 @@ async function saveRgPlan() {
 function downloadRgPlanXlsx() {
   if (!_rgPlans.length) { alert('내려받을 데이터가 없습니다.'); return; }
   const n = v => (v == null || !isFinite(v)) ? '' : Math.round(v * 100) / 100;
-  const header = ['상품', '상품코드', '판매단위', '안', '개당 정가', '정가', '할인율(%)', '개당 판매가(VAT 포함)', '판매가(VAT 포함)', '부가세', '공급가(VAT 제외)',
-    '매입원가/낱개(×판매단위)', '입고 부대비/낱개(×판매단위)', '쿠팡 입출고비(입력값 그대로)', '쿠팡 배송비(입력값 그대로)', '기타(입력값 그대로)', '수수료율(%)', '수수료', '차감율(%)', '차감 총액', '그 외 차감', '참고: 실적 수수료율(%)',
-    '주문원가', '고정비/주문', '물류비/낱개', '마진/주문', '마진율(%)', '마진/낱개', '낱개판매가',
-    '손익분기가', '목표율(%)', '목표가', '풀필먼트 기준', '추정여부', '부가세기준', '메모'];
-  const body = _rgPlans.map(r => {
-    const m = _rgpCompute(r);
+
+  // 계산 열은 값이 아니라 '수식' 으로 내보낸다 — 엑셀에서 원가·판매가를 바꾸면 마진이 바로 따라온다.
+  //   그래서 입력 열을 앞쪽에 모으고, 뒤쪽 계산 열이 그 셀을 참조하게 배치했다.
+  //   열 문자는 아래 순서 그대로다. 순서를 바꾸면 수식도 함께 고쳐야 한다.
+  //     A 상품          B 상품코드      C 판매단위      D 안
+  //     E 개당정가      F 개당판매가    G 매입원가/낱개 H 입고부대비/낱개
+  //     I 쿠팡입출고비  J 쿠팡배송비    K 기타          L 수수료율%
+  //     M 차감율%       N 목표율%       O 부가세율      (여기까지 입력)
+  //     P 정가          Q 판매가        R 부가세        S 공급가
+  //     T 할인율%       U 수수료        V 차감총액      W 그외차감
+  //     X 주문원가      Y 고정비/주문   Z 물류비/낱개   AA 마진/주문
+  //     AB 마진율%      AC 마진/낱개    AD 낱개판매가   AE 손익분기가  AF 목표가
+  //     AG~ 참고/메모
+  const header = [
+    '상품', '상품코드', '판매단위', '안',
+    '개당 정가', '개당 판매가(VAT 포함)',
+    '매입원가/낱개', '입고 부대비/낱개',
+    '쿠팡 입출고비', '쿠팡 배송비', '기타',
+    '수수료율(%)', '차감율(%)', '목표율(%)', '부가세율',
+    '정가', '판매가(VAT 포함)', '부가세', '공급가(VAT 제외)', '할인율(%)',
+    '수수료', '차감 총액', '그 외 차감',
+    '주문원가', '고정비/주문', '물류비/낱개',
+    '마진/주문', '마진율(%)', '마진/낱개', '낱개판매가',
+    '손익분기가', '목표가',
+    '참고: 실적 수수료율(%)', '풀필먼트 기준', '추정여부', '메모',
+  ];
+
+  const F = f => ({ f });                       // 수식 셀
+  const body = _rgPlans.map((r, i) => {
+    const R = i + 2;                            // 1행은 헤더
+    // 원가가 둘 다 비면 마진을 내지 않는다 — 빈칸을 0 으로 보면 마진이 부풀려진다.
+    const hasCost = `COUNT(G${R},H${R})>0`;
+    const guard = (expr) => F(`IFERROR(IF(${hasCost},${expr},""),"")`);
+    const plain = (expr) => F(`IFERROR(${expr},"")`);
     return [
       r.product_name || '', r.product_code || '', r.sales_unit, r.plan_label || '',
-      n(r.list_price_per_item), n(_rgpListPrice(r)),
-      (() => { const lp = _rgpListPrice(r), pv = Number(r.price);
-        return (lp && lp > 0 && isFinite(pv) && pv > 0) ? n((1 - pv / lp) * 100) : ''; })(),
-      n(r.price_per_item), n(r.price),
-      (r.price == null || !m.vat_applied) ? '' : n(Number(r.price) - m.price_net), n(m.price_net), n(r.unit_cost), n(r.inbound_cost), n(r.inout_fee), n(r.ship_fee), n(r.etc_cost),
-      n(r.commission_rate), n(m.commission_amt), n(r.deduct_rate), n(m.deduct_total), n(m.etc_deduct_amt),
-      r._comm_ref == null ? '' : n(r._comm_ref * 100), n(m.cost_per_order), n(m.fixed_per_order), n(m.logistics_per_item),
-      n(m.margin), m.margin_rate == null ? '' : n(m.margin_rate * 100), n(m.margin_per_item), n(m.price_per_item),
-      n(m.be_price), n(r.target_margin_rate), n(m.target_price),
-      r.fulfill_basis || '', r.fulfill_estimated ? '추정' : '', m.vat_applied ? '공급가(VAT 제외)' : 'VAT 미반영',
-      r.memo || '',
+      // ── 입력 ──
+      n(r.list_price_per_item), n(r.price_per_item),
+      n(r.unit_cost), n(r.inbound_cost),
+      n(r.inout_fee), n(r.ship_fee), n(r.etc_cost),
+      n(r.commission_rate), n(r.deduct_rate), n(r.target_margin_rate),
+      _rgVatOn() ? _RG_VAT : 0,
+      // ── 계산 (수식) ──
+      plain(`E${R}*C${R}`),                                    // P 정가
+      plain(`F${R}*C${R}`),                                    // Q 판매가
+      plain(`Q${R}-S${R}`),                                    // R 부가세
+      plain(`Q${R}/(1+O${R})`),                                // S 공급가
+      plain(`IF(P${R}>0,(1-Q${R}/P${R})*100,"")`),             // T 할인율%
+      plain(`S${R}*L${R}/100`),                                // U 수수료
+      plain(`S${R}*M${R}/100`),                                // V 차감총액
+      plain(`V${R}-U${R}`),                                    // W 그외차감
+      guard(`(G${R}+H${R})*C${R}`),                            // X 주문원가
+      plain(`I${R}+J${R}+K${R}`),                              // Y 고정비/주문
+      plain(`Y${R}/C${R}`),                                    // Z 물류비/낱개
+      guard(`S${R}-V${R}-Y${R}-X${R}`),                        // AA 마진/주문
+      guard(`AA${R}/S${R}*100`),                               // AB 마진율%
+      guard(`AA${R}/C${R}`),                                   // AC 마진/낱개
+      plain(`Q${R}/C${R}`),                                    // AD 낱개판매가
+      guard(`(Y${R}+X${R})*(1+O${R})/(1-M${R}/100)`),          // AE 손익분기가
+      guard(`IF(N${R}="","",(Y${R}+X${R})*(1+O${R})/(1-M${R}/100-N${R}/100))`),  // AF 목표가
+      // ── 참고 ──
+      r._comm_ref == null ? '' : n(r._comm_ref * 100),
+      r.fulfill_basis || '', r.fulfill_estimated ? '추정' : '', r.memo || '',
     ];
   });
   downloadXlsxRows([header, ...body], `로켓그로스_판매단위기획_${new Date().toISOString().slice(0, 10)}`, '판매단위기획');
