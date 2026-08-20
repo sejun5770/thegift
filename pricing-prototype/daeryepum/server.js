@@ -1659,7 +1659,11 @@ async function apiProductStats(query) {
       await mergeMarket(() => require('./naver/store').listNaverOrders({ startStr: s, endStr: e, byPaid: false }), r => `NV:${r.product_order_id}`, '네이버');
       await mergeMarket(() => require('./cafe24/store').listCafe24Orders({ startStr: s, endStr: e, byPaid: false }), r => `CF:${r.cafe24_order_id}`, '정수당');
       try {
-        const mos = await require('./barungift/store').listManualOrders({ category: 'daeryepum', startDate: s, endDate: e });
+        // e 는 exclusive(end+1) 인데 listManualOrders 의 endDate 는 inclusive(≤ 23:59:59) 다.
+        //   그대로 넘기면 하루가 더 들어온다 — 특히 전기 대비의 e(prevEndPlus)는 현재 기간
+        //   첫날이라 그 날 더기프트 주문이 전기/현재 양쪽에 중복됐다. -1일로 변환.
+        const eIncl = new Date(new Date(e).getTime() - 86400000).toISOString().slice(0, 10);
+        const mos = await require('./barungift/store').listManualOrders({ category: 'daeryepum', startDate: s, endDate: eIncl });
         for (const mo of (mos || [])) {
           const st = Number(mo.status_seq) || 0;
           if (!(st >= 2 && ![3, 5, 15].includes(st))) continue;
@@ -3339,8 +3343,13 @@ async function apiDashboardComparison(query = {}) {
     //   copurchase 개념 없음 → standalone 으로 전체 처리.
     if (_isDaeryepumCmp) try {
       const bgStore = require('./barungift/store');
+      // endStr 는 exclusive 인데 listManualOrders 의 endDate 는 inclusive(≤ 23:59:59) 다.
+      //   그대로 넘기면 하루가 더 들어와 '어제' 카드에 오늘 주문이 겹친다
+      //   (2026-08-20 더기프트 681,780원이 어제/오늘 양쪽에 표시된 실사례).
+      //   위 로켓그로스 머지와 같은 -1일 변환을 쓴다.
+      const endIncl = endStr ? new Date(new Date(endStr).getTime() - 86400000).toISOString().slice(0, 10) : null;
       const manualOrders = await bgStore.listManualOrders({
-        category: 'daeryepum', startDate: startStr, endDate: endStr,
+        category: 'daeryepum', startDate: startStr, endDate: endIncl,
       });
       const validOrders = (manualOrders || []).filter(mo => {
         const st = Number(mo.status_seq) || 0;
