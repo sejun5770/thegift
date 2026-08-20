@@ -1320,10 +1320,14 @@ async function apiOrders(query) {
   if (query.category === 'bhands_gift') {
     try {
       const bgStore = require('./barungift/store');
+      // endDate 는 화면이 종료일+1 로 보내는 exclusive 값인데 listManualOrders 의
+      //   endDate 는 inclusive(≤ 23:59:59) 다 → 그대로 넘기면 종료일 다음날 주문이 딸려온다
+      //   (8/1~8/19 조회에 8/20 주문이 섞여 나온 실측, 2026-08-20). -1 일로 변환.
+      const bgEndIncl = endDate ? new Date(new Date(endDate).getTime() - 86400000).toISOString().slice(0, 10) : null;
       const manualOrders = await bgStore.listManualOrders({
         category: 'daeryepum',
         startDate,
-        endDate: endDate,  // listManualOrders 는 end 를 <= 로 처리 (T23:59:59 append)
+        endDate: bgEndIncl,
       });
       if (manualOrders && manualOrders.length) {
         const normalized = [];
@@ -3768,10 +3772,14 @@ async function apiDashboardSummary(query) {
   if (!query.category || query.category === 'daeryepum') {
     try {
       const bgStore = require('./barungift/store');
+      // endDate 는 exclusive(화면이 종료일+1 전송), listManualOrders 는 inclusive → -1 일.
+      //   그대로 넘기면 종료일 다음날 매출이 합산된다 (8/1~8/19 요약에 8/20
+      //   더기프트 681,780원이 들어간 실측, 2026-08-20).
+      const bgEndIncl = endDate ? new Date(new Date(endDate).getTime() - 86400000).toISOString().slice(0, 10) : null;
       const manualOrders = await bgStore.listManualOrders({
         category: 'daeryepum',
         startDate,
-        endDate,
+        endDate: bgEndIncl,
       });
       if (manualOrders && manualOrders.length) {
         const SITE_LABEL = '바른손더기프트';
