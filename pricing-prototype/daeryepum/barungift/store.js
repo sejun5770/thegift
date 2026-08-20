@@ -1593,6 +1593,47 @@ async function getSiteSettings() {
   }
 }
 
+/**
+ * 슬랙 알림 메시지 구성 (074) — 기본값 = 지금까지의 하드코딩 동작 그대로.
+ *   A안(항목 켜기/끄기 + 순서)이라 값 공간이 닫혀 있다. 여기서 전부 검증해 저장하므로
+ *   발송 쪽(stock-alert)은 형태를 다시 의심하지 않아도 된다.
+ */
+const ALERT_FORMAT_DEFAULT = {
+  summary: { counts: true, attention: true, attention_limit: 0 },
+  sections: { order: ['soldout', 'warn', 'ok'], soldout: true, warn: true, ok: true, group_by_kind: true },
+  item: { available: true, consume_30d: true, daily_avg: true, threshold: true, sales_30d: false, code: true },
+  sort: 'days',
+};
+
+function normAlertFormat(src) {
+  if (src == null) return null;                       // null = 기본 구성으로 되돌리기
+  const d = ALERT_FORMAT_DEFAULT;
+  const bool = (v, def) => (typeof v === 'boolean' ? v : def);
+  const out = {
+    summary: {
+      counts: bool(src?.summary?.counts, d.summary.counts),
+      attention: bool(src?.summary?.attention, d.summary.attention),
+      attention_limit: Math.min(Math.max(parseInt(src?.summary?.attention_limit, 10) || 0, 0), 50),
+    },
+    sections: {
+      order: (Array.isArray(src?.sections?.order) ? src.sections.order : d.sections.order)
+        .filter(k => ['soldout', 'warn', 'ok'].includes(k)),
+      soldout: bool(src?.sections?.soldout, true),
+      warn: bool(src?.sections?.warn, true),
+      ok: bool(src?.sections?.ok, true),
+      group_by_kind: bool(src?.sections?.group_by_kind, true),
+    },
+    item: Object.fromEntries(Object.keys(d.item)
+      .map(k => [k, bool(src?.item?.[k], d.item[k])])),
+    sort: ['days', 'qty', 'name'].includes(src?.sort) ? src.sort : 'days',
+  };
+  // 순서에서 빠진 섹션은 뒤에 붙인다 — 순서 배열이 곧 켜짐/꺼짐이 되면 헷갈린다 (별도 플래그)
+  for (const k of ['soldout', 'warn', 'ok']) {
+    if (!out.sections.order.includes(k)) out.sections.order.push(k);
+  }
+  return out;
+}
+
 async function updateSiteSettings(patch, updatedBy = null) {
   if (!USE_SUPABASE) throw new Error('Supabase 미설정 — 사이트 설정 저장 불가');
   const allowed = ['custom_guide_title', 'custom_guide_text',
@@ -1602,6 +1643,10 @@ async function updateSiteSettings(patch, updatedBy = null) {
   // boolean 은 문자열 변환하면 안 됨
   if ('stock_alert_enabled' in patch) {
     clean.stock_alert_enabled = patch.stock_alert_enabled == null ? null : !!patch.stock_alert_enabled;
+  }
+  // 메시지 구성 (074) — 모르는 키·이상값은 버린다. 잘못 저장돼도 발송이 깨지면 안 된다.
+  if ('stock_alert_format' in patch) {
+    clean.stock_alert_format = normAlertFormat(patch.stock_alert_format);
   }
   // 구분별 경고 기준일 (073) — JSONB. 키는 ITEM_KINDS 만, 값은 1~365 정수만 남긴다.
   if ('stock_alert_warn_days' in patch) {
@@ -1618,10 +1663,25 @@ async function updateSiteSettings(patch, updatedBy = null) {
   }
   clean.updated_at = new Date().toISOString();
   if (updatedBy) clean.updated_by = updatedBy;
-  const updated = await sbUpdate('bg_site_settings', 'id=eq.1', clean);
-  if (updated) return updated;
-  // row 없으면 INSERT
-  return sbInsert('bg_site_settings', { id: 1, ...clean });
+  try {
+    const updated = await sbUpdate('bg_site_settings', 'id=eq.1', clean);
+    if (updated) return updated;
+    // row 없으면 INSERT
+    return sbInsert('bg_site_settings', { id: 1, ...clean });
+  } catch (err) {
+    // 073/074 마이그레이션 전에는 새 컬럼이 없어 PGRST204 가 난다. 그 컬럼만 빼고
+    // 다시 저장한다 — 새 기능 하나 때문에 채널·시각 저장까지 막히면 안 된다.
+    const m = /Could not find the '([a-z_]+)' column/.exec(err.message || '');
+    if (m && ['stock_alert_format', 'stock_alert_warn_days'].includes(m[1]) && m[1] in clean) {
+      delete clean[m[1]];
+      const retried = Object.keys(clean).some(k => !['updated_at', 'updated_by'].includes(k))
+        ? ((await sbUpdate('bg_site_settings', 'id=eq.1', clean)) || (await sbInsert('bg_site_settings', { id: 1, ...clean })))
+        : { id: 1 };
+      return { ...retried, _skipped_column: m[1],
+        _warning: `${m[1]} 컬럼이 아직 없습니다 — 해당 설정은 저장되지 않았습니다. supabase/migrations/${m[1] === 'stock_alert_format' ? '074' : '073'}_*.sql 을 실행하세요.` };
+    }
+    throw err;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -2260,6 +2320,8 @@ module.exports = {
   updateIncident,
   deleteIncident,
   BOM_ROLES,
+  ALERT_FORMAT_DEFAULT,
+  normAlertFormat,
   ITEM_KINDS,
   listBomRows,
   addBomRows,

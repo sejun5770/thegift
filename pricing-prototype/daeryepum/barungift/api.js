@@ -1049,9 +1049,12 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       if ('enabled' in body) patch.stock_alert_enabled = body.enabled == null ? null : !!body.enabled;
       // 구분별 경고 기준일 (073) — 값 검증은 store 가 한다 (ITEM_KINDS 키, 1~365)
       if ('warn_days' in body) patch.stock_alert_warn_days = body.warn_days;
-      await store.updateSiteSettings(patch, session?.email || null);
+      // 메시지 구성 (074) — 값 검증은 store.normAlertFormat 이 한다
+      if ('format' in body) patch.stock_alert_format = body.format;
+      const saved = await store.updateSiteSettings(patch, session?.email || null);
       stockAlert.invalidateAlertConfig();
-      return json(res, { ok: true, config: await stockAlert.loadAlertConfig() });
+      // 마이그레이션 전 컬럼이 빠졌으면 사유를 화면까지 올린다 — 조용히 유실되면 안 된다
+      return json(res, { ok: true, warning: saved?._warning || null, config: await stockAlert.loadAlertConfig() });
     } catch (err) {
       console.error('[stock-alerts config] error:', err.message);
       return json(res, { error: err.message }, 400);

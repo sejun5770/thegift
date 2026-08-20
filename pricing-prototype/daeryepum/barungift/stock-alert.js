@@ -36,6 +36,8 @@ async function loadAlertConfig() {
     enabled: row.stock_alert_enabled == null
       ? (process.env.BG_STOCK_ALERT_ENABLED === '1')
       : !!row.stock_alert_enabled,
+    // 메시지 구성 (074). null 이면 기본 구성 — 지금까지의 동작 그대로.
+    format: store.normAlertFormat(row.stock_alert_format) || store.ALERT_FORMAT_DEFAULT,
     // 구분별 소진예상 경고 기준일 (073). 없으면 전부 30 — 예전과 같은 동작.
     warn_days: { product: 30, material: 30, package: 30, set: 30, etc: 30,
       ...(row.stock_alert_warn_days && typeof row.stock_alert_warn_days === 'object' ? row.stock_alert_warn_days : {}) },
@@ -44,6 +46,7 @@ async function loadAlertConfig() {
       time: !!String(row.stock_alert_time || '').trim(),
       enabled: row.stock_alert_enabled != null,
       warn_days: !!row.stock_alert_warn_days,
+      format: !!row.stock_alert_format,
     },
   };
   _cfgCache = { at: Date.now(), val };
@@ -235,17 +238,29 @@ async function buildStockReport(baseUrl, { codes = null } = {}) {
    *   고정폭 표도 시도했으나 한글 상품명이 길어 잘리고 열이 붙어 오히려 읽기 어려웠다.
    *   이름 한 줄 / 핵심 수치 한 줄 / 코드 한 줄 로 세로로 편다.
    */
+  const F = cfg.format || store.ALERT_FORMAT_DEFAULT;
   const itemBlock = r => {
-    const parts = [`가용 *${_fmt(r.available_qty)}개*`];
-    const use = r.consume_qty_30d ?? r.sales_qty_30d;
-    parts.push(`30일 소진 ${_fmt(use)}개`);
-    if (r.daily_avg_30d) parts.push(`일평균 ${r.daily_avg_30d}`);
-    if (r.threshold != null) parts.push(`임계 ${_fmt(r.threshold)}`);
-    return `${r.soldout ? '⛔' : r.warn ? '⚠️' : '✅'}  *${r.product_name || r.stock_code}*  ·  ${urgency(r)}
-`
-      + `　　${parts.join('  ·  ')}
-`
-      + `　　\`${r.stock_code}\``;
+    // 수치 구성은 화면 설정(074)을 따른다. 전부 끄면 이름·상태 줄만 남는다.
+    const parts = [];
+    if (F.item.available) parts.push(`가용 *${_fmt(r.available_qty)}개*`);
+    if (F.item.consume_30d) parts.push(`30일 소진 ${_fmt(r.consume_qty_30d ?? r.sales_qty_30d)}개`);
+    if (F.item.sales_30d) parts.push(`30일 판매 ${_fmt(r.sales_qty_30d)}개`);
+    if (F.item.daily_avg && r.daily_avg_30d) parts.push(`일평균 ${r.daily_avg_30d}`);
+    if (F.item.threshold && r.threshold != null) parts.push(`임계 ${_fmt(r.threshold)}`);
+    const lines = [`${r.soldout ? '⛔' : r.warn ? '⚠️' : '✅'}  *${r.product_name || r.stock_code}*  ·  ${urgency(r)}`];
+    if (parts.length) lines.push(`　　${parts.join('  ·  ')}`);
+    if (F.item.code) lines.push(`　　\`${r.stock_code}\``);
+    return lines.join('\n');
+  };
+
+  /** 섹션 안 정렬 — 소진예상일(기본) / 가용재고 적은 순 / 이름 가나다 */
+  const sortRows = rs => {
+    const by = {
+      days: (a, b) => (a.days_to_soldout ?? 99999) - (b.days_to_soldout ?? 99999),
+      qty: (a, b) => (a.available_qty ?? 0) - (b.available_qty ?? 0),
+      name: (a, b) => String(a.product_name || a.stock_code).localeCompare(String(b.product_name || b.stock_code), 'ko'),
+    };
+    return rs.slice().sort(by[F.sort] || by.days);
   };
 
   const KIND_LABEL = { product: '원물', material: '부자재', package: '포장재', set: '세트', etc: '기타' };
@@ -257,11 +272,14 @@ async function buildStockReport(baseUrl, { codes = null } = {}) {
    */
   const section = (title, rs) => {
     if (!rs.length) return [];
-    const kinds = KIND_ORDER.filter(k => rs.some(r => r.kind === k));
-    if (kinds.length <= 1) return [title, '', ...rs.flatMap(r => [itemBlock(r), ''])];
+    const sorted = sortRows(rs);
+    const kinds = KIND_ORDER.filter(k => sorted.some(r => r.kind === k));
+    if (!F.sections.group_by_kind || kinds.length <= 1) {
+      return [title, '', ...sorted.flatMap(r => [itemBlock(r), ''])];
+    }
     const out = [title, ''];
     for (const k of kinds) {
-      const sub = rs.filter(r => r.kind === k);
+      const sub = sorted.filter(r => r.kind === k);
       out.push(`▸ ${KIND_LABEL[k]} ${sub.length}`, '');
       out.push(...sub.flatMap(r => [itemBlock(r), '']));
     }
@@ -305,17 +323,27 @@ async function buildStockReport(baseUrl, { codes = null } = {}) {
   const summary = [
     '📦  *답례품 재고 현황*',
     `_${_kstDateLabel()} · 관리 품목 ${targets.length}건_`,
-    '',
-    `⛔ 소진 *${soldoutRows.length}*     ⚠️ 확인 필요 *${warnRows.length}*     ✅ 정상 *${okRows.length}*`,
   ];
-  if (attention.length) {
+  if (F.summary.counts) {
+    summary.push('', `⛔ 소진 *${soldoutRows.length}*     ⚠️ 확인 필요 *${warnRows.length}*     ✅ 정상 *${okRows.length}*`);
+  }
+  if (F.summary.attention && attention.length) {
+    // 상한(attention_limit)을 두면 급한 순으로 상위만 — 품목이 많은 날 요약이 화면을 넘지 않게.
+    //   소진(⛔)은 소진예상일이 null 이라 날짜 정렬에서 뒤로 밀린다 — 항상 맨 위로 (stable sort).
+    const list = sortRows(attention).sort((a, b) => (a.soldout ? 0 : 1) - (b.soldout ? 0 : 1));
+    const capped = F.summary.attention_limit > 0 ? list.slice(0, F.summary.attention_limit) : list;
+    const omitted = list.length - capped.length;
     summary.push('', '━━━━━━━━━━━━━━━━━━', '*🔴 조치 필요*', '');
     // 항목 사이 빈 줄 — 슬랙에서 블록이 붙어 보이지 않게
-    summary.push(...attention.flatMap(r => [
+    summary.push(...capped.flatMap(r => [
       `${r.soldout ? '⛔' : '⚠️'}  *${r.product_name || r.stock_code}*\n`
       + `　　${urgency(r)}  ·  가용 ${_fmt(r.available_qty)}개`,
       '',
     ]).slice(0, -1));
+    if (omitted > 0) summary.push('', `_…외 ${omitted}건은 스레드에서_`);
+  } else if (!F.summary.attention && attention.length) {
+    // 조치 필요 목록을 꺼도 '급한 게 있다' 는 사실은 숨기면 안 된다
+    summary.push('', `_조치 필요 ${attention.length}건 — 상세는 스레드에서_`);
   } else if (rows.length) {
     summary.push('', '✅  전 품목 재고 정상입니다.');
   } else {
@@ -326,12 +354,15 @@ async function buildStockReport(baseUrl, { codes = null } = {}) {
   }
   if (rows.length) summary.push('', '_전체 목록은 스레드에서_ 👇');
 
-  // ── 스레드: 고정폭 표 (열 정렬) ──
-  const detailLines = [
-    ...section(`*⛔ 소진 ${soldoutRows.length}건*`, soldoutRows),
-    ...section(`*⚠️ 확인 필요 ${warnRows.length}건*`, warnRows),
-    ...section(`*✅ 정상 ${okRows.length}건*`, okRows),
-  ];
+  // ── 스레드: 섹션 순서·표시 여부는 화면 설정(074)을 따른다 ──
+  const SECTION_DEFS = {
+    soldout: () => section(`*⛔ 소진 ${soldoutRows.length}건*`, soldoutRows),
+    warn: () => section(`*⚠️ 확인 필요 ${warnRows.length}건*`, warnRows),
+    ok: () => section(`*✅ 정상 ${okRows.length}건*`, okRows),
+  };
+  const detailLines = F.sections.order
+    .filter(k => F.sections[k] !== false)
+    .flatMap(k => SECTION_DEFS[k]());
 
   const summaryText = summary.join('\n');
   const detailChunks = detailLines.length ? _chunkLines(detailLines) : [];
