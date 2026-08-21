@@ -752,6 +752,40 @@ async function setProcessedBatch(orderIds, data) {
   return { ok, fail, errors };
 }
 
+/**
+ * 수집완료(processed_at) 됐고 희망출고일이 이미 지난 주문 목록.
+ *   출고 누락 감시(barungift/missed-shipping.js) 전용 — 여기서는 우리 쪽 기록만 모으고,
+ *   실제 출고 여부 판정은 MSSQL 을 함께 보는 쪽에서 한다.
+ *
+ * sbGet 을 쓰지 않는 이유: PostgREST 기본 상한이 1000행이라 조용히 잘린다.
+ *   (실측 2026-08-21 — 6월 이후만도 2,706행이라 한 번에 못 받는다) 그래서 직접 페이징한다.
+ *
+ * @param {{before:string, from:string}} p  before/from 모두 'YYYY-MM-DD'.
+ *   desired_ship_date 가 [from, before) 인 행. before 는 보통 오늘 = 오늘 출고분은 아직 정상.
+ */
+async function listProcessedShipDateBefore({ before, from }) {
+  if (!USE_SUPABASE) return [];
+  const PAGE = 1000;
+  const out = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const url = `${REST_BASE}/bg_order_customer_info`
+      + '?select=order_id,desired_ship_date,processed_at,processed_by'
+      + '&processed_at=not.is.null'
+      + `&desired_ship_date=lt.${encodeURIComponent(before)}`
+      + `&desired_ship_date=gte.${encodeURIComponent(from)}`
+      + `&order=desired_ship_date.asc&limit=${PAGE}&offset=${offset}`;
+    const res = await fetch(url, { headers: HEADERS });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Supabase GET bg_order_customer_info [${res.status}]: ${text}`);
+    }
+    const page = await res.json();
+    out.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return out;
+}
+
 // ============================================
 // 주문조회 '수집완료' 상태 (bg_order_collected)
 // 답례품/데코소품/꽃다발 주문조회 페이지에서 마킹하는 수집 상태.
@@ -2360,6 +2394,7 @@ module.exports = {
   deleteCustomerInfo,
   setProcessed,
   setProcessedBatch,
+  listProcessedShipDateBefore,
   getCollectedOrderSeqs,
   addCollectedOrderSeqs,
   removeCollectedOrderSeqs,

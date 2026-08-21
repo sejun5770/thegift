@@ -14766,6 +14766,25 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/orders/missed-shipping' && req.method === 'GET') {
+        // 출고 누락 감시 — 수집완료로 처리됐는데 희망출고일이 지나도 출고 흔적이 없는 주문.
+        //   수집복사가 '클립보드 복사 성공 = 수집완료' 로 마킹하는 구조라, 붙여넣기를 놓치면
+        //   목록에서 사라진 채 후공정이 통째로 안 돈다 (2026-08-13 ETC-3248985/3249011 사고).
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          data = await require('./barungift/missed-shipping').detectMissedShipping({
+            getPool,
+            store: require('./barungift/store'),
+            today: fmtDate(today()),
+            days: Math.min(Math.max(parseInt(parsed.query.days, 10) || 180, 1), 3650),
+          });
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
       } else if (pathname === '/api/orders/work-drift' && req.method === 'POST') {
         // 작업 후 주문 변경 감지 — 화면에 뜬 주문번호만 받아 케이스별로 가른다.
         //   body: { order_seqs: number[], category: 'deco' }

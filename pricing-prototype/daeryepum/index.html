@@ -3634,6 +3634,18 @@ nav.nav-loading a[href^="#"] {
     <span id="uni-processed-summary" style="font-size:12px;color:var(--gray-700)">-</span>
   </div>
 
+  <!-- 출고 누락 경보 — 수집완료로 마킹됐는데 희망출고일이 지나도 MSSQL 에 출고 흔적이 없는 주문.
+       수집복사가 '클립보드 복사 성공 = 수집완료' 라서 붙여넣기를 놓치면 조용히 사라진다
+       (2026-08-13 ETC-3248985/3249011 사고). 페이지 로드마다 서버가 전수 검사한다. -->
+  <div id="uni-missed-shipping" style="display:none;padding:10px 14px;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <strong style="font-size:13px;color:#b91c1c">🚨 출고 누락 의심 <span id="uni-missed-count">0</span>건</strong>
+      <span style="font-size:12px;color:#7f1d1d">수집완료 처리됐지만 희망출고일이 지나도록 출고 기록이 없습니다 — 스프레드시트 등록 여부를 확인하세요.</span>
+      <button class="btn" style="padding:3px 10px;font-size:11px;margin-left:auto" onclick="document.getElementById('uni-missed-detail').style.display=document.getElementById('uni-missed-detail').style.display==='none'?'block':'none'">상세</button>
+    </div>
+    <div id="uni-missed-detail" style="display:none;margin-top:8px;font-size:12px;overflow-x:auto"></div>
+  </div>
+
   <div id="uni-loading" style="text-align:center;padding:40px;color:var(--gray-400)">데이터를 불러오는 중입니다...</div>
 
   <!-- 사고건 등록/수정 모달 -->
@@ -20814,11 +20826,47 @@ async function deleteBgManualOrder() {
 
 // 활성 fetch 들의 AbortController — 중첩 호출 시 이전 응답 무시 (race condition 방지).
 let _bgUnifiedAbort = null;
+/**
+ * 출고 누락 경보 로드 — 정보입력현황 상단 배너.
+ *   서버가 수집완료+희망출고일 경과 전수를 MSSQL 출고 기록과 대조한다 (기간 필터와 무관).
+ *   실패해도 화면을 막지 않는다 (경보는 부가 기능).
+ */
+async function loadMissedShippingAlert() {
+  const box = document.getElementById('uni-missed-shipping');
+  if (!box) return;
+  try {
+    const r = await fetch(`${API}/api/orders/missed-shipping?days=180`);
+    if (!r.ok) { box.style.display = 'none'; return; }
+    const d = await r.json();
+    if (!d || !d.count) { box.style.display = 'none'; return; }
+    document.getElementById('uni-missed-count').textContent = d.count;
+    const rows = (d.items || []).map(i => {
+      const seq = String(i.order_id).replace(/^ETC-/, '');
+      return `<tr>
+        <td style="padding:3px 8px;font-family:monospace"><a href="#" title="주문번호 복사" onclick="navigator.clipboard.writeText('${seq}').then(()=>showToast('주문번호 복사: ${seq}'));return false">${i.order_id}</a></td>
+        <td style="padding:3px 8px;white-space:nowrap;color:#b91c1c;font-weight:600">${i.desired_ship_date} (${i.days_overdue}일 경과)</td>
+        <td style="padding:3px 8px">${i.status_label}</td>
+        <td style="padding:3px 8px">${(i.order_name || '')}</td>
+        <td style="padding:3px 8px">${(i.product_name || '').slice(0, 30)}</td>
+        <td style="padding:3px 8px;text-align:right">${(Number(i.settle_price) || 0).toLocaleString()}원</td>
+        <td style="padding:3px 8px;font-size:11px;color:var(--gray-500)">수집: ${String(i.processed_at || '').slice(0, 10)} ${(i.processed_by || '').split('@')[0]}</td>
+      </tr>`;
+    }).join('');
+    document.getElementById('uni-missed-detail').innerHTML =
+      `<table style="border-collapse:collapse;min-width:640px"><thead><tr style="color:var(--gray-500);text-align:left">
+        <th style="padding:3px 8px">주문</th><th style="padding:3px 8px">희망출고</th><th style="padding:3px 8px">현재상태</th>
+        <th style="padding:3px 8px">주문자</th><th style="padding:3px 8px">상품</th><th style="padding:3px 8px">금액</th><th style="padding:3px 8px">수집처리</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+    box.style.display = 'block';
+  } catch { box.style.display = 'none'; }
+}
+
 async function loadBgUnified() {
   if (_bgUnifiedAbort) _bgUnifiedAbort.abort();
   _bgUnifiedAbort = new AbortController();
   const signal = _bgUnifiedAbort.signal;
 
+  loadMissedShippingAlert();   // 출고 누락 경보 — 비동기, 목록 로딩과 무관
   showBgUnifiedSkeleton('1/3 데이터 조회 시작...');
   document.getElementById('uni-table-wrap').style.display = 'none';
 
