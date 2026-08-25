@@ -461,10 +461,24 @@ async function _connectPool(config, label, onError) {
  *   연결을 닫으면 본 쿼리가 ECONNCLOSED/ESOCKET 으로 죽는다. 이 경우만 풀을 새로 잡고
  *   한 번 더 시도한다. 타임아웃·SQL 오류는 재시도해도 같으므로 그대로 올린다.
  */
+// 요청이 서버 응답 도중 끊기면 tedious 는 서버측 오류 정보 없이
+//   RequestError('An unknown error has occurred.') 하나만 준다 — code/number 가 'UNKNOWN' 이고
+//   state/class/lineNumber 가 전부 비어 있다. 진짜 SQL 오류(문법·권한·타임아웃)는 그 필드들이
+//   채워지므로 구분된다. 연결 자체는 멀쩡한 경우가 많아 풀은 건드리지 않고 같은 풀로 한 번만
+//   다시 실행한다 — 풀을 닫으면 같은 풀을 쓰는 동시 요청까지 같이 죽는다.
+//   2026-08-25 운영: 정보입력현황이 이 오류로 간헐적 500 (재조회하면 바로 성공).
+const _isTransientRequestErr = e =>
+  e?.code === 'UNKNOWN' && e?.number === 'UNKNOWN'
+  && e?.state === undefined && e?.class === undefined && e?.lineNumber === undefined;
+
 async function runWithPoolRetry(fn, p) {
   try {
     return await fn(p || await getPool());
   } catch (e) {
+    if (_isTransientRequestErr(e)) {
+      console.warn('[db] 요청이 응답 도중 끊김 — 같은 풀로 1회 재시도:', e.message);
+      return fn(p || await getPool());
+    }
     if (!_isRetryableConnErr(e)) throw e;
     console.warn('[db] 쿼리 중 연결 끊김 — 풀 재생성 후 1회 재시도:', e.message);
     try { if (pool) await pool.close(); } catch { /* 이미 끊긴 풀 */ }
