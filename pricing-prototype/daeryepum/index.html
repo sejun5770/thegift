@@ -18568,7 +18568,10 @@ async function rglConfirmUpload() {
   const $st = document.getElementById('rgl-upload-status');
   const done = [];
   const failed = [];
-  let lastKind = null, from = null, to = null;
+  // 두 파일은 날짜 축이 다르다 — 파일1 은 결제완료일, 파일2(cfs) 는 배송완료일.
+  //   범위를 뭉뚱그리면 엉뚱한 구간으로 조회하게 되므로 종류별로 따로 모은다.
+  const range = { tr: { from: null, to: null }, cfs: { from: null, to: null } };
+  const kinds = new Set();
   // 업로드 직후 서버가 정보입력현황 단계까지 맞춘다 — 몇 건이 옮겨갔는지 보여준다
   let wfShipped = 0, wfPacked = 0;
   for (let i = 0; i < _rglFiles.length; i++) {
@@ -18584,9 +18587,10 @@ async function rglConfirmUpload() {
       if (d.error) throw new Error(d.error);
       done.push(`${f.name} ${fmtNum(d.upserted)}건`);
       if (d.workflow) { wfShipped += d.workflow.toShipped || 0; wfPacked += d.workflow.toPacked || 0; }
-      lastKind = d.kind;
-      if (d.dates?.from && (!from || d.dates.from < from)) from = d.dates.from;
-      if (d.dates?.to && (!to || d.dates.to > to)) to = d.dates.to;
+      const k = d.kind === 'cfs' ? 'cfs' : 'tr';
+      kinds.add(k);
+      if (d.dates?.from && (!range[k].from || d.dates.from < range[k].from)) range[k].from = d.dates.from;
+      if (d.dates?.to && (!range[k].to || d.dates.to > range[k].to)) range[k].to = d.dates.to;
     } catch (e) { failed.push(`${f.name}: ${e.message}`); }
   }
   rglResetUpload();
@@ -18598,11 +18602,18 @@ async function rglConfirmUpload() {
     showToast(`${done.length}개 파일 등록 — ${done.join(' · ')}`
       + (wfShipped || wfPacked ? ` / 정보입력현황 출고완료 ${fmtNum(wfShipped)}건 · 포장완료 ${fmtNum(wfPacked)}건 반영` : ''));
   }
-  // 방금 올린 범위로 맞춰 결과가 바로 보이게 한다
-  const sel = document.getElementById('rgl-basis');
-  if (sel && lastKind) sel.value = lastKind === 'cfs' ? 'delivered' : 'paid';
-  if (from) document.getElementById('rgl-from').value = from;
-  if (to) document.getElementById('rgl-to').value = to;
+  // 방금 올린 범위로 맞춰 결과가 바로 보이게 한다.
+  //   ⚠ 두 파일을 함께 올렸을 때 마지막 파일(대개 물류비)을 따라가면 안 된다.
+  //     배송완료일 기준으로 넘어가는 순간, 물류비가 아직 안 붙은 매출 라인은
+  //     delivered_date 가 비어 목록에서 통째로 사라진다 (지워진 것처럼 보인다).
+  //     매출 파일을 함께 올렸다면 결제완료일 기준을 유지한다 — 그쪽이 전체 집합이다.
+  const useKind = kinds.has('tr') ? 'tr' : (kinds.has('cfs') ? 'cfs' : null);
+  if (useKind) {
+    const sel = document.getElementById('rgl-basis');
+    if (sel) sel.value = useKind === 'cfs' ? 'delivered' : 'paid';
+    if (range[useKind].from) document.getElementById('rgl-from').value = range[useKind].from;
+    if (range[useKind].to) document.getElementById('rgl-to').value = range[useKind].to;
+  }
   loadRgLines();
 }
 
@@ -18684,7 +18695,12 @@ function renderRgLines() {
         ? ` · <span style="color:#dc2626" title="${esc(conflictMsg)}">코드충돌 ${fmtNum(conflicts.length)}건</span>`
         : '')
       + (sellerCnt ? ` · <span style="color:var(--gray-500)" title="판매자배송 주문 — 쿠팡 채널에서 집계되므로 로켓그로스 매출에서는 빠집니다">판매자배송 ${fmtNum(sellerCnt)}건</span>` : '')
-      + (unknownCnt ? ` · <span style="color:#b45309" title="쿠팡 주문 정보가 없어 판매 방식을 확정하지 못했습니다. 그 기간까지 '주문 가져오기' 를 돌리면 채워집니다. 지금은 로켓그로스 매출에 포함됩니다">방식 미확인 ${fmtNum(unknownCnt)}건</span>` : '');
+      + (unknownCnt ? ` · <span style="color:#b45309" title="쿠팡 주문 정보가 없어 판매 방식을 확정하지 못했습니다. 그 기간까지 '주문 가져오기' 를 돌리면 채워집니다. 지금은 로켓그로스 매출에 포함됩니다">방식 미확인 ${fmtNum(unknownCnt)}건</span>` : '')
+      // 배송완료일 기준으로 보면 물류비가 아직 안 붙은 매출 라인은 목록에서 빠진다.
+      //   그 사실을 적어 두지 않으면 '주문이 지워졌다' 로 읽힌다 (2026-08-20 운영 문의).
+      + (document.getElementById('rgl-basis')?.value === 'delivered'
+        ? ` · <span style="color:#b45309" title="배송완료일이 없는 라인 — 물류비 리포트가 아직 안 올라온 매출 라인 — 은 이 기준에서 보이지 않습니다. 전체를 보려면 결제완료일 기준으로 바꾸세요.">배송완료일 기준 (물류비 미등록 건은 숨겨짐)</span>`
+        : '');
   }
   const cell = (v, style = '') => `<td style="padding:5px 8px;border-bottom:1px solid var(--gray-100);text-align:right;${style}">${v === null || v === undefined ? '<span style="color:var(--gray-300)">-</span>' : fmtNum(Math.round(Number(v)))}</td>`;
   // 정산금액 = 정산대상액 − 물류비. 물류비 리포트(파일2)가 아직 안 올라온 행은
