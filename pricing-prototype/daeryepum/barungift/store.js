@@ -1373,13 +1373,34 @@ async function _ensureStubForManualOrder(mo, { force = false, stickerMap = null 
   let preservedTopShipDate = null;
   const preservedSelShipByIdx = new Map();      // idx → date
   const preservedSelShipByCode = new Map();     // product_code → date (idx 재정렬 대비 fallback)
+  // 작업 흔적 보존 (076) — 같은 파일을 '기존 덮어쓰기' 로 다시 올리면 stub 을 새로 만드는데,
+  //   그때 수집완료(processed_at) 와 스티커/인쇄/제본/포장 진행 timestamp, 업로드한 이미지가
+  //   통째로 날아가 작업을 처음부터 다시 해야 했다. 파일에서 다시 만들 수 없는 값들이라 되살린다.
+  //   워크플로우 필드는 stage 가 늘어도 따라가도록 이름 규칙(*_at / *_by)으로 잡는다.
+  const isWorkflowKey = k => /_(at|by)$/.test(k) || k === 'images';
+  const preservedSelWorkByIdx = new Map();
+  const preservedSelWorkByCode = new Map();
+  let preservedProcessed = null;
   if (existing && force) {
     preservedTopShipDate = existing.desired_ship_date || null;
+    if (existing.processed_at || existing.submitted_at) {
+      preservedProcessed = {
+        processed_at: existing.processed_at || null,
+        processed_by: existing.processed_by || null,
+        submitted_at: existing.submitted_at || null,
+      };
+    }
     const sels = Array.isArray(existing.sticker_selections) ? existing.sticker_selections : [];
     sels.forEach((sel, i) => {
       if (sel?.desired_ship_date) {
         preservedSelShipByIdx.set(i, sel.desired_ship_date);
         if (sel.product_code) preservedSelShipByCode.set(String(sel.product_code), sel.desired_ship_date);
+      }
+      const work = {};
+      Object.keys(sel || {}).forEach(k => { if (isWorkflowKey(k) && sel[k] != null) work[k] = sel[k]; });
+      if (Object.keys(work).length) {
+        preservedSelWorkByIdx.set(i, work);
+        if (sel.product_code) preservedSelWorkByCode.set(String(sel.product_code), work);
       }
     });
     if (USE_SUPABASE) {
@@ -1448,6 +1469,8 @@ async function _ensureStubForManualOrder(mo, { force = false, stickerMap = null 
       custom_options: customOptions,
       desired_ship_date: preservedShip,
       is_express: isExpressItem(it),  // product 단위 빠른출고 여부 (sticker_selection 우선 lookup)
+      // 재생성 전 작업 흔적(진행 timestamp · 업로드 이미지) 되살리기 — 상품코드 우선, 없으면 순번.
+      ...(preservedSelWorkByCode.get(String(it.product_code || '')) || preservedSelWorkByIdx.get(idx) || {}),
     };
   });
   try {
@@ -1463,6 +1486,19 @@ async function _ensureStubForManualOrder(mo, { force = false, stickerMap = null 
       receipt_number: null,
       customer_request: mo._customer_request || existing?.customer_request || null,
     });
+    // saveCustomerInfo 는 submitted_at 을 now() 로 새로 찍고 processed_* 를 받지 않는다.
+    //   재생성이면 원래 값으로 되돌려 수집완료 표시가 유지되게 한다.
+    if (preservedProcessed) {
+      try {
+        if (USE_SUPABASE) {
+          await sbUpdate('bg_order_customer_info', `order_id=eq.${encodeURIComponent(stubId)}`, preservedProcessed);
+        } else {
+          const infos = readJson(FILES.customerInfo, []);
+          const idx2 = infos.findIndex(i => i.order_id === stubId);
+          if (idx2 >= 0) { infos[idx2] = { ...infos[idx2], ...preservedProcessed }; writeJson(FILES.customerInfo, infos); }
+        }
+      } catch (e) { console.warn(`[stub] ${stubId} 수집완료 복원 실패 (무시):`, e.message); }
+    }
     return force && existing ? 'recreated' : 'created';
   } catch (e) {
     if (/already/i.test(e.message || '')) return 'exists';
@@ -1573,15 +1609,22 @@ async function bulkCreateManualOrders(orders, { dryRun = false, overwrite = fals
           };
           patch.vendor_name = (data.vendor_name && String(data.vendor_name).trim()) || null;
           await updateManualOrder(orderId, patch);
-          // 기존 stub 삭제 후 새로 생성 (sticker_selections 최신화).
-          //   위탁으로 바뀐 주문은 삭제만 하고 다시 만들지 않는다.
+          // stub 재생성 — force 로 넘겨 수집완료·작업 진행·이미지를 보존한 채 items 만 최신화한다.
+          //   (예전처럼 먼저 지우고 만들면 그 값들이 전부 사라져 작업을 다시 해야 했다.)
+          //   위탁으로 바뀐 주문은 남은 stub 을 지우기만 하고 다시 만들지 않는다.
           const stubId = `MO-${orderId}`;
-          if (USE_SUPABASE) {
-            try { await sbDelete('bg_order_customer_info', `order_id=eq.${encodeURIComponent(stubId)}`); } catch { /* ignore */ }
+          let stubStatus;
+          if (_needsCollectStub(data)) {
+            stubStatus = await _ensureStubForManualOrder(data, { force: true, stickerMap });
+          } else {
+            if (USE_SUPABASE) {
+              try { await sbDelete('bg_order_customer_info', `order_id=eq.${encodeURIComponent(stubId)}`); } catch { /* ignore */ }
+            } else {
+              const infos = readJson(FILES.customerInfo, []);
+              writeJson(FILES.customerInfo, infos.filter(i => i.order_id !== stubId));
+            }
+            stubStatus = 'skipped:vendor';
           }
-          const stubStatus = _needsCollectStub(data)
-            ? await _ensureStubForManualOrder(data, { stickerMap })
-            : 'skipped:vendor';
           results.updated++;
           results.details.push({ index: idx, order_id: orderId, status: 'updated', stub: stubStatus });
           continue;
