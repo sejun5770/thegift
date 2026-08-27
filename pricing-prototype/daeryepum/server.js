@@ -693,6 +693,130 @@ function bgPrimarySiteOf(mo) {
   return items.some(it => !bgIsVendorItem(mo, it)) ? BG_SITE_OWN : BG_SITE_VENDOR;
 }
 
+// ── 💬 문자발송 리스트 — 기프트팀 스프레드시트 읽기 ──────────────
+//   출고완료 안내 문자용. 시트가 '링크가 있는 모든 사용자 열람' 이라 인증 없이
+//   CSV export 로 읽는다 (읽기 전용 — 이 서버는 시트에 아무것도 쓰지 않는다).
+//   공유가 닫히면 export 가 HTML 로그인 페이지를 돌려주므로 그 경우를 감지해 안내한다.
+const GIFT_SHEET_ID = process.env.GIFT_SHEET_ID || '1CsoTkZ2PTaicT7jwgYE_8PiBDrG0RlR5z2R1mgOm8yY';
+// 시트별 열 매핑 (0-based) — 운영 시트 실측 (2026-08-27):
+//   커스텀 상품 주문시트: 헤더 2행 · D=주문번호 F=성함 L=연락처1 AG=출고예정일 AH=송장번호
+//   월별(26년 8월 …):     헤더 3행 · D=주문번호 E=성함 F=연락처1 W=희망출고일 AC=운송장번호(대표)
+const GIFT_SHEET_KINDS = {
+  custom:  { headerRows: 2, cols: { order: 3, name: 5, phone: 11, ship: 32, invoice: 33 } },
+  monthly: { headerRows: 3, cols: { order: 3, name: 4, phone: 5, ship: 22, invoice: 28 } },
+};
+const _giftSheetCache = new Map();  // key → {at, data}
+function _giftCacheGet(key, ttlMs) {
+  const hit = _giftSheetCache.get(key);
+  return hit && (Date.now() - hit.at) < ttlMs ? hit.data : null;
+}
+function _giftCacheSet(key, data) { _giftSheetCache.set(key, { at: Date.now(), data }); }
+
+async function _giftFetch(url, { expectCsv = false } = {}) {
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (daeryepum-dashboard)' },
+    redirect: 'follow',
+    signal: AbortSignal.timeout(30000),
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`구글시트 응답 HTTP ${res.status}`);
+  // 공유가 닫히면 로그인 페이지로 넘어간다 — CSV 를 기대한 요청에 HTML 이 오거나,
+  //   어떤 요청이든 구글 로그인 화면이 오면 접근 실패다.
+  const looksHtml = /^\s*<(!DOCTYPE|html)/i.test(text);
+  const looksLogin = /accounts\.google\.com|ServiceLogin/i.test(text.slice(0, 3000));
+  if ((expectCsv && looksHtml) || looksLogin) {
+    throw new Error('시트에 접근하지 못했습니다 — 스프레드시트 공유가 "링크가 있는 모든 사용자(뷰어)" 인지 확인해주세요.');
+  }
+  return text;
+}
+
+/** 시트 탭 목록 — htmlview 의 시트 스위처에서 {name, gid} 추출. 10분 캐시. */
+async function giftSheetTabs() {
+  const cached = _giftCacheGet('tabs', 10 * 60 * 1000);
+  if (cached) return cached;
+  const html = await _giftFetch(`https://docs.google.com/spreadsheets/d/${GIFT_SHEET_ID}/htmlview`);
+  const tabs = [];
+  const re = /items\.push\(\{name: "([^"]*)"[^}]*?gid=(\d+)/g;
+  let m;
+  while ((m = re.exec(html))) tabs.push({ name: m[1].replace(/\\\//g, '/'), gid: m[2] });
+  // 문자발송에 쓰는 시트만: 커스텀 상품 주문시트 + 'NN년 N월' 월별 시트.
+  //   월별은 최신이 위로 오게 역정렬 (스프레드시트 탭 순서는 뒤죽박죽이다).
+  const custom = tabs.filter(t => /커스텀/.test(t.name));
+  const monthly = tabs.filter(t => /^\d{2}년\s*\d{1,2}월$/.test(t.name.trim()))
+    .sort((a, b) => {
+      const key = t => { const mm = t.name.match(/(\d{2})년\s*(\d{1,2})월/); return Number(mm[1]) * 100 + Number(mm[2]); };
+      return key(b) - key(a);
+    });
+  const result = { sheets: [...custom, ...monthly] };
+  if (!result.sheets.length) throw new Error('시트 목록에서 커스텀/월별 시트를 찾지 못했습니다');
+  _giftCacheSet('tabs', result);
+  return result;
+}
+
+/** CSV 파서 — 따옴표 안 쉼표/개행 처리. 시트 export 전용의 최소 구현. */
+function _giftParseCsv(text) {
+  const rows = []; let row = []; let cur = ''; let inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQ) {
+      if (ch === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else inQ = false; }
+      else cur += ch;
+    } else if (ch === '"') inQ = true;
+    else if (ch === ',') { row.push(cur); cur = ''; }
+    else if (ch === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+    else if (ch !== '\r') cur += ch;
+  }
+  if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+}
+
+/** 시트 한 장의 문자발송 행 — {order_id, name, phone, ship_date, invoice, phone_ok, invoice_ok}. 60초 캐시. */
+async function giftSmsRows(gid) {
+  if (!/^\d+$/.test(String(gid))) throw new Error('gid 형식 오류');
+  const cacheKey = `rows:${gid}`;
+  const cached = _giftCacheGet(cacheKey, 60 * 1000);
+  if (cached) return cached;
+  const { sheets } = await giftSheetTabs();
+  const tab = sheets.find(t => t.gid === String(gid));
+  if (!tab) throw new Error('문자발송 대상 시트가 아닙니다 (커스텀/월별 시트만 지원)');
+  const kind = /커스텀/.test(tab.name) ? 'custom' : 'monthly';
+  const { headerRows, cols } = GIFT_SHEET_KINDS[kind];
+  const csv = await _giftFetch(`https://docs.google.com/spreadsheets/d/${GIFT_SHEET_ID}/export?format=csv&gid=${gid}`, { expectCsv: true });
+  const raw = _giftParseCsv(csv);
+  const rows = [];
+  for (const r of raw.slice(headerRows)) {
+    const orderId = String(r[cols.order] ?? '').trim();
+    // 주문번호 없는 행·중간에 반복된 헤더 행은 버린다
+    if (!orderId || orderId === '주문번호') continue;
+    const name = String(r[cols.name] ?? '').trim();
+    const phoneRaw = String(r[cols.phone] ?? '').trim();
+    const shipRaw = String(r[cols.ship] ?? '').trim();
+    const invoice = String(r[cols.invoice] ?? '').trim();
+    // 이름도 연락처도 없으면 발송 대상이 아니다 (합계/메모 행)
+    if (!name && !phoneRaw) continue;
+    // 출고일 정규화 — 시트는 'YYYY-MM-DD' 문자열. 다른 구분자만 통일하고, 그 외 형식은 원문 유지.
+    let shipDate = '';
+    const dm = shipRaw.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+    if (dm) shipDate = `${dm[1]}-${String(dm[2]).padStart(2, '0')}-${String(dm[3]).padStart(2, '0')}`;
+    else if (shipRaw) shipDate = shipRaw;
+    // 연락처 — 숫자와 '-' 만 (문자 양식 허용 형식). 10~11자리 휴대폰만 정상으로 본다.
+    const digits = phoneRaw.replace(/\D/g, '');
+    const phoneOk = /^01[016789]\d{7,8}$/.test(digits);
+    const phone = phoneOk ? digits.replace(/^(\d{3})(\d{3,4})(\d{4})$/, '$1-$2-$3') : phoneRaw;
+    // 송장 — 숫자/하이픈 9자리 이상만 유효 ('취소'·'추가'·'퀵 출고' 같은 메모값 걸러냄)
+    const invDigits = invoice.replace(/\D/g, '');
+    const invoiceOk = /^[\d-]+$/.test(invoice) && invDigits.length >= 9;
+    rows.push({
+      order_id: orderId, name, phone,
+      ship_date: shipDate, invoice,
+      phone_ok: phoneOk, invoice_ok: invoiceOk,
+    });
+  }
+  const result = { sheet: tab.name, kind, rows };
+  _giftCacheSet(cacheKey, result);
+  return result;
+}
+
 // 모듈 레벨 D01_FILTER — 위탁답례품 포함 답례품 기본 필터로 alias
 const D01_FILTER = DAERYEPUM_FILTER_SQL;
 
@@ -14840,6 +14964,28 @@ const server = http.createServer(async (req, res) => {
           });
         } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/sms-list/sheets' && req.method === 'GET') {
+        // 문자발송 대상 시트 목록 (커스텀 + 월별)
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try { data = await giftSheetTabs(); }
+        catch (e) {
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/sms-list' && req.method === 'GET') {
+        // 시트 한 장의 문자발송 행 (성함/연락처/출고일/송장)
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try { data = await giftSmsRows(String(parsed.query.gid || '')); }
+        catch (e) {
+          res.writeHead(502, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
