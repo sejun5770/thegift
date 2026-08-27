@@ -2020,17 +2020,25 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     //   앞뒤 공백·둘러싼 따옴표는 벗겨내고, 특수문자 시크릿은 *_B64 로도 받을 수 있게 한다.
     let clientSecret = '';
     let secretSource = '';
-    if (process.env.BARUN_SMS_CLIENT_SECRET) { clientSecret = process.env.BARUN_SMS_CLIENT_SECRET; secretSource = 'BARUN_SMS_CLIENT_SECRET'; }
-    else if (process.env.PARTNER_CLIENT_SECRET) { clientSecret = process.env.PARTNER_CLIENT_SECRET; secretSource = 'PARTNER_CLIENT_SECRET'; }
-    else if (process.env.BARUN_SMS_CLIENT_SECRET_B64) {
-      try { clientSecret = Buffer.from(String(process.env.BARUN_SMS_CLIENT_SECRET_B64).trim(), 'base64').toString('utf8'); secretSource = 'BARUN_SMS_CLIENT_SECRET_B64'; }
-      catch { /* 잘못된 b64 → 아래 미설정 처리 */ }
-    }
+    let rawEnvLen = 0;   // 환경변수에 실제로 도달한 원본 길이 — 잘림 진단용 (값은 절대 노출 안 함)
+    const _pick = (envName, decode) => {
+      const v = process.env[envName];
+      if (!v) return false;
+      rawEnvLen = String(v).trim().length;
+      secretSource = envName;
+      try { clientSecret = decode ? decode(String(v).trim()) : v; } catch { clientSecret = ''; }
+      return true;
+    };
+    // HEX 우선 — 0-9a-f 만이라 어떤 환경변수 UI 에서도 잘리거나 변형될 여지가 없다.
+    _pick('BARUN_SMS_CLIENT_SECRET_HEX', v => Buffer.from(v.replace(/[^0-9a-fA-F]/g, ''), 'hex').toString('utf8'))
+      || _pick('BARUN_SMS_CLIENT_SECRET')
+      || _pick('PARTNER_CLIENT_SECRET')
+      || _pick('BARUN_SMS_CLIENT_SECRET_B64', v => Buffer.from(v, 'base64').toString('utf8'));
     clientSecret = String(clientSecret).trim().replace(/^["']+|["']+$/g, '').trim();
     if (!clientSecret) return null;
     return {
       base, clientId, clientSecret,
-      secretSource,
+      secretSource, rawEnvLen,
       sendUrl: process.env.BARUN_SMS_API_URL || `${base}/api/Lms/send`,
       // v1 은 발신번호 1661-2646 전용 (RCS BrandKey 종속 — 문서 2-8). 다른 번호는 비정상 경로.
       callback: process.env.BARUN_SMS_CALLBACK || '1661-2646',
@@ -2050,7 +2058,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     if (!res.ok) {
       // 값은 절대 남기지 않는다 — 길이만으로 오입력(따옴표 포함·잘림)을 가늠할 수 있게 한다.
       const hint = res.status === 401
-        ? ` — clientId '${cfg.clientId}' · 시크릿 ${cfg.clientSecret.length}자 (출처: ${cfg.secretSource}) 로 시도. B64 를 쓰려면 BARUN_SMS_CLIENT_SECRET / PARTNER_CLIENT_SECRET 변수를 삭제해야 합니다 (그쪽이 우선 적용됨). 환경변수 변경은 재배포해야 반영됩니다.`
+        ? ` — clientId '${cfg.clientId}' · 출처 ${cfg.secretSource} · 환경변수 원본 ${cfg.rawEnvLen}자 → 실제 사용 ${cfg.clientSecret.length}자. 원본 길이가 넣은 값보다 짧으면 환경변수가 잘린 것입니다 (BARUN_SMS_CLIENT_SECRET_HEX 로 넣어보세요). 환경변수 변경은 재배포해야 반영됩니다.`
         : '';
       throw new Error(`Partner 인증 실패 (${res.status})${hint}`);
     }
