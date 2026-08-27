@@ -1505,7 +1505,7 @@ nav.nav-loading a[href^="#"] {
     <button class="btn bg-vtab" data-v="all" onclick="setBgVendorTab('all')" style="padding:4px 12px;font-size:12px">전체 <span class="bg-vtab-n"></span></button>
     <button class="btn bg-vtab" data-v="own" onclick="setBgVendorTab('own')" style="padding:4px 12px;font-size:12px">🏢 매입 <span class="bg-vtab-n"></span></button>
     <button class="btn bg-vtab" data-v="consign" onclick="setBgVendorTab('consign')" style="padding:4px 12px;font-size:12px">🤝 위탁 <span class="bg-vtab-n"></span></button>
-    <span style="font-size:11px;color:var(--gray-500)">위탁 주문은 주문수집(정보입력현황) 대상이 아닙니다</span>
+    <span style="font-size:11px;color:var(--gray-500)">위탁 주문은 주문수집(정보입력현황) 대상이 아닙니다 (혼합 주문의 본사 품목은 수집 대상)</span>
   </div>
 
   <!-- 필터바: 날짜/검색/조회 + 표시 필터 통합 -->
@@ -11438,7 +11438,7 @@ function renderSampleTable() {
 
 // --- 전환율 차트 ---
 let conversionChart = null;
-const SITE_COLORS = {'바른손카드':'#3b82f6','바른손몰':'#10b981','디얼디어':'#8b5cf6','바른손M카드':'#f59e0b','쿠팡':'#ef4444','쿠팡 로켓그로스':'#991b1b','네이버':'#03c75a','정수당':'#d97706','위탁답례품':'#a855f7','기타':'#a1a1aa','비회원':'#94a3b8'};
+const SITE_COLORS = {'더기프트(매입)':'#8b5cf6','더기프트(위탁)':'#7c3aed','바른손카드':'#3b82f6','바른손몰':'#10b981','디얼디어':'#8b5cf6','바른손M카드':'#f59e0b','쿠팡':'#ef4444','쿠팡 로켓그로스':'#991b1b','네이버':'#03c75a','정수당':'#d97706','위탁답례품':'#a855f7','기타':'#a1a1aa','비회원':'#94a3b8'};
 function renderConversion(data) {
   _conversionData = data;
   const weeks = data.weeks;
@@ -21001,9 +21001,11 @@ async function loadBgUnified() {
       }
       const v = await r.json();
       const list = Array.isArray(v) ? v : [];
-      // 위탁업체 주문은 우리가 수집/제작하지 않는다 — 정보입력현황에서 통째로 뺀다 (076).
-      //   '혼합'(본사+위탁 한 주문) 은 본사 품목이 있으므로 남긴다.
-      return list.filter(o => !o.vendor_name || o.vendor_name === '혼합');
+      // 위탁업체 판매분은 우리가 수집/제작하지 않는다 — 정보입력현황에서 뺀다 (076).
+      //   주문 단위 라벨('혼합')이 아니라 행(=품목)의 채널로 거른다 — 위탁업체 2곳이 섞인
+      //   주문도 '혼합'이 붙는데 그 주문엔 본사 품목이 하나도 없다.
+      //   혼합 주문은 본사 품목 행만 남아 그대로 수집 대상이 된다.
+      return list.filter(o => o.site_name !== '더기프트(위탁)');
     };
     // 사고건은 주문 조회와 독립이라 실패해도 화면이 죽지 않게 따로 띄운다 (탭 카운트/목록용).
     loadIncidents();
@@ -24789,10 +24791,23 @@ function _bgCsvBuildOrders(rows) {
       const effUnit = unitPrice > 0 ? unitPrice : (grossQty > 0 ? Math.round(grossAmount / grossQty) : 0);
       const quantity = Math.max(0, grossQty - cancelQty);
       const itemAmount = Math.max(0, grossAmount - (effUnit * cancelQty));
-      if (!barcode || itemName === '(상동)' || itemName === '상동') return;
+      // 스티커 행이 이어지는 '(상동)' 행은 언제나 버린다.
+      if (itemName === '(상동)' || itemName === '상동') return;
+      // 바코드 없는 행: 본사는 종전대로 버리고(우리 상품은 코드가 있어야 한다),
+      //   위탁은 상품명만 있어도 살린다 — 업체 상품엔 우리 바코드가 없는 경우가 많아
+      //   버리면 주문이 통째로 0원으로 등록된다 (실파일 2026-08-27: 12개 주문 2,502,100원).
+      const _isVendorRow = _bgSellerOf(r) !== BG_OWN_SELLER;
+      if (!barcode && !(_isVendorRow && itemName.trim())) return;
       const lower = itemName.toLowerCase();
       let itemType = 'product';
-      if (itemName.includes('박스') || lower.includes('box')) itemType = 'box';
+      if (_isVendorRow) {
+        // 위탁 행은 우리 스티커/박스 코드 규칙을 따르지 않는다 (076).
+        //   업체 상품명에 '스티커/박스' 가 옵션 설명으로 들어가는 일이 흔해
+        //   이름으로 나누면 매출이 있는 상품 행이 옵션으로 빠져 주문 금액이 0원이 된다
+        //   (실파일 2026-08-27: 24개 주문 3,213,700원이 이렇게 0원으로 등록될 뻔했다).
+        //   퍼스트몰은 옵션 행을 금액 0 으로 내보내므로 금액 유무로 가른다.
+        itemType = itemAmount > 0 ? 'product' : 'sticker';
+      } else if (itemName.includes('박스') || lower.includes('box')) itemType = 'box';
       else if (itemName.includes('스티커') || itemName.includes('STICKER') || lower.includes('sticker')) itemType = 'sticker';
       else if (_bgIsStickerCode(barcode)) {
         const hasEarlierProduct = items.some(it => it.type === 'product');
@@ -25135,6 +25150,19 @@ async function backfillBhgStubs() {
 async function submitBgCsvUpload() {
   if (!_bgCsvParsed || !_bgCsvParsed.orders.length) return;
   const orders = _bgCsvParsed.orders;
+  // 위탁 건이 있으면 업체명을 확인받는다 (076).
+  //   예전 '본사' 필터가 형식이 다른 파일을 사실상 걸러주는 가드 역할도 했는데 그게 사라졌다 —
+  //   판매자 열이 아닌 열(출고방식 등)을 올리면 '택배' 같은 값이 업체명으로 등록될 수 있다.
+  const vendorNames = [...new Set(orders.map(o => o.vendor_name).filter(Boolean))];
+  if (vendorNames.length) {
+    const ownN = orders.filter(o => !o.vendor_name).length;
+    if (!confirm(`위탁 주문이 포함돼 있습니다.
+
+· 매입(본사) ${ownN}건
+· 위탁 ${orders.length - ownN}건 — ${vendorNames.join(', ')}
+
+업체명이 맞습니까? (위탁 주문은 정보입력현황에 올라가지 않습니다)`)) return;
+  }
   const overwrite = !!document.getElementById('bg-csv-overwrite')?.checked;
   const btn = document.getElementById('bg-csv-submit-btn');
   const status = document.getElementById('bg-csv-status');

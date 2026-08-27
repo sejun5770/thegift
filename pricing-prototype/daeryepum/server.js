@@ -683,6 +683,15 @@ function bgIsVendorItem(mo, it) {
 function bgSiteOf(mo, it) {
   return bgIsVendorItem(mo, it) ? BG_SITE_VENDOR : BG_SITE_OWN;
 }
+/**
+ * 이 주문을 '한 건' 으로 셀 채널.
+ *   본사 품목이 하나라도 있으면 매입, 전부 위탁이면 위탁.
+ *   ('혼합' 라벨은 위탁업체 2곳이 섞인 주문에도 붙는다 — 라벨만 보면 매입으로 오분류된다.)
+ */
+function bgPrimarySiteOf(mo) {
+  const items = Array.isArray(mo && mo.items) ? mo.items : [];
+  return items.some(it => !bgIsVendorItem(mo, it)) ? BG_SITE_OWN : BG_SITE_VENDOR;
+}
 
 // 모듈 레벨 D01_FILTER — 위탁답례품 포함 답례품 기본 필터로 alias
 const D01_FILTER = DAERYEPUM_FILTER_SQL;
@@ -3419,6 +3428,8 @@ async function apiDashboardComparison(query = {}) {
             agg.set(label, cur);
           }
         }
+        // 주문 건수는 채널별로 센다 — 혼합 주문은 양쪽에 1건씩 (운영 확인 2026-08-27).
+        //   금액·수량은 품목 단위라 이중계상이 없다.
         for (const [label, v] of agg) {
           const orders = v.orders.size;
           const site = ensureSite(label);
@@ -3869,8 +3880,14 @@ async function apiDashboardSummary(query) {
         for (const mo of validOrders) {
           const day = (mo.order_date || '').toString().slice(0, 10);
           if (!day) continue;
+          // 품목이 있는 채널마다 1건씩 센다 — 혼합 주문은 매입·위탁 양쪽에 잡힌다.
+          //   (운영 확인 2026-08-27: 그 편이 '그 채널에 주문이 있었다' 는 사실에 맞다.
+          //    그래서 채널 건수의 합은 실제 주문 수보다 혼합 건수만큼 크다 — 금액은 품목
+          //    단위라 이중계상이 없다.)
+          //   라벨이 아니라 품목의 채널로 센다 — 위탁업체 2곳만 섞인 주문도 '혼합' 이 붙는데
+          //   그건 위탁으로만 세야 한다.
           const labels = new Set((Array.isArray(mo.items) ? mo.items : []).map(it => bgSiteOf(mo, it)));
-          if (!labels.size) labels.add(bgSiteOf(mo, null));
+          if (!labels.size) labels.add(bgPrimarySiteOf(mo));
           for (const label of labels) {
             const key = `${day}|${label}|${ORDER_TYPE_LABEL}`;
             if (!dayCountMap.has(key)) dayCountMap.set(key, { order_day: day, site_name: label, order_type: ORDER_TYPE_LABEL, distinct_order_count: 0 });
@@ -4008,7 +4025,9 @@ async function apiDashboardSummary(query) {
         for (const [day, b] of perDay) {
           expressDaily.push({
             order_day: day,
-            site_name: '바른손더기프트',
+            // 요약 rows 와 같은 채널명이어야 화면의 빠른출고 sub-row 가 붙는다 (076).
+            //   '바른손더기프트' 로 두면 그룹 목록에 없는 이름이라 오늘출발 행이 조용히 사라진다.
+            site_name: BG_SITE_OWN,
             is_copurchase: 0,
             order_count: b.orders.size,
             total_amount: Math.round(b.amount),
@@ -4940,7 +4959,7 @@ async function apiDashboardByShipDate(query) {
             amount += a;
             qty += q;
           }
-          salesRows.push({ order_seq: moId, is_copurchase: 0, amount, qty, site_name: mo.site_name || '바른손더기프트', _src: 'MANUAL' });
+          salesRows.push({ order_seq: moId, is_copurchase: 0, amount, qty, site_name: bgSiteOf(mo, null), _src: 'MANUAL' });
         } catch (e) { console.warn(`[by-ship-date] MANUAL ${moId} 실패 (무시):`, e.message); }
       }
     } catch (e) { console.warn('[by-ship-date] MANUAL lookup 실패:', e.message); }
@@ -5184,7 +5203,7 @@ async function apiLeadtimeAnalysis(query) {
           manualRows.push({
             order_seq: moId, _src: 'MANUAL',
             order_day: String(mo.order_date || '').slice(0, 10),
-            site_name: mo.site_name || '바른손더기프트',
+            site_name: bgSiteOf(mo, null),
             amount, qty,
           });
         } catch (e) { /* skip */ }

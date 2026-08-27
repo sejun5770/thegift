@@ -1400,7 +1400,8 @@ async function _ensureStubForManualOrder(mo, { force = false, stickerMap = null 
       stickerMap = new Map();
     }
   }
-  const items = Array.isArray(mo.items) ? mo.items : [];
+  // 혼합 주문은 본사 품목만 스티커 작업 대상 (076)
+  const items = _collectItemsOf(mo);
   // 상품명 prefix "오늘출발" 감지 — 하나라도 있으면 주문 전체를 빠른출고로 분류.
   //   (CSV 업로드 시 items[i].product_name 에 "[오늘출발] ..." / "오늘출발 ..." 등으로 붙어있음.)
   //   대시보드 (apiDashboardByShipDate) 는 ci.is_express 를 그대로 express 버킷 판정에 사용.
@@ -1494,6 +1495,9 @@ async function backfillManualOrderStubs({ category = 'daeryepum', force = false,
     created: 0, exists: 0, recreated: 0, failed: 0, details: [],
   };
   for (const mo of orders) {
+    // 위탁 주문은 주문수집 대상이 아니다 (076) — 여기서 걸러야 'stub 재생성' 버튼 한 번에
+    //   위탁 stub 이 통째로 만들어져 정보입력현황·출고일 집계로 새어 들어간다.
+    if (!_needsCollectStub(mo)) { result.skipped_vendor = (result.skipped_vendor || 0) + 1; continue; }
     const status = await _ensureStubForManualOrder(mo, { force, stickerMap });
     if (status === 'created') { result.created++; result.details.push({ order_id: mo.order_id, status: 'created' }); }
     else if (status === 'recreated') { result.recreated++; result.details.push({ order_id: mo.order_id, status: 'recreated' }); }
@@ -1519,7 +1523,20 @@ async function backfillManualOrderStubs({ category = 'daeryepum', force = false,
  */
 function _needsCollectStub(data) {
   const v = (data && data.vendor_name ? String(data.vendor_name).trim() : '');
-  return !v || v === '혼합';
+  if (!v) return true;              // 본사 주문
+  if (v !== '혼합') return false;   // 위탁 단독 주문
+  // '혼합' 은 라벨만으로 믿지 않는다 — 위탁업체 2곳이 한 주문에 섞여도 '혼합' 이 붙는데
+  //   그 주문엔 본사 품목이 하나도 없다. 품목의 vendor 로 실제 본사 품목 유무를 본다.
+  const items = Array.isArray(data && data.items) ? data.items : [];
+  return items.some(it => !it || !it.vendor);
+}
+/** 주문수집 대상 품목만 (위탁 품목은 우리가 만들지 않으니 스티커 작업 목록에서 뺀다). */
+function _collectItemsOf(mo) {
+  const items = Array.isArray(mo && mo.items) ? mo.items : [];
+  const v = (mo && mo.vendor_name ? String(mo.vendor_name).trim() : '');
+  if (v !== '혼합') return items;
+  const own = items.filter(it => !it || !it.vendor);
+  return own.length ? own : items;
 }
 
 async function bulkCreateManualOrders(orders, { dryRun = false, overwrite = false } = {}) {
