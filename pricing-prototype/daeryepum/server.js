@@ -786,8 +786,9 @@ async function giftSmsRows(gid) {
   const rows = [];
   for (const r of raw.slice(headerRows)) {
     const orderId = String(r[cols.order] ?? '').trim();
-    // 주문번호 없는 행·중간에 반복된 헤더 행은 버린다
-    if (!orderId || orderId === '주문번호') continue;
+    // 반복 헤더 행만 버린다. 주문번호 없는 행은 유지 — 커스텀 시트의 이벤트/단독주문 23행이
+    //   주문번호 없이 성함+연락처를 가진 실주문이었다 (fable 검증 2026-08-27).
+    if (orderId === '주문번호') continue;
     const name = String(r[cols.name] ?? '').trim();
     const phoneRaw = String(r[cols.phone] ?? '').trim();
     const shipRaw = String(r[cols.ship] ?? '').trim();
@@ -799,10 +800,15 @@ async function giftSmsRows(gid) {
     const dm = shipRaw.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
     if (dm) shipDate = `${dm[1]}-${String(dm[2]).padStart(2, '0')}-${String(dm[3]).padStart(2, '0')}`;
     else if (shipRaw) shipDate = shipRaw;
-    // 연락처 — 숫자와 '-' 만 (문자 양식 허용 형식). 10~11자리 휴대폰만 정상으로 본다.
+    // 연락처 — 휴대폰(01x 10~11자리) + 0508 안심번호(12자리) 를 정상으로 본다.
+    //   8월 시트에서 '이상' 20건 중 18건이 0508 안심번호였다 — 문자 수신 가능한 번호다 (fable 검증).
     const digits = phoneRaw.replace(/\D/g, '');
-    const phoneOk = /^01[016789]\d{7,8}$/.test(digits);
-    const phone = phoneOk ? digits.replace(/^(\d{3})(\d{3,4})(\d{4})$/, '$1-$2-$3') : phoneRaw;
+    // 안심번호는 050X 전 대역 (실측: 0502 15건 · 0504 3건 · 0508 등) — 11~12자리
+    const isSafeNum = /^050\d{8,9}$/.test(digits);
+    const phoneOk = /^01[016789]\d{7,8}$/.test(digits) || isSafeNum;
+    const phone = !phoneOk ? phoneRaw
+      : isSafeNum ? digits.replace(/^(\d{4})(\d{3,4})(\d{4})$/, '$1-$2-$3')
+      : digits.replace(/^(\d{3})(\d{3,4})(\d{4})$/, '$1-$2-$3');
     // 송장 — 숫자/하이픈 9자리 이상만 유효 ('취소'·'추가'·'퀵 출고' 같은 메모값 걸러냄)
     const invDigits = invoice.replace(/\D/g, '');
     const invoiceOk = /^[\d-]+$/.test(invoice) && invDigits.length >= 9;

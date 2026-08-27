@@ -1671,15 +1671,16 @@ nav.nav-loading a[href^="#"] {
       <div style="flex:1"></div>
       <button class="btn" onclick="copySmsTemplate()" style="padding:5px 12px;font-size:12px" title="문자 시스템에 붙여넣을 메시지 본문을 복사합니다 (출고일={#A}, 송장번호={#B})">💬 메시지 본문 복사</button>
       <button class="btn btn-primary" onclick="downloadSmsExcel()" style="padding:5px 14px;font-size:12px" title="선택된 행(없으면 표시된 전체)을 문자발송 엑셀 업로드 양식으로 다운로드">📥 문자발송 엑셀 다운로드</button>
+      <button class="btn" id="sms-send-btn" onclick="sendSmsDirect()" style="padding:5px 14px;font-size:12px;background:#fef2f2;border-color:#fca5a5;color:#dc2626" title="선택된 행에 출고완료 안내 문자를 바로 발송합니다 (문자 API 직접 호출 — 체크박스로 선택한 행만)">📨 문자 바로 발송</button>
     </div>
 
     <div class="card" style="padding:0;overflow-x:auto">
       <table class="data-table">
         <thead><tr>
           <th style="width:36px"><input type="checkbox" id="sms-select-all" onchange="_smsToggleAll(this)"></th>
-          <th>주문번호</th><th>성함</th><th>연락처</th><th>출고일</th><th>송장번호</th><th>비고</th>
+          <th>주문번호</th><th>성함</th><th>연락처</th><th>출고일</th><th>송장번호</th><th>발송이력</th><th>비고</th>
         </tr></thead>
-        <tbody id="sms-tbody"><tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:24px">시트를 선택하면 목록을 불러옵니다.</td></tr></tbody>
+        <tbody id="sms-tbody"><tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:24px">시트를 선택하면 목록을 불러옵니다.</td></tr></tbody>
       </table>
     </div>
     <div style="margin-top:8px;font-size:11.5px;color:var(--gray-500);line-height:1.6">
@@ -4924,8 +4925,11 @@ function switchCategory(cat) {
   currentCategory = cat;
   // ── 문자발송 리스트 — 주문 목록이 아니라 스프레드시트 뷰라 표준 구역을 통째로 바꾼다 ──
   const _smsMode = (cat === 'sms_list');
-  ['ord-toolbar', 'ord-sec-filter', 'ord-sec-site', 'ord-sec-cols', 'ord-drift-bar', 'ord-actionbar', 'ord-table-card']
+  ['ord-toolbar', 'ord-sec-filter', 'ord-sec-site', 'ord-sec-cols', 'ord-actionbar', 'ord-table-card']
     .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = _smsMode ? 'none' : ''; });
+  // drift-bar 는 기본이 숨김 — '' 로 되돌리면 이전 카테고리의 stale 경고가 잠깐 보인다 (fable 검증)
+  const _driftBar = document.getElementById('ord-drift-bar');
+  if (_driftBar && _smsMode) _driftBar.style.display = 'none';
   const smsPanel = document.getElementById('sms-panel');
   if (smsPanel) smsPanel.style.display = _smsMode ? '' : 'none';
   if (_smsMode) {
@@ -5057,6 +5061,8 @@ function showOrderTableSkeleton() {
 }
 
 async function loadOrders() {
+  // 문자발송 탭 상태로 페이지 재진입 시 — 주문 fetch 대신 패널만 복원 (서버 D01 fallback 조회 방지)
+  if (currentCategory === 'sms_list') { switchCategory('sms_list'); return; }
   showOrderTableSkeleton();
   const start = document.getElementById('ord-start').value;
   const end = document.getElementById('ord-end').value;
@@ -24593,7 +24599,8 @@ let _smsInited = false;
 
 async function initSmsList() {
   const dateInput = document.getElementById('sms-date');
-  if (dateInput && !dateInput.value) dateInput.value = new Date().toISOString().slice(0, 10);
+  // KST 기준 오늘 — toISOString 은 UTC 라 KST 00~09시에 전날이 된다 (코드베이스 +9h 관례)
+  if (dateInput && !dateInput.value) dateInput.value = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
   if (_smsInited) return;
   _smsInited = true;
   const sel = document.getElementById('sms-sheet');
@@ -24613,7 +24620,7 @@ async function initSmsList() {
   } catch (e) {
     sel.innerHTML = '<option value="">시트 목록 실패</option>';
     document.getElementById('sms-tbody').innerHTML =
-      `<tr><td colspan="7" style="text-align:center;color:#dc2626;padding:24px">시트 목록을 불러오지 못했습니다: ${esc(e.message)}</td></tr>`;
+      `<tr><td colspan="8" style="text-align:center;color:#dc2626;padding:24px">시트 목록을 불러오지 못했습니다: ${esc(e.message)}</td></tr>`;
   }
 }
 
@@ -24627,23 +24634,24 @@ async function loadSmsList() {
   const gid = document.getElementById('sms-sheet').value;
   if (!gid) return;
   const tbody = document.getElementById('sms-tbody');
-  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:24px">불러오는 중…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:24px">불러오는 중…</td></tr>';
   try {
     const r = await fetch(`${API}/api/sms-list?gid=${encodeURIComponent(gid)}`);
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
     _smsRows = j.rows || [];
+    await _smsLoadHistory();
     renderSmsList();
   } catch (e) {
     _smsRows = [];
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:#dc2626;padding:24px">불러오기 실패: ${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#dc2626;padding:24px">불러오기 실패: ${esc(e.message)}</td></tr>`;
   }
 }
 
 function _smsFiltered() {
   const mode = document.getElementById('sms-date-mode').value;
   const pick = document.getElementById('sms-date').value;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);   // KST
   const q = (document.getElementById('sms-search').value || '').trim().toLowerCase();
   const hideInvalid = document.getElementById('sms-hide-invalid').checked;
   return _smsRows.filter(r => {
@@ -24671,7 +24679,7 @@ function renderSmsList() {
   if (shipBad) warn.push(`출고일 빈 값 ${shipBad}건`);
   document.getElementById('sms-warn').textContent = warn.length ? `⚠️ ${warn.join(' · ')}` : '';
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:24px">조건에 맞는 행이 없습니다.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:24px">조건에 맞는 행이 없습니다.</td></tr>';
     _smsUpdateSelected();
     return;
   }
@@ -24680,13 +24688,15 @@ function renderSmsList() {
     if (!r.phone_ok) marks.push('<span style="background:#fef2f2;color:#dc2626;font-size:10px;padding:1px 5px;border-radius:3px">연락처 확인</span>');
     if (!r.ship_date) marks.push('<span style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 5px;border-radius:3px">출고일 없음</span>');
     if (!r.invoice_ok) marks.push(`<span style="background:#f3f4f6;color:var(--gray-500);font-size:10px;padding:1px 5px;border-radius:3px">${esc((r.invoice || '송장 없음').slice(0, 12))}</span>`);
+    if (!r.order_id) marks.push('<span style="background:#ede9fe;color:#5b21b6;font-size:10px;padding:1px 5px;border-radius:3px" title="시트에 주문번호가 없는 행 (이벤트·단독주문) — 연락처 기준으로 발송 이력을 관리합니다">주문번호 없음</span>');
     return `<tr>
       <td><input type="checkbox" class="sms-check" data-idx="${i}" onchange="_smsUpdateSelected()"></td>
-      <td style="font-family:monospace">${esc(r.order_id)}</td>
+      <td style="font-family:monospace">${esc(r.order_id || '-')}</td>
       <td>${esc(r.name)}</td>
       <td style="font-family:monospace">${esc(r.phone)}</td>
       <td>${esc(r.ship_date || '-')}</td>
       <td style="font-family:monospace">${r.invoice_ok ? esc(r.invoice) : '-'}</td>
+      <td>${_smsHistBadge(_smsKey(r))}</td>
       <td><div style="display:flex;gap:4px;flex-wrap:wrap">${marks.join('')}</div></td>
     </tr>`;
   }).join('');
@@ -24699,6 +24709,81 @@ function _smsToggleAll(cb) {
 }
 function _smsUpdateSelected() {
   document.getElementById('sms-selected-count').textContent = document.querySelectorAll('.sms-check:checked').length;
+}
+
+// ── 문자 바로 발송 (서버가 문자 API 호출) ──────────────────────
+let _smsHistory = {};   // 발송키 → {count, lastSentAt, successCount}
+// 발송 이력 키 — 주문번호가 없으면 연락처 기반 (서버 PH- 키와 동일 규칙)
+function _smsKey(r) { return r.order_id || ('PH-' + String(r.phone || '').replace(/\D/g, '')); }
+
+function _smsHistBadge(orderId) {
+  const h = _smsHistory[orderId];
+  if (!h || !h.count) return '<span style="color:var(--gray-300)">-</span>';
+  const okPart = h.successCount > 0
+    ? `<span style="background:#dcfce7;color:#166534;font-size:10px;padding:1px 6px;border-radius:3px" title="마지막 발송 ${esc(String(h.lastSentAt || '').slice(0, 16))}">✓ 발송 ${h.successCount}회</span>`
+    : `<span style="background:#fef2f2;color:#dc2626;font-size:10px;padding:1px 6px;border-radius:3px">실패 ${h.count}회</span>`;
+  return okPart;
+}
+
+async function _smsLoadHistory() {
+  try {
+    const ids = [...new Set(_smsRows.map(_smsKey))];
+    if (!ids.length) { _smsHistory = {}; return; }
+    const r = await fetch(`${API}/api/bg/sms/history`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ids: ids }),
+    });
+    const j = await r.json();
+    _smsHistory = (r.ok && j.history) || {};
+  } catch { _smsHistory = {}; }
+}
+
+async function sendSmsDirect() {
+  const rows = _smsFiltered();
+  const checkedIdx = [...document.querySelectorAll('.sms-check:checked')].map(c => parseInt(c.dataset.idx));
+  if (!checkedIdx.length) { showToast('발송할 행을 체크박스로 선택해주세요 (실발송이라 전체 자동 선택은 하지 않습니다)'); return; }
+  const picked = checkedIdx.map(i => rows[i]).filter(Boolean);
+  // 발송 가능 조건: 성함 + 유효 연락처 + 출고일 + 유효 송장
+  const ready = picked.filter(r => r.name && r.phone_ok && /^\d{4}-\d{2}-\d{2}$/.test(r.ship_date || '') && r.invoice_ok);
+  const skipped = picked.length - ready.length;
+  if (!ready.length) { showToast('발송 가능한 행이 없습니다 (연락처/출고일/송장 확인)'); return; }
+  const already = ready.filter(r => (_smsHistory[_smsKey(r)]?.successCount || 0) > 0);
+  const sample = ready[0];
+  const sampleMsg = `안녕하세요,\n${sample.name}님, 주문 상품이 발송됩니다.\n${sample.ship_date}\nCJ대한통운 ${sample.invoice}\n\n감사합니다.`;
+  let msg = `${ready.length}건에 출고완료 안내 문자를 발송합니다.` +
+    (skipped ? `\n(선택 ${picked.length}건 중 ${skipped}건은 연락처/출고일/송장 미비로 제외)` : '') +
+    (already.length ? `\n⚠️ 이미 발송된 주문 ${already.length}건은 건너뜁니다.` : '') +
+    `\n\n발신번호: 1644-0708\n──── 첫 건 미리보기 ────\n${sampleMsg}\n────────────────\n\n진행할까요?`;
+  if (!confirm(msg)) return;
+  const btn = document.getElementById('sms-send-btn');
+  btn.disabled = true; btn.style.opacity = '.5';
+  const CHUNK = 50;
+  const total = { sent: 0, duplicate: 0, failed: 0 };
+  const failReasons = [];
+  try {
+    for (let i = 0; i < ready.length; i += CHUNK) {
+      const chunk = ready.slice(i, i + CHUNK).map(r => ({
+        order_id: r.order_id, name: r.name, phone: r.phone, ship_date: r.ship_date, invoice: r.invoice,
+      }));
+      btn.textContent = `📨 발송 중 ${Math.min(i + CHUNK, ready.length)}/${ready.length}…`;
+      const resp = await fetch(`${API}/api/bg/sms/send`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: chunk }),
+      });
+      const j = await resp.json();
+      if (!resp.ok) throw new Error(j.error || `HTTP ${resp.status}`);
+      total.sent += j.sent || 0; total.duplicate += j.duplicate || 0; total.failed += j.failed || 0;
+      (j.results || []).filter(x => !x.success && !x.duplicate).forEach(x => failReasons.push(`${x.order_id}: ${x.error}`));
+    }
+    showToast(`문자 발송 완료 — 성공 ${total.sent} · 중복 건너뜀 ${total.duplicate} · 실패 ${total.failed}`);
+    if (failReasons.length) alert(`실패 ${failReasons.length}건:\n` + failReasons.slice(0, 12).join('\n') + (failReasons.length > 12 ? `\n… 외 ${failReasons.length - 12}건` : ''));
+    await _smsLoadHistory();
+    renderSmsList();
+  } catch (e) {
+    alert('발송 실패: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.style.opacity = '1'; btn.textContent = '📨 문자 바로 발송';
+  }
 }
 
 const SMS_MESSAGE_TEMPLATE = '안녕하세요,\n{#이름}님, 주문 상품이 발송됩니다.\n{#A}  \nCJ대한통운 {#B} \n\n감사합니다. ';

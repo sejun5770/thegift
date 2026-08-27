@@ -102,6 +102,8 @@ const LIMITS = {
   // 관리자 알림톡 일괄 발송 — 한 번에 최대 200건이라 5분당 5회 = 1,000건/5분 상한
   // SMS 비용 폭증 가드 (의도한 사용은 1번 발송 후 결과 모달 확인이라 5회면 충분)
   alimtalk_send: { max: envInt('BG_RL_ALIMTALK_MAX', 5), windowMs: envInt('BG_RL_ALIMTALK_WINDOW_SEC', 300) * 1000 },
+  // 출고완료 안내 문자 (배치 1회 = 최대 50건) — 비용 폭증 가드
+  sms_send: { max: envInt('BG_RL_SMS_MAX', 10), windowMs: envInt('BG_RL_SMS_WINDOW_SEC', 300) * 1000 },
 };
 
 module.exports = { check, rateLimitResponse, LIMITS, hashIp, extractIp };

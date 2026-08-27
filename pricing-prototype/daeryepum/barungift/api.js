@@ -2001,6 +2001,119 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   }
 
   // ============================================
+  // 💬 출고완료 안내 문자 발송 (문자발송 탭)
+  //   메시지 API 는 사내 퍼블릭 게이트웨이 — 주소는 환경변수로 받는다 (하드코딩 금지).
+  //   body 형식 (운영 확인 2026-08-27):
+  //     { recipientNum, message, callback, salesGubun, purpose }
+  // ============================================
+  const SMS_TEMPLATE_CODE = 'SMS_출고완료안내';
+  const SMS_API_URL = process.env.BARUN_SMS_API_URL || '';
+
+  // POST /api/bg/sms/history — {order_ids:[]} → {history: {id: {count,lastSentAt}}}
+  if (pathname === '/api/bg/sms/history' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const ids = Array.isArray(body.order_ids) ? body.order_ids.slice(0, 1000) : [];
+      const map = await store.getSmsSendHistory(ids, SMS_TEMPLATE_CODE);
+      const history = {};
+      for (const [k, v] of map) history[k] = v;
+      return json(res, { history });
+    } catch (err) { return json(res, { error: err.message }, 400); }
+  }
+
+  // POST /api/bg/sms/send — {rows:[{order_id,name,phone,ship_date,invoice}], force?}
+  if (pathname === '/api/bg/sms/send' && method === 'POST') {
+    const rlSms = rlCheck(req, 'sms_send', RL_LIMITS.sms_send);
+    if (!rlSms.allowed) {
+      logAccess(req, 'rate_limited', null, { status_code: 429, metadata: { action: 'sms_send', retry_after: rlSms.retryAfterSec } });
+      return rateLimitResponse(res, rlSms);
+    }
+    try {
+      if (!SMS_API_URL) {
+        return json(res, { error: '문자 API 주소가 설정되지 않았습니다 — 환경변수 BARUN_SMS_API_URL 을 넣고 재배포해주세요.' }, 503);
+      }
+      const body = await parseBody(req);
+      const rows = Array.isArray(body.rows) ? body.rows : [];
+      if (!rows.length) return json(res, { error: '발송할 행이 없습니다.' }, 400);
+      if (rows.length > 50) return json(res, { error: '한 번에 최대 50건까지 발송할 수 있습니다 (화면이 나눠 보냅니다).' }, 400);
+
+      const callback = process.env.BARUN_SMS_CALLBACK || '1644-0708';
+      const salesGubun = process.env.BARUN_SMS_SALES_GUBUN || 'SD';
+      const purpose = process.env.BARUN_SMS_PURPOSE || 'order-notice';
+      // 선택 인증 헤더 — 'Header-Name: value' 형식 (게이트웨이가 요구하면 설정)
+      const extraHeaders = {};
+      const authRaw = process.env.BARUN_SMS_AUTH_HEADER || '';
+      const ai = authRaw.indexOf(':');
+      if (ai > 0) extraHeaders[authRaw.slice(0, ai).trim()] = authRaw.slice(ai + 1).trim();
+
+      // 중복 방지 — 같은 주문에 이미 성공 발송이 있으면 force 없인 건너뛴다.
+      //   주문번호 없는 행은 연락처 기반 PH- 키로 본다 (order_id 만 보면 빈 값이라 안 걸린다 — 실측 수정).
+      const keyOf = r => (String(r.order_id || '').trim()) || ('PH-' + String(r.phone || '').replace(/\D/g, ''));
+      const history = await store.getSmsSendHistory(rows.map(keyOf), SMS_TEMPLATE_CODE);
+
+      logAccess(req, 'sms_send_start', null, { metadata: { count: rows.length } });
+      const results = [];
+      for (const raw of rows) {
+        const orderId = String(raw.order_id || '').trim();
+        const name = String(raw.name || '').trim();
+        const shipDate = String(raw.ship_date || '').trim();
+        const invoice = String(raw.invoice || '').trim();
+        const digits = String(raw.phone || '').replace(/\D/g, '');
+        // 서버에서 한 번 더 검증 — 화면 값을 그대로 믿지 않는다 (실수·조작 모두 방지)
+        if (!name) { results.push({ order_id: orderId, success: false, error: '성함 누락' }); continue; }
+        // 휴대폰(01x) + 0508 안심번호 허용 (fable 검증 — 8월 시트의 0508 18건은 수신 가능)
+        const isSafeNum = /^050\d{8,9}$/.test(digits);
+        if (!/^01[016789]\d{7,8}$/.test(digits) && !isSafeNum) { results.push({ order_id: orderId, success: false, error: '휴대폰 번호 형식 오류' }); continue; }
+        // 주문번호 없는 행(이벤트·단독주문) — 연락처 기반 키로 발송 이력·중복을 관리한다
+        const logKey = orderId || `PH-${digits}`;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(shipDate)) { results.push({ order_id: orderId, success: false, error: '출고일 형식 오류 (YYYY-MM-DD)' }); continue; }
+        if (!/^[\d-]{9,}$/.test(invoice)) { results.push({ order_id: orderId, success: false, error: '송장번호 형식 오류' }); continue; }
+        const dup = history.get(logKey);
+        if (dup && dup.successCount > 0 && !body.force) {
+          results.push({ order_id: logKey, success: false, duplicate: true, error: `이미 발송됨 (${String(dup.lastSentAt).slice(0, 16)})` });
+          continue;
+        }
+        const phone = isSafeNum
+          ? digits.replace(/^(\d{4})(\d{3,4})(\d{4})$/, '$1-$2-$3')
+          : digits.replace(/^(\d{3})(\d{3,4})(\d{4})$/, '$1-$2-$3');
+        // 메시지 — 운영 확정 양식 그대로 (줄바꿈·공백 유지)
+        const message = `안녕하세요,\n${name}님, 주문 상품이 발송됩니다.\n${shipDate}  \nCJ대한통운 ${invoice} \n\n감사합니다. `;
+        let ok = false, errMsg = null, msgId = null;
+        try {
+          const r = await fetch(SMS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...extraHeaders },
+            body: JSON.stringify({ recipientNum: phone, message, callback, salesGubun, purpose }),
+            signal: AbortSignal.timeout(15000),
+          });
+          const text = await r.text();
+          ok = r.ok;
+          if (!ok) errMsg = `HTTP ${r.status}: ${text.slice(0, 180)}`;
+          else { try { const j = JSON.parse(text); msgId = j.messageId || j.message_id || j.id || null; } catch { /* 응답이 JSON 아니어도 성공 처리 */ } }
+        } catch (e) {
+          errMsg = e.name === 'TimeoutError' ? '응답 시간 초과 (15초)' : e.message;
+        }
+        // 이력 기록 — 전화번호는 마지막 4자리만 남긴다 (로그에 개인정보 최소화)
+        try {
+          await store.logAlimtalkSend({
+            order_id: logKey, to_phone: `****${digits.slice(-4)}`,
+            template_code: SMS_TEMPLATE_CODE, message_id: msgId,
+            success: ok, error_message: errMsg,
+          });
+        } catch { /* 로그 실패는 발송 결과에 영향 없음 */ }
+        results.push({ order_id: logKey, success: ok, error: errMsg });
+      }
+      const sent = results.filter(r => r.success).length;
+      const dup = results.filter(r => r.duplicate).length;
+      logAccess(req, 'sms_send_done', null, { metadata: { count: rows.length, sent, dup } });
+      return json(res, { total: rows.length, sent, duplicate: dup, failed: rows.length - sent - dup, results });
+    } catch (err) {
+      console.error('[sms send] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
+  // ============================================
   // 알림톡 발송 API
   //   2026-05-20 정리: Partner API 직접 호출 경로 (recipients/send/preview) 제거.
   //   send-via-sp 단일 경로로 통합 (SP 우선 + 통합관리자 HTTP API fallback).
