@@ -2018,14 +2018,19 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     // docker-manager env 함정 방어 (flower-daily-report 에서 실제 겪음):
     //   값에 따옴표를 치면 따옴표가 값에 포함되고, '#' 이 있으면 그 뒤가 잘린다.
     //   앞뒤 공백·둘러싼 따옴표는 벗겨내고, 특수문자 시크릿은 *_B64 로도 받을 수 있게 한다.
-    let clientSecret = process.env.BARUN_SMS_CLIENT_SECRET || process.env.PARTNER_CLIENT_SECRET || '';
-    if (!clientSecret && process.env.BARUN_SMS_CLIENT_SECRET_B64) {
-      try { clientSecret = Buffer.from(String(process.env.BARUN_SMS_CLIENT_SECRET_B64).trim(), 'base64').toString('utf8'); } catch { /* 잘못된 b64 → 아래 미설정 처리 */ }
+    let clientSecret = '';
+    let secretSource = '';
+    if (process.env.BARUN_SMS_CLIENT_SECRET) { clientSecret = process.env.BARUN_SMS_CLIENT_SECRET; secretSource = 'BARUN_SMS_CLIENT_SECRET'; }
+    else if (process.env.PARTNER_CLIENT_SECRET) { clientSecret = process.env.PARTNER_CLIENT_SECRET; secretSource = 'PARTNER_CLIENT_SECRET'; }
+    else if (process.env.BARUN_SMS_CLIENT_SECRET_B64) {
+      try { clientSecret = Buffer.from(String(process.env.BARUN_SMS_CLIENT_SECRET_B64).trim(), 'base64').toString('utf8'); secretSource = 'BARUN_SMS_CLIENT_SECRET_B64'; }
+      catch { /* 잘못된 b64 → 아래 미설정 처리 */ }
     }
     clientSecret = String(clientSecret).trim().replace(/^["']+|["']+$/g, '').trim();
     if (!clientSecret) return null;
     return {
       base, clientId, clientSecret,
+      secretSource,
       sendUrl: process.env.BARUN_SMS_API_URL || `${base}/api/Lms/send`,
       // v1 은 발신번호 1661-2646 전용 (RCS BrandKey 종속 — 문서 2-8). 다른 번호는 비정상 경로.
       callback: process.env.BARUN_SMS_CALLBACK || '1661-2646',
@@ -2045,7 +2050,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     if (!res.ok) {
       // 값은 절대 남기지 않는다 — 길이만으로 오입력(따옴표 포함·잘림)을 가늠할 수 있게 한다.
       const hint = res.status === 401
-        ? ` — clientId '${cfg.clientId}' · 시크릿 ${cfg.clientSecret.length}자로 시도. 값에 따옴표/공백/# 이 섞였는지 확인하고, 특수문자가 있으면 BARUN_SMS_CLIENT_SECRET_B64 (base64 인코딩) 로 넣어보세요.`
+        ? ` — clientId '${cfg.clientId}' · 시크릿 ${cfg.clientSecret.length}자 (출처: ${cfg.secretSource}) 로 시도. B64 를 쓰려면 BARUN_SMS_CLIENT_SECRET / PARTNER_CLIENT_SECRET 변수를 삭제해야 합니다 (그쪽이 우선 적용됨). 환경변수 변경은 재배포해야 반영됩니다.`
         : '';
       throw new Error(`Partner 인증 실패 (${res.status})${hint}`);
     }
