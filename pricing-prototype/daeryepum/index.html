@@ -1664,6 +1664,34 @@ nav.nav-loading a[href^="#"] {
       </label>
     </div>
 
+    <!-- 발송 본문 편집 — 실제 발송·엑셀 다운로드가 모두 이 문구를 쓴다 -->
+    <details class="ord-sec" id="sms-sec-template" style="margin-top:10px">
+      <summary>발송 메시지 본문 <span id="sms-tpl-badge" style="font-size:11px;color:var(--gray-500);font-weight:400"></span></summary>
+      <div class="ord-sec-body">
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start">
+          <div style="flex:1;min-width:280px">
+            <textarea id="sms-tpl-text" rows="7" oninput="_smsTplPreview()"
+              style="width:100%;padding:9px 11px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;line-height:1.55;font-family:inherit;resize:vertical"></textarea>
+            <div style="margin-top:6px;font-size:11.5px;color:var(--gray-500);line-height:1.6">
+              변수: <b>{이름}</b> · <b>{출고일}</b> · <b>{송장번호}</b> — 그대로 두면 발송 시 각 주문 값으로 바뀝니다.<br>
+              비우고 저장하면 기본 문구로 돌아갑니다. [메시지 본문 복사] 도 이 문구를 씁니다<br>
+              (엑셀 다운로드는 본문이 아니라 이름·연락처·출고일·송장 값만 채웁니다).
+            </div>
+            <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <button class="btn btn-primary" onclick="saveSmsTemplate()" style="padding:5px 14px;font-size:12px">💾 본문 저장</button>
+              <button class="btn" onclick="resetSmsTemplate()" style="padding:5px 12px;font-size:12px">기본 문구로</button>
+              <span id="sms-tpl-status" style="font-size:12px;color:var(--gray-500)"></span>
+            </div>
+          </div>
+          <div style="width:290px">
+            <div style="font-size:11.5px;color:var(--gray-500);margin-bottom:4px">미리보기 (첫 행 기준)</div>
+            <div id="sms-tpl-preview" style="white-space:pre-wrap;background:#f8fafc;border:1px solid var(--gray-200);border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.6;min-height:120px;color:var(--gray-800)"></div>
+            <div id="sms-tpl-bytes" style="margin-top:6px;font-size:11px;color:var(--gray-500)"></div>
+          </div>
+        </div>
+      </div>
+    </details>
+
     <div style="display:flex;align-items:center;gap:12px;margin:10px 0 8px;flex-wrap:wrap;font-size:12px;color:var(--gray-600)">
       <span>표시 <strong id="sms-count" style="color:var(--gray-800)">0</strong>건</span>
       <span>선택 <strong id="sms-selected-count" style="color:var(--gray-800)">0</strong>건</span>
@@ -24603,6 +24631,7 @@ async function initSmsList() {
   if (dateInput && !dateInput.value) dateInput.value = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
   if (_smsInited) return;
   _smsInited = true;
+  _smsLoadTemplate();
   const sel = document.getElementById('sms-sheet');
   sel.innerHTML = '<option value="">시트 불러오는 중…</option>';
   try {
@@ -24711,6 +24740,82 @@ function _smsUpdateSelected() {
   document.getElementById('sms-selected-count').textContent = document.querySelectorAll('.sms-check:checked').length;
 }
 
+// ── 발송 본문 (서버 저장, 변수 치환) ──────────────────────────
+let _smsTpl = '';          // 현재 본문
+let _smsTplDefault = '';   // 서버 기본 문구
+
+function _smsFillTemplate(tpl, r) {
+  return String(tpl || '')
+    .replace(/\{이름\}/g, (r && r.name) || '{이름}')
+    .replace(/\{출고일\}/g, (r && r.ship_date) || '{출고일}')
+    .replace(/\{송장번호\}/g, (r && r.invoice) || '{송장번호}');
+}
+
+async function _smsLoadTemplate() {
+  try {
+    const r = await fetch(`${API}/api/bg/sms/template`);
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    _smsTpl = j.template || '';
+    _smsTplDefault = j.default_template || '';
+    const ta = document.getElementById('sms-tpl-text');
+    if (ta && document.activeElement !== ta) ta.value = _smsTpl;
+    const badge = document.getElementById('sms-tpl-badge');
+    if (badge) badge.textContent = j.is_default ? '(기본 문구)' : '(수정됨)';
+    _smsTplPreview();
+  } catch (e) {
+    const st = document.getElementById('sms-tpl-status');
+    if (st) { st.style.color = '#dc2626'; st.textContent = '본문 불러오기 실패: ' + e.message; }
+  }
+}
+
+function _smsTplPreview() {
+  const ta = document.getElementById('sms-tpl-text');
+  if (!ta) return;
+  const rows = (typeof _smsFiltered === 'function') ? _smsFiltered() : [];
+  const sample = rows[0] || null;
+  const text = _smsFillTemplate(ta.value, sample);
+  const pv = document.getElementById('sms-tpl-preview');
+  if (pv) pv.textContent = text;
+  // 80바이트 초과면 LMS/MMS 로 나간다 (문자 API 가 자동 판별) — 비용/형식이 달라 알려준다.
+  const bytes = new TextEncoder().encode(text).length;
+  const el = document.getElementById('sms-tpl-bytes');
+  if (el) el.textContent = `${text.length}자 · ${bytes}바이트 — ${bytes > 80 ? '장문(LMS/MMS)으로 발송' : '단문(SMS)으로 발송'}`;
+}
+
+async function saveSmsTemplate() {
+  const ta = document.getElementById('sms-tpl-text');
+  const st = document.getElementById('sms-tpl-status');
+  const val = ta.value;
+  // 변수를 다 지우면 모든 고객에게 같은 문장이 나간다 — 실수로 지운 경우를 잡는다.
+  const missing = ['{이름}', '{출고일}', '{송장번호}'].filter(v => !val.includes(v));
+  if (missing.length && !confirm(`본문에 ${missing.join(', ')} 변수가 없습니다.\n그대로 저장하면 해당 값이 문자에 들어가지 않습니다. 계속할까요?`)) return;
+  st.style.color = 'var(--gray-500)'; st.textContent = '저장 중…';
+  try {
+    const r = await fetch(`${API}/api/bg/sms/template`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ template: val }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    _smsTpl = j.template || '';
+    document.getElementById('sms-tpl-badge').textContent = j.is_default ? '(기본 문구)' : '(수정됨)';
+    st.style.color = '#16a34a'; st.textContent = '저장했습니다 — 이후 발송·엑셀에 적용됩니다';
+    ta.value = _smsTpl;
+    _smsTplPreview();
+  } catch (e) {
+    st.style.color = '#dc2626'; st.textContent = '저장 실패: ' + e.message;
+  }
+}
+
+function resetSmsTemplate() {
+  const ta = document.getElementById('sms-tpl-text');
+  ta.value = _smsTplDefault || '';
+  _smsTplPreview();
+  const st = document.getElementById('sms-tpl-status');
+  st.style.color = 'var(--gray-500)'; st.textContent = '기본 문구를 불러왔습니다 — [본문 저장] 을 눌러야 반영됩니다';
+}
+
 // ── 문자 바로 발송 (서버가 문자 API 호출) ──────────────────────
 let _smsHistory = {};   // 발송키 → {count, lastSentAt, successCount}
 // 발송 이력 키 — 주문번호가 없으면 연락처 기반 (서버 PH- 키와 동일 규칙)
@@ -24749,7 +24854,7 @@ async function sendSmsDirect() {
   if (!ready.length) { showToast('발송 가능한 행이 없습니다 (연락처/출고일/송장 확인)'); return; }
   const already = ready.filter(r => (_smsHistory[_smsKey(r)]?.successCount || 0) > 0);
   const sample = ready[0];
-  const sampleMsg = `안녕하세요,\n${sample.name}님, 주문 상품이 발송됩니다.\n${sample.ship_date}\nCJ대한통운 ${sample.invoice}\n\n감사합니다.`;
+  const sampleMsg = _smsFillTemplate(_smsTpl || _smsTplDefault, sample);
   let msg = `${ready.length}건에 출고완료 안내 문자를 발송합니다.` +
     (skipped ? `\n(선택 ${picked.length}건 중 ${skipped}건은 연락처/출고일/송장 미비로 제외)` : '') +
     (already.length ? `\n⚠️ 이미 발송된 주문 ${already.length}건은 건너뜁니다.` : '') +
@@ -24789,7 +24894,12 @@ async function sendSmsDirect() {
 const SMS_MESSAGE_TEMPLATE = '안녕하세요,\n{#이름}님, 주문 상품이 발송됩니다.\n{#A}  \nCJ대한통운 {#B} \n\n감사합니다. ';
 
 function copySmsTemplate() {
-  navigator.clipboard.writeText(SMS_MESSAGE_TEMPLATE).then(
+  // 엑셀 업로드 양식의 변수명으로 바꿔서 복사 ({이름}→{#이름}, {출고일}→{#A}, {송장번호}→{#B})
+  const body = (_smsTpl || _smsTplDefault || SMS_MESSAGE_TEMPLATE)
+    .replace(/\{이름\}/g, '{#이름}')
+    .replace(/\{출고일\}/g, '{#A}')
+    .replace(/\{송장번호\}/g, '{#B}');
+  navigator.clipboard.writeText(body).then(
     () => showToast('메시지 본문 복사 완료 — {#이름}=성함, {#A}=출고일, {#B}=송장번호'),
     () => showToast('복사 실패 — 브라우저 권한을 확인해주세요'));
 }

@@ -2010,6 +2010,22 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   //   비운영 환경은 서버측 allowlist 가드가 있어 고객 실발송이 차단된다.
   // ============================================
   const SMS_TEMPLATE_CODE = 'SMS_출고완료안내';
+  // 기본 본문 — 운영 확정 문구. 화면에서 수정하면 bg_site_settings.sms_ship_template 에 저장된다.
+  const SMS_DEFAULT_TEMPLATE = '안녕하세요,\n{이름}님, 주문 상품이 발송됩니다.\n{출고일}  \nCJ대한통운 {송장번호} \n\n감사합니다. ';
+  /** 본문 렌더 — 변수만 치환한다 (임의 코드/HTML 실행 없음). */
+  function _smsRender(tpl, vars) {
+    return String(tpl || SMS_DEFAULT_TEMPLATE)
+      .replace(/\{이름\}/g, vars.name)
+      .replace(/\{출고일\}/g, vars.shipDate)
+      .replace(/\{송장번호\}/g, vars.invoice);
+  }
+  async function _smsTemplate() {
+    try {
+      const st = await store.getSiteSettings();
+      const t = st && st.sms_ship_template ? String(st.sms_ship_template).trim() : '';
+      return t || SMS_DEFAULT_TEMPLATE;
+    } catch { return SMS_DEFAULT_TEMPLATE; }
+  }
 
   function _smsConfig() {
     // 알림톡(Partner) 과 같은 인증을 쓴다 — 이미 배포에 있는 env 를 우선 재사용.
@@ -2075,6 +2091,34 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     return _smsAuth(cfg);
   }
 
+  // GET /api/bg/sms/template — 현재 본문 + 기본 본문
+  if (pathname === '/api/bg/sms/template' && method === 'GET') {
+    try {
+      const tpl = await _smsTemplate();
+      return json(res, { template: tpl, is_default: tpl === SMS_DEFAULT_TEMPLATE, default_template: SMS_DEFAULT_TEMPLATE });
+    } catch (err) { return json(res, { error: err.message }, 500); }
+  }
+
+  // PUT /api/bg/sms/template — {template} 저장. 빈 값이면 기본 문구로 되돌린다.
+  if (pathname === '/api/bg/sms/template' && method === 'PUT') {
+    try {
+      const body = await parseBody(req);
+      const raw = body.template == null ? '' : String(body.template);
+      if (raw.length > 2000) return json(res, { error: '본문은 2000자를 넘을 수 없습니다 (문자 API 제한).' }, 400);
+      const updatedBy = req._session?.user?.user_id || req._session?.user?.id || 'admin';
+      await store.updateSiteSettings({ sms_ship_template: raw.trim() || null }, updatedBy);
+      const tpl = await _smsTemplate();
+      logAccess(req, 'sms_template_update', null, { metadata: { length: tpl.length } });
+      return json(res, { template: tpl, is_default: tpl === SMS_DEFAULT_TEMPLATE });
+    } catch (err) {
+      // 컬럼 미적용(마이그레이션 077 전)이면 원인을 바로 알 수 있게 안내한다.
+      const msg = /sms_ship_template/.test(err.message || '')
+        ? '본문 저장 컬럼이 아직 없습니다 — 마이그레이션 077 을 실행한 뒤 다시 저장해주세요.'
+        : err.message;
+      return json(res, { error: msg }, 400);
+    }
+  }
+
   // POST /api/bg/sms/history — {order_ids:[]} → {history: {id: {count,lastSentAt}}}
   if (pathname === '/api/bg/sms/history' && method === 'POST') {
     try {
@@ -2108,6 +2152,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const keyOf = r => (String(r.order_id || '').trim()) || ('PH-' + String(r.phone || '').replace(/\D/g, ''));
       const history = await store.getSmsSendHistory(rows.map(keyOf), SMS_TEMPLATE_CODE);
 
+      const tpl = await _smsTemplate();
       logAccess(req, 'sms_send_start', null, { metadata: { count: rows.length } });
       const results = [];
       for (const raw of rows) {
@@ -2131,8 +2176,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         const phone = isSafeNum
           ? digits.replace(/^(\d{4})(\d{3,4})(\d{4})$/, '$1-$2-$3')
           : digits.replace(/^(\d{3})(\d{3,4})(\d{4})$/, '$1-$2-$3');
-        // 메시지 — 운영 확정 양식 그대로 (80바이트 초과 → API 가 MMS/RCS 자동 처리)
-        const message = `안녕하세요,\n${name}님, 주문 상품이 발송됩니다.\n${shipDate}  \nCJ대한통운 ${invoice} \n\n감사합니다. `;
+        // 메시지 — 운영자가 저장한 본문에 변수 치환 (80바이트 초과 → API 가 MMS/RCS 자동 처리)
+        const message = _smsRender(tpl, { name, shipDate, invoice });
         let ok = false, errMsg = null, tranId = null;
         try {
           const payload = {

@@ -1065,8 +1065,9 @@ async function getSmsSendHistory(orderIds, templateCode) {
       rows = await sbGet('bg_alimtalk_log',
         `order_id=in.(${inList})&template_code=eq.${encodeURIComponent(templateCode)}&order=sent_at.desc`);
     } catch (e) {
-      console.warn('[store] sms history 조회 실패 (무시):', e.message);
-      rows = [];
+      // 테이블 미적용(PGRST205) 등 — 저장이 JSON 으로 폴백됐을 수 있으니 그쪽도 본다.
+      console.warn('[store] sms history Supabase 조회 실패, JSON 폴백:', e.message);
+      rows = (readJson(FILES.alimtalkLog, [])).filter(r => ids.includes(String(r.order_id)) && r.template_code === templateCode);
     }
   } else {
     rows = (readJson(FILES.alimtalkLog, [])).filter(r => ids.includes(String(r.order_id)) && r.template_code === templateCode);
@@ -1805,7 +1806,7 @@ function normAlertFormat(src) {
 
 async function updateSiteSettings(patch, updatedBy = null) {
   if (!USE_SUPABASE) throw new Error('Supabase 미설정 — 사이트 설정 저장 불가');
-  const allowed = ['custom_guide_title', 'custom_guide_text',
+  const allowed = ['custom_guide_title', 'custom_guide_text', 'sms_ship_template',
                    'stock_alert_channel', 'stock_alert_time'];   // migration 049
   const clean = {};
   for (const k of allowed) if (k in patch) clean[k] = patch[k] == null ? null : String(patch[k]);
