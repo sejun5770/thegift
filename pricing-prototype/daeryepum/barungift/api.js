@@ -2014,8 +2014,15 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   function _smsConfig() {
     // 알림톡(Partner) 과 같은 인증을 쓴다 — 이미 배포에 있는 env 를 우선 재사용.
     const base = (process.env.BARUN_SMS_API_BASE || process.env.BIZTALK_API_URL || 'https://api.barunsoncard.com').replace(/\/$/, '');
-    const clientId = process.env.BARUN_SMS_CLIENT_ID || process.env.PARTNER_CLIENT_ID || 'kakaotalk';
-    const clientSecret = process.env.BARUN_SMS_CLIENT_SECRET || process.env.PARTNER_CLIENT_SECRET || '';
+    const clientId = (process.env.BARUN_SMS_CLIENT_ID || process.env.PARTNER_CLIENT_ID || 'kakaotalk').trim();
+    // docker-manager env 함정 방어 (flower-daily-report 에서 실제 겪음):
+    //   값에 따옴표를 치면 따옴표가 값에 포함되고, '#' 이 있으면 그 뒤가 잘린다.
+    //   앞뒤 공백·둘러싼 따옴표는 벗겨내고, 특수문자 시크릿은 *_B64 로도 받을 수 있게 한다.
+    let clientSecret = process.env.BARUN_SMS_CLIENT_SECRET || process.env.PARTNER_CLIENT_SECRET || '';
+    if (!clientSecret && process.env.BARUN_SMS_CLIENT_SECRET_B64) {
+      try { clientSecret = Buffer.from(String(process.env.BARUN_SMS_CLIENT_SECRET_B64).trim(), 'base64').toString('utf8'); } catch { /* 잘못된 b64 → 아래 미설정 처리 */ }
+    }
+    clientSecret = String(clientSecret).trim().replace(/^["']+|["']+$/g, '').trim();
     if (!clientSecret) return null;
     return {
       base, clientId, clientSecret,
@@ -2035,7 +2042,13 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       body: JSON.stringify({ clientId: cfg.clientId, clientSecret: cfg.clientSecret }),
       signal: AbortSignal.timeout(15000),
     });
-    if (!res.ok) throw new Error(`Partner 인증 실패 (${res.status})`);
+    if (!res.ok) {
+      // 값은 절대 남기지 않는다 — 길이만으로 오입력(따옴표 포함·잘림)을 가늠할 수 있게 한다.
+      const hint = res.status === 401
+        ? ` — clientId '${cfg.clientId}' · 시크릿 ${cfg.clientSecret.length}자로 시도. 값에 따옴표/공백/# 이 섞였는지 확인하고, 특수문자가 있으면 BARUN_SMS_CLIENT_SECRET_B64 (base64 인코딩) 로 넣어보세요.`
+        : '';
+      throw new Error(`Partner 인증 실패 (${res.status})${hint}`);
+    }
     const d = await res.json();
     if (!d || !d.token) throw new Error('Partner 인증 응답에 token 없음');
     const now = Date.now();
