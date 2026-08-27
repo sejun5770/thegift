@@ -1591,6 +1591,9 @@ async function backfillManualOrderStubs({ category = 'daeryepum', force = false,
  *   '혼합'(본사+위탁 한 주문)은 본사 품목이 있으므로 만든다.
  */
 function _needsCollectStub(data) {
+  // 취소·환불·반품·결제실패/주문무효(3/5/15) 는 작업 대상이 아니다 — 정보입력현황에 띄우지 않는다.
+  const st = Number(data && data.status_seq);
+  if (st === 3 || st === 5 || st === 15) return false;
   const v = (data && data.vendor_name ? String(data.vendor_name).trim() : '');
   if (!v) return true;              // 본사 주문
   if (v !== '혼합') return false;   // 위탁 단독 주문

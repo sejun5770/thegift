@@ -1696,6 +1696,9 @@ nav.nav-loading a[href^="#"] {
       <span>표시 <strong id="sms-count" style="color:var(--gray-800)">0</strong>건</span>
       <span>선택 <strong id="sms-selected-count" style="color:var(--gray-800)">0</strong>건</span>
       <span id="sms-warn" style="color:#b45309"></span>
+      <label style="display:flex;align-items:center;gap:4px;cursor:pointer" title="이미 발송된 주문도 다시 발송합니다. 고객이 같은 안내를 두 번 받으니 송장이 바뀐 경우 등에만 사용하세요">
+        <input type="checkbox" id="sms-force"> 중복 재발송 허용
+      </label>
       <div style="flex:1"></div>
       <button class="btn" onclick="copySmsTemplate()" style="padding:5px 12px;font-size:12px" title="문자 시스템에 붙여넣을 메시지 본문을 복사합니다 (출고일={#A}, 송장번호={#B})">💬 메시지 본문 복사</button>
       <button class="btn btn-primary" onclick="downloadSmsExcel()" style="padding:5px 14px;font-size:12px" title="선택된 행(없으면 표시된 전체)을 문자발송 엑셀 업로드 양식으로 다운로드">📥 문자발송 엑셀 다운로드</button>
@@ -1706,9 +1709,9 @@ nav.nav-loading a[href^="#"] {
       <table class="data-table">
         <thead><tr>
           <th style="width:36px"><input type="checkbox" id="sms-select-all" onchange="_smsToggleAll(this)"></th>
-          <th>주문번호</th><th>성함</th><th>연락처</th><th>출고일</th><th>송장번호</th><th>발송이력</th><th>비고</th>
+          <th>주문번호</th><th>주문사이트</th><th>성함</th><th>연락처</th><th>출고일</th><th>송장번호</th><th>발송이력</th><th>비고</th>
         </tr></thead>
-        <tbody id="sms-tbody"><tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:24px">시트를 선택하면 목록을 불러옵니다.</td></tr></tbody>
+        <tbody id="sms-tbody"><tr><td colspan="9" style="text-align:center;color:var(--gray-400);padding:24px">시트를 선택하면 목록을 불러옵니다.</td></tr></tbody>
       </table>
     </div>
     <div style="margin-top:8px;font-size:11.5px;color:var(--gray-500);line-height:1.6">
@@ -24649,7 +24652,7 @@ async function initSmsList() {
   } catch (e) {
     sel.innerHTML = '<option value="">시트 목록 실패</option>';
     document.getElementById('sms-tbody').innerHTML =
-      `<tr><td colspan="8" style="text-align:center;color:#dc2626;padding:24px">시트 목록을 불러오지 못했습니다: ${esc(e.message)}</td></tr>`;
+      `<tr><td colspan="9" style="text-align:center;color:#dc2626;padding:24px">시트 목록을 불러오지 못했습니다: ${esc(e.message)}</td></tr>`;
   }
 }
 
@@ -24663,7 +24666,7 @@ async function loadSmsList() {
   const gid = document.getElementById('sms-sheet').value;
   if (!gid) return;
   const tbody = document.getElementById('sms-tbody');
-  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:24px">불러오는 중…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--gray-400);padding:24px">불러오는 중…</td></tr>';
   try {
     const r = await fetch(`${API}/api/sms-list?gid=${encodeURIComponent(gid)}`);
     const j = await r.json();
@@ -24673,7 +24676,7 @@ async function loadSmsList() {
     renderSmsList();
   } catch (e) {
     _smsRows = [];
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:#dc2626;padding:24px">불러오기 실패: ${esc(e.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#dc2626;padding:24px">불러오기 실패: ${esc(e.message)}</td></tr>`;
   }
 }
 
@@ -24688,7 +24691,7 @@ function _smsFiltered() {
     if (mode === 'pick' && pick && r.ship_date !== pick) return false;
     if (hideInvalid && !r.invoice_ok) return false;
     if (q) {
-      const hay = `${r.order_id}|${r.name}|${r.phone}`.toLowerCase();
+      const hay = `${r.order_id}|${r.site_name || ''}|${r.name}|${r.phone}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -24708,7 +24711,7 @@ function renderSmsList() {
   if (shipBad) warn.push(`출고일 빈 값 ${shipBad}건`);
   document.getElementById('sms-warn').textContent = warn.length ? `⚠️ ${warn.join(' · ')}` : '';
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:24px">조건에 맞는 행이 없습니다.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--gray-400);padding:24px">조건에 맞는 행이 없습니다.</td></tr>';
     _smsUpdateSelected();
     return;
   }
@@ -24721,6 +24724,9 @@ function renderSmsList() {
     return `<tr>
       <td><input type="checkbox" class="sms-check" data-idx="${i}" onchange="_smsUpdateSelected()"></td>
       <td style="font-family:monospace">${esc(r.order_id || '-')}</td>
+      <td>${r.site_name
+        ? esc(r.site_name)
+        : '<span style="color:var(--gray-400)" title="사내 주문 DB에서 찾지 못한 주문번호입니다 (오픈마켓 주문번호 등)">미확인</span>'}</td>
       <td>${esc(r.name)}</td>
       <td style="font-family:monospace">${esc(r.phone)}</td>
       <td>${esc(r.ship_date || '-')}</td>
@@ -24855,13 +24861,22 @@ async function sendSmsDirect() {
   const skipped = picked.length - ready.length;
   if (!ready.length) { showToast('발송 가능한 행이 없습니다 (연락처/출고일/송장 확인)'); return; }
   const already = ready.filter(r => (_smsHistory[_smsKey(r)]?.successCount || 0) > 0);
+  // 중복 재발송 — 체크했을 때만. 실수 방지로 대상이 있으면 한 번 더 묻는다.
+  const force = !!document.getElementById('sms-force')?.checked;
   const sample = ready[0];
   const sampleMsg = _smsFillTemplate(_smsTpl || _smsTplDefault, sample);
   let msg = `${ready.length}건에 출고완료 안내 문자를 발송합니다.` +
     (skipped ? `\n(선택 ${picked.length}건 중 ${skipped}건은 연락처/출고일/송장 미비로 제외)` : '') +
-    (already.length ? `\n⚠️ 이미 발송된 주문 ${already.length}건은 건너뜁니다.` : '') +
+    (already.length ? (force
+      ? `
+
+⚠️ 이미 발송된 주문 ${already.length}건을 다시 발송합니다 (고객이 같은 안내를 두 번 받습니다).`
+      : `\n⚠️ 이미 발송된 주문 ${already.length}건은 건너뜁니다.`) : '') +
     `\n\n발신번호: 1644-0708\n──── 첫 건 미리보기 ────\n${sampleMsg}\n────────────────\n\n진행할까요?`;
   if (!confirm(msg)) return;
+  if (force && already.length &&
+      !confirm(`재발송 확인 — 이미 발송된 ${already.length}건에 문자를 한 번 더 보냅니다.
+정말 진행할까요?`)) return;
   const btn = document.getElementById('sms-send-btn');
   btn.disabled = true; btn.style.opacity = '.5';
   const CHUNK = 50;
@@ -24875,14 +24890,15 @@ async function sendSmsDirect() {
       btn.textContent = `📨 발송 중 ${Math.min(i + CHUNK, ready.length)}/${ready.length}…`;
       const resp = await fetch(`${API}/api/bg/sms/send`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows: chunk }),
+        body: JSON.stringify({ rows: chunk, force }),
       });
       const j = await resp.json();
       if (!resp.ok) throw new Error(j.error || `HTTP ${resp.status}`);
       total.sent += j.sent || 0; total.duplicate += j.duplicate || 0; total.failed += j.failed || 0;
       (j.results || []).filter(x => !x.success && !x.duplicate).forEach(x => failReasons.push(`${x.order_id}: ${x.error}`));
     }
-    showToast(`문자 발송 완료 — 성공 ${total.sent} · 중복 건너뜀 ${total.duplicate} · 실패 ${total.failed}`);
+    showToast(`문자 발송 완료 — 성공 ${total.sent}${force && already.length ? ` (재발송 ${already.length} 포함)` : ''}`
+      + ` · 중복 건너뜀 ${total.duplicate} · 실패 ${total.failed}`);
     if (failReasons.length) alert(`실패 ${failReasons.length}건:\n` + failReasons.slice(0, 12).join('\n') + (failReasons.length > 12 ? `\n… 외 ${failReasons.length - 12}건` : ''));
     await _smsLoadHistory();
     renderSmsList();
@@ -25004,11 +25020,28 @@ function _bgParseCsvDate(raw) {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+/**
+ * 주문번호 → 주문일시. 더기프트 주문번호는 'YYYYMMDDHHMMSS' + 일련번호 형식이다.
+ *   운영 표본 400건 검증: 저장된 결제일시와 395건이 1시간 이내, 4건이 24시간 이내로 일치.
+ *   결제일자가 비어 있을 때의 대체값으로만 쓴다.
+ */
+function _bgDateFromOrderNo(orderNo) {
+  const m = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/.exec(String(orderNo || '').trim());
+  if (!m) return null;
+  const [, y, mo, d, h, mi, sec] = m;
+  if (+mo < 1 || +mo > 12 || +d < 1 || +d > 31 || +h > 23 || +mi > 59 || +sec > 59) return null;
+  return `${y}-${mo}-${d}T${h}:${mi}:${sec}`;
+}
+
 // 주문상품상태 → status_seq 매핑 (FirstMall 코드).
 //   결제확인/결제완료/배송준비중 = 4, 취소 = 3, 환불 = 5, 반품완료 = 15, 그 외 = 4 (default)
+//   '결제실패'·'주문무효' 는 결제가 성립하지 않은 건이라 매출이 아니다 (2026-08-27 운영 사고).
+//     기존엔 default 4(결제확인) 로 떨어져 취소 제외 필터(3/5/15)를 통과 → 매출에 그대로 잡혔다.
+//     재결제되면 다음 업로드에서 4 로 갱신되므로 행은 남기고 상태만 취소 계열로 둔다.
 function _bgStatusToSeq(raw) {
   const s = String(raw || '').trim();
   if (!s) return 4;
+  if (s.includes('결제실패') || s.includes('주문무효') || s === '무효') return 3;
   if (s.includes('취소')) return 3;
   if (s.includes('환불')) return 5;
   if (s.includes('반품') && s.includes('완료')) return 15;
@@ -25176,7 +25209,10 @@ function _bgCsvBuildOrders(rows) {
       recv_msg: (first[BG_CSV_COL.사용자메모] || '').toString().trim(),
       _shipDate: (first[BG_CSV_COL.희망배송일] || '').toString().trim(),
       _inputMsg: (first[BG_CSV_COL.추가입력옵션] || '').toString().trim(),
-      _settleDate: _bgParseCsvDate(first[COL.결제일자]),  // 결제일자 — 매출 집계 기준일 (헤더 자동 감지, 없으면 R열=17)
+      // 결제일자 — 매출 집계 기준일 (헤더 자동 감지, 없으면 R열=17).
+      //   비어 있으면 주문번호 앞 14자리(YYYYMMDDHHMMSS) 로 대체한다.
+      //   예전엔 업로드 시각(now) 으로 떨어져, 결제일 없는 옛 주문이 전부 '오늘 매출' 로 잡혔다.
+      _settleDate: _bgParseCsvDate(first[COL.결제일자]) || _bgDateFromOrderNo(orderNum),
     };
     // 상품/박스/스티커 분류
     //   수량 참조: 주문상품상태에 따라 분기

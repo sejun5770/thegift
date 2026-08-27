@@ -771,6 +771,89 @@ function _giftParseCsv(text) {
 }
 
 /** 시트 한 장의 문자발송 행 — {order_id, name, phone, ship_date, invoice, phone_ok, invoice_ok}. 60초 캐시. */
+/**
+ * 시트 주문번호 → 주문사이트 라벨.
+ *   시트에는 사이트 정보가 없어 사내 DB(custom_order / CUSTOM_ETC_ORDER)의 company_Seq 로 찾는다.
+ *   · SiteInfo 에 이름이 있으면 그대로 ('바른손카드'), 숫자면 formatSiteName 이 제휴사명으로 바꾼다.
+ *   · 오픈마켓(쿠팡·네이버 등) 주문번호는 13자리 이상이라 int 컬럼에 애초에 없다 → '' (화면은 '미확인').
+ *   조회 실패는 무시한다 — 사이트 표시 때문에 발송 목록 자체가 막히면 안 된다.
+ */
+async function giftResolveSites(orderIds) {
+  const map = new Map();
+  // int 범위 밖(오픈마켓 주문번호)은 IN 절에 넣으면 변환 오류가 난다 — 아예 제외.
+  const ids = [...new Set(orderIds.map(x => String(x || '').trim()))]
+    .filter(x => /^\d+$/.test(x) && Number(x) > 0 && Number(x) <= 2147483647);
+  if (!ids.length) return map;
+  try {
+    for (let i = 0; i < ids.length; i += 800) {
+      const inList = ids.slice(i, i + 800).join(',');
+      const rs = await runWithPoolRetry(p => p.request().query(`
+        SELECT 1 AS pri, CAST(co.order_seq AS VARCHAR(20)) AS oid,
+               ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR(20))) AS site
+        FROM custom_order co WITH (NOLOCK)
+        LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+        WHERE co.order_seq IN (${inList})
+        UNION ALL
+        SELECT 2, CAST(o.order_seq AS VARCHAR(20)),
+               ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR(20)))
+        FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+        LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+        WHERE o.order_seq IN (${inList})
+        ORDER BY pri`));
+      // pri 순서라 카드 주문이 먼저 — 같은 번호가 양쪽에 있으면 카드 우선.
+      for (const r of rs.recordset) {
+        if (!map.has(r.oid)) map.set(r.oid, formatSiteName(r.site) || '');
+      }
+    }
+  } catch (e) {
+    console.warn('[sms-list] 주문사이트 조회 실패 (무시):', e.message);
+  }
+
+  // 사내 DB 에 없는 주문번호는 더기프트(카페24·오픈마켓 업로드분) 일 수 있다 — bg_manual_orders 조회.
+  //   vendor_name 만으로 채널이 정해진다: NULL=매입 / '혼합'=매입 품목 포함 → 매입 / 그 외=위탁.
+  //   (대시보드의 bgPrimarySiteOf 와 같은 규칙)
+  const REST = process.env.SUPABASE_URL ? `${process.env.SUPABASE_URL}/rest/v1` : null;
+  const hdr = { apikey: process.env.SUPABASE_ANON_KEY, Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}` };
+  const remaining = () => [...new Set(orderIds.map(x => String(x || '').trim()))].filter(x => x && !map.has(x));
+  /** 한 소스에서 남은 주문번호만 찾아 map 을 채운다. 실패는 무시 (사이트 표시가 목록을 막으면 안 됨). */
+  const fill = async (label, ids, chunk, urlOf, keyOf, siteOf) => {
+    if (!ids.length || !REST) return;
+    try {
+      for (let i = 0; i < ids.length; i += chunk) {
+        const r = await fetch(urlOf(ids.slice(i, i + chunk)), { headers: hdr });
+        if (!r.ok) break;
+        for (const row of await r.json()) {
+          const k = String(keyOf(row));
+          if (!map.has(k)) map.set(k, siteOf(row));
+        }
+      }
+    } catch (e) {
+      console.warn(`[sms-list] ${label} 주문사이트 조회 실패 (무시):`, e.message);
+    }
+  };
+
+  // 더기프트 (카페24 업로드분) — vendor_name 만으로 채널이 정해진다:
+  //   NULL=매입 / '혼합'=매입 품목 포함 → 매입 / 그 외=위탁. (대시보드 bgPrimarySiteOf 와 같은 규칙)
+  await fill('더기프트', remaining(), 100,
+    ids => `${REST}/bg_manual_orders?select=order_id,vendor_name&order_id=in.(${encodeURIComponent(ids.map(x => `"${x.replace(/"/g, '')}"`).join(','))})`,
+    row => row.order_id,
+    row => { const v = String(row.vendor_name || '').trim(); return (!v || v === '혼합') ? BG_SITE_OWN : BG_SITE_VENDOR; });
+
+  // 쿠팡 — coupang_order_id 는 bigint 라 숫자 주문번호만 넘긴다.
+  await fill('쿠팡', remaining().filter(x => /^\d+$/.test(x)), 200,
+    ids => `${REST}/coupang_orders?select=coupang_order_id,is_rocket_growth&coupang_order_id=in.(${ids.join(',')})&limit=20000`,
+    row => row.coupang_order_id,
+    row => row.is_rocket_growth ? '쿠팡 로켓그로스' : '쿠팡');
+
+  // 네이버 — 시트에 적히는 값은 상품주문번호(product_order_id).
+  await fill('네이버', remaining(), 200,
+    ids => `${REST}/naver_orders?select=product_order_id,store_id&product_order_id=in.(${encodeURIComponent(ids.map(x => `"${x.replace(/"/g, '')}"`).join(','))})&limit=20000`,
+    row => row.product_order_id,
+    row => naverSiteLabel(row.store_id));
+
+  return map;
+}
+
 async function giftSmsRows(gid) {
   if (!/^\d+$/.test(String(gid))) throw new Error('gid 형식 오류');
   const cacheKey = `rows:${gid}`;
@@ -818,6 +901,8 @@ async function giftSmsRows(gid) {
       phone_ok: phoneOk, invoice_ok: invoiceOk,
     });
   }
+  const siteMap = await giftResolveSites(rows.map(r => r.order_id));
+  for (const r of rows) r.site_name = siteMap.get(r.order_id) || '';
   const result = { sheet: tab.name, kind, rows };
   _giftCacheSet(cacheKey, result);
   return result;
