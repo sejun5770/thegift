@@ -1295,6 +1295,24 @@ async function getManualOrder(orderId) {
   return (readJson(FILES.manualOrders, [])).find(r => r.order_id === orderId) || null;
 }
 
+/**
+ * vendor_name (076) 컬럼이 아직 없는 환경 폴백.
+ *   마이그레이션 전에 배포되면 PostgREST 가 42703(column does not exist) 로 거절해
+ *   업로드가 통째로 실패한다. 그 오류에 한해 컬럼을 빼고 한 번만 다시 시도한다 —
+ *   판매 주체는 못 남기지만 주문 자체는 들어간다. 마이그레이션 후에는 이 경로를 타지 않는다.
+ */
+async function _withVendorColumnFallback(payload, run) {
+  try {
+    return await run(payload);
+  } catch (e) {
+    const msg = String(e && e.message || '');
+    if (!('vendor_name' in payload) || !/vendor_name/.test(msg) || !/42703|column|does not exist|schema cache/i.test(msg)) throw e;
+    console.warn('[manual-order] vendor_name 컬럼 없음 — 마이그레이션 076 미적용. 판매 주체 없이 저장합니다.');
+    const { vendor_name, ...rest } = payload;
+    return run(rest);
+  }
+}
+
 async function createManualOrder(data) {
   const orderId = (data.order_id || '').trim();
   if (!orderId) throw new Error('order_id 필수 (실제 missing order_seq 또는 임시 ID)');
@@ -1319,10 +1337,13 @@ async function createManualOrder(data) {
     company_seq: data.company_seq || null,
     category: data.category || 'daeryepum',
     source_memo: data.source_memo || null,
+    // 판매 주체 (076) — NULL=본사(매입) / '혼합' / 위탁업체명.
+    //   빈 문자열이 들어오면 NULL 로 떨어뜨린다 (본사와 같은 취급).
+    vendor_name: (data.vendor_name && String(data.vendor_name).trim()) || null,
     created_by: data.created_by || null,
   };
 
-  if (USE_SUPABASE) return sbInsert('bg_manual_orders', payload);
+  if (USE_SUPABASE) return _withVendorColumnFallback(payload, p => sbInsert('bg_manual_orders', p));
   const list = readJson(FILES.manualOrders, []);
   if (list.some(r => r.order_id === orderId)) throw new Error('이미 존재하는 order_id');
   const local = { id: uuid(), ...payload, created_at: now(), updated_at: now() };
@@ -1490,6 +1511,17 @@ async function backfillManualOrderStubs({ category = 'daeryepum', force = false,
  *   overwrite=true 이면 기존 있는 주문의 items 를 덮어씀 + stub 도 재생성.
  *     → 옛날 파서 결과 (스티커 정보 누락 등) 를 최신 파서 결과로 갱신 가능.
  */
+/**
+ * 이 주문이 우리 주문수집(정보입력현황) 대상인가 (076).
+ *   위탁업체 주문은 우리가 스티커를 만들지도, 출고하지도 않는다 — MO- stub 을 만들면
+ *   정보입력현황에 영영 처리되지 않는 미입력 건으로 쌓인다. 그래서 stub 자체를 만들지 않는다.
+ *   '혼합'(본사+위탁 한 주문)은 본사 품목이 있으므로 만든다.
+ */
+function _needsCollectStub(data) {
+  const v = (data && data.vendor_name ? String(data.vendor_name).trim() : '');
+  return !v || v === '혼합';
+}
+
 async function bulkCreateManualOrders(orders, { dryRun = false, overwrite = false } = {}) {
   if (!Array.isArray(orders)) throw new Error('orders 는 배열이어야 합니다');
   // stickerMap 사전 로드 — 반복 호출 방지
@@ -1522,21 +1554,28 @@ async function bulkCreateManualOrders(orders, { dryRun = false, overwrite = fals
             site_name: data.site_name || '바른손더기프트',
             source_memo: data.source_memo || null,
           };
+          patch.vendor_name = (data.vendor_name && String(data.vendor_name).trim()) || null;
           await updateManualOrder(orderId, patch);
-          // 기존 stub 삭제 후 새로 생성 (sticker_selections 최신화)
+          // 기존 stub 삭제 후 새로 생성 (sticker_selections 최신화).
+          //   위탁으로 바뀐 주문은 삭제만 하고 다시 만들지 않는다.
           const stubId = `MO-${orderId}`;
           if (USE_SUPABASE) {
             try { await sbDelete('bg_order_customer_info', `order_id=eq.${encodeURIComponent(stubId)}`); } catch { /* ignore */ }
           }
-          const stubStatus = await _ensureStubForManualOrder(data, { stickerMap });
+          const stubStatus = _needsCollectStub(data)
+            ? await _ensureStubForManualOrder(data, { stickerMap })
+            : 'skipped:vendor';
           results.updated++;
           results.details.push({ index: idx, order_id: orderId, status: 'updated', stub: stubStatus });
           continue;
         }
         // 기본 (overwrite=false): 기존 유지, stub 만 backfill.
         let stubStatus = 'exists';
-        try { stubStatus = await _ensureStubForManualOrder({ ...existing, _desired_ship_date: data._desired_ship_date, _customer_request: data._customer_request }, { stickerMap }); }
-        catch (e) { stubStatus = 'error'; }
+        if (!_needsCollectStub(existing) || !_needsCollectStub(data)) stubStatus = 'skipped:vendor';
+        else {
+          try { stubStatus = await _ensureStubForManualOrder({ ...existing, _desired_ship_date: data._desired_ship_date, _customer_request: data._customer_request }, { stickerMap }); }
+          catch (e) { stubStatus = 'error'; }
+        }
         results.skipped++;
         results.details.push({ index: idx, order_id: orderId, status: 'skipped', reason: '이미 존재', stub: stubStatus });
         continue;
@@ -1548,7 +1587,10 @@ async function bulkCreateManualOrders(orders, { dryRun = false, overwrite = fals
       }
       await createManualOrder(data);
       // stub 저장 — 헬퍼 재사용 (실패해도 manual_order 는 유지).
-      const stubStatus = await _ensureStubForManualOrder(data, { stickerMap });
+      //   위탁 주문은 주문수집 대상이 아니라 stub 을 만들지 않는다 (076).
+      const stubStatus = _needsCollectStub(data)
+        ? await _ensureStubForManualOrder(data, { stickerMap })
+        : 'skipped:vendor';
       results.success++;
       results.details.push({ index: idx, order_id: orderId, status: 'created', stub: stubStatus });
     } catch (e) {
@@ -1567,6 +1609,7 @@ async function updateManualOrder(orderId, data) {
     'recv_name', 'recv_hphone', 'recv_address', 'recv_zip', 'recv_msg',
     'order_date', 'settle_price', 'settle_method', 'status_seq',
     'items', 'site_name', 'company_seq', 'category', 'source_memo',
+    'vendor_name',
   ];
   for (const k of allowed) { if (k in data) patch[k] = data[k]; }
   if ('settle_price' in patch) patch.settle_price = Math.max(0, parseInt(patch.settle_price, 10) || 0);
@@ -1574,7 +1617,7 @@ async function updateManualOrder(orderId, data) {
   if ('items' in patch && !Array.isArray(patch.items)) patch.items = [];
   patch.updated_at = now();
 
-  if (USE_SUPABASE) return sbUpdate('bg_manual_orders', `order_id=eq.${encodeURIComponent(orderId)}`, patch);
+  if (USE_SUPABASE) return _withVendorColumnFallback(patch, p => sbUpdate('bg_manual_orders', `order_id=eq.${encodeURIComponent(orderId)}`, p));
   const list = readJson(FILES.manualOrders, []);
   const idx = list.findIndex(r => r.order_id === orderId);
   if (idx < 0) throw new Error('주문을 찾을 수 없습니다');

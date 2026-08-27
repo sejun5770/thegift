@@ -1499,6 +1499,15 @@ nav.nav-loading a[href^="#"] {
     <button class="cat-tab" data-cat="flower" onclick="switchCategory('flower')">꽃다발</button>
     <button class="cat-tab" data-cat="bhands_gift" onclick="switchCategory('bhands_gift')" title="API 미연동 채널 — CSV 업로드로 수동 등록">답례품_더기프트</button>
   </div>
+  <!-- 매입/위탁 서브탭 — 답례품_더기프트 전용 (076).
+       업로드 파일 하나에 본사(매입) 와 위탁업체 주문이 함께 들어 있어 여기서 갈라 본다. -->
+  <div id="ord-bg-vendor-tabs" style="display:none;gap:6px;margin:-8px 0 14px 0;align-items:center;flex-wrap:wrap">
+    <button class="btn bg-vtab" data-v="all" onclick="setBgVendorTab('all')" style="padding:4px 12px;font-size:12px">전체 <span class="bg-vtab-n"></span></button>
+    <button class="btn bg-vtab" data-v="own" onclick="setBgVendorTab('own')" style="padding:4px 12px;font-size:12px">🏢 매입 <span class="bg-vtab-n"></span></button>
+    <button class="btn bg-vtab" data-v="consign" onclick="setBgVendorTab('consign')" style="padding:4px 12px;font-size:12px">🤝 위탁 <span class="bg-vtab-n"></span></button>
+    <span style="font-size:11px;color:var(--gray-500)">위탁 주문은 주문수집(정보입력현황) 대상이 아닙니다</span>
+  </div>
+
   <!-- 필터바: 날짜/검색/조회 + 표시 필터 통합 -->
   <div class="toolbar" style="gap:12px">
     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;flex:1;min-width:0">
@@ -3838,7 +3847,9 @@ nav.nav-loading a[href^="#"] {
       <!-- 안내 -->
       <div style="padding:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:12px;color:#1e40af;line-height:1.6">
         <b>사용법</b>: 퍼스트몰 원본 <b>Excel(.xlsx)</b> 또는 스프레드시트 <b>CSV</b> 업로드.<br>
-        · <b>본사</b> 필터 (B열), 주문번호 (D열) 그룹핑, 상품/박스/스티커 자동 분류<br>
+        · 판매자 (B열) 로 <b>매입(본사)</b> / <b>위탁업체</b> 자동 구분 — 파일 하나로 양쪽 모두 등록<br>
+        · 위탁 주문은 <b>정보입력현황(주문수집)에 올라가지 않고</b> 매출·대시보드에만 반영됩니다<br>
+        · 주문번호 (D열) 그룹핑, 상품/박스/스티커 자동 분류<br>
         · 품목코드1/2, 박스컬러 자동 결정 (핸드워시/주방세제/수건 세트 로직)<br>
         · 결제일자 컬럼은 헤더에서 자동 감지<br>
         · 미리보기 검증 후 [등록] 버튼으로 저장 (중복 order_id 는 자동 skip)
@@ -3861,6 +3872,7 @@ nav.nav-loading a[href^="#"] {
           <thead style="position:sticky;top:0;background:var(--gray-50);z-index:1">
             <tr>
               <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);white-space:nowrap">상태</th>
+              <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);white-space:nowrap">판매자</th>
               <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);white-space:nowrap">주문번호</th>
               <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);white-space:nowrap">주문자</th>
               <th style="padding:8px 10px;text-align:left;border-bottom:1px solid var(--gray-200);white-space:nowrap">연락처</th>
@@ -4566,6 +4578,8 @@ const ALL_COLS = [
   {key:'recv_msg',label:'배송메세지',default:true},
   {key:'card_name',label:'상품명',default:true},
   {key:'card_code',label:'상품코드',default:false},
+  // 판매 주체 (076) — 더기프트 업로드 파일의 판매자(B열). 본사 건은 값이 비어 있다.
+  {key:'vendor_name',label:'판매자(위탁)',default:false},
   // 쿠팡 원본 코드 (057) 는 컬럼에서 뺐다 — 평소 보는 값이 아니다.
   //   응답(channel_product_code / channel_option_id)에는 그대로 실려 오고,
   //   등록이 필요할 때만 '쿠팡 미매핑' 배지 → 목록 모달에서 본다.
@@ -4879,6 +4893,11 @@ function switchCategory(cat) {
   if (cfBtn) cfBtn.style.display = showMarketplaceSync ? '' : 'none';
   if (csvBtn) csvBtn.style.display = showCsvUpload ? '' : 'none';
   if (bhgBackfillBtn) bhgBackfillBtn.style.display = showCsvUpload ? '' : 'none';
+  // 매입/위탁 서브탭 — 더기프트에서만. 들어올 때마다 '전체' 로 되돌린다
+  //   (위탁만 보다 다른 카테고리를 거쳐 돌아오면 목록이 비어 보여 오해한다).
+  const vTabs = document.getElementById('ord-bg-vendor-tabs');
+  if (vTabs) vTabs.style.display = showCsvUpload ? 'flex' : 'none';
+  if (showCsvUpload) setBgVendorTab('all');
   // 주문사이트 필터 — 답례품 카테고리 (여러 채널 UNION) 에서만 노출.
   //   데코/꽃다발은 채널 단일이라 불필요, 더기프트는 MANUAL 만이라 불필요.
   //   구역(details) 째로 감춘다. 안쪽 #ord-site-filter 는 display 를 건드리지 않는다 —
@@ -5124,8 +5143,49 @@ function _ordRenderDriftBar() {
 function getFilteredOrders() {
   const driftOnly = document.getElementById('ord-drift-only')?.checked;
   const _pre = _getFilteredOrdersInner();
-  return driftOnly ? _pre.filter(r => _ordDrift[String(r.order_seq)]) : _pre;
+  const base = driftOnly ? _pre.filter(r => _ordDrift[String(r.order_seq)]) : _pre;
+  // 더기프트 매입/위탁 서브탭 (076) — 여기서 걸러야 목록과 체크박스 선택이 같은 배열을 본다.
+  //   (getSelectedRows 가 화면 index 로 이 배열을 되짚는다 — 따로 거르면 엉뚱한 주문이 잡힌다.)
+  if (currentCategory !== 'bhands_gift') return base;
+  _bgVendorTabCounts(base);   // 건수는 탭 적용 전 기준 — 탭을 옮겨도 숫자가 흔들리지 않는다
+  if (_bgVendorTab === 'own') return base.filter(r => !_isBgVendorRow(r));
+  if (_bgVendorTab === 'consign') return base.filter(_isBgVendorRow);
+  return base;
 }
+// 더기프트 매입/위탁 서브탭 상태 (076) — 'all' | 'own' | 'consign'
+let _bgVendorTab = 'all';
+function setBgVendorTab(v) {
+  _bgVendorTab = v;
+  document.querySelectorAll('#ord-bg-vendor-tabs .bg-vtab').forEach(b => {
+    const on = b.dataset.v === v;
+    b.style.background = on ? '#1e40af' : '';
+    b.style.color = on ? '#fff' : '';
+    b.style.borderColor = on ? '#1e40af' : '';
+  });
+  renderOrderTable();
+}
+/** 주문 행이 위탁(업체 판매)인가 — '혼합'도 위탁 쪽으로 센다. */
+const _isBgVendorRow = o => !!(o && o.vendor_name);
+/** 주문번호 앞 판매자 배지 — 위탁 건만 표시한다 (본사 건에 배지를 달면 목록이 시끄럽다). */
+function _bgVendorBadge(r) {
+  if (!r || !r.vendor_name) return '';
+  const mixed = r.vendor_name === '혼합';
+  return `<span title="${esc(mixed ? '본사 품목과 위탁 품목이 한 주문에 섞여 있습니다' : '위탁업체 판매 — 주문수집 대상 아님')}"`
+    + ` style="display:inline-block;margin-right:4px;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600;`
+    + `background:${mixed ? '#fef3c7' : '#ede9fe'};color:${mixed ? '#92400e' : '#5b21b6'}">${esc(r.vendor_name)}</span>`;
+}
+/** 서브탭 건수 갱신 — 주문(=order_seq) 단위로 센다. 행 단위로 세면 품목 수만큼 부풀려진다. */
+function _bgVendorTabCounts(rows) {
+  const own = new Set(), con = new Set();
+  (rows || []).forEach(o => (_isBgVendorRow(o) ? con : own).add(o.order_seq));
+  const el = document.getElementById('ord-bg-vendor-tabs');
+  if (!el) return;
+  const ns = el.querySelectorAll('.bg-vtab .bg-vtab-n');
+  if (ns[0]) ns[0].textContent = `(${own.size + con.size})`;
+  if (ns[1]) ns[1].textContent = `(${own.size})`;
+  if (ns[2]) ns[2].textContent = `(${con.size})`;
+}
+
 function _getFilteredOrdersInner() {
   const q = (document.getElementById('ord-code-search')?.value || '').trim().toLowerCase();
   const excludeCancel = isExcludeCancel();
@@ -5208,7 +5268,7 @@ function renderOrderTable() {
     return `<tr class="${cls}" style="cursor:pointer" onclick="_onOrderRowClick(${i}, event)">` +
       `<td><input type="checkbox" class="row-check" data-idx="${i}" onchange="updateSelectedCount()" onclick="event.stopPropagation()"></td>` +
       actionCell +
-      cols.map(c => `<td class="${c.num?'num':''}">${c.key === 'order_seq' ? _ordDriftBadge(r) + (r[c.key] ?? '') : (r[c.key] ?? '')}</td>`).join('') +
+      cols.map(c => `<td class="${c.num?'num':''}">${c.key === 'order_seq' ? _ordDriftBadge(r) + _bgVendorBadge(r) + (r[c.key] ?? '') : (r[c.key] ?? '')}</td>`).join('') +
       `</tr>`;
   }).join('');
   document.getElementById('order-count').textContent = filtered.length;
@@ -7042,7 +7102,11 @@ async function loadProductRanking() {
     const GROUPS = [{ key: 'own', title: '🏢 자사 (바른손카드 · 바른손몰)', color: '#3b82f6' }];
     // 판매가 있을 때만 섹션을 만든다 — 마켓 채널과 같은 규칙. 늘 비어 있으면 표만 길어진다.
     if (allProducts.some(p => p.scope === 'own:thegift')) {
-      GROUPS.push({ key: 'own:thegift', title: '🎁 더기프트', color: '#8b5cf6' });
+      GROUPS.push({ key: 'own:thegift', title: '🎁 더기프트(매입)', color: '#8b5cf6' });
+    }
+    // 위탁은 우리가 제작·출고하지 않는 매출 — 매입과 같은 표에 두면 자체 제작분이 부풀려 보인다 (076)
+    if (allProducts.some(p => p.scope === 'own:thegift_vendor')) {
+      GROUPS.push({ key: 'own:thegift_vendor', title: '🤝 더기프트(위탁)', color: '#7c3aed' });
     }
     // 데이터에 실제로 존재하는 마켓 채널만 섹션 추가 (매출/판매 없는 채널 제외)
     [...new Set(allProducts.map(p => p.scope).filter(s => String(s || '').startsWith('market:')))]
@@ -12513,7 +12577,8 @@ function renderDailyTable(data, topProducts) {
       const score = g => {
         if (g === '바른손몰') return 1;
         if (g === '바른손카드' || g === '바른손M카드') return 2;
-        if (g === '바른손더기프트') return 3;
+        if (g === '바른손더기프트' || g === '더기프트(매입)') return 3;
+        if (g === '더기프트(위탁)') return 3.5;   // 매입 바로 뒤 (076)
         if (g === '쿠팡') return 4;
         if (g === '쿠팡 로켓그로스') return 5;
         if (g.startsWith('네이버(바른손')) return 6;   // 네이버(바른손카드) 등
@@ -12884,7 +12949,8 @@ function renderWeeklyTable(data, topProducts) {
       const score = g => {
         if (g === '바른손몰') return 1;
         if (g === '바른손카드' || g === '바른손M카드') return 2;
-        if (g === '바른손더기프트') return 3;
+        if (g === '바른손더기프트' || g === '더기프트(매입)') return 3;
+        if (g === '더기프트(위탁)') return 3.5;   // 매입 바로 뒤 (076)
         if (g === '쿠팡') return 4;
         if (g === '쿠팡 로켓그로스') return 5;
         if (g.startsWith('네이버(바른손')) return 6;   // 네이버(바른손카드) 등
@@ -20934,7 +21000,10 @@ async function loadBgUnified() {
         throw new Error(`주문 조회 실패 (${c}, HTTP ${r.status})${why ? ' — ' + why : ''}`);
       }
       const v = await r.json();
-      return Array.isArray(v) ? v : [];
+      const list = Array.isArray(v) ? v : [];
+      // 위탁업체 주문은 우리가 수집/제작하지 않는다 — 정보입력현황에서 통째로 뺀다 (076).
+      //   '혼합'(본사+위탁 한 주문) 은 본사 품목이 있으므로 남긴다.
+      return list.filter(o => !o.vendor_name || o.vendor_name === '혼합');
     };
     // 사고건은 주문 조회와 독립이라 실패해도 화면이 죽지 않게 따로 띄운다 (탭 카운트/목록용).
     loadIncidents();
@@ -24470,6 +24539,25 @@ const BG_CSV_COL = {
   취소수량: 19,   // T열 — 반품/취소 수량. 수량·금액에서 차감.
 };
 
+// 판매자(B열) 정규화 — 빈 값은 '본사' 로 본다 (구버전 파일에 판매자 열이 비어 오는 경우).
+const BG_OWN_SELLER = '본사';
+function _bgSellerOf(row) {
+  const v = (row[BG_CSV_COL.판매자] || '').toString().trim();
+  return v || BG_OWN_SELLER;
+}
+/**
+ * 한 주문(행 묶음)의 판매 주체 판정 (076).
+ *   전부 본사 → null (매입) / 전부 같은 업체 → 업체명 / 섞임 → '혼합'
+ *   '혼합' 은 본사 품목이 있으므로 주문수집(정보입력현황) 대상으로 남긴다.
+ */
+function _bgVendorOfGroup(group) {
+  const sellers = [...new Set(group.map(_bgSellerOf))];
+  const others = sellers.filter(v => v !== BG_OWN_SELLER);
+  if (!others.length) return null;
+  if (others.length === 1 && sellers.length === 1) return others[0];
+  return '혼합';
+}
+
 // CSV 결제일자 파싱 — 다양한 형식 허용.
 //   지원: 'YYYY-MM-DD', 'YYYY/MM/DD', 'YYYY.MM.DD', 'YYYY-MM-DD HH:mm:ss',
 //         'YYYYMMDD', 'YYYY MM DD' 등. 유효하지 않으면 null.
@@ -24643,13 +24731,19 @@ function _bgCsvBuildOrders(rows) {
     console.log(`[CSV] 결제일자 컬럼 자동 감지 — index ${settleDateIdx} (헤더: "${header[settleDateIdx]}")`);
   }
   const dataRows = rows.slice(1); // 첫 행은 header
-  // "본사" 필터
-  const filtered = dataRows.filter(r => (r[BG_CSV_COL.판매자] || '').toString().trim() === '본사');
+  // 판매자(B열) — '본사'(매입) 와 위탁업체명이 한 파일에 섞여 온다.
+  //   예전에는 '본사' 행만 남기고 나머지를 버려서 위탁 매출이 통째로 빠졌다.
+  //   이제 전부 받아 주문 단위로 판매 주체를 판정한다 (076).
+  const filtered = dataRows.filter(r => (r[BG_CSV_COL.주문번호] || '').toString().trim());
+  const sellerCount = new Map();   // 판매자별 행 수 (요약 배지용)
+  filtered.forEach(r => {
+    const sel = _bgSellerOf(r);
+    sellerCount.set(sel, (sellerCount.get(sel) || 0) + 1);
+  });
   // 주문번호별 그룹핑
   const groups = new Map();
   filtered.forEach(r => {
     const key = (r[BG_CSV_COL.주문번호] || '').toString().trim();
-    if (!key) return;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(r);
   });
@@ -24709,6 +24803,9 @@ function _bgCsvBuildOrders(rows) {
         itemAmount,
         inputMsg: (r[BG_CSV_COL.추가입력옵션] || '').toString(),
         originalIndex: rowIndex,
+        // 행별 판매자 (076) — 한 주문에 본사·위탁이 섞이면 품목 단위로 갈라야
+        //   대시보드 매입/위탁 매출이 정확해진다.
+        seller: _bgSellerOf(r),
       });
     });
     const products = items.filter(i => i.type === 'product');
@@ -24752,6 +24849,9 @@ function _bgCsvBuildOrders(rows) {
         unit_price: product.quantity > 0 ? Math.round((product.itemAmount || 0) / product.quantity) : 0,  // 참조용 (item_amount 우선)
         stickers: cleanedStickers,
         sticker_note: product.inputMsg || '',
+        // 판매 주체 (076) — 본사면 null, 위탁이면 업체명.
+        //   주문 단위 vendor_name 이 '혼합'일 때 대시보드가 이 값으로 매출을 가른다.
+        vendor: (product.seller && product.seller !== BG_OWN_SELLER) ? product.seller : null,
       };
     });
     // 주문 전체 결제금액 = 상품별 판매금액 SUM (스티커/박스 제외 — items 안에는 이미 product 만)
@@ -24773,6 +24873,9 @@ function _bgCsvBuildOrders(rows) {
       site_name: '바른손더기프트',
       category: 'daeryepum',
       source_memo: 'CSV 업로드 (바른손더기프트)',
+      // 판매 주체 (076) — null=본사(매입) / '혼합' / 위탁업체명
+      vendor_name: _bgVendorOfGroup(group),
+      _sellers: [...new Set(group.map(_bgSellerOf))],
       _desired_ship_date: baseInfo._shipDate,
       // 고객 요청사항은 CS/관리자 전용 영역 — CSV 의 추가입력옵션(K열, 스티커 문구)은
       //   items[i].sticker_note → sticker_selections[i].custom_values.text 로만 저장하고
@@ -24780,7 +24883,7 @@ function _bgCsvBuildOrders(rows) {
       _customer_request: null,
     });
   }
-  return { orders, filteredCount: filtered.length, totalCount: dataRows.length };
+  return { orders, filteredCount: filtered.length, totalCount: dataRows.length, sellerCount: [...sellerCount.entries()].sort((a, b) => b[1] - a[1]) };
 }
 
 // 파싱 결과 상태 저장
@@ -24861,15 +24964,23 @@ function _bgCsvRender(parsed) {
   const empty = document.getElementById('bg-csv-empty');
   const tbody = document.getElementById('bg-csv-preview-tbody');
   if (!parsed.orders.length) {
-    empty.style.display = 'block'; empty.textContent = 'CSV 안에 "본사" 필터 통과 주문이 없습니다.';
+    empty.style.display = 'block'; empty.textContent = 'CSV 안에 등록할 주문이 없습니다 (주문번호 열이 비어 있는지 확인해 주세요).';
     wrap.style.display = 'none'; summary.style.display = 'none';
     return;
   }
   const totalAmount = parsed.orders.reduce((s, o) => s + (Number(o.settle_price) || 0), 0);
+  // 판매 주체별 건수 (076) — 매입(본사) / 위탁(업체명·혼합)
+  const ownCnt = parsed.orders.filter(o => !o.vendor_name).length;
+  const mixedCnt = parsed.orders.filter(o => o.vendor_name === '혼합').length;
+  const vendorCnt = parsed.orders.length - ownCnt;
+  const vendorTitle = (parsed.sellerCount || [])
+    .filter(([name]) => name !== '본사')
+    .map(([name, n]) => `${name} ${n}행`).join(' · ') || '위탁 행 없음';
   summary.style.display = 'flex';
   summary.innerHTML = `
     <span style="padding:4px 10px;background:#e0e7ff;color:#4338ca;border-radius:4px;font-weight:600">전체 ${parsed.totalCount}행</span>
-    <span style="padding:4px 10px;background:#dcfce7;color:#166534;border-radius:4px;font-weight:600">본사 ${parsed.filteredCount}행</span>
+    <span style="padding:4px 10px;background:#dcfce7;color:#166534;border-radius:4px;font-weight:600" title="판매자 = 본사">🏢 매입 ${ownCnt}건</span>
+    <span style="padding:4px 10px;background:#ede9fe;color:#5b21b6;border-radius:4px;font-weight:600" title="${esc(vendorTitle)}">🤝 위탁 ${vendorCnt}건${mixedCnt ? ` (혼합 ${mixedCnt})` : ''}</span>
     <span style="padding:4px 10px;background:#fef3c7;color:#92400e;border-radius:4px;font-weight:600">📦 주문 ${parsed.orders.length}건</span>
     <span style="padding:4px 10px;background:#f1f5f9;color:#0f172a;border-radius:4px;font-weight:600" title="상품별 판매금액 SUM">💰 합계 ${fmtNum(totalAmount)}원</span>
   `;
@@ -24879,6 +24990,9 @@ function _bgCsvRender(parsed) {
       const stickersLabel = (it.stickers || []).map(s => `${s.code}(${s.qty})`).join(' / ') || '-';
       rowsHtml.push(`<tr>
         <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100)"><span style="background:#dbeafe;color:#1e40af;font-size:10px;font-weight:600;padding:1px 6px;border-radius:3px">대기</span></td>
+        <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);white-space:nowrap">${idx === 0 ? (o.vendor_name
+          ? `<span style="background:#ede9fe;color:#5b21b6;font-size:10px;font-weight:600;padding:1px 6px;border-radius:3px">${esc(o.vendor_name)}</span>`
+          : `<span style="background:#dcfce7;color:#166534;font-size:10px;font-weight:600;padding:1px 6px;border-radius:3px">본사</span>`) : ''}</td>
         <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100);font-family:monospace">${idx === 0 ? esc(o.order_id) : ''}</td>
         <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100)">${idx === 0 ? esc(o.order_name) : ''}</td>
         <td style="padding:6px 10px;border-bottom:1px solid var(--gray-100)">${idx === 0 ? esc(o.order_hphone || '-') : ''}</td>

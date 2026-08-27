@@ -665,6 +665,25 @@ const CATEGORY_FILTERS = {
   // 바른손더기프트 — API 미연동 채널. MSSQL 조회 결과 없음 (bg_manual_orders 만 UNION).
   bhands_gift: { label: '바른손더기프트', filter: `1 = 0` },
 };
+// ── 더기프트(수동 등록) 판매 주체 라벨 (076) ──────────────────
+//   업로드 파일 하나에 본사(매입) 와 위탁업체 주문이 섞여 온다. 대시보드/상품별 매출은
+//   두 채널을 나눠 봐야 한다 — 위탁은 우리가 만들지 않고 수수료만 남는 매출이라
+//   같은 줄에 합치면 마진·작업량 해석이 어긋난다.
+//   주문 단위 vendor_name 이 '혼합'(본사+위탁 한 주문)이면 품목의 vendor 로 가른다.
+const BG_SITE_OWN = '더기프트(매입)';
+const BG_SITE_VENDOR = '더기프트(위탁)';
+/** 이 품목이 위탁 판매분인가. it 이 없으면 주문 단위로만 판정한다. */
+function bgIsVendorItem(mo, it) {
+  const v = mo && mo.vendor_name ? String(mo.vendor_name).trim() : '';
+  if (!v) return false;                       // 본사 주문
+  if (v !== '혼합') return true;              // 위탁 단독 주문
+  return !!(it && it.vendor);                 // 혼합 — 품목이 결정한다
+}
+/** 대시보드에 쓸 채널명. */
+function bgSiteOf(mo, it) {
+  return bgIsVendorItem(mo, it) ? BG_SITE_VENDOR : BG_SITE_OWN;
+}
+
 // 모듈 레벨 D01_FILTER — 위탁답례품 포함 답례품 기본 필터로 alias
 const D01_FILTER = DAERYEPUM_FILTER_SQL;
 
@@ -1384,7 +1403,7 @@ async function apiOrders(query) {
               status_label: ({ 4: '결제확인', 3: '취소', 5: '환불', 15: '반품완료' })[mo.status_seq] || '결제확인',
               settle_method: mo.settle_method || null,
               wedding_date: null,
-              site_name: mo.site_name || '바른손더기프트',
+              site_name: bgSiteOf(mo, it),   // 매입/위탁 구분 (076)
               file_count: 0,
               // items 1건당 1행으로 보이게 delivery_seq 를 순번으로 부여 (2026-08-06).
               //   프론트는 (order_seq, delivery_seq) 복합키로 행을 나눈다. 전에는 전부 1 이라
@@ -1395,6 +1414,11 @@ async function apiOrders(query) {
               source: 'manual',
               manual_order_id: mo.order_id,
               manual_source_memo: mo.source_memo || null,
+              // 판매 주체 (076) — null=본사(매입) / '혼합' / 위탁업체명.
+              //   주문조회 매입·위탁 탭과 정보입력현황 제외 판정이 이 값을 쓴다.
+              //   컬럼이 아직 없는 환경(마이그레이션 전)에서는 undefined → null 로 떨어져
+              //   전부 본사로 보이므로 기존 동작 그대로다.
+              vendor_name: mo.vendor_name || null,
               display_name: mo.recv_name || mo.order_name || '',
             });
           });
@@ -1687,7 +1711,8 @@ async function apiProductStats(query) {
           if (!(st >= 2 && ![3, 5, 15].includes(st))) continue;
           for (const it of (Array.isArray(mo.items) ? mo.items : [])) {
             const q = Number(it.quantity) || 0;
-            push(it.product_code, it.product_name, mo.order_date, `MO:${mo.order_id}`, q, Number(it.item_amount) || (Number(it.unit_price) || 0) * q);
+            push(it.product_code, it.product_name, mo.order_date, `MO:${mo.order_id}`, q,
+              Number(it.item_amount) || (Number(it.unit_price) || 0) * q, bgSiteOf(mo, it));
           }
         }
       } catch (err) { console.warn('[product-stats] 더기프트 병합 실패 (무시):', err.message); }
@@ -2283,7 +2308,12 @@ async function apiProductRanking(query = {}) {
           : { site_name: '더기프트', match_type: 'name', match_value: it.product_name, label: it.product_name };
         // 더기프트는 소스가 따로라(bg_manual_orders) 섹션도 나눈다 — 바른손카드와 섞이면
         //   어느 채널에서 팔린 건지 구분이 안 된다 (운영 요청 2026-08-12).
-        addEntry(gName || it.product_name, qty, amt, '더기프트', 'own:thegift', mSpec);
+        //   매입/위탁도 갈라 본다 (076) — 위탁은 우리가 만들지 않는 매출이라 같은 줄에 두면
+        //   상품별 판매현황에서 자체 제작분이 부풀려 보인다.
+        const isVen = bgIsVendorItem(mo, it);
+        addEntry(gName || it.product_name, qty, amt,
+          isVen ? BG_SITE_VENDOR : BG_SITE_OWN,
+          isVen ? 'own:thegift_vendor' : 'own:thegift', mSpec);
       }
     }
   } catch (e) {
@@ -3374,26 +3404,34 @@ async function apiDashboardComparison(query = {}) {
         return st >= 2 && ![3, 5, 15].includes(st);
       });
       if (validOrders.length) {
-        let amount = 0, qty = 0;
+        // 매입/위탁을 각각의 채널 행으로 나눈다 (076).
+        //   혼합 주문은 품목 단위로 갈리므로 주문 수는 '그 채널 품목이 하나라도 있는 주문' 으로 센다
+        //   — 양쪽에 1건씩 잡히지만, 합계(total_amount)는 품목 금액이라 이중계상이 없다.
+        const agg = new Map();   // 채널 → {amount, qty, orders:Set}
         for (const mo of validOrders) {
-          const items = Array.isArray(mo.items) ? mo.items : [];
-          for (const it of items) {
+          for (const it of (Array.isArray(mo.items) ? mo.items : [])) {
+            const label = bgSiteOf(mo, it);
+            const cur = agg.get(label) || { amount: 0, qty: 0, orders: new Set() };
             const q = Number(it.quantity) || 0;
-            const a = Number(it.item_amount) || (Number(it.unit_price) || 0) * q;
-            amount += a;
-            qty += q;
+            cur.amount += Number(it.item_amount) || (Number(it.unit_price) || 0) * q;
+            cur.qty += q;
+            cur.orders.add(mo.order_id);
+            agg.set(label, cur);
           }
         }
-        const site = ensureSite('바른손더기프트');
-        site.order_count += validOrders.length;
-        site.total_amount += amount;
-        site.total_qty += qty;
-        site.standalone.amount += amount;
-        site.standalone.orders += validOrders.length;
-        site.standalone.qty += qty;
-        standalone_amount += amount;
-        standalone_orders += validOrders.length;
-        standalone_qty += qty;
+        for (const [label, v] of agg) {
+          const orders = v.orders.size;
+          const site = ensureSite(label);
+          site.order_count += orders;
+          site.total_amount += v.amount;
+          site.total_qty += v.qty;
+          site.standalone.amount += v.amount;
+          site.standalone.orders += orders;
+          site.standalone.qty += v.qty;
+          standalone_amount += v.amount;
+          standalone_orders += orders;
+          standalone_qty += v.qty;
+        }
       }
     } catch (e) {
       console.warn('[getPeriodTotal] 바른손더기프트 머지 실패 (무시):', e.message);
@@ -3796,7 +3834,7 @@ async function apiDashboardSummary(query) {
         endDate: bgEndIncl,
       });
       if (manualOrders && manualOrders.length) {
-        const SITE_LABEL = '바른손더기프트';
+        // 매입/위탁을 각각의 채널 행으로 (076)
         const ORDER_TYPE_LABEL = '단독주문';
         // status_seq 필터 — MSSQL 결제완료 상태 기준 (3=취소, 5=환불, 15=반품완료 제외)
         const isValid = mo => {
@@ -3816,7 +3854,7 @@ async function apiDashboardSummary(query) {
               card_name: cleanName(it.product_name || ''),
               card_code: it.product_code || '',
               order_day: day,
-              site_name: SITE_LABEL,
+              site_name: bgSiteOf(mo, it),
               order_type: ORDER_TYPE_LABEL,
               order_count: 1,
               total_qty: qty,
@@ -3825,13 +3863,19 @@ async function apiDashboardSummary(query) {
           }
         }
         // orderCounts 일별 sum (order_id 중복 제거)
+        //   혼합 주문은 채널마다 1건씩 잡는다 — 주문 건수는 채널별로 세는 값이라
+        //   양쪽에 한 번씩 들어가는 편이 '그 채널에 주문이 있었다' 는 사실에 맞다.
         const dayCountMap = new Map();
         for (const mo of validOrders) {
           const day = (mo.order_date || '').toString().slice(0, 10);
           if (!day) continue;
-          const key = `${day}|${SITE_LABEL}|${ORDER_TYPE_LABEL}`;
-          if (!dayCountMap.has(key)) dayCountMap.set(key, { order_day: day, site_name: SITE_LABEL, order_type: ORDER_TYPE_LABEL, distinct_order_count: 0 });
-          dayCountMap.get(key).distinct_order_count++;
+          const labels = new Set((Array.isArray(mo.items) ? mo.items : []).map(it => bgSiteOf(mo, it)));
+          if (!labels.size) labels.add(bgSiteOf(mo, null));
+          for (const label of labels) {
+            const key = `${day}|${label}|${ORDER_TYPE_LABEL}`;
+            if (!dayCountMap.has(key)) dayCountMap.set(key, { order_day: day, site_name: label, order_type: ORDER_TYPE_LABEL, distinct_order_count: 0 });
+            dayCountMap.get(key).distinct_order_count++;
+          }
         }
         orderCounts.push(...dayCountMap.values());
       }
