@@ -24778,7 +24778,9 @@ function _smsTplPreview() {
   const pv = document.getElementById('sms-tpl-preview');
   if (pv) pv.textContent = text;
   // 80바이트 초과면 LMS/MMS 로 나간다 (문자 API 가 자동 판별) — 비용/형식이 달라 알려준다.
-  const bytes = new TextEncoder().encode(text).length;
+  //   문자 표준 계산: ASCII 1바이트 · 그 외(한글 등) 2바이트 (LMS-SEND-API.md 2-3).
+  //   UTF-8(TextEncoder)로 세면 한글이 3바이트라 실제보다 크게 나와 단문을 장문으로 오판한다.
+  const bytes = [...text].reduce((n, ch) => n + (ch.codePointAt(0) < 128 ? 1 : 2), 0);
   const el = document.getElementById('sms-tpl-bytes');
   if (el) el.textContent = `${text.length}자 · ${bytes}바이트 — ${bytes > 80 ? '장문(LMS/MMS)으로 발송' : '단문(SMS)으로 발송'}`;
 }
