@@ -2002,12 +2002,52 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
   // ============================================
   // 💬 출고완료 안내 문자 발송 (문자발송 탭)
-  //   메시지 API 는 사내 퍼블릭 게이트웨이 — 주소는 환경변수로 받는다 (하드코딩 금지).
-  //   body 형식 (운영 확인 2026-08-27):
-  //     { recipientNum, message, callback, salesGubun, purpose }
+  //   PublicApi LMS 발송 API (LMS-SEND-API.md, 2026-07-30 구현):
+  //     POST {base}/api/Lms/send + Bearer JWT
+  //     인증: POST /api/Partner/authenticate (clientId/clientSecret — 알림톡과 공유, 'kakaotalk')
+  //   응답의 성공은 '발송 접수'다 — 실발송·결과 처리는 KTRCS Worker 몫.
+  //   본문이 80바이트를 넘으면(우리 안내문은 항상 넘는다) API 가 알아서 MMS/RCS 로 보낸다.
+  //   비운영 환경은 서버측 allowlist 가드가 있어 고객 실발송이 차단된다.
   // ============================================
   const SMS_TEMPLATE_CODE = 'SMS_출고완료안내';
-  const SMS_API_URL = process.env.BARUN_SMS_API_URL || '';
+
+  function _smsConfig() {
+    // 알림톡(Partner) 과 같은 인증을 쓴다 — 이미 배포에 있는 env 를 우선 재사용.
+    const base = (process.env.BARUN_SMS_API_BASE || process.env.BIZTALK_API_URL || 'https://api.barunsoncard.com').replace(/\/$/, '');
+    const clientId = process.env.BARUN_SMS_CLIENT_ID || process.env.PARTNER_CLIENT_ID || 'kakaotalk';
+    const clientSecret = process.env.BARUN_SMS_CLIENT_SECRET || process.env.PARTNER_CLIENT_SECRET || '';
+    if (!clientSecret) return null;
+    return {
+      base, clientId, clientSecret,
+      sendUrl: process.env.BARUN_SMS_API_URL || `${base}/api/Lms/send`,
+      // v1 은 발신번호 1661-2646 전용 (RCS BrandKey 종속 — 문서 2-8). 다른 번호는 비정상 경로.
+      callback: process.env.BARUN_SMS_CALLBACK || '1661-2646',
+      salesGubun: process.env.BARUN_SMS_SALES_GUBUN || 'SD',
+      purpose: process.env.BARUN_SMS_PURPOSE || 'order-notice',
+    };
+  }
+
+  // Partner JWT 캐시 — access 1시간 / refresh 7일 (알림톡 모듈과 동일 응답 형식: token/expires/refreshToken)
+  if (!global._smsTokenCache) global._smsTokenCache = null;
+  async function _smsAuth(cfg) {
+    const res = await fetch(`${cfg.base}/api/Partner/authenticate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId: cfg.clientId, clientSecret: cfg.clientSecret }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) throw new Error(`Partner 인증 실패 (${res.status})`);
+    const d = await res.json();
+    if (!d || !d.token) throw new Error('Partner 인증 응답에 token 없음');
+    const now = Date.now();
+    const exp = d.expires ? new Date(d.expires).getTime() : now + 3600000;
+    global._smsTokenCache = { token: d.token, expires: Number.isFinite(exp) ? exp : now + 3600000 };
+    return d.token;
+  }
+  async function _smsToken(cfg, force) {
+    const c = global._smsTokenCache;
+    if (!force && c && c.expires > Date.now() + 5 * 60000) return c.token;
+    return _smsAuth(cfg);
+  }
 
   // POST /api/bg/sms/history — {order_ids:[]} → {history: {id: {count,lastSentAt}}}
   if (pathname === '/api/bg/sms/history' && method === 'POST') {
@@ -2029,25 +2069,16 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       return rateLimitResponse(res, rlSms);
     }
     try {
-      if (!SMS_API_URL) {
-        return json(res, { error: '문자 API 주소가 설정되지 않았습니다 — 환경변수 BARUN_SMS_API_URL 을 넣고 재배포해주세요.' }, 503);
+      const cfg = _smsConfig();
+      if (!cfg) {
+        return json(res, { error: '문자 API 인증키가 없습니다 — 환경변수 BARUN_SMS_CLIENT_SECRET(또는 PARTNER_CLIENT_SECRET)을 넣고 재배포해주세요.' }, 503);
       }
       const body = await parseBody(req);
       const rows = Array.isArray(body.rows) ? body.rows : [];
       if (!rows.length) return json(res, { error: '발송할 행이 없습니다.' }, 400);
       if (rows.length > 50) return json(res, { error: '한 번에 최대 50건까지 발송할 수 있습니다 (화면이 나눠 보냅니다).' }, 400);
 
-      const callback = process.env.BARUN_SMS_CALLBACK || '1644-0708';
-      const salesGubun = process.env.BARUN_SMS_SALES_GUBUN || 'SD';
-      const purpose = process.env.BARUN_SMS_PURPOSE || 'order-notice';
-      // 선택 인증 헤더 — 'Header-Name: value' 형식 (게이트웨이가 요구하면 설정)
-      const extraHeaders = {};
-      const authRaw = process.env.BARUN_SMS_AUTH_HEADER || '';
-      const ai = authRaw.indexOf(':');
-      if (ai > 0) extraHeaders[authRaw.slice(0, ai).trim()] = authRaw.slice(ai + 1).trim();
-
-      // 중복 방지 — 같은 주문에 이미 성공 발송이 있으면 force 없인 건너뛴다.
-      //   주문번호 없는 행은 연락처 기반 PH- 키로 본다 (order_id 만 보면 빈 값이라 안 걸린다 — 실측 수정).
+      // 중복 방지 — 주문번호 없는 행은 연락처 기반 PH- 키.
       const keyOf = r => (String(r.order_id || '').trim()) || ('PH-' + String(r.phone || '').replace(/\D/g, ''));
       const history = await store.getSmsSendHistory(rows.map(keyOf), SMS_TEMPLATE_CODE);
 
@@ -2059,15 +2090,13 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         const shipDate = String(raw.ship_date || '').trim();
         const invoice = String(raw.invoice || '').trim();
         const digits = String(raw.phone || '').replace(/\D/g, '');
-        // 서버에서 한 번 더 검증 — 화면 값을 그대로 믿지 않는다 (실수·조작 모두 방지)
-        if (!name) { results.push({ order_id: orderId, success: false, error: '성함 누락' }); continue; }
-        // 휴대폰(01x) + 0508 안심번호 허용 (fable 검증 — 8월 시트의 0508 18건은 수신 가능)
-        const isSafeNum = /^050\d{8,9}$/.test(digits);
-        if (!/^01[016789]\d{7,8}$/.test(digits) && !isSafeNum) { results.push({ order_id: orderId, success: false, error: '휴대폰 번호 형식 오류' }); continue; }
-        // 주문번호 없는 행(이벤트·단독주문) — 연락처 기반 키로 발송 이력·중복을 관리한다
         const logKey = orderId || `PH-${digits}`;
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(shipDate)) { results.push({ order_id: orderId, success: false, error: '출고일 형식 오류 (YYYY-MM-DD)' }); continue; }
-        if (!/^[\d-]{9,}$/.test(invoice)) { results.push({ order_id: orderId, success: false, error: '송장번호 형식 오류' }); continue; }
+        // 서버에서 한 번 더 검증 — 화면 값을 그대로 믿지 않는다
+        if (!name) { results.push({ order_id: logKey, success: false, error: '성함 누락' }); continue; }
+        const isSafeNum = /^050\d{8,9}$/.test(digits);
+        if (!/^01[016789]\d{7,8}$/.test(digits) && !isSafeNum) { results.push({ order_id: logKey, success: false, error: '휴대폰 번호 형식 오류' }); continue; }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(shipDate)) { results.push({ order_id: logKey, success: false, error: '출고일 형식 오류 (YYYY-MM-DD)' }); continue; }
+        if (!/^[\d-]{9,}$/.test(invoice)) { results.push({ order_id: logKey, success: false, error: '송장번호 형식 오류' }); continue; }
         const dup = history.get(logKey);
         if (dup && dup.successCount > 0 && !body.force) {
           results.push({ order_id: logKey, success: false, duplicate: true, error: `이미 발송됨 (${String(dup.lastSentAt).slice(0, 16)})` });
@@ -2076,32 +2105,57 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         const phone = isSafeNum
           ? digits.replace(/^(\d{4})(\d{3,4})(\d{4})$/, '$1-$2-$3')
           : digits.replace(/^(\d{3})(\d{3,4})(\d{4})$/, '$1-$2-$3');
-        // 메시지 — 운영 확정 양식 그대로 (줄바꿈·공백 유지)
+        // 메시지 — 운영 확정 양식 그대로 (80바이트 초과 → API 가 MMS/RCS 자동 처리)
         const message = `안녕하세요,\n${name}님, 주문 상품이 발송됩니다.\n${shipDate}  \nCJ대한통운 ${invoice} \n\n감사합니다. `;
-        let ok = false, errMsg = null, msgId = null;
+        let ok = false, errMsg = null, tranId = null;
         try {
-          const r = await fetch(SMS_API_URL, {
+          const payload = {
+            recipientNum: phone,
+            recipientName: name.slice(0, 20),
+            message,
+            callback: cfg.callback,
+            salesGubun: cfg.salesGubun,
+            purpose: cfg.purpose,
+          };
+          let token = await _smsToken(cfg);
+          let r = await fetch(cfg.sendUrl, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...extraHeaders },
-            body: JSON.stringify({ recipientNum: phone, message, callback, salesGubun, purpose }),
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify(payload),
             signal: AbortSignal.timeout(15000),
           });
+          if (r.status === 401) {   // 토큰 만료 → 재발급 후 1회 재시도
+            token = await _smsToken(cfg, true);
+            r = await fetch(cfg.sendUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify(payload),
+              signal: AbortSignal.timeout(15000),
+            });
+          }
           const text = await r.text();
-          ok = r.ok;
-          if (!ok) errMsg = `HTTP ${r.status}: ${text.slice(0, 180)}`;
-          else { try { const j = JSON.parse(text); msgId = j.messageId || j.message_id || j.id || null; } catch { /* 응답이 JSON 아니어도 성공 처리 */ } }
+          let parsed = null;
+          try { parsed = JSON.parse(text); } catch { /* 본문 없는 401 등 */ }
+          // 문서 2-5: 200 + success=true 가 접수 성공. success=false 면 HTTP 200 이어도 실패.
+          ok = r.ok && (!parsed || parsed.success !== false);
+          if (!ok) {
+            const detail = parsed ? (parsed.message || JSON.stringify(parsed.errors || {})) : text.slice(0, 150);
+            errMsg = `HTTP ${r.status}: ${String(detail).slice(0, 180)}`;
+          } else if (parsed) {
+            tranId = parsed.tranId != null ? String(parsed.tranId) : null;
+          }
         } catch (e) {
           errMsg = e.name === 'TimeoutError' ? '응답 시간 초과 (15초)' : e.message;
         }
-        // 이력 기록 — 전화번호는 마지막 4자리만 남긴다 (로그에 개인정보 최소화)
+        // 이력 기록 — 전화번호는 마지막 4자리만 (개인정보 최소화). tranId 는 KTRCS MSG_ID.
         try {
           await store.logAlimtalkSend({
             order_id: logKey, to_phone: `****${digits.slice(-4)}`,
-            template_code: SMS_TEMPLATE_CODE, message_id: msgId,
+            template_code: SMS_TEMPLATE_CODE, message_id: tranId,
             success: ok, error_message: errMsg,
           });
         } catch { /* 로그 실패는 발송 결과에 영향 없음 */ }
-        results.push({ order_id: logKey, success: ok, error: errMsg });
+        results.push({ order_id: logKey, success: ok, tran_id: tranId, error: errMsg });
       }
       const sent = results.filter(r => r.success).length;
       const dup = results.filter(r => r.duplicate).length;
