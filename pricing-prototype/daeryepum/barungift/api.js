@@ -2401,25 +2401,41 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       let token = null, authError = null;
       try { token = await _smsToken(cfg, true); }
       catch (e) { authError = e.message; }
-      const paths = ['/api/Biztalk/send', '/api/KakaoTalk/send', '/api/Biztalk/sendGift'];
+      // 1단계: 빈 바디 → 필수 필드 목록.
+      // 2단계(?stage=2): 필수 필드를 채우되 **존재할 수 없는 템플릿 코드**와 수신 불가 번호를 넣어
+      //   다음 검증 계층(허용 Caller · 수신자/변수 필드명)을 드러낸다. 실발송은 구조적으로 불가능하다.
+      const stage = String(query.stage || '1');
+      const BAD_TEMPLATE = '__PROBE_NO_SUCH_TEMPLATE__';
+      const BAD_PHONE = '010-0000-0000';
+      const cases = stage === '2'
+        ? [
+            { path: '/api/KakaoTalk/send', body: { Caller: String(query.caller || 'daeryepum'), SalesGubun: cfg.salesGubun, TemplateCode: BAD_TEMPLATE } },
+            { path: '/api/KakaoTalk/send', body: { Caller: String(query.caller || 'daeryepum'), SalesGubun: cfg.salesGubun, TemplateCode: BAD_TEMPLATE, RecipientNum: BAD_PHONE, OrderSeq: 0 } },
+            { path: '/api/Biztalk/send', body: { Caller: String(query.caller || 'daeryepum'), SalesGubun: cfg.salesGubun, TemplateCode: BAD_TEMPLATE, Subject: 'probe', Content: 'probe', Callback: cfg.callback, SenderKey: '__PROBE__', RecipientNum: BAD_PHONE } },
+          ]
+        : [
+            { path: '/api/Biztalk/send', body: {} },
+            { path: '/api/KakaoTalk/send', body: {} },
+            { path: '/api/Biztalk/sendGift', body: {} },
+          ];
       const probes = [];
-      for (const path of paths) {
+      for (const c of cases) {
         try {
-          const r = await fetch(`${cfg.base}${path}`, {
+          const r = await fetch(`${cfg.base}${c.path}`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               ...(token ? { Authorization: `Bearer ${token}` } : {}),
             },
-            body: '{}',
+            body: JSON.stringify(c.body),
             signal: AbortSignal.timeout(15000),
           });
-          probes.push({ path, status: r.status, body: (await r.text()).slice(0, 800) });
+          probes.push({ path: c.path, sent_keys: Object.keys(c.body), status: r.status, body: (await r.text()).slice(0, 900) });
         } catch (e) {
-          probes.push({ path, error: e.name === 'TimeoutError' ? 'timeout' : e.message });
+          probes.push({ path: c.path, error: e.name === 'TimeoutError' ? 'timeout' : e.message });
         }
       }
-      logAccess(req, 'alimtalk_publicapi_probe', null, { metadata: { authed: !!token } });
+      logAccess(req, 'alimtalk_publicapi_probe', null, { metadata: { authed: !!token, stage } });
       return json(res, { base: cfg.base, client_id: cfg.clientId, authenticated: !!token, auth_error: authError, probes });
     } catch (err) {
       return json(res, { error: err.message }, 500);
