@@ -21443,10 +21443,18 @@ function computeRowStage(order, ci, sel) {
 let _uniAlimHistory = {};          // key → { count, successCount, lastSentAt }
 const _uniAlimFetched = new Set(); // 조회 완료(결과 유무 무관) 키 — 재조회 방지
 
+/** UTC/offset 포함 시각 문자열 → KST 'MM-DD HH:mm'. Supabase sent_at 은 UTC(+00:00)로 온다. */
+function _fmtKstShort(iso) {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return String(iso).slice(5, 16);
+  return new Date(t + 9 * 3600000).toISOString().replace('T', ' ').slice(5, 16);
+}
+
 function _uniAlimBadge(key) {
   const h = _uniAlimHistory[key];
   if (!h || !h.count) return '<span style="color:var(--gray-300)">-</span>';
-  const dt = String(h.lastSentAt || '').replace('T', ' ').slice(5, 16);
+  const dt = _fmtKstShort(h.lastSentAt);
   if (!h.successCount) {
     return `<span style="background:#fef2f2;color:#dc2626;font-size:11px;padding:2px 6px;border-radius:4px" title="발송 시도 ${h.count}회 모두 실패">✗ 실패 ${h.count}회</span>`;
   }
@@ -24902,7 +24910,7 @@ function _smsHistBadge(orderId) {
   const h = _smsHistory[orderId];
   if (!h || !h.count) return '<span style="color:var(--gray-300)">-</span>';
   const okPart = h.successCount > 0
-    ? `<span style="background:#dcfce7;color:#166534;font-size:10px;padding:1px 6px;border-radius:3px" title="마지막 발송 ${esc(String(h.lastSentAt || '').slice(0, 16))}">✓ 발송 ${h.successCount}회</span>`
+    ? `<span style="background:#dcfce7;color:#166534;font-size:10px;padding:1px 6px;border-radius:3px" title="마지막 발송 ${esc(_fmtKstShort(h.lastSentAt))} (KST)">✓ 발송 ${h.successCount}회</span>`
     : `<span style="background:#fef2f2;color:#dc2626;font-size:10px;padding:1px 6px;border-radius:3px">실패 ${h.count}회</span>`;
   return okPart;
 }

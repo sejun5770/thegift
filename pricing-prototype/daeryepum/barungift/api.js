@@ -193,6 +193,34 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
   }
 
+  // GET /api/bg/orders/delivery-status?ids=a,b,c — 주문선택 목록용 배송상태 (고객용, 경량)
+  //   목록 화면에서 주문마다 배송 배지를 붙인다. 이 화면은 이름+전화 검색으로도 들어오므로
+  //   송장번호는 내려보내지 않는다 — 상태 문구와 완료 여부만.
+  if (pathname === '/api/bg/orders/delivery-status' && method === 'GET') {
+    const rl = rlCheck(req, 'view', RL_LIMITS.view);
+    if (!rl.allowed) return rateLimitResponse(res, rl);
+    const ids = String(query.ids || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 10);
+    if (!ids.length) return json(res, { statuses: {} });
+    const cj = require('./cj-tracking');
+    const statuses = {};
+    for (const oid of ids) {
+      try {
+        let invs = [];
+        try {
+          invs = ((await require('./workflow-store').listInvoices(oid)) || [])
+            .map(iv => String(iv.invoice_number || '').replace(/\D/g, '')).filter(Boolean);
+        } catch { /* bg_order_invoices 미존재 */ }
+        if (!invs.length) invs = (await cj.sheetInvoicesForOrder(oid)).map(x => x.invoice);
+        if (!invs.length) continue;   // 송장 없음 = 출고 전 — 배지 없음
+        const t = await cj.trackCj(invs[0]).catch(() => null);
+        statuses[oid] = t
+          ? { registered: t.registered, delivered: t.delivered, status: t.registered ? t.status : '출고 준비' }
+          : { registered: false, delivered: false, status: '출고 준비' };
+      } catch { /* 개별 실패는 배지 생략 */ }
+    }
+    return json(res, { statuses });
+  }
+
   // GET /api/bg/orders/:orderId/delivery — 배송조회 (고객용, 2026-08-28)
   //   송장은 ① bg_order_invoices(있으면) ② 운영 구글시트(문자안내 기능과 같은 소스)에서 찾고,
   //   CJ대한통운 공개 조회 JSON 으로 상태를 가져온다. 접근 제어는 주문 상세와 동일 (HMAC).
@@ -2256,7 +2284,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         if (!/^[\d-]{9,}$/.test(invoice)) { results.push({ order_id: logKey, success: false, error: '송장번호 형식 오류' }); continue; }
         const dup = history.get(logKey);
         if (dup && dup.successCount > 0 && !body.force) {
-          results.push({ order_id: logKey, success: false, duplicate: true, error: `이미 발송됨 (${String(dup.lastSentAt).slice(0, 16)})` });
+          results.push({ order_id: logKey, success: false, duplicate: true, error: `이미 발송됨 (${(d => Number.isFinite(d) ? new Date(d + 9 * 3600000).toISOString().replace('T', ' ').slice(0, 16) + ' KST' : String(dup.lastSentAt).slice(0, 16))(Date.parse(dup.lastSentAt))})` });
           continue;
         }
         const phone = isSafeNum
