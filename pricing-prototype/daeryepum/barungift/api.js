@@ -2073,7 +2073,10 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     });
     if (!res.ok) {
       // 값은 절대 남기지 않는다 — 길이만으로 오입력(따옴표 포함·잘림)을 가늠할 수 있게 한다.
-      const hint = res.status === 401
+      // 404 = base 에 경로/슬래시가 붙어 URL 이 비틀린 것 — 호출 URL 을 그대로 보여준다.
+      const hint = res.status === 404
+        ? ` — 호출 URL ${cfg.base}/api/Partner/authenticate 이 서버에 없습니다. BARUN_ALIMTALK_API_BASE 는 경로 없는 서버 주소만 넣으세요 (예: https://dev-api.barunsoncard.com).`
+        : res.status === 401
         ? ` — 접속 서버 ${cfg.base} · clientId '${cfg.clientId}' · 출처 ${cfg.secretSource} · 환경변수 원본 ${cfg.rawEnvLen}자 → 실제 사용 ${cfg.clientSecret.length}자. 원본 길이가 넣은 값보다 짧으면 환경변수가 잘린 것입니다 (BARUN_SMS_CLIENT_SECRET_HEX 로 넣어보세요). 환경변수 변경은 재배포해야 반영됩니다. 개발용 시크릿이면 접속 서버도 개발(BARUN_ALIMTALK_API_BASE)이어야 합니다.`
         : '';
       throw new Error(`Partner 인증 실패 (${res.status})${hint}`);
