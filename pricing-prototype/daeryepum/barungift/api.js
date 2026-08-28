@@ -2388,6 +2388,44 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     return json(res, base);
   }
 
+  // GET /api/bg/alimtalk/publicapi-probe - PublicApi 알림톡 엔드포인트 계약 확인
+  //   기존 두 경로가 모두 막힌 상태에서(SP 권한 X · admin.barunsoncard.com 은 사내망 172.16.1.5
+  //   라 컨테이너에서 도달 불가) 세 번째 경로를 찾기 위한 진단용.
+  //   LMS 문서 2-7: 알림톡 API(BiztalkController/KakaoTalkController)는 인증 클라이언트
+  //   'kakaotalk' 을 문자 API 와 공유한다 → 이미 있는 시크릿으로 호출 가능한지 확인한다.
+  //   빈 바디를 보내 모델 검증 에러(필수 필드 목록)를 받아온다 — 발송은 일어나지 않는다.
+  if (pathname === '/api/bg/alimtalk/publicapi-probe' && method === 'GET') {
+    try {
+      const cfg = _smsConfig();
+      if (!cfg) return json(res, { error: '문자 API 인증키(BARUN_SMS_CLIENT_SECRET)가 없습니다.' }, 503);
+      let token = null, authError = null;
+      try { token = await _smsToken(cfg, true); }
+      catch (e) { authError = e.message; }
+      const paths = ['/api/Biztalk/send', '/api/KakaoTalk/send', '/api/Biztalk/sendGift'];
+      const probes = [];
+      for (const path of paths) {
+        try {
+          const r = await fetch(`${cfg.base}${path}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: '{}',
+            signal: AbortSignal.timeout(15000),
+          });
+          probes.push({ path, status: r.status, body: (await r.text()).slice(0, 800) });
+        } catch (e) {
+          probes.push({ path, error: e.name === 'TimeoutError' ? 'timeout' : e.message });
+        }
+      }
+      logAccess(req, 'alimtalk_publicapi_probe', null, { metadata: { authed: !!token } });
+      return json(res, { base: cfg.base, client_id: cfg.clientId, authenticated: !!token, auth_error: authError, probes });
+    } catch (err) {
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
   // POST /api/bg/alimtalk/sp-reset - SP availability 캐시 초기화
   //   DBA 가 GRANT EXECUTE 부여 후 컨테이너 재시작 없이 SP 경로 재시도하도록.
   //   다음 발송 호출 시 SP 우선 시도 → 성공하면 true, 또 실패하면 false.
