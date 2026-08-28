@@ -1931,17 +1931,20 @@ nav.nav-loading a[href^="#"] {
 
       <!-- 입력 필드 편집기 — 고객이 이 스티커 선택시 노출되는 입력 폼 정의 -->
       <div style="border-top:1px solid var(--gray-200);padding-top:16px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <div>
-            <div style="font-size:14px;font-weight:600">입력 필드</div>
-            <div style="font-size:11px;color:var(--gray-500);margin-top:2px">고객이 이 스티커 선택 시 노출되는 입력 항목입니다. 비워두면 기본 "스티커 문구" 한 줄만 노출됩니다.</div>
-          </div>
-          <div style="display:flex;gap:6px;align-items:center">
-            <select id="bg-s-copy-src" style="padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;max-width:230px"
-              title="이미 만든 스티커의 입력 필드 구성을 그대로 복사해 옵니다"></select>
-            <button class="btn btn-sm" onclick="copyBgStickerFieldsFrom()" title="선택한 스티커의 입력 필드를 복사해 온다 (현재 필드는 교체)">필드 가져오기</button>
-            <button class="btn btn-sm" onclick="addBgStickerField()">+ 필드 추가</button>
-          </div>
+        <!-- 헤더: 제목/설명 줄 → 컨트롤 줄 로 분리.
+             한 줄에 모두 넣으면 좁은 폭에서 버튼 글자가 세로로 깨진다. -->
+        <div style="margin-bottom:10px">
+          <div style="font-size:14px;font-weight:600">입력 필드</div>
+          <div style="font-size:11px;color:var(--gray-500);margin-top:2px">고객이 이 스티커 선택 시 노출되는 입력 항목입니다. 비워두면 기본 "스티커 문구" 한 줄만 노출됩니다.</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <select id="bg-s-copy-src"
+            style="flex:1 1 200px;min-width:0;max-width:320px;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px"
+            title="이미 만든 스티커의 입력 필드 구성을 그대로 복사해 옵니다"></select>
+          <button class="btn btn-sm" onclick="copyBgStickerFieldsFrom()" style="white-space:nowrap;flex:0 0 auto"
+            title="선택한 스티커의 입력 필드를 복사해 온다 (현재 필드는 교체)">복사</button>
+          <div style="flex:1 1 auto"></div>
+          <button class="btn btn-sm" onclick="addBgStickerField()" style="white-space:nowrap;flex:0 0 auto">+ 필드 추가</button>
         </div>
         <div id="bg-s-fields"></div>
       </div>
