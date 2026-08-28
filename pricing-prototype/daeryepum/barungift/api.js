@@ -2065,12 +2065,25 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
   // Partner JWT 캐시 — access 1시간 / refresh 7일 (알림톡 모듈과 동일 응답 형식: token/expires/refreshToken)
   if (!global._smsTokenCache) global._smsTokenCache = null;
+  const _isTimeoutErr = e => e?.name === 'TimeoutError' || /timed? ?out/i.test(e?.message || '');
   async function _smsAuth(cfg) {
-    const res = await fetch(`${cfg.base}/api/Partner/authenticate`, {
+    const call = () => fetch(`${cfg.base}/api/Partner/authenticate`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ clientId: cfg.clientId, clientSecret: cfg.clientSecret }),
       signal: AbortSignal.timeout(15000),
     });
+    let res;
+    try {
+      res = await call();
+    } catch (e) {
+      if (!_isTimeoutErr(e)) throw new Error(`Partner 인증 서버 연결 실패 (${cfg.base}) — ${e.message}`);
+      // 인증은 멱등이라 재시도해도 안전. dev 서버는 유휴 후 첫 요청이 15초를 넘길 수 있다 (콜드스타트).
+      try {
+        res = await call();
+      } catch (e2) {
+        throw new Error(`Partner 인증 응답 없음 (${cfg.base}, 15초×2회) — dev 서버 콜드스타트일 수 있습니다. 잠시 후 다시 시도해주세요.`);
+      }
+    }
     if (!res.ok) {
       // 값은 절대 남기지 않는다 — 길이만으로 오입력(따옴표 포함·잘림)을 가늠할 수 있게 한다.
       // 404 = base 에 경로/슬래시가 붙어 URL 이 비틀린 것 — 호출 URL 을 그대로 보여준다.
@@ -2440,7 +2453,9 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
               throw new Error(`HTTP ${r.status}: ${String(detail).slice(0, 180)}`);
             }
           } catch (e) {
-            lastError = (lastError ? lastError + ' | ' : '') + `PublicApi: ${e.name === 'TimeoutError' ? '응답 시간 초과 (15초)' : e.message}`;
+            lastError = (lastError ? lastError + ' | ' : '') + `PublicApi: ${_isTimeoutErr(e)
+              ? `발송 호출 시간 초과 (${alimCfg.base}) — 접수 여부 불명. 발송이력을 확인한 뒤 재시도하세요 (바로 재시도하면 중복 발송 가능)`
+              : e.message}`;
           }
         }
 
