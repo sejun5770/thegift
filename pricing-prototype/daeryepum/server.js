@@ -810,14 +810,17 @@ async function giftResolveSites(orderIds) {
       const rs = await runWithPoolRetry(p => p.request().query(`
         SELECT 1 AS pri, CAST(co.order_seq AS VARCHAR(20)) AS oid,
                ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR(20))) AS site,
-               co.order_name, co.order_hphone
+               co.order_name, co.order_hphone, di.NAME AS recv_name
         FROM custom_order co WITH (NOLOCK)
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+        LEFT JOIN (
+          SELECT ORDER_SEQ, NAME FROM DELIVERY_INFO WITH (NOLOCK) WHERE DELIVERY_SEQ = 1
+        ) di ON di.ORDER_SEQ = co.order_seq
         WHERE co.order_seq IN (${inList})
         UNION ALL
         SELECT 2, CAST(o.order_seq AS VARCHAR(20)),
                ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR(20))),
-               o.order_name, o.order_hphone
+               o.order_name, o.order_hphone, o.recv_name
         FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
         WHERE o.order_seq IN (${inList})
@@ -828,6 +831,7 @@ async function giftResolveSites(orderIds) {
           site: formatSiteName(r.site) || '',
           orderer_name: (r.order_name || '').trim(),
           orderer_phone: (r.order_hphone || '').trim(),
+          recv_name: (r.recv_name || '').trim(),
         });
       }
     }
@@ -858,7 +862,7 @@ async function giftResolveSites(orderIds) {
   // 더기프트 (카페24 업로드분) — vendor_name 만으로 채널이 정해진다:
   //   NULL=매입 / '혼합'=매입 품목 포함 → 매입 / 그 외=위탁. (대시보드 bgPrimarySiteOf 와 같은 규칙)
   await fill('더기프트', remaining(), 100,
-    ids => `${REST}/bg_manual_orders?select=order_id,vendor_name,order_name,order_hphone&order_id=in.(${encodeURIComponent(ids.map(x => `"${x.replace(/"/g, '')}"`).join(','))})`,
+    ids => `${REST}/bg_manual_orders?select=order_id,vendor_name,order_name,order_hphone,recv_name&order_id=in.(${encodeURIComponent(ids.map(x => `"${x.replace(/"/g, '')}"`).join(','))})`,
     row => row.order_id,
     row => {
       const v = String(row.vendor_name || '').trim();
@@ -866,6 +870,7 @@ async function giftResolveSites(orderIds) {
         site: (!v || v === '혼합') ? BG_SITE_OWN : BG_SITE_VENDOR,
         orderer_name: (row.order_name || '').trim(),
         orderer_phone: (row.order_hphone || '').trim(),
+        recv_name: (row.recv_name || '').trim(),
       };
     });
 
@@ -874,13 +879,13 @@ async function giftResolveSites(orderIds) {
     ids => `${REST}/coupang_orders?select=coupang_order_id,is_rocket_growth&coupang_order_id=in.(${ids.join(',')})&limit=20000`,
     row => row.coupang_order_id,
     // 오픈마켓은 주문자 연락처가 마스킹돼 우리 DB 에 없다 → 시트(수령인) 번호를 그대로 쓴다.
-    row => ({ site: row.is_rocket_growth ? '쿠팡 로켓그로스' : '쿠팡', orderer_name: '', orderer_phone: '' }));
+    row => ({ site: row.is_rocket_growth ? '쿠팡 로켓그로스' : '쿠팡', orderer_name: '', orderer_phone: '', recv_name: '' }));
 
   // 네이버 — 시트에 적히는 값은 상품주문번호(product_order_id).
   await fill('네이버', remaining(), 200,
     ids => `${REST}/naver_orders?select=product_order_id,store_id&product_order_id=in.(${encodeURIComponent(ids.map(x => `"${x.replace(/"/g, '')}"`).join(','))})&limit=20000`,
     row => row.product_order_id,
-    row => ({ site: naverSiteLabel(row.store_id), orderer_name: '', orderer_phone: '' }));
+    row => ({ site: naverSiteLabel(row.store_id), orderer_name: '', orderer_phone: '', recv_name: '' }));
 
   return map;
 }
@@ -921,7 +926,7 @@ async function giftSmsRows(gid) {
     const invDigits = invoice.replace(/\D/g, '');
     const invoiceOk = /^[\d-]+$/.test(invoice) && invDigits.length >= 9;
     rows.push({
-      order_id: orderId, name,
+      order_id: orderId, name, sheet_name: name,
       phone: recv.phone, phone_ok: recv.ok,   // 아래에서 주문자 번호로 덮어쓴다
       recv_phone: recv.phone, phone_source: '수령인',
       ship_date: shipDate, invoice,
@@ -935,11 +940,20 @@ async function giftSmsRows(gid) {
     const meta = metaMap.get(r.order_id) || null;
     r.site_name = meta ? meta.site : '';
     r.orderer_name = meta ? meta.orderer_name : '';
+    r.recv_name = meta ? meta.recv_name : '';
     const op = meta ? _giftNormPhone(meta.orderer_phone) : null;
     if (op && op.ok) {
       r.phone = op.phone;
       r.phone_ok = true;
       r.phone_source = '주문자';
+    }
+    // 이름 — 문자를 받는 주문자를 앞에 두고 수령자를 괄호로 덧붙인다 ('윤다혜(홍성호)').
+    //   시트 성함은 '수령인(주문자)' 순서라 문자 인사말에 맞지 않았다.
+    //   주문자 정보를 못 찾으면(오픈마켓 등) 시트 성함을 그대로 쓴다.
+    if (r.orderer_name) {
+      r.name = r.recv_name && r.recv_name !== r.orderer_name
+        ? `${r.orderer_name}(${r.recv_name})`
+        : r.orderer_name;
     }
   }
   const result = { sheet: tab.name, kind, rows };

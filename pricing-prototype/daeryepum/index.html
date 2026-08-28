@@ -1709,13 +1709,14 @@ nav.nav-loading a[href^="#"] {
       <table class="data-table">
         <thead><tr>
           <th style="width:36px"><input type="checkbox" id="sms-select-all" onchange="_smsToggleAll(this)"></th>
-          <th>주문번호</th><th>주문사이트</th><th>성함</th><th title="출고 안내는 주문자에게 보냅니다. 시트의 연락처1은 수령인 번호라 사내 주문 DB의 주문자 번호로 대체합니다">연락처(주문자)</th><th>출고일</th><th>송장번호</th><th>발송이력</th><th>비고</th>
+          <th>주문번호</th><th>주문사이트</th><th title="주문자명(수령자명) — 문자 인사말에 쓰입니다">성함</th><th title="출고 안내는 주문자에게 보냅니다. 시트의 연락처1은 수령인 번호라 사내 주문 DB의 주문자 번호로 대체합니다">연락처(주문자)</th><th>출고일</th><th>송장번호</th><th>발송이력</th><th>비고</th>
         </tr></thead>
         <tbody id="sms-tbody"><tr><td colspan="9" style="text-align:center;color:var(--gray-400);padding:24px">시트를 선택하면 목록을 불러옵니다.</td></tr></tbody>
       </table>
     </div>
     <div style="margin-top:8px;font-size:11.5px;color:var(--gray-500);line-height:1.6">
-      · 연락처는 <b>주문자 번호</b>입니다 — 시트의 연락처1(수령인) 대신 사내 주문 DB에서 찾아 대체합니다. 못 찾으면 시트 번호로 발송되며 '수령인 번호'로 표시됩니다.<br>
+      · 성함·연락처는 <b>주문자 기준</b>입니다 — 시트의 성함/연락처1(수령인) 대신 사내 주문 DB에서 찾아 대체하며, 수령자가 다르면 <b>주문자명(수령자명)</b>으로 표기합니다.<br>
+      · 주문자를 못 찾으면(오픈마켓 등) 시트 값 그대로 발송되며 연락처에 '수령인 번호'로 표시됩니다.<br>
       · 원본: 기프트팀 매입상품 입고·주문관리 스프레드시트 (커스텀 상품 주문시트 D/F/L/AG/AH · 월별 시트 D/E/F/W/AC)<br>
       · 엑셀 양식의 변수 매핑: <b>{#이름}=성함 · {#A}=출고일 · {#B}=송장번호</b> — 메시지 본문에서 {#출고일}·{#송장번호} 대신 {#A}·{#B} 를 사용하세요.
     </div>
@@ -24728,7 +24729,8 @@ function renderSmsList() {
       <td>${r.site_name
         ? esc(r.site_name)
         : '<span style="color:var(--gray-400)" title="사내 주문 DB에서 찾지 못한 주문번호입니다 (오픈마켓 주문번호 등)">미확인</span>'}</td>
-      <td>${esc(r.name)}</td>
+      <td${r.sheet_name && r.sheet_name !== r.name
+        ? ` title="시트 성함: ${esc(r.sheet_name)}"` : ''}>${esc(r.name)}</td>
       <td style="font-family:monospace">${esc(r.phone)}${
         r.phone_source === '주문자' && r.recv_phone && r.recv_phone !== r.phone
           ? `<div style="font-size:10px;color:var(--gray-400);font-family:inherit" title="시트의 수령인 번호">수령인 ${esc(r.recv_phone)}</div>`
