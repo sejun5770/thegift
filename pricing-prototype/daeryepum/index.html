@@ -1891,7 +1891,7 @@ nav.nav-loading a[href^="#"] {
 </div>
 
 <!-- 스티커 생성/수정 모달 -->
-<div id="bg-sticker-modal" onclick="if(event.target===this)closeBgStickerForm()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+<div id="bg-sticker-modal" onclick="if(event.target===this)_bgBackdropClose(closeBgStickerForm)" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:12px;max-width:640px;width:90%;max-height:85vh;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
       <h3 id="bg-sticker-modal-title" style="margin:0;font-size:16px">스티커 생성</h3>
@@ -1992,7 +1992,7 @@ nav.nav-loading a[href^="#"] {
 </div>
 
 <!-- 거래처 추가/수정 모달 -->
-<div id="bg-vendor-modal" onclick="if(event.target===this)closeBgVendorForm()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+<div id="bg-vendor-modal" onclick="if(event.target===this)_bgBackdropClose(closeBgVendorForm)" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:12px;max-width:480px;width:90%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
       <h3 id="bg-vendor-modal-title" style="margin:0;font-size:16px">거래처 추가</h3>
@@ -2478,7 +2478,7 @@ nav.nav-loading a[href^="#"] {
 </div>
 
 <!-- 작가 추가/수정 모달 -->
-<div id="artist-modal" onclick="if(event.target===this)closeArtistModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+<div id="artist-modal" onclick="if(event.target===this)_bgBackdropClose(closeArtistModal)" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:12px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
       <h3 id="artist-modal-title" style="margin:0;font-size:16px">작가 추가</h3>
@@ -2543,7 +2543,7 @@ nav.nav-loading a[href^="#"] {
 </div>
 
 <!-- 품목 추가/수정 모달 -->
-<div id="product-modal" onclick="if(event.target===this)closeProductModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+<div id="product-modal" onclick="if(event.target===this)_bgBackdropClose(closeProductModal)" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:12px;max-width:480px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
       <h3 id="product-modal-title" style="margin:0;font-size:16px">품목 추가</h3>
@@ -2944,7 +2944,7 @@ nav.nav-loading a[href^="#"] {
 </div>
 
 <!-- 바른손더기프트 편집 모달 -->
-<div id="bhg-edit-modal" onclick="if(event.target===this)closeBhgEdit()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+<div id="bhg-edit-modal" onclick="if(event.target===this)_bgBackdropClose(closeBhgEdit)" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:12px;max-width:520px;width:92%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
       <h3 id="bhg-edit-title" style="margin:0;font-size:16px">주문 편집</h3>
@@ -3140,7 +3140,7 @@ nav.nav-loading a[href^="#"] {
 </div>
 
 <!-- 상품 설정 모달 (v4 - 스티커 선택 UX 개선) -->
-<div id="bg-product-modal" onclick="if(event.target===this)closeBgProductForm()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+<div id="bg-product-modal" onclick="if(event.target===this)_bgBackdropClose(closeBgProductForm)" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:12px;max-width:680px;width:95%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">
     <!-- 헤더 -->
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200);border-radius:12px 12px 0 0;flex-shrink:0">
@@ -3927,7 +3927,7 @@ nav.nav-loading a[href^="#"] {
 <!-- 고객입력 수정 모달 -->
 <!-- 수동 주문 등록 모달 (MSSQL 누락 사고 케이스) -->
 <!-- CSV 업로드 모달 (바른손더기프트) -->
-<div id="bg-csv-upload-modal" onclick="if(event.target===this)closeBgCsvUpload()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+<div id="bg-csv-upload-modal" onclick="if(event.target===this)_bgBackdropClose(closeBgCsvUpload)" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:12px;max-width:1100px;width:96%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
       <h3 style="margin:0;font-size:16px">📤 바른손더기프트 CSV/Excel 업로드</h3>
@@ -3993,7 +3993,7 @@ nav.nav-loading a[href^="#"] {
   </div>
 </div>
 
-<div id="bg-manual-order-modal" onclick="if(event.target===this)closeBgManualOrderForm()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+<div id="bg-manual-order-modal" onclick="if(event.target===this)_bgBackdropClose(closeBgManualOrderForm)" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:12px;max-width:780px;width:95%;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
       <h3 id="bg-manual-modal-title" style="margin:0;font-size:16px">➕ 수동 주문 등록</h3>
@@ -4125,7 +4125,7 @@ nav.nav-loading a[href^="#"] {
   </div>
 </div>
 
-<div id="bg-order-edit-modal" onclick="if(event.target===this)closeBgOrderEdit()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+<div id="bg-order-edit-modal" onclick="if(event.target===this)_bgBackdropClose(closeBgOrderEdit)" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
   <div style="background:#fff;border-radius:12px;max-width:560px;width:90%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--gray-200)">
       <h3 id="bg-edit-modal-title" style="margin:0;font-size:16px">고객 입력 수정</h3>
@@ -13721,6 +13721,17 @@ function editBgSticker(id) {
 }
 
 let bgFieldCounter = 0;
+/**
+ * 모달 배경 클릭으로 닫기 — 입력 중이던 내용이 사라지므로 한 번 확인한다.
+ *   실수로 바깥을 눌러 작성 중인 폼이 날아가는 일이 잦았다 (2026-08-28 운영 요청).
+ *   '취소' 버튼은 의도가 명확하므로 확인 없이 닫는다. 조회 전용 모달도 그대로 둘 닫힐다.
+ */
+function _bgBackdropClose(closeFn) {
+  if (typeof closeFn !== 'function') return;
+  if (!confirm('작성 중인 내용은 저장되지 않습니다.\n창을 닫을까요?')) return;
+  closeFn();
+}
+
 function addBgStickerField() { addBgStickerFieldRow(null); }
 
 /**
