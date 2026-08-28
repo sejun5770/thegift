@@ -1058,19 +1058,26 @@ async function getSmsSendHistory(orderIds, templateCode) {
   const result = new Map();
   const ids = [...new Set((orderIds || []).map(v => String(v || '').trim()).filter(Boolean))];
   if (!ids.length) return result;
+  // templateCode: 문자열 1개 또는 배열 (알림톡은 사이트별 코드가 달라 묶어서 조회)
+  const codes = (Array.isArray(templateCode) ? templateCode : [templateCode]).filter(Boolean);
+  if (!codes.length) return result;
+  const jsonMatch = r => ids.includes(String(r.order_id)) && codes.includes(r.template_code);
   let rows = [];
   if (USE_SUPABASE) {
     try {
       const inList = ids.map(id => `"${encodeURIComponent(id)}"`).join(',');
+      const codeFilter = codes.length === 1
+        ? `template_code=eq.${encodeURIComponent(codes[0])}`
+        : `template_code=in.(${codes.map(c => `"${encodeURIComponent(c)}"`).join(',')})`;
       rows = await sbGet('bg_alimtalk_log',
-        `order_id=in.(${inList})&template_code=eq.${encodeURIComponent(templateCode)}&order=sent_at.desc`);
+        `order_id=in.(${inList})&${codeFilter}&order=sent_at.desc`);
     } catch (e) {
       // 테이블 미적용(PGRST205) 등 — 저장이 JSON 으로 폴백됐을 수 있으니 그쪽도 본다.
       console.warn('[store] sms history Supabase 조회 실패, JSON 폴백:', e.message);
-      rows = (readJson(FILES.alimtalkLog, [])).filter(r => ids.includes(String(r.order_id)) && r.template_code === templateCode);
+      rows = (readJson(FILES.alimtalkLog, [])).filter(jsonMatch);
     }
   } else {
-    rows = (readJson(FILES.alimtalkLog, [])).filter(r => ids.includes(String(r.order_id)) && r.template_code === templateCode);
+    rows = (readJson(FILES.alimtalkLog, [])).filter(jsonMatch);
   }
   for (const r of rows) {
     const key = String(r.order_id);

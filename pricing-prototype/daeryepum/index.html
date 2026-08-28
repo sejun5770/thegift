@@ -3890,6 +3890,7 @@ nav.nav-loading a[href^="#"] {
             <th class="uni-col-all" style="white-space:nowrap;display:none">주문자명</th>
             <th class="uni-col-all" style="white-space:nowrap;display:none" title="쿠팡/네이버는 buyer 마스킹 — 수령인 연락처로 폴백">주문자 연락처</th>
             <th class="uni-col-input" style="white-space:nowrap">입력일시</th>
+            <th class="uni-col-alimtalk" style="white-space:nowrap;display:none" title="정보입력 안내 알림톡 발송 이력 — 대시보드(PublicApi)에서 보낸 것만 표시됩니다. 과거 SP/통합관리자 발송분은 바른손 백엔드에만 기록되어 안 보입니다">알림톡</th>
             <th class="uni-col-processed" style="white-space:nowrap;display:none" title="정보수집이 완료되어 주문수집 스프레드시트로 등록이 완료된 주문건입니다.">주문수집 <span style="font-size:10px;color:var(--gray-400);font-weight:400;cursor:help">ⓘ</span></th>
             <th>상품명</th>
             <th style="text-align:center">수량</th>
@@ -21365,6 +21366,10 @@ function switchUniTab(tab) {
   document.querySelectorAll('.uni-col-input').forEach(el => {
     el.style.display = (tab !== 'unsubmitted') ? '' : 'none';
   });
+  // 알림톡 이력 컬럼 — 발송 버튼이 있는 미입력 탭에서만 의미 있음.
+  document.querySelectorAll('.uni-col-alimtalk').forEach(el => {
+    el.style.display = (tab === 'unsubmitted') ? '' : 'none';
+  });
   // 전체 탭 전용 컬럼 (주문자ID/명/연락처) — 'all' 탭에서만 노출
   document.querySelectorAll('.uni-col-all').forEach(el => {
     el.style.display = (tab === 'all') ? '' : 'none';
@@ -21433,6 +21438,42 @@ function computeRowStage(order, ci, sel) {
  *   NAVER (네이버)     → 'NV-{order_seq}'    (stub ci row 동일 prefix)
  *   CARD (바른손카드)  → '{order_seq}' (raw)
  */
+// ── 정보입력 안내 알림톡 발송 이력 (미입력 탭) ─────────
+//   PublicApi 경로 발송만 bg_alimtalk_log 에 남는다. 키 = bgCiKey (발송 시 쓰는 order_id 와 동일).
+let _uniAlimHistory = {};          // key → { count, successCount, lastSentAt }
+const _uniAlimFetched = new Set(); // 조회 완료(결과 유무 무관) 키 — 재조회 방지
+
+function _uniAlimBadge(key) {
+  const h = _uniAlimHistory[key];
+  if (!h || !h.count) return '<span style="color:var(--gray-300)">-</span>';
+  const dt = String(h.lastSentAt || '').replace('T', ' ').slice(5, 16);
+  if (!h.successCount) {
+    return `<span style="background:#fef2f2;color:#dc2626;font-size:11px;padding:2px 6px;border-radius:4px" title="발송 시도 ${h.count}회 모두 실패">✗ 실패 ${h.count}회</span>`;
+  }
+  return `<span style="background:#ecfdf5;color:#047857;font-size:11px;padding:2px 6px;border-radius:4px" `
+    + `title="정보입력 안내 알림톡 · 성공 ${h.successCount}회${h.count > h.successCount ? ` · 실패 ${h.count - h.successCount}회` : ''} · 최근 ${dt}">`
+    + `✓ ${dt}${h.successCount > 1 ? ` · ${h.successCount}회` : ''}</span>`;
+}
+
+async function _uniLoadAlimHistory(keys) {
+  const need = [...new Set(keys)].filter(k => k && !_uniAlimFetched.has(k));
+  if (!need.length) return false;
+  need.forEach(k => _uniAlimFetched.add(k));
+  try {
+    const r = await fetch(`${API}/api/bg/alimtalk/history`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ids: need }),
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+    Object.assign(_uniAlimHistory, j.history || {});
+    return Object.keys(j.history || {}).length > 0;
+  } catch (e) {
+    console.warn('[alimtalk] 이력 조회 실패 (표시 생략):', e.message);
+    return false;
+  }
+}
+
 function bgCiKey(order) {
   if (!order) return '';
   if (order.order_type === 'ETC') return `ETC-${order.order_seq}`;
@@ -22076,6 +22117,7 @@ function renderBgUnified() {
       <td class="uni-col-all" style="font-size:12px;white-space:nowrap${activeTab === 'all' ? '' : ';display:none'}">${esc(order.order_name || '-')}</td>
       <td class="uni-col-all" style="font-size:12px;white-space:nowrap${activeTab === 'all' ? '' : ';display:none'}">${esc(order.order_hphone || '-')}</td>
       <td class="uni-col-input" style="font-size:12px${activeTab === 'unsubmitted' ? ';display:none' : ''}">${inputBadge}</td>
+      <td class="uni-col-alimtalk" style="font-size:12px;white-space:nowrap${activeTab === 'unsubmitted' ? '' : ';display:none'}">${_uniAlimBadge(bgCiKey(order))}</td>
       ${processedCellHtml}
       <td style="font-size:12px">${productName}</td>
       <td style="text-align:center;font-size:12px">${itemCount}</td>
@@ -22096,7 +22138,21 @@ function renderBgUnified() {
   });
 
   document.getElementById('uni-tbody').innerHTML = html;
+  // 입력일시/알림톡 헤더 동기화 — 탭 전환 함수만 토글하면 초기 로드(기본 미입력 탭)에서
+  // 헤더가 셀과 어긋난다 (입력일시 헤더가 알림톡 셀 위에 놈임).
+  document.querySelectorAll('th.uni-col-input').forEach(el => {
+    el.style.display = (activeTab !== 'unsubmitted') ? '' : 'none';
+  });
+  document.querySelectorAll('th.uni-col-alimtalk').forEach(el => {
+    el.style.display = (activeTab === 'unsubmitted') ? '' : 'none';
+  });
   updateBgUnifiedSelectedCount();
+  // 알림톡 이력 lazy 조회 — 미입력 탭 표시 행만. 새 이력이 오면 1회 재렌더
+  //   (_uniAlimFetched 가 재조회를 막아 무한 루프 없음).
+  if (activeTab === 'unsubmitted' && bgUnifiedRows.length) {
+    const keys = bgUnifiedRows.map(r => r.order ? bgCiKey(r.order) : '').filter(Boolean);
+    _uniLoadAlimHistory(keys).then(gotNew => { if (gotNew) renderBgUnified(); });
+  }
 }
 
 // ============================================
@@ -23577,17 +23633,21 @@ async function bulkSendAlimtalkViaSp() {
   }
 
   const preview = orderIds.slice(0, 5).join(', ') + (orderIds.length > 5 ? ` 외 ${orderIds.length - 5}건` : '');
+  const alreadySent = orderIds.filter(k => _uniAlimHistory[k]?.successCount > 0);
   const ok = confirm(
     `💬 알림톡 발송\n\n` +
     `${orderIds.length}건의 미입력 주문에 정보입력 안내 알림톡을 발송합니다.\n` +
     `(템플릿: 답례품_주문완료 — 카드=BHGIFT_01 / 몰=BMGIFT_01 · 주문자 휴대폰으로 발송)\n\n` +
     `대상 주문번호: ${preview}\n\n` +
     `※ 서버가 가능한 경로로 자동 발송합니다 (사내 SP → 통합관리자 → PublicApi · 이력은 경로별 시스템에 기록)\n` +
+    (alreadySent.length ? `⚠️ 이미 발송된 주문 ${alreadySent.length}건이 포함되어 있습니다 (알림톡 컬럼 참고)\n` : '') +
     `※ 동일 고객에게 중복 발송될 수 있으니 주의하세요\n\n` +
     `진행하시겠습니까?`
   );
   if (!ok) return;
 
+  // 발송 후 다음 렌더에서 이력을 다시 읽도록 캐시 무효화
+  orderIds.forEach(k => { _uniAlimFetched.delete(k); delete _uniAlimHistory[k]; });
   showToast(`발송 중... (0 / ${orderIds.length})`);
   try {
     const res = await fetch(API + '/api/bg/alimtalk/send-via-sp', {

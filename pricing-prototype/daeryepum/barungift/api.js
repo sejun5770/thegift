@@ -193,6 +193,57 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
   }
 
+  // GET /api/bg/orders/:orderId/delivery — 배송조회 (고객용, 2026-08-28)
+  //   송장은 ① bg_order_invoices(있으면) ② 운영 구글시트(문자안내 기능과 같은 소스)에서 찾고,
+  //   CJ대한통운 공개 조회 JSON 으로 상태를 가져온다. 접근 제어는 주문 상세와 동일 (HMAC).
+  const deliveryMatch = pathname.match(/^\/api\/bg\/orders\/([^/]+)\/delivery$/);
+  if (deliveryMatch && method === 'GET') {
+    const orderId = decodeURIComponent(deliveryMatch[1]);
+    const rl = rlCheck(req, 'view', RL_LIMITS.view);
+    if (!rl.allowed) {
+      logAccess(req, 'rate_limited', orderId, { status_code: 429, metadata: { action: 'delivery', retry_after: rl.retryAfterSec } });
+      return rateLimitResponse(res, rl);
+    }
+    if (query.t || query.sig || signedUrl.STRICT) {
+      const sigCheck = signedUrl.verify(orderId, query.t, query.sig);
+      if (!sigCheck.valid && signedUrl.STRICT) {
+        return json(res, { error: '유효한 접근 링크가 아닙니다. 발송된 링크로 다시 접속해주세요.' }, 403);
+      }
+    }
+    try {
+      const cj = require('./cj-tracking');
+      const found = [];
+      // ① 출고처리 모달 송장 — 테이블(migration 017)이 없는 환경이 있어 실패는 조용히 넘어간다
+      try {
+        const invs = await require('./workflow-store').listInvoices(orderId);
+        for (const iv of (invs || [])) {
+          if (iv.invoice_number) {
+            found.push({ invoice_no: String(iv.invoice_number).replace(/\D/g, ''),
+              ship_date: iv.shipped_at ? String(iv.shipped_at).slice(0, 10) : null,
+              delivery_company: iv.delivery_company || 'CJ대한통운', source: 'db' });
+          }
+        }
+      } catch { /* bg_order_invoices 미존재 — 시트로 */ }
+      // ② 운영 시트 (커스텀·월별)
+      if (!found.length) {
+        for (const s of await cj.sheetInvoicesForOrder(orderId)) {
+          found.push({ invoice_no: s.invoice, ship_date: s.ship_date || null,
+            delivery_company: 'CJ대한통운', source: 'sheet' });
+        }
+      }
+      // CJ 조회 — 최대 2건 (나눔배송). CJ 가 아닌 택배사는 상태 조회 없이 송장만 안내.
+      for (const f of found.slice(0, 2)) {
+        if (!/CJ|대한통운/i.test(f.delivery_company)) { f.tracking = null; continue; }
+        try { f.tracking = await cj.trackCj(f.invoice_no); }
+        catch (e) { f.tracking = null; f.tracking_error = String(e.message).slice(0, 120); }
+      }
+      return json(res, { order_id: orderId, found: found.length > 0, invoices: found.slice(0, 2) });
+    } catch (err) {
+      console.error('[delivery] 조회 실패:', err.message);
+      return json(res, { error: '배송 정보를 불러오지 못했습니다.' }, 500);
+    }
+  }
+
   // GET /api/bg/orders/:orderId - 주문 상세 (고객용)
   const orderDetailMatch = pathname.match(/^\/api\/bg\/orders\/([^/]+)$/);
   if (orderDetailMatch && method === 'GET') {
@@ -2278,6 +2329,20 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   //   2026-05-20 정리: Partner API 직접 호출 경로 (recipients/send/preview) 제거.
   //   send-via-sp 단일 경로로 통합 (SP 우선 + 통합관리자 HTTP API fallback).
   // ============================================
+
+  // POST /api/bg/alimtalk/history — {order_ids:[]} → {history:{id:{count,successCount,lastSentAt}}}
+  //   PublicApi 경로로 보낸 발송만 잡힌다 (bg_alimtalk_log). SP/통합관리자 경로의 과거 발송
+  //   이력은 바른손 백엔드에만 있어 여기 안 나온다.
+  if (pathname === '/api/bg/alimtalk/history' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const ids = Array.isArray(body.order_ids) ? body.order_ids.slice(0, 1000) : [];
+      const map = await store.getSmsSendHistory(ids, ['BHGIFT_01', 'BMGIFT_01']);
+      const history = {};
+      for (const [k, v] of map) history[k] = v;
+      return json(res, { history });
+    } catch (err) { return json(res, { error: err.message }, 400); }
+  }
 
   // POST /api/bg/alimtalk/send-via-sp - 답례품 알림톡 발송 (auto-fallback)
   //   경로 우선순위:
