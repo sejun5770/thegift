@@ -772,14 +772,34 @@ function _giftParseCsv(text) {
 
 /** 시트 한 장의 문자발송 행 — {order_id, name, phone, ship_date, invoice, phone_ok, invoice_ok}. 60초 캐시. */
 /**
+ * 연락처 정규화 — 휴대폰(01x 10~11자리) + 050X 안심번호(11~12자리) 를 정상으로 본다.
+ *   시트 값과 사내 DB 값에 같은 규칙을 쓴다.
+ */
+function _giftNormPhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  const isSafe = /^050\d{8,9}$/.test(digits);
+  const ok = /^01[016789]\d{7,8}$/.test(digits) || isSafe;
+  const phone = !ok ? String(raw || '').trim()
+    : isSafe ? digits.replace(/^(\d{4})(\d{3,4})(\d{4})$/, '$1-$2-$3')
+    : digits.replace(/^(\d{3})(\d{3,4})(\d{4})$/, '$1-$2-$3');
+  return { phone, ok, digits };
+}
+
+/**
  * 시트 주문번호 → 주문사이트 라벨.
  *   시트에는 사이트 정보가 없어 사내 DB(custom_order / CUSTOM_ETC_ORDER)의 company_Seq 로 찾는다.
  *   · SiteInfo 에 이름이 있으면 그대로 ('바른손카드'), 숫자면 formatSiteName 이 제휴사명으로 바꾼다.
  *   · 오픈마켓(쿠팡·네이버 등) 주문번호는 13자리 이상이라 int 컬럼에 애초에 없다 → '' (화면은 '미확인').
  *   조회 실패는 무시한다 — 사이트 표시 때문에 발송 목록 자체가 막히면 안 된다.
+ *
+ *   사이트와 함께 **주문자 정보(이름·연락처)** 도 같이 담는다. 시트의 '연락처1' 은 수령인
+ *   번호라서(3248181: 시트 010-9046-9519=수령인 홍성호, 주문자는 윤다혜) 출고 안내는
+ *   주문자에게 가야 한다. 8월 시트 실측 151건 중 20건이 서로 다른 번호였다.
+ *   반환: Map<order_id, { site, orderer_name, orderer_phone }>
  */
 async function giftResolveSites(orderIds) {
   const map = new Map();
+  const put = (id, v) => { if (id && !map.has(String(id))) map.set(String(id), v); };
   // int 범위 밖(오픈마켓 주문번호)은 IN 절에 넣으면 변환 오류가 난다 — 아예 제외.
   const ids = [...new Set(orderIds.map(x => String(x || '').trim()))]
     .filter(x => /^\d+$/.test(x) && Number(x) > 0 && Number(x) <= 2147483647);
@@ -789,20 +809,26 @@ async function giftResolveSites(orderIds) {
       const inList = ids.slice(i, i + 800).join(',');
       const rs = await runWithPoolRetry(p => p.request().query(`
         SELECT 1 AS pri, CAST(co.order_seq AS VARCHAR(20)) AS oid,
-               ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR(20))) AS site
+               ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR(20))) AS site,
+               co.order_name, co.order_hphone
         FROM custom_order co WITH (NOLOCK)
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
         WHERE co.order_seq IN (${inList})
         UNION ALL
         SELECT 2, CAST(o.order_seq AS VARCHAR(20)),
-               ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR(20)))
+               ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR(20))),
+               o.order_name, o.order_hphone
         FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
         WHERE o.order_seq IN (${inList})
         ORDER BY pri`));
       // pri 순서라 카드 주문이 먼저 — 같은 번호가 양쪽에 있으면 카드 우선.
       for (const r of rs.recordset) {
-        if (!map.has(r.oid)) map.set(r.oid, formatSiteName(r.site) || '');
+        put(r.oid, {
+          site: formatSiteName(r.site) || '',
+          orderer_name: (r.order_name || '').trim(),
+          orderer_phone: (r.order_hphone || '').trim(),
+        });
       }
     }
   } catch (e) {
@@ -816,16 +842,13 @@ async function giftResolveSites(orderIds) {
   const hdr = { apikey: process.env.SUPABASE_ANON_KEY, Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}` };
   const remaining = () => [...new Set(orderIds.map(x => String(x || '').trim()))].filter(x => x && !map.has(x));
   /** 한 소스에서 남은 주문번호만 찾아 map 을 채운다. 실패는 무시 (사이트 표시가 목록을 막으면 안 됨). */
-  const fill = async (label, ids, chunk, urlOf, keyOf, siteOf) => {
+  const fill = async (label, ids, chunk, urlOf, keyOf, metaOf) => {
     if (!ids.length || !REST) return;
     try {
       for (let i = 0; i < ids.length; i += chunk) {
         const r = await fetch(urlOf(ids.slice(i, i + chunk)), { headers: hdr });
         if (!r.ok) break;
-        for (const row of await r.json()) {
-          const k = String(keyOf(row));
-          if (!map.has(k)) map.set(k, siteOf(row));
-        }
+        for (const row of await r.json()) put(keyOf(row), metaOf(row));
       }
     } catch (e) {
       console.warn(`[sms-list] ${label} 주문사이트 조회 실패 (무시):`, e.message);
@@ -835,21 +858,29 @@ async function giftResolveSites(orderIds) {
   // 더기프트 (카페24 업로드분) — vendor_name 만으로 채널이 정해진다:
   //   NULL=매입 / '혼합'=매입 품목 포함 → 매입 / 그 외=위탁. (대시보드 bgPrimarySiteOf 와 같은 규칙)
   await fill('더기프트', remaining(), 100,
-    ids => `${REST}/bg_manual_orders?select=order_id,vendor_name&order_id=in.(${encodeURIComponent(ids.map(x => `"${x.replace(/"/g, '')}"`).join(','))})`,
+    ids => `${REST}/bg_manual_orders?select=order_id,vendor_name,order_name,order_hphone&order_id=in.(${encodeURIComponent(ids.map(x => `"${x.replace(/"/g, '')}"`).join(','))})`,
     row => row.order_id,
-    row => { const v = String(row.vendor_name || '').trim(); return (!v || v === '혼합') ? BG_SITE_OWN : BG_SITE_VENDOR; });
+    row => {
+      const v = String(row.vendor_name || '').trim();
+      return {
+        site: (!v || v === '혼합') ? BG_SITE_OWN : BG_SITE_VENDOR,
+        orderer_name: (row.order_name || '').trim(),
+        orderer_phone: (row.order_hphone || '').trim(),
+      };
+    });
 
   // 쿠팡 — coupang_order_id 는 bigint 라 숫자 주문번호만 넘긴다.
   await fill('쿠팡', remaining().filter(x => /^\d+$/.test(x)), 200,
     ids => `${REST}/coupang_orders?select=coupang_order_id,is_rocket_growth&coupang_order_id=in.(${ids.join(',')})&limit=20000`,
     row => row.coupang_order_id,
-    row => row.is_rocket_growth ? '쿠팡 로켓그로스' : '쿠팡');
+    // 오픈마켓은 주문자 연락처가 마스킹돼 우리 DB 에 없다 → 시트(수령인) 번호를 그대로 쓴다.
+    row => ({ site: row.is_rocket_growth ? '쿠팡 로켓그로스' : '쿠팡', orderer_name: '', orderer_phone: '' }));
 
   // 네이버 — 시트에 적히는 값은 상품주문번호(product_order_id).
   await fill('네이버', remaining(), 200,
     ids => `${REST}/naver_orders?select=product_order_id,store_id&product_order_id=in.(${encodeURIComponent(ids.map(x => `"${x.replace(/"/g, '')}"`).join(','))})&limit=20000`,
     row => row.product_order_id,
-    row => naverSiteLabel(row.store_id));
+    row => ({ site: naverSiteLabel(row.store_id), orderer_name: '', orderer_phone: '' }));
 
   return map;
 }
@@ -883,26 +914,34 @@ async function giftSmsRows(gid) {
     const dm = shipRaw.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
     if (dm) shipDate = `${dm[1]}-${String(dm[2]).padStart(2, '0')}-${String(dm[3]).padStart(2, '0')}`;
     else if (shipRaw) shipDate = shipRaw;
-    // 연락처 — 휴대폰(01x 10~11자리) + 0508 안심번호(12자리) 를 정상으로 본다.
+    // 연락처 — 시트의 '연락처1' 은 수령인 번호다. 아래에서 주문자 번호로 교체한다.
     //   8월 시트에서 '이상' 20건 중 18건이 0508 안심번호였다 — 문자 수신 가능한 번호다 (fable 검증).
-    const digits = phoneRaw.replace(/\D/g, '');
-    // 안심번호는 050X 전 대역 (실측: 0502 15건 · 0504 3건 · 0508 등) — 11~12자리
-    const isSafeNum = /^050\d{8,9}$/.test(digits);
-    const phoneOk = /^01[016789]\d{7,8}$/.test(digits) || isSafeNum;
-    const phone = !phoneOk ? phoneRaw
-      : isSafeNum ? digits.replace(/^(\d{4})(\d{3,4})(\d{4})$/, '$1-$2-$3')
-      : digits.replace(/^(\d{3})(\d{3,4})(\d{4})$/, '$1-$2-$3');
+    const recv = _giftNormPhone(phoneRaw);
     // 송장 — 숫자/하이픈 9자리 이상만 유효 ('취소'·'추가'·'퀵 출고' 같은 메모값 걸러냄)
     const invDigits = invoice.replace(/\D/g, '');
     const invoiceOk = /^[\d-]+$/.test(invoice) && invDigits.length >= 9;
     rows.push({
-      order_id: orderId, name, phone,
+      order_id: orderId, name,
+      phone: recv.phone, phone_ok: recv.ok,   // 아래에서 주문자 번호로 덮어쓴다
+      recv_phone: recv.phone, phone_source: '수령인',
       ship_date: shipDate, invoice,
-      phone_ok: phoneOk, invoice_ok: invoiceOk,
+      invoice_ok: invoiceOk,
     });
   }
-  const siteMap = await giftResolveSites(rows.map(r => r.order_id));
-  for (const r of rows) r.site_name = siteMap.get(r.order_id) || '';
+  // 출고 안내는 **주문자** 에게 보낸다 — 시트 연락처1 은 수령인이라 사내 DB 로 교체한다.
+  //   주문자 번호를 못 찾으면(오픈마켓 마스킹·DB 미매칭) 시트 번호를 그대로 쓴다.
+  const metaMap = await giftResolveSites(rows.map(r => r.order_id));
+  for (const r of rows) {
+    const meta = metaMap.get(r.order_id) || null;
+    r.site_name = meta ? meta.site : '';
+    r.orderer_name = meta ? meta.orderer_name : '';
+    const op = meta ? _giftNormPhone(meta.orderer_phone) : null;
+    if (op && op.ok) {
+      r.phone = op.phone;
+      r.phone_ok = true;
+      r.phone_source = '주문자';
+    }
+  }
   const result = { sheet: tab.name, kind, rows };
   _giftCacheSet(cacheKey, result);
   return result;
