@@ -2082,11 +2082,13 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     if (!d || !d.token) throw new Error('Partner 인증 응답에 token 없음');
     const now = Date.now();
     const exp = d.expires ? new Date(d.expires).getTime() : now + 3600000;
-    global._smsTokenCache = { token: d.token, expires: Number.isFinite(exp) ? exp : now + 3600000 };
+    if (!global._smsTokenCaches) global._smsTokenCaches = {};
+    global._smsTokenCaches[`${cfg.base}|${cfg.clientId}`] = { token: d.token, expires: Number.isFinite(exp) ? exp : now + 3600000 };
     return d.token;
   }
+  // base|clientId 별 캐시 — 알림톡을 개발 PublicApi(별도 base)로 돌릴 때 문자(운영) 토큰과 섞이지 않게.
   async function _smsToken(cfg, force) {
-    const c = global._smsTokenCache;
+    const c = global._smsTokenCaches?.[`${cfg.base}|${cfg.clientId}`];
     if (!force && c && c.expires > Date.now() + 5 * 60000) return c.token;
     return _smsAuth(cfg);
   }
@@ -2117,6 +2119,23 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         : err.message;
       return json(res, { error: msg }, 400);
     }
+  }
+
+  /**
+   * 알림톡(PublicApi kakaotalk/send) 설정 — 기본은 문자 API 설정을 그대로 쓴다.
+   *   PublicApi 반영이 개발 서버에만 된 동안은 BARUN_ALIMTALK_API_BASE / _CLIENT_SECRET 으로
+   *   알림톡만 개발 서버를 보게 할 수 있다 (문자는 운영 그대로). 운영 반영 후 두 변수를 지우면
+   *   문자와 같은 운영 인증으로 돌아간다.
+   */
+  function _alimConfig() {
+    const sms = _smsConfig();   // 시크릿 없으면 null
+    const base = (process.env.BARUN_ALIMTALK_API_BASE || sms?.base || 'https://api.barunsoncard.com')
+      .trim().replace(/\/$/, '');
+    const clientId = (process.env.BARUN_ALIMTALK_CLIENT_ID || sms?.clientId || 'kakaotalk').trim();
+    const own = (process.env.BARUN_ALIMTALK_CLIENT_SECRET || '').trim().replace(/^["']|["']$/g, '');
+    const clientSecret = own || sms?.clientSecret || '';
+    if (!clientSecret) return null;
+    return { base, clientId, clientSecret, secretSource: own ? 'BARUN_ALIMTALK_CLIENT_SECRET' : (sms?.secretSource || ''), rawEnvLen: own ? own.length : (sms?.rawEnvLen ?? 0), secretLen: clientSecret.length };
   }
 
   // POST /api/bg/sms/history — {order_ids:[]} → {history: {id: {count,lastSentAt}}}
@@ -2281,7 +2300,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       //   BARUN_ALIMTALK_CALLER 등록 전엔 비활성 — 값이 있어야만 이 경로를 탄다.
       //   발송: 주문번호 + 주문자 휴대전화 기준. 템플릿의 #{name}/#{0000000} 치환.
       const alimCaller = (process.env.BARUN_ALIMTALK_CALLER || '').trim();
-      const alimCfg = alimCaller ? _smsConfig() : null;
+      const alimCfg = alimCaller ? _alimConfig() : null;
       // sales_gubun → template_code. wedd_biztalk 실측(2026-08-28) 폴백:
       //   SB(바른손카드)=BHGIFT_01 ('[바른손카드]…' 본문) · B(바른손몰)=BMGIFT_01 ('[바른손몰]…').
       //   div = 템플릿 그룹명 ('답례품_주문완료') 로 조회해 코드 개정(_260423 류)에도 따라간다.
