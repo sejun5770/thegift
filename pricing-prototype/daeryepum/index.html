@@ -1515,7 +1515,12 @@ nav.nav-loading a[href^="#"] {
       <input type="date" id="ord-start" />
       <span>~</span>
       <input type="date" id="ord-end" />
-      <input type="text" id="ord-code-search" placeholder="상품코드 검색" style="width:160px;min-width:100px" oninput="renderOrderTable()" />
+      <select id="ord-search-field" onchange="_ordSearchFieldChanged()" style="width:110px;min-width:90px"
+        title="검색할 항목 — 조회된 결과 안에서 걸러냅니다">
+        <option value="product">상품코드/명</option>
+        <option value="order">주문번호</option>
+      </select>
+      <input type="text" id="ord-code-search" placeholder="상품코드 또는 상품명" style="width:160px;min-width:100px" oninput="renderOrderTable()" />
       <button class="btn btn-primary" onclick="loadOrders()">조회</button>
     </div>
   </div>
@@ -5294,8 +5299,19 @@ function _bgVendorTabCounts(rows) {
   if (ns[2]) ns[2].textContent = `(${con.size})`;
 }
 
+/** 검색 대상 변경 — placeholder 를 맞추고 즉시 재렌더. */
+function _ordSearchFieldChanged() {
+  const field = document.getElementById('ord-search-field')?.value || 'product';
+  const input = document.getElementById('ord-code-search');
+  if (input) {
+    input.placeholder = field === 'order' ? '주문번호' : '상품코드 또는 상품명';
+  }
+  renderOrderTable();
+}
+
 function _getFilteredOrdersInner() {
   const q = (document.getElementById('ord-code-search')?.value || '').trim().toLowerCase();
+  const searchField = document.getElementById('ord-search-field')?.value || 'product';
   const excludeCancel = isExcludeCancel();
   const excludePending = isExcludePending();
   // 취소 상태 식별 — CARD/ETC (status_seq) + 마켓플레이스 (네이버: CANCELED/RETURNED/EXCHANGED, 쿠팡: CANCEL/RETURNS)
@@ -5327,11 +5343,19 @@ function _getFilteredOrdersInner() {
     if (excludePending && (r.status_seq === 1 || r.status_seq === 9) && !r.settle_date) return false;
     // 주문사이트 필터 (답례품 카테고리 활성 시만)
     if (activeOrdSiteKeys && !ORD_SITE_CATS.some(c => activeOrdSiteKeys.has(c.key) && c.match(r))) return false;
-    // 상품코드/명 검색
+    // 검색 — 대상(상품코드/명 · 주문번호) 별로 분기
     if (q) {
-      const code = (r.card_code || '').toLowerCase();
-      const name = (r.card_name || '').toLowerCase();
-      if (!code.includes(q) && !name.includes(q)) return false;
+      if (searchField === 'order') {
+        // 주문번호 — ETC-/CP-/NV- 같은 접두사가 붙는 채널이 있어
+        //   숫자만 입력해도 찾히도록 접두사 제거 버전과 함께 비교한다.
+        const seq = String(r.order_seq || '').toLowerCase();
+        const bare = seq.replace(/^[a-z]+-/, '');
+        if (!seq.includes(q) && !bare.includes(q)) return false;
+      } else {
+        const code = (r.card_code || '').toLowerCase();
+        const name = (r.card_name || '').toLowerCase();
+        if (!code.includes(q) && !name.includes(q)) return false;
+      }
     }
     return true;
   });
