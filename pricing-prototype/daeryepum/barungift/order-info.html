@@ -3701,13 +3701,45 @@
         (isCancelled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:-translate-y-0.5 hover:shadow-lifted') + '">' +
         '<div class="flex items-center justify-between mb-2 gap-1 flex-wrap">' +
           '<span class="text-[13px] font-bold text-slate-900">' + esc(o.order_number) + '</span>' +
-          '<div class="flex items-center gap-1 flex-wrap">' + statusBadge + priorityBadge + '</div>' +
+          '<div class="flex items-center gap-1 flex-wrap">' + statusBadge + priorityBadge
+            + '<span class="' + cls + ' hidden" data-ship-slot="' + esc(o.order_id) + '"></span>' + '</div>' +
         '</div>' +
         '<div class="text-[12px] text-slate-500 space-y-1">' +
           '<div class="flex justify-between items-center"><span class="font-medium text-slate-700">' + esc(o.customer_name || '') + (o.phone_last4 ? ' <span class="text-slate-400">(' + esc(o.phone_last4) + ')</span>' : '') + '</span><span class="text-slate-400">' + esc(dateStr) + '</span></div>' +
           '<div class="text-slate-700 font-medium truncate">' + productDisplay + '</div>' +
         '</div></button>';
     }).join('');
+    loadListDeliveryBadges(orders);
+  }
+
+  /**
+   * 주문선택 목록 배송 배지 (2026-08-28) — 입력완료 주문의 출고 이후 상태를 이어 보여준다.
+   *   송장이 없는 주문(출고 전)은 배지를 붙이지 않는다. 실패해도 목록은 그대로다.
+   */
+  async function loadListDeliveryBadges(orders) {
+    const ids = (orders || [])
+      .filter(o => o.status_seq !== 3 && o.status_seq !== 5)   // 취소 제외
+      .map(o => o.order_id).filter(Boolean).slice(0, 10);
+    if (!ids.length) return;
+    try {
+      const resp = await fetch(API_BASE + '/api/bg/orders/delivery-status?ids=' + encodeURIComponent(ids.join(',')));
+      if (!resp.ok) return;
+      const d = await resp.json();
+      document.querySelectorAll('[data-ship-slot]').forEach(function (el) {
+        const st = d.statuses?.[el.getAttribute('data-ship-slot')];
+        if (!st) return;
+        if (st.delivered) {
+          el.textContent = '📦 배송완료';
+          el.className = el.className.replace('hidden', '') + ' bg-emerald-100 text-emerald-800';
+        } else if (st.registered) {
+          el.textContent = '🚚 배송중';
+          el.className = el.className.replace('hidden', '') + ' bg-sky-50 text-sky-700';
+        } else {
+          el.textContent = '📦 출고 준비';
+          el.className = el.className.replace('hidden', '') + ' bg-slate-100 text-slate-600';
+        }
+      });
+    } catch (e) { /* 배지 실패는 무시 */ }
   }
 
   window.searchOrders = async function() {
@@ -3776,14 +3808,77 @@
     renderSubmittedSummary();
     showScreen('submittedSummaryScreen');
     window.scrollTo({ top: 0 });
+    loadDeliveryStatus();   // 배송조회 — 렌더 후 비동기로 카드가 붙는다
   };
 
-  /** 요약 화면 뒤로가기 — 이전에 있던 화면(success/completed) 으로 복귀 */
+  /** 요약 화면 뒤로가기 — 직행(입력완료 스킵)으로 왔으면 주문선택 목록으로,
+   *  목록이 없으면(단건 링크 접속) 완료 안내 화면으로 복귀 */
   window.backFromSummary = function() {
+    if (_prevScreenBeforeSummary === null) {
+      if (lastLoadedOrders && lastLoadedOrders.length) { goBackToOrderList(); return; }
+      showScreen('completedScreen'); return;
+    }
     showScreen(_prevScreenBeforeSummary || 'completedScreen');
   };
 
   /** 이미 제출된 정보를 orderData.existing_info 기반으로 요약 렌더 */
+  // ============================================
+  // 배송조회 (2026-08-28) — 시트/출고처리 송장 → CJ대한통운 실시간 상태
+  // ============================================
+  //   요약 화면이 뜬 뒤 비동기로 붙는다. 송장이 없으면(출고 전) 카드 자체를 그리지 않는다 —
+  //   '조회 불가' 카드는 출고 전 고객에게 불안만 준다.
+  let _deliveryLoadedFor = null;
+  let _deliveryHtml = '';
+  async function loadDeliveryStatus() {
+    const wrap = document.getElementById('deliveryTrackWrap');
+    if (!wrap || !orderData?.order_id) return;
+    // 재진입: 요약 화면이 컨테이너를 새로 그리므로, 받아둔 카드를 다시 붙이기만 한다
+    if (_deliveryLoadedFor === orderData.order_id) { wrap.innerHTML = _deliveryHtml; return; }
+    try {
+      const url = withSignature(API_BASE + '/api/bg/orders/' + encodeURIComponent(orderData.order_id) + '/delivery');
+      const resp = await fetch(url);
+      if (!resp.ok) return;
+      const d = await resp.json();
+      _deliveryLoadedFor = orderData.order_id;
+      _deliveryHtml = (d.found && d.invoices?.length) ? d.invoices.map(renderDeliveryCard).join('') : '';
+      wrap.innerHTML = _deliveryHtml;
+    } catch (e) { /* 배송조회 실패는 요약 화면을 막지 않는다 */ }
+  }
+
+  function renderDeliveryCard(inv) {
+    const t = inv.tracking;
+    const cjUrl = 'https://trace.cjlogistics.com/next/tracking.html?wblNo=' + encodeURIComponent(inv.invoice_no);
+    const invLine = '<div class="flex items-center justify-between mt-2 text-[12px]">'
+      + '<span class="text-slate-500">' + esc(inv.delivery_company || 'CJ대한통운') + ' <span class="font-mono text-slate-700">' + esc(inv.invoice_no) + '</span></span>'
+      + '<a href="' + cjUrl + '" target="_blank" rel="noopener" class="font-semibold" style="color:var(--brand-600)">택배사에서 조회 →</a>'
+      + '</div>';
+    if (!t) {
+      return '<div class="surface p-4 mb-2">'
+        + '<h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">배송 조회</h3>'
+        + '<p class="text-sm text-slate-700">송장이 등록되었습니다.</p>' + invLine + '</div>';
+    }
+    const badge = t.delivered
+      ? '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full" style="background:#dcfce7;color:#047857">배송완료</span>'
+      : t.registered
+        ? '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full" style="background:#dbeafe;color:#1d4ed8">배송중</span>'
+        : '<span class="text-[11px] font-bold px-2 py-0.5 rounded-full" style="background:#f1f5f9;color:#64748b">접수 대기</span>';
+    // 이력 — 최신이 위, 최근 4개만 (전체는 택배사 링크)
+    const steps = (t.steps || []).slice(-4).reverse().map(function (st, i) {
+      return '<div class="flex gap-2 items-start' + (i ? ' opacity-60' : '') + '">'
+        + '<span class="text-[11px] text-slate-400 w-[86px] flex-shrink-0 font-mono">' + esc(st.date.slice(5)) + ' ' + esc(st.time) + '</span>'
+        + '<div class="min-w-0"><p class="text-[12.5px] font-semibold text-slate-800">' + esc(st.status)
+        + (st.location ? ' <span class="font-normal text-slate-400">· ' + esc(st.location) + '</span>' : '') + '</p>'
+        + (i === 0 && st.desc ? '<p class="text-[11.5px] text-slate-500 leading-snug">' + esc(st.desc) + '</p>' : '')
+        + '</div></div>';
+    }).join('');
+    return '<div class="surface p-4 mb-2">'
+      + '<div class="flex items-center justify-between mb-2">'
+      + '<h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">배송 조회</h3>' + badge + '</div>'
+      + (steps ? '<div class="space-y-1.5">' + steps + '</div>'
+               : '<p class="text-sm text-slate-600">' + esc(t.status_desc || t.status) + '</p>')
+      + invLine + '</div>';
+  }
+
   function renderSubmittedSummary() {
     const info = orderData?.existing_info || {};
     const products = orderData?.products || [];
@@ -3925,6 +4020,7 @@
     const content = document.getElementById('submittedSummaryContent');
     content.innerHTML = ''
       + '<div class="fade-in">'
+      + '<div id="deliveryTrackWrap"></div>'
       + '<div class="surface p-4 mb-2">'
       +   '<h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">희망 출고일</h3>'
       +   '<p class="text-[14px] font-semibold text-slate-900">📅 ' + shipDateLabel + '</p>'
@@ -4079,10 +4175,16 @@
         return;
       }
 
-      // Already completed check
+      // Already completed check — '입력이 완료됐어요' 안내 화면은 건너뛰고 바로
+      //   입력한 정보(요약+배송조회)로 간다 (2026-08-28 요청). 안내 화면은 클릭만 한 번
+      //   더 시킬 뿐 정보가 없었다. 뒤로가기는 주문선택 목록으로 (아래 backFromSummary).
       if (orderData.info_status === 'completed') {
         toggleBackToListButtons();
-        showScreen('completedScreen');
+        _prevScreenBeforeSummary = null;   // 요약에서 뒤로 = 목록 (completedScreen 아님)
+        renderSubmittedSummary();
+        showScreen('submittedSummaryScreen');
+        window.scrollTo({ top: 0 });
+        loadDeliveryStatus();
         return;
       }
 
