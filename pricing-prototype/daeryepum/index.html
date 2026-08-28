@@ -1936,7 +1936,12 @@ nav.nav-loading a[href^="#"] {
             <div style="font-size:14px;font-weight:600">입력 필드</div>
             <div style="font-size:11px;color:var(--gray-500);margin-top:2px">고객이 이 스티커 선택 시 노출되는 입력 항목입니다. 비워두면 기본 "스티커 문구" 한 줄만 노출됩니다.</div>
           </div>
-          <button class="btn btn-sm" onclick="addBgStickerField()">+ 필드 추가</button>
+          <div style="display:flex;gap:6px;align-items:center">
+            <select id="bg-s-copy-src" style="padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;max-width:230px"
+              title="이미 만든 스티커의 입력 필드 구성을 그대로 복사해 옵니다"></select>
+            <button class="btn btn-sm" onclick="copyBgStickerFieldsFrom()" title="선택한 스티커의 입력 필드를 복사해 온다 (현재 필드는 교체)">필드 가져오기</button>
+            <button class="btn btn-sm" onclick="addBgStickerField()">+ 필드 추가</button>
+          </div>
         </div>
         <div id="bg-s-fields"></div>
       </div>
@@ -13668,6 +13673,16 @@ function openBgStickerForm(sticker) {
   fieldsEl.innerHTML = '';
   (sticker ? sticker.custom_fields || [] : []).forEach(f => addBgStickerFieldRow(f));
 
+  // 필드 복사 소스 — 입력 필드가 있는 다른 스티커만 후보로 (자기 자신 제외)
+  const copySel = document.getElementById('bg-s-copy-src');
+  if (copySel) {
+    const cands = (bgStickers || [])
+      .filter(st => Array.isArray(st.custom_fields) && st.custom_fields.length && (!sticker || st.id !== sticker.id))
+      .sort((a, b) => String(a.sticker_code || a.name).localeCompare(String(b.sticker_code || b.name)));
+    copySel.innerHTML = '<option value="">다른 스티커에서 복사…</option>'
+      + cands.map(st => `<option value="${st.id}">${esc(st.sticker_code || '')} ${esc(st.name)} (필드 ${st.custom_fields.length})</option>`).join('');
+  }
+
   // 코드 → 상품군 hint 갱신 (편집 진입 시)
   updateBgStickerGroupHint();
 
@@ -13704,6 +13719,28 @@ function editBgSticker(id) {
 
 let bgFieldCounter = 0;
 function addBgStickerField() { addBgStickerFieldRow(null); }
+
+/**
+ * 다른 스티커의 custom_fields 를 현재 폼으로 복사.
+ *   기존 필드는 교체한다 (섮으면 순서·중복이 엉키므로 확인 후 전체 교체).
+ *   field_id 는 복사하지 않는다 — 저장 시 새로 발급되어 스티커 간 ID 공유로 인한 혼동을 막는다.
+ */
+function copyBgStickerFieldsFrom() {
+  const sel = document.getElementById('bg-s-copy-src');
+  const srcId = sel?.value;
+  if (!srcId) { showToast('복사할 스티커를 먼저 선택해주세요'); return; }
+  const src = (bgStickers || []).find(st => String(st.id) === String(srcId));
+  if (!src || !Array.isArray(src.custom_fields) || !src.custom_fields.length) {
+    showToast('선택한 스티커에 입력 필드가 없습니다'); return;
+  }
+  const fieldsEl = document.getElementById('bg-s-fields');
+  if (fieldsEl.children.length &&
+      !confirm(`현재 입력 필드 ${fieldsEl.children.length}개를 지우고 '${src.name}' 의 필드 ${src.custom_fields.length}개로 교체합니다.
+계속할까요?`)) return;
+  fieldsEl.innerHTML = '';
+  src.custom_fields.forEach(f => addBgStickerFieldRow({ ...f, field_id: null }));
+  showToast(`'${src.name}' 의 입력 필드 ${src.custom_fields.length}개를 가져왔습니다 — 저장을 눌러야 반영됩니다`);
+}
 
 function addBgStickerFieldRow(field) {
   bgFieldCounter++;
