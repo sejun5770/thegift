@@ -2273,8 +2273,33 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const adminClient = require('./admin-client');
       const pool = await getPool();
       const results = [];
-      const viaCounts = { sp: 0, 'admin-http': 0 };
+      const viaCounts = { sp: 0, 'admin-http': 0, publicapi: 0 };
       let httpAborted = false; // 세션 만료/네트워크 차단 시 이후 HTTP 호출 skip
+
+      // 3순위 경로: PublicApi /api/kakaotalk/send (OpenAPI 명세 2026-08-28 확보).
+      //   문자 API 와 인증 공유 (clientId 'kakaotalk'). caller 는 서버 allowlist 검증이라
+      //   BARUN_ALIMTALK_CALLER 등록 전엔 비활성 — 값이 있어야만 이 경로를 탄다.
+      //   발송: 주문번호 + 주문자 휴대전화 기준. 템플릿의 #{name}/#{0000000} 치환.
+      const alimCaller = (process.env.BARUN_ALIMTALK_CALLER || '').trim();
+      const alimCfg = alimCaller ? _smsConfig() : null;
+      // sales_gubun → template_code. wedd_biztalk 실측(2026-08-28) 폴백:
+      //   SB(바른손카드)=BHGIFT_01 ('[바른손카드]…' 본문) · B(바른손몰)=BMGIFT_01 ('[바른손몰]…').
+      //   div = 템플릿 그룹명 ('답례품_주문완료') 로 조회해 코드 개정(_260423 류)에도 따라간다.
+      let alimTplByGubun = { SB: 'BHGIFT_01', B: 'BMGIFT_01' };
+      if (alimCfg) {
+        try {
+          const tq = await pool.request()
+            .input('div', sql.NVarChar, templateName)
+            .query(`SELECT sales_gubun, template_code FROM wedd_biztalk WITH (NOLOCK)
+                    WHERE div = @div AND USE_YORN = 'Y'`);
+          if (tq.recordset.length) {
+            alimTplByGubun = {};
+            for (const t of tq.recordset) alimTplByGubun[String(t.sales_gubun || '').trim()] = String(t.template_code || '').trim();
+          }
+        } catch (e) {
+          console.warn('[alimtalk] wedd_biztalk 템플릿 조회 실패 — 하드코딩 매핑 사용:', e.message);
+        }
+      }
 
       for (const rawId of orderIds) {
         const oid = String(rawId || '').trim();
@@ -2340,13 +2365,71 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
           }
         }
 
+        // 3) PublicApi KakaoTalk fallback — SP·사내망 HTTP 둘 다 실패했을 때.
+        if (!sent && alimCfg) {
+          try {
+            const gubun = orderCategory === 'E' ? 'B' : 'SB';   // W=바른손카드(SB) / E=바른손몰(B)
+            const tplCode = alimTplByGubun[gubun];
+            if (!tplCode) throw new Error(`사용 가능한 템플릿 없음 (sales_gubun=${gubun})`);
+            const oq = await pool.request().input('seq', sql.Int, seq).query(
+              orderCategory === 'E'
+                ? 'SELECT order_name, order_hphone FROM CUSTOM_ETC_ORDER WITH (NOLOCK) WHERE order_seq = @seq'
+                : 'SELECT order_name, order_hphone FROM custom_order WITH (NOLOCK) WHERE order_seq = @seq');
+            const ord = oq.recordset[0];
+            if (!ord) throw new Error('주문 조회 실패 (주문번호 확인)');
+            // 알림톡은 휴대폰(01X)만 허용 — 안심번호/유선은 이 경로로 발송 불가.
+            const digits = String(ord.order_hphone || '').replace(/\D/g, '');
+            if (!/^01[016789]\d{7,8}$/.test(digits)) throw new Error('주문자 번호가 휴대폰이 아닙니다');
+            const payload = {
+              caller: alimCaller,
+              salesGubun: gubun,
+              templateCode: tplCode,
+              recipientNum: digits.replace(/^(\d{3})(\d{3,4})(\d{4})$/, '$1-$2-$3'),
+              // 템플릿 변수 실측: #{name} · #{0000000}(주문번호). 버튼 링크는 고정 URL.
+              variables: { name: String(ord.order_name || '고객').trim(), '0000000': String(seq) },
+            };
+            let token = await _smsToken(alimCfg);
+            const call = tk => fetch(`${alimCfg.base}/api/kakaotalk/send`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tk}` },
+              body: JSON.stringify(payload),
+              signal: AbortSignal.timeout(15000),
+            });
+            let r = await call(token);
+            if (r.status === 401) { token = await _smsToken(alimCfg, true); r = await call(token); }
+            const text = await r.text();
+            let parsed = null;
+            try { parsed = JSON.parse(text); } catch { /* 본문 없는 401 등 */ }
+            if (r.ok && parsed && parsed.success !== false) {
+              sent = true;
+              via = 'publicapi';
+              viaCounts.publicapi++;
+              // SP/사내망 경로와 달리 이력이 바른손 백엔드에 안 남을 수 있어 우리 쪽에 기록.
+              try {
+                await store.logAlimtalkSend({
+                  order_id: oid, to_phone: `****${digits.slice(-4)}`,
+                  template_code: tplCode,
+                  message_id: parsed.messageId != null ? String(parsed.messageId) : null,
+                  success: true,
+                });
+              } catch { /* 로그 실패는 발송 결과에 영향 없음 */ }
+            } else {
+              const detail = parsed ? (parsed.message || JSON.stringify(parsed.errors || {})) : text.slice(0, 150);
+              throw new Error(`HTTP ${r.status}: ${String(detail).slice(0, 180)}`);
+            }
+          } catch (e) {
+            lastError = (lastError ? lastError + ' | ' : '') + `PublicApi: ${e.name === 'TimeoutError' ? '응답 시간 초과 (15초)' : e.message}`;
+          }
+        }
+
         if (sent) {
           results.push({ order_id: oid, order_seq: seq, order_type: orderCategory, success: true, via });
         } else {
           results.push({ order_id: oid, order_seq: seq, order_type: orderCategory, success: false, error: lastError || 'unknown' });
-          if (httpAborted) {
+          // PublicApi 경로가 살아 있으면 다음 주문을 계속 시도한다 — abort 는 남은 경로가 없을 때만.
+          if (httpAborted && !alimCfg) {
             // 남은 주문들은 어차피 같은 이유로 실패 — 일찍 끝냄
-            results.push({ order_id: '_aborted', success: false, error: '경로 차단으로 이후 호출 중단 (SP 권한 X + HTTP 차단)' });
+            results.push({ order_id: '_aborted', success: false, error: '경로 차단으로 이후 호출 중단 (SP 권한 X + HTTP 차단 · BARUN_ALIMTALK_CALLER 미설정)' });
             break;
           }
         }
@@ -2358,6 +2441,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         failed: results.filter(r => !r.success).length,
         template: templateName,
         via_counts: viaCounts,
+        publicapi_enabled: !!alimCfg,
         sp_available: _spAvailable,
       };
       logAccess(req, 'alimtalk_send_done', null, {
