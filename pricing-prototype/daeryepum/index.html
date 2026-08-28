@@ -23580,9 +23580,9 @@ async function bulkSendAlimtalkViaSp() {
   const ok = confirm(
     `💬 알림톡 발송\n\n` +
     `${orderIds.length}건의 미입력 주문에 정보입력 안내 알림톡을 발송합니다.\n` +
-    `(SP_GIFT_ORDER_BIZTALK_PROC · 템플릿: 답례품_주문완료)\n\n` +
+    `(템플릿: 답례품_주문완료 — 카드=BHGIFT_01 / 몰=BMGIFT_01 · 주문자 휴대폰으로 발송)\n\n` +
     `대상 주문번호: ${preview}\n\n` +
-    `※ 발송 이력은 바른손 백엔드 시스템에 기록됩니다\n` +
+    `※ 서버가 가능한 경로로 자동 발송합니다 (사내 SP → 통합관리자 → PublicApi · 이력은 경로별 시스템에 기록)\n` +
     `※ 동일 고객에게 중복 발송될 수 있으니 주의하세요\n\n` +
     `진행하시겠습니까?`
   );
