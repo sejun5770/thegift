@@ -2403,15 +2403,30 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         // 3) PublicApi KakaoTalk fallback — SP·사내망 HTTP 둘 다 실패했을 때.
         if (!sent && alimCfg) {
           try {
-            const gubun = orderCategory === 'E' ? 'B' : 'SB';   // W=바른손카드(SB) / E=바른손몰(B)
-            const tplCode = alimTplByGubun[gubun];
-            if (!tplCode) throw new Error(`사용 가능한 템플릿 없음 (sales_gubun=${gubun})`);
+            // 브랜드는 테이블이 아니라 **주문의 사이트** 로 판정한다.
+            //   CUSTOM_ETC_ORDER 는 바른손카드 답례품 단독주문이 대부분이다 (최근 60일 실측:
+            //   바른손카드 2,090건 vs 바른손몰 1건). 테이블 기준(E=몰)으로 보내면 카드 고객이
+            //   [바른손몰] 템플릿을 받는다 (2026-08-28 운영 오발송 원인).
             const oq = await pool.request().input('seq', sql.Int, seq).query(
               orderCategory === 'E'
-                ? 'SELECT order_name, order_hphone FROM CUSTOM_ETC_ORDER WITH (NOLOCK) WHERE order_seq = @seq'
-                : 'SELECT order_name, order_hphone FROM custom_order WITH (NOLOCK) WHERE order_seq = @seq');
+                ? `SELECT o.order_name, o.order_hphone,
+                          ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR(20))) AS site
+                   FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
+                   LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
+                   WHERE o.order_seq = @seq`
+                : `SELECT co.order_name, co.order_hphone,
+                          ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR(20))) AS site
+                   FROM custom_order co WITH (NOLOCK)
+                   LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+                   WHERE co.order_seq = @seq`);
             const ord = oq.recordset[0];
             if (!ord) throw new Error('주문 조회 실패 (주문번호 확인)');
+            // 바른손몰 계열만 B — SiteName '바른손몰' 또는 2715(바른손몰 B2B, SiteInfo 미등록이라 raw 코드).
+            //   그 외(바른손카드·제휴 웨딩홀 등 카드 플랫폼 판매)는 전부 SB.
+            const site = String(ord.site || '').trim();
+            const gubun = (site.includes('바른손몰') || site === '2715') ? 'B' : 'SB';
+            const tplCode = alimTplByGubun[gubun];
+            if (!tplCode) throw new Error(`사용 가능한 템플릿 없음 (sales_gubun=${gubun})`);
             // 알림톡은 휴대폰(01X)만 허용 — 안심번호/유선은 이 경로로 발송 불가.
             const digits = String(ord.order_hphone || '').replace(/\D/g, '');
             if (!/^01[016789]\d{7,8}$/.test(digits)) throw new Error('주문자 번호가 휴대폰이 아닙니다');
