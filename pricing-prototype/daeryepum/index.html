@@ -5220,6 +5220,34 @@ const DRIFT_STYLE = {
 };
 
 /** 행 배지 — 케이스 라벨 + 툴팁(작업일·작업자·변경 이력 원문) */
+// ── 합포장 검토 배지 ────────────────────────────────────────
+//   같은 주문·같은 배송지에 품목이 2개 이상이면 한 박스로 묶을 수 있는지 확인하라는 표시.
+//   4~8월 실측: 합포장 가능한 복수품목 주문 140건 중 134건(96%)이 박스를 나눠 나갔고
+//   추가 박스가 285개였다. 나눔배송(배송지 2곳 이상)은 합포장이 불가능해 제외한다.
+/** rows → Map<order_seq, {lines, dseqs}>. getOrder 로 두 화면의 행 모양 차이를 흡수. */
+function _buildCombineMap(rows, getOrder) {
+  const m = new Map();
+  for (const row of rows || []) {
+    const o = getOrder(row);
+    if (!o) continue;
+    const key = String(o.order_seq || '');
+    if (!key) continue;
+    let e = m.get(key);
+    if (!e) { e = { lines: 0, dseqs: new Set() }; m.set(key, e); }
+    e.lines++;
+    e.dseqs.add(String(o.delivery_seq || 1));
+  }
+  return m;
+}
+
+/** 배지 HTML — 품목 2개 이상 + 배송지 1곳일 때만. */
+function _combineBadge(map, orderSeq) {
+  const e = map && map.get(String(orderSeq || ''));
+  if (!e || e.lines < 2 || e.dseqs.size > 1) return '';
+  return `<span title="합포장 검토 — 같은 배송지로 ${e.lines}개 품목이 나갑니다. 한 박스로 묶을 수 있는지 확인하세요 (나눔배송은 제외됨)"
+    style="background:#eff6ff;color:#1d4ed8;font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px;margin-right:3px;white-space:nowrap">📦${e.lines}</span>`;
+}
+
 function _ordDriftBadge(r) {
   const d = _ordDrift[String(r.order_seq)];
   if (!d) return '';
@@ -5361,8 +5389,12 @@ function _getFilteredOrdersInner() {
   });
 }
 
+let _ordCombine = new Map();   // 주문번호 → 합포장 배지 계산용 (품목 수 / 배송지 수)
+
 function renderOrderTable() {
   _ordUpdateFilterBadge();
+  // 화면 필터와 무관하게 주문 전체 품목을 세야 하므로 ordersData 원본 기준으로 계산한다.
+  _ordCombine = _buildCombineMap(ordersData, r => r);
   const cols = getSelectedCols();
   const hideCollected = document.getElementById('hide-collected')?.checked;
   const collected = getCollectedSet();
@@ -5400,7 +5432,7 @@ function renderOrderTable() {
     return `<tr class="${cls}" style="cursor:pointer" onclick="_onOrderRowClick(${i}, event)">` +
       `<td><input type="checkbox" class="row-check" data-idx="${i}" onchange="updateSelectedCount()" onclick="event.stopPropagation()"></td>` +
       actionCell +
-      cols.map(c => `<td class="${c.num?'num':''}">${c.key === 'order_seq' ? _ordDriftBadge(r) + _bgVendorBadge(r) + (r[c.key] ?? '') : (r[c.key] ?? '')}</td>`).join('') +
+      cols.map(c => `<td class="${c.num?'num':''}">${c.key === 'order_seq' ? _ordDriftBadge(r) + _bgVendorBadge(r) + _combineBadge(_ordCombine, r.order_seq) + (r[c.key] ?? '') : (r[c.key] ?? '')}</td>`).join('') +
       `</tr>`;
   }).join('');
   document.getElementById('order-count').textContent = filtered.length;
@@ -20498,6 +20530,7 @@ let bgUnifiedOrders = [];   // MSSQL 주문 데이터 (중복 제거)
 let bgUnifiedProductMap = new Map(); // order_seq → Map(card_code → card_name)
 let bgUnifiedCiMap = new Map(); // order_id → customer_info
 let bgUnifiedRows = [];     // 평탄화된 렌더 행
+let _uniCombine = new Map(); // 주문번호 → 합포장 배지 계산용
 
 // 전체 탭 복사용 컬럼 정의 — 주문조회 페이지 ALL_COLS 와 유사 구조.
 //   valueFn(row) 은 rowIdx 위치의 { order, ci, sel, product_name, product_qty } 를 받아 셀 값 반환.
@@ -21783,6 +21816,9 @@ function renderBgUnified() {
   // ============================================
   // Row 단위 워크플로우 stage 태깅 + 7-탭 카운트
   // ============================================
+  // 합포장 배지 — 탭/필터로 행이 걸러지기 전에 계산해야 주문의 실제 품목 수가 나온다.
+  _uniCombine = _buildCombineMap(bgUnifiedRows, r => r.order);
+
   bgUnifiedRows.forEach(r => {
     r._stage = computeRowStage(r.order, r.ci, r.sel);
     // 로켓그로스는 쿠팡이 포장·출고까지 한다 — 우리 작업 대기열에 섞이면 안 된다.
@@ -22191,7 +22227,8 @@ function renderBgUnified() {
     const orderSeqInner = hasRequest
       ? `<span title="${esc(String(ci.customer_request).slice(0, 200))}">📝 ${esc(order.order_seq)}</span>`
       : esc(order.order_seq);
-    const orderSeqContent = specialPrefix + expressPrefix + logoPrefix + orderSeqInner;
+    const orderSeqContent = specialPrefix + expressPrefix + logoPrefix
+      + _combineBadge(_uniCombine, order.order_seq) + orderSeqInner;
     html += `<tr class="${rowClass}" style="${borderStyle}${rowInlineStyle ? ';' + rowInlineStyle : ''};cursor:pointer" onclick="_onUniRowClick(${rowIdx}, event)">
       <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()" onclick="event.stopPropagation()"></td>
       <td style="${orderSeqStyle}">${orderSeqContent}</td>
