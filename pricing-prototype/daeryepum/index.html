@@ -3749,6 +3749,16 @@ nav.nav-loading a[href^="#"] {
     <div id="uni-missed-detail" style="display:none;margin-top:8px;font-size:12px;overflow-x:auto"></div>
   </div>
 
+  <!-- 주문수집 누락 경보 — 수집완료 주문이 희망출고월 시트에 없음 (출고일 지나기 전에 잡는 사전 경보) -->
+  <div id="uni-missed-collect" style="display:none;padding:10px 14px;background:#fffbeb;border:1px solid #fbbf24;border-radius:6px;margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <strong style="font-size:13px;color:#92400e">📋 주문수집 누락 의심 <span id="uni-collect-count">0</span>건</strong>
+      <span id="uni-collect-sub" style="font-size:12px;color:#78350f">수집완료 처리됐지만 희망출고월 스프레드시트에 주문번호가 없습니다</span>
+      <button class="btn" style="padding:3px 10px;font-size:11px;margin-left:auto" onclick="document.getElementById('uni-collect-detail').style.display=document.getElementById('uni-collect-detail').style.display==='none'?'block':'none'">상세</button>
+    </div>
+    <div id="uni-collect-detail" style="display:none;margin-top:8px;font-size:12px;overflow-x:auto"></div>
+  </div>
+
   <div id="uni-loading" style="text-align:center;padding:40px;color:var(--gray-400)">데이터를 불러오는 중입니다...</div>
 
   <!-- 사고건 등록/수정 모달 -->
@@ -21151,12 +21161,51 @@ async function loadMissedShippingAlert() {
   } catch { box.style.display = 'none'; }
 }
 
+/**
+ * 주문수집 누락 경보 — 수집완료 주문의 희망출고월 시트에 주문번호가 있는지 대조.
+ *   출고 누락 경보(빨강)는 출고일이 지나야 잡힌다 — 이건 그 전에 잡는 사전 경보(주황).
+ *   '어느 월에도 없음' = 진짜 누락 / '다른 월에 있음' = 월 착오 수집 (참고).
+ */
+async function loadMissedCollectAlert() {
+  const box = document.getElementById('uni-missed-collect');
+  if (!box) return;
+  try {
+    const r = await fetch(`${API}/api/orders/missed-collect`);
+    if (!r.ok) { box.style.display = 'none'; return; }
+    const d = await r.json();
+    if (!d || !(d.items || []).length) { box.style.display = 'none'; return; }
+    document.getElementById('uni-collect-count').textContent = d.missing;
+    document.getElementById('uni-collect-sub').textContent =
+      `수집완료 처리됐지만 희망출고월 스프레드시트에 주문번호가 없습니다`
+      + (d.wrong_month ? ` · 월 착오 ${d.wrong_month}건 별도` : '')
+      + ` (최근 30일 이후 희망출고 ${d.checked}건 대조)`;
+    const rows = d.items.map(i => {
+      const seq = String(i.order_id).replace(/^[A-Z]+-/i, '');
+      const verdict = i.elsewhere
+        ? `<span style="color:#92400e">다른 월(${i.elsewhere}) 시트에 있음 — 월 착오</span>`
+        : `<span style="color:#b91c1c;font-weight:600">어느 월 시트에도 없음</span>`;
+      return `<tr>
+        <td style="padding:3px 8px;font-family:monospace"><a href="#" title="주문번호 복사" onclick="navigator.clipboard.writeText('${seq}').then(()=>showToast('복사: ${seq}'));return false">${i.order_id}</a></td>
+        <td style="padding:3px 8px;white-space:nowrap">${i.desired_ship_date || '-'}</td>
+        <td style="padding:3px 8px;white-space:nowrap;font-size:11px;color:var(--gray-500)">${String(i.processed_at || '').slice(0, 10)}</td>
+        <td style="padding:3px 8px">${verdict}</td>
+      </tr>`;
+    }).join('');
+    document.getElementById('uni-collect-detail').innerHTML =
+      `<table style="border-collapse:collapse;min-width:520px"><thead><tr style="color:var(--gray-500);text-align:left">
+        <th style="padding:3px 8px">주문</th><th style="padding:3px 8px">희망출고</th><th style="padding:3px 8px">수집처리</th><th style="padding:3px 8px">판정</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+    box.style.display = 'block';
+  } catch { box.style.display = 'none'; }
+}
+
 async function loadBgUnified() {
   if (_bgUnifiedAbort) _bgUnifiedAbort.abort();
   _bgUnifiedAbort = new AbortController();
   const signal = _bgUnifiedAbort.signal;
 
   loadMissedShippingAlert();   // 출고 누락 경보 — 비동기, 목록 로딩과 무관
+  loadMissedCollectAlert();    // 주문수집 누락 경보 (시트 대조) — 비동기
   showBgUnifiedSkeleton('1/3 데이터 조회 시작...');
   document.getElementById('uni-table-wrap').style.display = 'none';
 

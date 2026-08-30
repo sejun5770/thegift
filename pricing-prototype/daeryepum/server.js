@@ -890,6 +890,107 @@ async function giftResolveSites(orderIds) {
   return map;
 }
 
+/**
+ * 주문수집 누락 점검 — 수집완료(processed_at) 주문의 희망출고월 시트에 주문번호가 있는지 대조.
+ *   출고 누락 경보(missed-shipping)는 희망출고일이 지나야 잡힌다 — 이 점검은 그 전에,
+ *   시트 등록 단계에서 빠진 주문을 미리 찾는다 (수집복사=클립보드 성공만으로 완료 마킹되는 구조 보완).
+ *   판정: '어느 월에도 없음' = 진짜 누락 / '다른 월에 있음' = 월 착오 (참고 표시).
+ *   실측 (2026-08-31, 최근 30일~미래 312건): 누락 1건 + 월 착오 2건, 오탐 0.
+ */
+async function giftMissedCollect() {
+  const cached = _giftCacheGet('missed-collect', 5 * 60 * 1000);
+  if (cached) return cached;
+
+  const REST = process.env.SUPABASE_URL ? `${process.env.SUPABASE_URL}/rest/v1` : null;
+  if (!REST) throw new Error('SUPABASE_URL 미설정');
+  const hdr = { apikey: process.env.SUPABASE_ANON_KEY, Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}` };
+
+  // 1) 수집완료 + 희망출고일이 최근 30일 이후 (지난 건은 출고 누락 경보 몫)
+  const from = new Date(Date.now() + 9 * 3600000 - 30 * 86400000).toISOString().slice(0, 10);
+  let ci = [];
+  for (let off = 0; ; off += 1000) {
+    const r = await fetch(`${REST}/bg_order_customer_info?select=order_id,desired_ship_date,processed_at,sticker_selections`
+      + `&processed_at=not.is.null&desired_ship_date=gte.${from}&order=desired_ship_date.asc&limit=1000&offset=${off}`, { headers: hdr });
+    if (!r.ok) throw new Error(`customer_info 조회 실패 (${r.status})`);
+    const d = await r.json();
+    ci = ci.concat(d);
+    if (d.length < 1000) break;
+  }
+
+  // 주문이 걸치는 희망출고월들 — 기본값 + 품목별(나눔배송) 날짜 모두
+  const bare = id => String(id || '').trim().replace(/^[A-Z]+-/i, '');
+  const monthsOf = c => {
+    const ds = new Set();
+    if (c.desired_ship_date) ds.add(String(c.desired_ship_date).slice(0, 7));
+    for (const sel of (c.sticker_selections || [])) {
+      if (sel && sel.desired_ship_date) ds.add(String(sel.desired_ship_date).slice(0, 7));
+    }
+    return [...ds];
+  };
+  const allMonths = new Set();
+  ci.forEach(c => monthsOf(c).forEach(m => allMonths.add(m)));
+
+  // 2) 월별 시트의 주문번호 집합 ('26년 9월' 형식 탭)
+  const { sheets } = await giftSheetTabs();
+  const sheetIds = {};   // ym → Set(주문번호) | null(탭 없음)
+  const noSheet = [];
+  for (const ym of allMonths) {
+    const [y, m] = ym.split('-');
+    const tab = sheets.find(t => t.name.trim() === `${y.slice(2)}년 ${Number(m)}월`);
+    if (!tab) { sheetIds[ym] = null; noSheet.push(ym); continue; }
+    const csv = await _giftFetch(`https://docs.google.com/spreadsheets/d/${GIFT_SHEET_ID}/export?format=csv&gid=${tab.gid}`, { expectCsv: true });
+    const rows = _giftParseCsv(csv);
+    const hi = rows.findIndex(r => r.some(v => String(v).trim() === '주문번호'));
+    const col = hi >= 0 ? rows[hi].findIndex(v => String(v).trim() === '주문번호') : -1;
+    const set = new Set();
+    if (col >= 0) {
+      for (const r of rows.slice(hi + 1)) {
+        const v = bare(r[col]).replace(/\.0$/, '');
+        if (v) set.add(v);
+      }
+    }
+    sheetIds[ym] = set;
+  }
+
+  // 3) 대조 — 관련 월 시트 어디에도 없으면 누락, 다른 월에 있으면 월 착오
+  const items = [];
+  for (const c of ci) {
+    const months = monthsOf(c);
+    const b = bare(c.order_id);
+    let found = false, checked = 0;
+    for (const ym of months) {
+      const set = sheetIds[ym];
+      if (!set) continue;
+      checked++;
+      if (set.has(b)) { found = true; break; }
+    }
+    if (!checked || found) continue;
+    let elsewhere = null;
+    for (const [ym, set] of Object.entries(sheetIds)) {
+      if (set && set.has(b)) { elsewhere = ym; break; }
+    }
+    items.push({
+      order_id: c.order_id,
+      desired_ship_date: c.desired_ship_date,
+      processed_at: c.processed_at,
+      elsewhere,   // null = 어느 월에도 없음 (진짜 누락)
+    });
+  }
+  items.sort((a, b) => (a.elsewhere ? 1 : 0) - (b.elsewhere ? 1 : 0)
+    || String(a.desired_ship_date).localeCompare(String(b.desired_ship_date)));
+  const result = {
+    checked: ci.length,
+    from,
+    months: [...allMonths].sort(),
+    no_sheet_months: noSheet,
+    missing: items.filter(i => !i.elsewhere).length,
+    wrong_month: items.filter(i => !!i.elsewhere).length,
+    items,
+  };
+  _giftCacheSet('missed-collect', result);
+  return result;
+}
+
 async function giftSmsRows(gid) {
   if (!/^\d+$/.test(String(gid))) throw new Error('gid 형식 오류');
   const cacheKey = `rows:${gid}`;
@@ -15128,6 +15229,17 @@ const server = http.createServer(async (req, res) => {
           return denyForbidden(res, 'admin/operator 필요');
         }
         try { data = await giftSmsRows(String(parsed.query.gid || '')); }
+        catch (e) {
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/orders/missed-collect' && req.method === 'GET') {
+        // 주문수집 누락 점검 — 수집완료 주문이 희망출고월 시트에 등록됐는지 대조.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try { data = await giftMissedCollect(); }
         catch (e) {
           res.writeHead(502, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: e.message }));
