@@ -897,8 +897,8 @@ async function giftResolveSites(orderIds) {
  *   판정: '어느 월에도 없음' = 진짜 누락 / '다른 월에 있음' = 월 착오 (참고 표시).
  *   실측 (2026-08-31, 최근 30일~미래 312건): 누락 1건 + 월 착오 2건, 오탐 0.
  */
-async function giftMissedCollect() {
-  const cached = _giftCacheGet('missed-collect', 5 * 60 * 1000);
+async function giftMissedCollect(force) {
+  const cached = force ? null : _giftCacheGet('missed-collect', 5 * 60 * 1000);
   if (cached) return cached;
 
   const REST = process.env.SUPABASE_URL ? `${process.env.SUPABASE_URL}/rest/v1` : null;
@@ -15239,7 +15239,7 @@ const server = http.createServer(async (req, res) => {
         if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
           return denyForbidden(res, 'admin/operator 필요');
         }
-        try { data = await giftMissedCollect(); }
+        try { data = await giftMissedCollect(parsed.query.refresh === '1'); }
         catch (e) {
           res.writeHead(502, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: e.message }));
