@@ -735,6 +735,7 @@ nav.nav-loading a[href^="#"] {
         <!-- 매출 그룹 — 여러 행을 체크해 하나의 그룹으로 묶어 합산 표시 -->
         <button class="btn btn-sm btn-primary" id="pr-group-btn" onclick="_prOpenGroupModal()" style="display:none;padding:5px 10px">그룹으로 묶기 (<span id="pr-sel-count">0</span>)</button>
         <button class="btn btn-sm" id="pr-excl-btn" onclick="_prExcludeSelected()" style="display:none;padding:5px 10px;color:#dc2626;border-color:#fecaca" title="선택한 품목을 답례품 매출 집계에서 제외 (자개카드·탈취제 등 비-답례품)">답례품 아님</button>
+        <button class="btn btn-sm" onclick="copyPrRankingTsv()" style="padding:5px 10px" title="주간 리포트 시트에 붙여넣는 형식(순위·변동·상품명·수량·매출액·비중, 채널 섹션별)으로 복사합니다">📋 주간보고 복사</button>
         <button class="btn btn-sm" onclick="openSalesGroupManager()" style="padding:5px 10px" title="매출 그룹 · 제외 품목 관리">그룹</button>
       </div>
     </div>
@@ -7238,6 +7239,39 @@ function _prOpenGroupModal() {
   openSalesGroupModal(items);
 }
 
+// ── 주간보고 복사 (2026-08-30 요청) ──
+//   화면의 섹션 구조 그대로 스프레드시트에 붙는 TSV. 주간 리포트 시트가 쓰는 열 순서
+//   (순위·변동·상품명·판매수량·매출액·비중%)에 맞춘다. 섹션 사이는 빈 줄 —
+//   시트 쪽 색칠 블록이 그 단위라 붙여넣고 블록별로 서식만 입히면 된다.
+let _prCopyData = null;
+
+function copyPrRankingTsv() {
+  const d = _prCopyData;
+  if (!d || !d.sections.length) { showToast('먼저 순위를 조회하세요'); return; }
+  const lines = [];
+  // 헤더 — 주차 라벨(주별이면 'NNW')과 기간
+  const weekNo = (() => {
+    if (d.gran !== 'week') return null;
+    const dt = new Date(d.start + 'T00:00:00');
+    const jan1 = new Date(dt.getFullYear(), 0, 1);
+    return Math.ceil(((dt - jan1) / 86400000 + jan1.getDay() + 1) / 7);
+  })();
+  lines.push([weekNo ? `${weekNo}W` : d.label, `${d.start} ~ ${d.end}`, '', '', '', ''].join('	'));
+  lines.push(['순위', '변동', '상품명', '판매수량', '매출액', '비중%'].join('	'));
+  for (const sec of d.sections) {
+    if (!sec.rows.length) continue;
+    lines.push('');                                    // 블록 구분 빈 줄
+    lines.push([sec.title, '', '', '', '', ''].join('	'));
+    for (const r of sec.rows) {
+      lines.push([r.rank, r.change, r.name, r.qty, r.revenue, r.share.toFixed(1) + '%'].join('	'));
+    }
+  }
+  navigator.clipboard.writeText(lines.join('\n')).then(() => {
+    const n = d.sections.reduce((s, x) => s + x.rows.length, 0);
+    showToast(`📋 주간보고 형식 복사 완료 — ${d.sections.filter(x => x.rows.length).length}개 섹션 · ${n}개 상품`);
+  }).catch(() => alert('클립보드 복사 실패 — 브라우저 권한을 확인하세요'));
+}
+
 /** 상품 판매 순위 조회 + 렌더 (현재 기간 + 직전 기간 순위 비교 → 변동 컬럼) */
 async function loadProductRanking() {
   _prUpdateButtons();
@@ -7291,6 +7325,7 @@ async function loadProductRanking() {
         GROUPS.push({ key: sc, title: `${st.icon} ${ch}`, color: st.color });
       });
     let html = '';
+    _prCopyData = { label: _prLabel(start, end), start: startStr, end: endStr, gran: _prState.gran, sortBy, sections: [] };
     for (const g of GROUPS) {
       const prods = allProducts.filter(p => (p.scope || 'own') === g.key).sort(sortFn);
       const prevRankByName = new Map();
@@ -7302,12 +7337,23 @@ async function loadProductRanking() {
         html += `<tr><td colspan="7" style="padding:14px;text-align:center;color:var(--gray-400);font-size:12px">해당 기간 판매 없음</td></tr>`;
         continue;
       }
+      const copySec = { title: g.title.replace(/^\S+\s/, ''), rows: [] };   // 이모지 제거한 제목
+      _prCopyData.sections.push(copySec);
       html += prods.map((p, i) => {
         const rank = i + 1;
         const medal = rank <= 3 ? ['🥇', '🥈', '🥉'][rank - 1] : String(rank);
         const share = totalBase > 0 ? (Number(p[sortBy]) || 0) / totalBase * 100 : 0;
         const nm = String(p.name || '').trim().toLowerCase();
         const prevRank = prevRankByName.has(nm) ? prevRankByName.get(nm) : null;
+        // 주간보고 복사용 — 화면과 같은 값 (변동은 텍스트로)
+        copySec.rows.push({
+          rank,
+          change: prevRank == null ? 'NEW' : (prevRank - rank > 0 ? `▲${prevRank - rank}` : prevRank - rank < 0 ? `▼${rank - prevRank}` : '-'),
+          name: String(p.name || '-'),
+          qty: Number(p.qty) || 0,
+          revenue: Math.round(Number(p.revenue) || 0),
+          share: share,
+        });
         const gi = allProducts.indexOf(p);
         return `<tr style="border-bottom:1px solid var(--gray-100)">
           <td style="padding:8px 6px;text-align:center"><input type="checkbox" class="pr-chk" data-idx="${gi}" onchange="_prSelChanged()"></td>
