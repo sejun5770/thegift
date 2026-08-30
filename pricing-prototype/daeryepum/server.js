@@ -6863,10 +6863,12 @@ async function apiWeddingCalendar(query = {}) {
   const prevMonthStart = new Date(year - 1, month - 1, 1);
   const prevMonthEnd = new Date(year - 1, month, 0);
 
-  const p = await getPool();
-
+  // 캘린더 진입 시 무거운 쿼리 3개(캘린더·트렌드·분포)가 동시에 나간다.
+  //   Azure SQL 이 유휴 재개 직후 응답 도중 연결을 끊으면 tedious 는
+  //   'An unknown error has occurred' 하나만 준다 — 재시도 한 번이면 붙는 유형이라
+  //   runWithPoolRetry 로 감싼다 (2026-08-28 운영 화면 '조회 실패' 재발 대응).
   // 1) 현재 월 그리드 범위의 사이트별 일별 예식자 수
-  const r1 = await p.request()
+  const r1 = await runWithPoolRetry(p => p.request()
     .input('ws', sql.VarChar, fmtDate(gridStart))
     .input('we', sql.VarChar, fmtDate(addDays(gridEnd, 1)))
     .query(`
@@ -6885,10 +6887,10 @@ async function apiWeddingCalendar(query = {}) {
       ) t
       GROUP BY wd, site_name
       ORDER BY wd
-    `);
+    `));
 
   // 2) 전년 동월 사이트별 총합 (비교 카드용)
-  const r2 = await p.request()
+  const r2 = await runWithPoolRetry(p => p.request()
     .input('ws', sql.VarChar, fmtDate(prevMonthStart))
     .input('we', sql.VarChar, fmtDate(addDays(prevMonthEnd, 1)))
     .query(`
@@ -6905,7 +6907,7 @@ async function apiWeddingCalendar(query = {}) {
           AND TRY_CAST(u.wedd_year+'-'+RIGHT('0'+u.wedd_month,2)+'-'+RIGHT('0'+u.wedd_day,2) AS date) < @we
       ) t
       GROUP BY site_name
-    `);
+    `));
 
   // 사이트 정규화: 4개 메인 외 모두 '기타'
   const normSite = (s) => WEDDING_CALENDAR_SITES.includes(s) ? s : '기타';
@@ -7050,8 +7052,7 @@ async function apiWeddingCalendarTrend(query = {}) {
   const startDate = new Date(endYear, endMonth - months, 1);
   if (startDate < new Date(2000, 0, 1)) return { error: '기간 범위 오류' };
 
-  const p = await getPool();
-  const r = await p.request()
+  const r = await runWithPoolRetry(p => p.request()
     .input('ws', sql.VarChar, fmtDate(startDate))
     .input('we', sql.VarChar, fmtDate(endDateExclusive))
     .query(`
@@ -7074,7 +7075,7 @@ async function apiWeddingCalendarTrend(query = {}) {
       ) t
       GROUP BY YEAR(t.wd_date), MONTH(t.wd_date), t.site_name
       ORDER BY YEAR(t.wd_date), MONTH(t.wd_date)
-    `);
+    `));
 
   const normSite = (s) => WEDDING_CALENDAR_SITES.includes(s) ? s : '기타';
   const ALL_SITES = [...WEDDING_CALENDAR_SITES, '기타'];
@@ -7135,10 +7136,9 @@ async function apiWeddingCalendarSiteBreakdown(query = {}) {
 
   const monthStart = new Date(year, month - 1, 1);
   const monthEndExclusive = new Date(year, month, 1);
-  const p = await getPool();
 
   // SiteName 분포 (NULL 도 별도 행으로 표시)
-  const r1 = await p.request()
+  const r1 = await runWithPoolRetry(p => p.request()
     .input('ws', sql.VarChar, fmtDate(monthStart))
     .input('we', sql.VarChar, fmtDate(monthEndExclusive))
     .query(`
@@ -7156,10 +7156,10 @@ async function apiWeddingCalendarSiteBreakdown(query = {}) {
       ) t
       GROUP BY site_name
       ORDER BY member_count DESC
-    `);
+    `));
 
   // REFERER_SALES_GUBUN 코드 단위 raw 분포 (어떤 코드가 매칭 안 되는지 확인)
-  const r2 = await p.request()
+  const r2 = await runWithPoolRetry(p => p.request()
     .input('ws', sql.VarChar, fmtDate(monthStart))
     .input('we', sql.VarChar, fmtDate(monthEndExclusive))
     .query(`
@@ -7178,7 +7178,7 @@ async function apiWeddingCalendarSiteBreakdown(query = {}) {
       ) t
       GROUP BY referer_code, site_name
       ORDER BY member_count DESC
-    `);
+    `));
 
   // '기타' 로 묶이는 사이트 (메인 4 외 + NULL)
   const MAIN = WEDDING_CALENDAR_SITES;
