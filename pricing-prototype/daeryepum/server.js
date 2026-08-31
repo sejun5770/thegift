@@ -1037,20 +1037,24 @@ async function giftPackCapacity(force) {
         if (Number.isFinite(qty) && qty > 0) { o.keys.add(pkey(r[C.code], name)); o.total += qty; }
         for (const i of invCols) { const d = String(r[i] || '').replace(/\D/g, ''); if (d.length >= 9) o.invs.add(d); }
       }
-      // 단일상품 주문(같은 상품 다라인 포함)만 학습 표본
+      // 단일상품 주문(같은 상품 다라인 포함)만 학습 표본.
+      //   용량 = (박스당 수량)의 **2위값** — 최대값은 1회짜리 이상치일 수 있다.
+      //   실측: TGJSD01 최대 120은 단 1회 출고(기록 누락 의심), 2위는 65. 2회 이상
+      //   재현된 최대만 기준으로 쓴다 (표본 1개뿐이면 그 값 그대로).
       for (const o of orders.values()) {
         if (o.keys.size !== 1 || o.invs.size < 1 || o.total <= 0) continue;
         const key = [...o.keys][0];
         const per = Math.ceil(o.total / o.invs.size);
-        const e = cap.get(key) || { cap: 0, samples: 0 };
-        if (per > e.cap) e.cap = per;
+        const e = cap.get(key) || { top1: 0, top2: 0, samples: 0 };
+        if (per >= e.top1) { e.top2 = e.top1; e.top1 = per; }
+        else if (per > e.top2) { e.top2 = per; }
         e.samples++;
         cap.set(key, e);
       }
     }
     if (!cap.size) throw new Error('학습 표본 없음');
     const capacities = {};
-    for (const [k, v] of cap) capacities[k] = v;
+    for (const [k, v] of cap) capacities[k] = { cap: v.samples >= 2 ? v.top2 : v.top1, max_seen: v.top1, samples: v.samples };
     const result = {
       learned_from: monthly.map(t => t.name).join(', '),
       learned_at: new Date().toISOString(),
