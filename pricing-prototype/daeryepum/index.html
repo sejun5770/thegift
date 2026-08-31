@@ -5238,27 +5238,68 @@ const DRIFT_STYLE = {
 //   4~8월 실측: 합포장 가능한 복수품목 주문 140건 중 134건(96%)이 박스를 나눠 나갔고
 //   추가 박스가 285개였다. 나눔배송(배송지 2곳 이상)은 합포장이 불가능해 제외한다.
 /** rows → Map<order_seq, {lines, dseqs}>. getOrder 로 두 화면의 행 모양 차이를 흡수. */
-function _buildCombineMap(rows, getOrder) {
+// 상품별 1박스 용량표 — /api/bg/pack-capacity (기프트팀 시트 실측 학습치). 로드 전엔 품목 수만 표시.
+let _packCap = null;
+async function _loadPackCapacity() {
+  if (_packCap !== null) return;
+  _packCap = {};   // 실패해도 재시도 폭주 방지 — 빈 표면 배지가 품목 수 모드로 동작
+  try {
+    const r = await fetch(`${API}/api/bg/pack-capacity`);
+    if (r.ok) _packCap = (await r.json()).capacities || {};
+  } catch { /* 용량 없이도 배지는 동작 */ }
+}
+
+/** 용량표 키 정규화 — 학습 스크립트와 동일 규칙 (코드 대문자 + 변형 접미사 제거, 없으면 정규화 이름). */
+function _packKey(code, name) {
+  const c = String(code || '').trim().toUpperCase();
+  if (c) return c.replace(/_[A-Z0-9]$/, '');
+  return String(name || '').replace(/^\[[^\]]*\]/, '').replace(/\s+/g, '').replace(/[.,-]/g, '').toLowerCase();
+}
+
+function _buildCombineMap(rows, getInfo) {
   const m = new Map();
   for (const row of rows || []) {
-    const o = getOrder(row);
-    if (!o) continue;
-    const key = String(o.order_seq || '');
+    const info = getInfo(row);
+    if (!info) continue;
+    const key = String(info.order_seq || '');
     if (!key) continue;
     let e = m.get(key);
-    if (!e) { e = { lines: 0, dseqs: new Set() }; m.set(key, e); }
+    if (!e) { e = { lines: 0, dseqs: new Set(), items: new Map() }; m.set(key, e); }
     e.lines++;
-    e.dseqs.add(String(o.delivery_seq || 1));
+    e.dseqs.add(String(info.delivery_seq || 1));
+    const pk = _packKey(info.code, info.name);
+    const qty = Number(info.qty);
+    if (pk && Number.isFinite(qty) && qty > 0) e.items.set(pk, (e.items.get(pk) || 0) + qty);
   }
   return m;
 }
 
-/** 배지 HTML — 품목 2개 이상 + 배송지 1곳일 때만. */
+/**
+ * 필요 최소 박스 추정 — Σ(수량 ÷ 상품별 1박스 용량) 올림.
+ *   용량 미상 상품은 단독 1박스로 가정 (보수적 — 합포장 가능성을 과장하지 않는다).
+ *   수량 정보가 하나도 없으면 null (추정 불가 → 품목 수만 표시).
+ */
+function _estimateMinBoxes(e) {
+  if (!_packCap || !e.items.size) return null;
+  let frac = 0;
+  for (const [k, q] of e.items) {
+    const cap = _packCap[k]?.cap || 0;
+    frac += cap > 0 ? q / cap : 1;
+  }
+  return Math.max(1, Math.ceil(frac));
+}
+
+/** 배지 HTML — 품목 2개 이상 + 배송지 1곳일 때만. 용량표가 있으면 최소 박스 추정을 함께 표시. */
 function _combineBadge(map, orderSeq) {
   const e = map && map.get(String(orderSeq || ''));
   if (!e || e.lines < 2 || e.dseqs.size > 1) return '';
-  return `<span title="합포장 검토 — 같은 배송지로 ${e.lines}개 품목이 나갑니다. 한 박스로 묶을 수 있는지 확인하세요 (나눔배송은 제외됨)"
-    style="background:#eff6ff;color:#1d4ed8;font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px;margin-right:3px;white-space:nowrap">📦${e.lines}</span>`;
+  const est = _estimateMinBoxes(e);
+  const label = est !== null ? `📦${e.lines}종→${est}박스` : `📦${e.lines}`;
+  const tip = est !== null
+    ? `합포장 검토 — 같은 배송지로 ${e.lines}개 품목. 실측 박스 용량 기준 최소 ${est}박스면 발송 가능합니다 (나눔배송 제외됨)`
+    : `합포장 검토 — 같은 배송지로 ${e.lines}개 품목이 나갑니다. 한 박스로 묶을 수 있는지 확인하세요 (나눔배송은 제외됨)`;
+  return `<span title="${tip}"
+    style="background:#eff6ff;color:#1d4ed8;font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px;margin-right:3px;white-space:nowrap">${label}</span>`;
 }
 
 function _ordDriftBadge(r) {
@@ -5407,7 +5448,9 @@ let _ordCombine = new Map();   // 주문번호 → 합포장 배지 계산용 (�
 function renderOrderTable() {
   _ordUpdateFilterBadge();
   // 화면 필터와 무관하게 주문 전체 품목을 세야 하므로 ordersData 원본 기준으로 계산한다.
-  _ordCombine = _buildCombineMap(ordersData, r => r);
+  _ordCombine = _buildCombineMap(ordersData,
+    r => ({ order_seq: r.order_seq, delivery_seq: r.delivery_seq, code: r.card_code, name: r.card_name, qty: r.item_count }));
+  _loadPackCapacity().then(() => {});   // 최초 1회 — 로드 전 렌더는 품목 수만 표시
   const cols = getSelectedCols();
   const hideCollected = document.getElementById('hide-collected')?.checked;
   const collected = getCollectedSet();
@@ -21940,7 +21983,10 @@ function renderBgUnified() {
   // Row 단위 워크플로우 stage 태깅 + 7-탭 카운트
   // ============================================
   // 합포장 배지 — 탭/필터로 행이 걸러지기 전에 계산해야 주문의 실제 품목 수가 나온다.
-  _uniCombine = _buildCombineMap(bgUnifiedRows, r => r.order);
+  _uniCombine = _buildCombineMap(bgUnifiedRows,
+    r => r.order && ({ order_seq: r.order.order_seq, delivery_seq: r.order.delivery_seq,
+      code: r.product_code || r.sel?.product_code, name: r.product_name, qty: r.product_qty || r.sel?.quantity }));
+  _loadPackCapacity().then(() => {});
 
   bgUnifiedRows.forEach(r => {
     r._stage = computeRowStage(r.order, r.ci, r.sel);

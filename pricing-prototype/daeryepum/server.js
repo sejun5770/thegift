@@ -991,6 +991,80 @@ async function giftMissedCollect(force) {
   return result;
 }
 
+/**
+ * 상품별 1박스 용량표 — 기프트팀 월별 시트에서 학습 (합포장 배지의 최소 박스 추정용).
+ *   단일품목 주문의 (주문수량 ÷ 송장 수) 실측 최대치를 상품별로 잡는다.
+ *   시트가 계속 갱신되므로 최근 6개 월시트를 12시간 캐시로 재학습한다.
+ *   시트를 못 읽으면 저장소의 시드(pack-capacity.json, 2026-04~08 학습치)로 폴백.
+ */
+async function giftPackCapacity(force) {
+  const cached = force ? null : _giftCacheGet('pack-capacity', 12 * 60 * 60 * 1000);
+  if (cached) return cached;
+  const pkey = (code, name) => {
+    const c = String(code || '').trim().toUpperCase();
+    if (c) return c.replace(/_[A-Z0-9]$/, '');
+    return String(name || '').replace(/^\[[^\]]*\]/, '').replace(/\s+/g, '').replace(/[.,-]/g, '').toLowerCase();
+  };
+  try {
+    const tabs = (await giftSheetTabs()).sheets;   // giftSheetTabs 는 {sheets:[...]} 형태로 반환한다
+    // '26년 8월' 형태 월시트만 — (년*12+월) 로 정렬해 최근 6개
+    // 미래 월 시트(미리 만들어 둔 빈 탭)는 표본이 없다 — 현재 월(KST) 이하만 최근 6개.
+    const kst = new Date(Date.now() + 9 * 3600000);
+    const nowOrd = (kst.getUTCFullYear() % 100) * 12 + (kst.getUTCMonth() + 1);
+    const monthly = tabs
+      .map(t => { const m = /^(\d{2})년 (\d{1,2})월$/.exec(String(t.name).trim()); return m ? { ...t, ord: (+m[1]) * 12 + (+m[2]) } : null; })
+      .filter(t => t && t.ord <= nowOrd).sort((a, b) => b.ord - a.ord).slice(0, 6);
+    const cap = new Map();
+    for (const tab of monthly) {
+      const csv = await _giftFetch(`https://docs.google.com/spreadsheets/d/${GIFT_SHEET_ID}/export?format=csv&gid=${tab.gid}`, { expectCsv: true });
+      const rows = _giftParseCsv(csv);
+      // 헤더 이름으로 열 탐색 — 열 위치가 월마다 다르다 (4~8월 실측: 주문수량이 S/T/U 로 이동)
+      const hi = rows.findIndex(r => r.some(v => String(v).trim() === '주문번호'));
+      if (hi < 0) continue;
+      const h = rows[hi];
+      const col = lbl => h.findIndex(v => String(v).trim() === lbl);
+      const C = { oid: col('주문번호'), name: col('상품명'), code: col('품목코드1'), qty: col('주문수량') };
+      if (C.oid < 0 || C.name < 0 || C.qty < 0) continue;
+      const invCols = h.map((v, i) => /운송장/.test(String(v)) ? i : null).filter(v => v !== null);
+      const orders = new Map();
+      for (const r of rows.slice(hi + 1)) {
+        const oid = String(r[C.oid] || '').trim();
+        const name = String(r[C.name] || '').trim();
+        if (!oid || !name) continue;
+        const qty = parseFloat(String(r[C.qty] || '').replace(/[^\d.]/g, ''));
+        if (!orders.has(oid)) orders.set(oid, { keys: new Set(), total: 0, invs: new Set() });
+        const o = orders.get(oid);
+        if (Number.isFinite(qty) && qty > 0) { o.keys.add(pkey(r[C.code], name)); o.total += qty; }
+        for (const i of invCols) { const d = String(r[i] || '').replace(/\D/g, ''); if (d.length >= 9) o.invs.add(d); }
+      }
+      // 단일상품 주문(같은 상품 다라인 포함)만 학습 표본
+      for (const o of orders.values()) {
+        if (o.keys.size !== 1 || o.invs.size < 1 || o.total <= 0) continue;
+        const key = [...o.keys][0];
+        const per = Math.ceil(o.total / o.invs.size);
+        const e = cap.get(key) || { cap: 0, samples: 0 };
+        if (per > e.cap) e.cap = per;
+        e.samples++;
+        cap.set(key, e);
+      }
+    }
+    if (!cap.size) throw new Error('학습 표본 없음');
+    const capacities = {};
+    for (const [k, v] of cap) capacities[k] = v;
+    const result = {
+      learned_from: monthly.map(t => t.name).join(', '),
+      learned_at: new Date().toISOString(),
+      capacities,
+    };
+    _giftCacheSet('pack-capacity', result);
+    return result;
+  } catch (e) {
+    console.warn('[pack-capacity] 시트 학습 실패 — 시드 JSON 폴백:', e.message);
+    try { return require('./barungift/pack-capacity.json'); }
+    catch { return { capacities: {}, error: e.message }; }
+  }
+}
+
 async function giftSmsRows(gid) {
   if (!/^\d+$/.test(String(gid))) throw new Error('gid 형식 오류');
   const cacheKey = `rows:${gid}`;
@@ -15209,6 +15283,14 @@ const server = http.createServer(async (req, res) => {
           });
         } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/bg/pack-capacity' && req.method === 'GET') {
+        // 합포장 배지용 용량표 — 로그인만 필요 (조회 전용)
+        try { data = await giftPackCapacity(parsed.query.refresh === '1'); }
+        catch (e) {
+          res.writeHead(502, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: e.message }));
           return;
         }

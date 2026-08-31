@@ -1,0 +1,427 @@
+{
+ "learned_from": "기프트팀 매입상품 시트 2026-04~08",
+ "learned_at": "2026-08-31",
+ "note": "단일품목 주문의 (주문수량 ÷ 송장수) 실측 최대치. 키 = 품목코드1 대문자, 변형 접미사(_X 1글자) 제거. 코드 없으면 정규화 상품명.",
+ "capacities": {
+  "소금그라인더답례품": {
+   "cap": 30,
+   "samples": 10
+  },
+  "메이플호두정과(80g)": {
+   "cap": 80,
+   "samples": 117
+  },
+  "핸드워시기프트([감사])": {
+   "cap": 30,
+   "samples": 7
+  },
+  "주방세제기프트([감사])": {
+   "cap": 25,
+   "samples": 1
+  },
+  "비타민답례품": {
+   "cap": 130,
+   "samples": 64
+  },
+  "블루밍데이기프트": {
+   "cap": 100,
+   "samples": 35
+  },
+  "비타민답례품(화이트)": {
+   "cap": 138,
+   "samples": 6
+  },
+  "바른쿠키(4종8개입)": {
+   "cap": 85,
+   "samples": 26
+  },
+  "핸드크림기프트": {
+   "cap": 200,
+   "samples": 11
+  },
+  "핸드크림&핸드워시기프트세트": {
+   "cap": 19,
+   "samples": 7
+  },
+  "에스프레소블록커피4p선물세트": {
+   "cap": 62,
+   "samples": 3
+  },
+  "핸드워시&리필기프트세트": {
+   "cap": 16,
+   "samples": 3
+  },
+  "데일리너츠(하루습관(화이트))": {
+   "cap": 30,
+   "samples": 2
+  },
+  "핸드워시기프트": {
+   "cap": 30,
+   "samples": 32
+  },
+  "핸드워시&리필기프트세트([감사])": {
+   "cap": 17,
+   "samples": 3
+  },
+  "밤잼미니튜브": {
+   "cap": 140,
+   "samples": 19
+  },
+  "데일리넛츠하루습관화이트": {
+   "cap": 36,
+   "samples": 3
+  },
+  "이코복스커피드립백3p": {
+   "cap": 80,
+   "samples": 1
+  },
+  "바른쿠키": {
+   "cap": 90,
+   "samples": 95
+  },
+  "상품없이발송(핸드워시기프트)": {
+   "cap": 22,
+   "samples": 1
+  },
+  "메이플호두정과": {
+   "cap": 65,
+   "samples": 134
+  },
+  "소금그라인더": {
+   "cap": 30,
+   "samples": 21
+  },
+  "시그니처허니기프트": {
+   "cap": 175,
+   "samples": 49
+  },
+  "핸드크림&핸드워시세트": {
+   "cap": 25,
+   "samples": 52
+  },
+  "데일리너츠하루간식": {
+   "cap": 33,
+   "samples": 3
+  },
+  "비타민답례품(블루)": {
+   "cap": 75,
+   "samples": 4
+  },
+  "데일리너츠하루습관": {
+   "cap": 34,
+   "samples": 6
+  },
+  "핸드크림기프트([감사])": {
+   "cap": 100,
+   "samples": 1
+  },
+  "에스프레소블록커피세트": {
+   "cap": 50,
+   "samples": 18
+  },
+  "프리미엄녹차와플": {
+   "cap": 65,
+   "samples": 21
+  },
+  "올리브오일스틱": {
+   "cap": 40,
+   "samples": 1
+  },
+  "그린티웨하스": {
+   "cap": 30,
+   "samples": 35
+  },
+  "핸드워시&리필세트": {
+   "cap": 18,
+   "samples": 20
+  },
+  "말차프레첼": {
+   "cap": 57,
+   "samples": 16
+  },
+  "이부키산": {
+   "cap": 12,
+   "samples": 2
+  },
+  "데일리너츠하루시작": {
+   "cap": 38,
+   "samples": 3
+  },
+  "크렘드마롱밤잼미니튜브": {
+   "cap": 1,
+   "samples": 1
+  },
+  "주방세제기프트": {
+   "cap": 26,
+   "samples": 6
+  },
+  "오설록그린티웨하스": {
+   "cap": 1,
+   "samples": 1
+  },
+  "레몬즙스틱": {
+   "cap": 37,
+   "samples": 1
+  },
+  "오설록블루밍데이기프트": {
+   "cap": 50,
+   "samples": 2
+  },
+  "오설록말차프레첼": {
+   "cap": 25,
+   "samples": 2
+  },
+  "에스프레소블록커피4p선물세트((c)thankyou_wedding)": {
+   "cap": 44,
+   "samples": 4
+  },
+  "데일리너츠(하루시작(퍼플))": {
+   "cap": 30,
+   "samples": 1
+  },
+  "핸드워시&리필기프트세트([thankyou])": {
+   "cap": 43,
+   "samples": 1
+  },
+  "정수당메이플호두정과답례품80g(1개)10세트": {
+   "cap": 60,
+   "samples": 1
+  },
+  "정수당메이플호두정과답례품80g+커스텀스티커": {
+   "cap": 49,
+   "samples": 1
+  },
+  "정수당메이플호두정과답례품메이플호두정과80g(1박스)+감사스티커(옐로우)10세트80g(1개)": {
+   "cap": 20,
+   "samples": 1
+  },
+  "다크초코맛호두정과": {
+   "cap": 65,
+   "samples": 7
+  },
+  "다크초코맛호두정과(65g)": {
+   "cap": 54,
+   "samples": 4
+  },
+  "녹차맛호두정과": {
+   "cap": 50,
+   "samples": 2
+  },
+  "커피드립백핸디기프트(3입)(화이트)": {
+   "cap": 30,
+   "samples": 1
+  },
+  "정수당꿀답례품": {
+   "cap": 70,
+   "samples": 1
+  },
+  "TGJSD02D1": {
+   "cap": 140,
+   "samples": 46
+  },
+  "TGJSD04D1": {
+   "cap": 130,
+   "samples": 82
+  },
+  "TGJSD01": {
+   "cap": 120,
+   "samples": 294
+  },
+  "TGJSD08D1": {
+   "cap": 90,
+   "samples": 130
+  },
+  "TGJSD11D1": {
+   "cap": 86,
+   "samples": 25
+  },
+  "OSL002": {
+   "cap": 100,
+   "samples": 28
+  },
+  "TGJBK01D1": {
+   "cap": 43,
+   "samples": 41
+  },
+  "TGJBK05D1": {
+   "cap": 36,
+   "samples": 51
+  },
+  "TGOSL006D1": {
+   "cap": 30,
+   "samples": 14
+  },
+  "TGJSD10D1": {
+   "cap": 60,
+   "samples": 42
+  },
+  "TGOSL003D1": {
+   "cap": 40,
+   "samples": 56
+  },
+  "TGJSD05D1": {
+   "cap": 30,
+   "samples": 27
+  },
+  "TGJBK04D1": {
+   "cap": 29,
+   "samples": 26
+  },
+  "TGAMT01O1": {
+   "cap": 65,
+   "samples": 20
+  },
+  "TGJBK02D1": {
+   "cap": 190,
+   "samples": 8
+  },
+  "TGJBK06D1": {
+   "cap": 33,
+   "samples": 6
+  },
+  "TGCMR01O1": {
+   "cap": 200,
+   "samples": 17
+  },
+  "OSL005": {
+   "cap": 67,
+   "samples": 23
+  },
+  "TGJSD03O1": {
+   "cap": 35,
+   "samples": 4
+  },
+  "TGJSD06D1": {
+   "cap": 55,
+   "samples": 13
+  },
+  "TGJBK09O23": {
+   "cap": 30,
+   "samples": 1
+  },
+  "TGJBK09O22": {
+   "cap": 68,
+   "samples": 11
+  },
+  "TGJSD09D1": {
+   "cap": 58,
+   "samples": 16
+  },
+  "TGJBK03O1": {
+   "cap": 22,
+   "samples": 11
+  },
+  "TGJBK03D1": {
+   "cap": 33,
+   "samples": 10
+  },
+  "TGJBK01O2": {
+   "cap": 23,
+   "samples": 23
+  },
+  "TGJBK09O4": {
+   "cap": 10,
+   "samples": 1
+  },
+  "TGJBK09O6": {
+   "cap": 8,
+   "samples": 3
+  },
+  "TGIBK01D1": {
+   "cap": 15,
+   "samples": 2
+  },
+  "TGJSD03O2": {
+   "cap": 32,
+   "samples": 11
+  },
+  "TGNSG01": {
+   "cap": 9,
+   "samples": 5
+  },
+  "TGJBK09O13": {
+   "cap": 11,
+   "samples": 2
+  },
+  "TGJBK09O9": {
+   "cap": 6,
+   "samples": 1
+  },
+  "TGIKX01": {
+   "cap": 80,
+   "samples": 1
+  },
+  "BC_TNT_D1": {
+   "cap": 20,
+   "samples": 11
+  },
+  "16191713546": {
+   "cap": 20,
+   "samples": 4
+  },
+  "TGJSD07D1": {
+   "cap": 90,
+   "samples": 3
+  },
+  "TGOSL002": {
+   "cap": 10,
+   "samples": 1
+  },
+  "TGJBK09O12": {
+   "cap": 22,
+   "samples": 1
+  },
+  "TGJSD15D1": {
+   "cap": 49,
+   "samples": 1
+  },
+  "DI5273_SET": {
+   "cap": 1,
+   "samples": 1
+  },
+  "TGJSD04D2": {
+   "cap": 130,
+   "samples": 14
+  },
+  "16260254952": {
+   "cap": 2,
+   "samples": 1
+  },
+  "TGBR01D1": {
+   "cap": 4,
+   "samples": 1
+  },
+  "TGJSD03O3": {
+   "cap": 33,
+   "samples": 4
+  },
+  "TGJBK09O3": {
+   "cap": 22,
+   "samples": 4
+  },
+  "2026PB_H_06": {
+   "cap": 1,
+   "samples": 1
+  },
+  "VB066_SET": {
+   "cap": 2,
+   "samples": 1
+  },
+  "TGCP01D1": {
+   "cap": 1,
+   "samples": 1
+  },
+  "FST26_32": {
+   "cap": 1,
+   "samples": 1
+  },
+  "TGJBK09O14": {
+   "cap": 9,
+   "samples": 1
+  },
+  "16281736838": {
+   "cap": 1,
+   "samples": 2
+  }
+ }
+}
