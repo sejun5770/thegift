@@ -5256,11 +5256,16 @@ function _packKey(code, name) {
   return String(name || '').replace(/^\[[^\]]*\]/, '').replace(/\s+/g, '').replace(/[.,-]/g, '').toLowerCase();
 }
 
+// 합포장 배지 대상 채널 — 자사가 직접 포장·출고하는 곳만 (2026-08-31 운영 확정).
+//   쿠팡/네이버/정수당(카페24)은 출고 방식이 달라 제외: CARD=바른손카드, ETC=바른손몰·단독주문, MANUAL=더기프트.
+const _COMBINE_CHANNELS = new Set(['CARD', 'ETC', 'MANUAL']);
+
 function _buildCombineMap(rows, getInfo) {
   const m = new Map();
   for (const row of rows || []) {
     const info = getInfo(row);
     if (!info) continue;
+    if (info.order_type && !_COMBINE_CHANNELS.has(info.order_type)) continue;
     const key = String(info.order_seq || '');
     if (!key) continue;
     let e = m.get(key);
@@ -5449,7 +5454,7 @@ function renderOrderTable() {
   _ordUpdateFilterBadge();
   // 화면 필터와 무관하게 주문 전체 품목을 세야 하므로 ordersData 원본 기준으로 계산한다.
   _ordCombine = _buildCombineMap(ordersData,
-    r => ({ order_seq: r.order_seq, delivery_seq: r.delivery_seq, code: r.card_code, name: r.card_name, qty: r.item_count }));
+    r => ({ order_seq: r.order_seq, delivery_seq: r.delivery_seq, order_type: r.order_type, code: r.card_code, name: r.card_name, qty: r.item_count }));
   _loadPackCapacity().then(() => {});   // 최초 1회 — 로드 전 렌더는 품목 수만 표시
   const cols = getSelectedCols();
   const hideCollected = document.getElementById('hide-collected')?.checked;
@@ -21984,7 +21989,7 @@ function renderBgUnified() {
   // ============================================
   // 합포장 배지 — 탭/필터로 행이 걸러지기 전에 계산해야 주문의 실제 품목 수가 나온다.
   _uniCombine = _buildCombineMap(bgUnifiedRows,
-    r => r.order && ({ order_seq: r.order.order_seq, delivery_seq: r.order.delivery_seq,
+    r => r.order && ({ order_seq: r.order.order_seq, delivery_seq: r.order.delivery_seq, order_type: r.order.order_type,
       code: r.product_code || r.sel?.product_code, name: r.product_name, qty: r.product_qty || r.sel?.quantity }));
   _loadPackCapacity().then(() => {});
 
