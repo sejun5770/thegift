@@ -64,8 +64,12 @@ code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px
   <a href="#orders-thegift" class="h3">4-2. 더기프트 CSV 업로드</a>
   <a href="#dispatch" class="h3">4-3. 출고상태 전송 (쿠팡·네이버)</a>
   <a href="#work-drift" class="h3">4-4. 작업 후 변경 감지 (데코소품)</a>
+  <a href="#sms-list" class="h3">4-5. 출고안내문자</a>
   <a href="#unified" class="h2">5. 정보입력현황</a>
   <a href="#incident" class="h3">5-1. 기타출고(사고건)</a>
+  <a href="#alimtalk" class="h3">5-2. 알림톡 발송·발송이력</a>
+  <a href="#collect-check" class="h3">5-3. 수집누락 점검</a>
+  <a href="#combine" class="h3">5-4. 합포장 검토 배지 📦</a>
   <a href="#stickers" class="h2">6. 스티커 관리</a>
   <a href="#products" class="h2">7. 상품설정</a>
   <a href="#shipping" class="h2">8. 출고일설정</a>
@@ -96,9 +100,9 @@ code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px
   <tr><th>채널</th><th>수집 방식</th><th>비고</th></tr>
   <tr><td>바른손카드</td><td>자동 (자사 DB 실시간)</td><td>청첩장 동시구매 포함</td></tr>
   <tr><td>바른손몰 (제휴사)</td><td>자동 (자사 DB 실시간)</td><td>제휴사 코드는 4자리 숫자로 구분</td></tr>
-  <tr><td>쿠팡</td><td>자동 (30분 주기) + 수동 동기화 버튼</td><td></td></tr>
-  <tr><td>네이버 (바른손카드/테넷텐)</td><td>자동 (30분 주기) + 수동 동기화 버튼</td><td></td></tr>
-  <tr><td>정수당 (카페24)</td><td>자동 (30분 주기) + 수동 동기화 버튼</td><td>스티커 코드·문구 자동 수집</td></tr>
+  <tr><td>쿠팡</td><td>자동 (10분 주기) + 수동 동기화 버튼</td><td>로켓그로스 제외</td></tr>
+  <tr><td>네이버 (바른손카드/테넷텐)</td><td>자동 (10분 주기) + 수동 동기화 버튼</td><td></td></tr>
+  <tr><td>정수당 (카페24)</td><td>자동 (10분 주기) + 수동 동기화 버튼</td><td>스티커 코드·문구 자동 수집</td></tr>
   <tr><td>바른손더기프트</td><td>CSV 파일 수동 업로드</td><td>주문조회 → 답례품_더기프트 탭</td></tr>
   <tr><td>쿠팡 로켓그로스</td><td>정산 리포트(xlsx) 업로드</td><td>월 정산 후 소급 등록 · 대시보드 매출 전용</td></tr>
   <tr><td>위탁답례품 (COM_ 상품)</td><td>자동 (자사 DB)</td><td>위탁 대시보드에서 별도 정산</td></tr>
@@ -217,9 +221,12 @@ code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px
 
 <h2 id="orders">4. 주문조회</h2>
 <div class="img-wrap"><img src="manual-assets/orders.png" alt="주문조회"><div class="img-cap">주문조회 — 조회줄 / 주문상태 · 주문사이트 · 표시 컬럼(접힘) / 동작 버튼 · 동기화·도구 묶음</div></div>
+<div class="img-wrap"><img src="manual-assets/orders-search-field.png" alt="검색 대상 선택"><div class="img-cap">조회줄 — 검색 대상(상품코드/명 · 주문번호)을 골라 검색합니다</div></div>
 <p>화면은 <b>쓰는 순서대로 3단</b>으로 나뉘어 있습니다. 자주 쓰지 않는 설정은 접혀 있고, 접은 상태는 다음에 들어와도 그대로 유지됩니다.</p>
 <ul>
-  <li><b>1단 — 조회</b>: 기간 · 상품코드 검색 · [조회]. 매번 쓰는 것만 펼쳐져 있습니다.</li>
+  <li><b>1단 — 조회</b>: 기간 · 검색 · [조회]. 매번 쓰는 것만 펼쳐져 있습니다.
+    검색은 왼쪽 선택으로 <b>상품코드/명</b> 또는 <b>주문번호</b> 대상을 고릅니다 —
+    주문번호는 <code>ETC-</code> 같은 접두 없이 숫자만 쳐도 찾히고, 앞자리 부분 일치도 됩니다.</li>
   <li><b>2단 — 설정</b>(접힘): 성격이 다른 셋을 각각 따로 접어 둡니다.
     <br>· <b>주문상태 필터</b> — 취소주문 제외 / 결제대기 제외 / 수집완료 숨기기
     <br>· <b>주문사이트 필터</b> — 어느 채널을 볼지 (답례품 탭에서만 나옵니다)
@@ -251,6 +258,12 @@ code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px
   <li>CSV의 결제일자(R열)가 매출 기준일, 판매금액(Q열)이 상품별 매출로 들어갑니다.</li>
   <li>추가입력옵션(K열)의 스티커 문구는 정보입력현황 문구 칸으로 자동 매핑됩니다.</li>
   <li>업로드된 주문은 대시보드 매출·상품별 통계·예측 카드 "실제 매출"에 모두 반영됩니다.</li>
+  <li><b>매입/위탁 구분</b>: 파일의 판매자(B열)로 본사(매입)와 위탁업체를 구분합니다. 답례품_더기프트 탭 안의
+    <b>매입/위탁 서브탭</b>으로 나눠 보고, 대시보드에는 <b>더기프트(매입) / 더기프트(위탁)</b> 행으로 따로 잡힙니다.
+    위탁 주문은 정보입력현황에 올라가지 않습니다.</li>
+  <li><b>결제실패·주문무효 행</b>은 자동으로 취소 상태로 저장되어 매출에서 빠집니다. 결제일이 빈 행은
+    주문번호 앞 14자리(주문일시)로 주문일을 잡습니다 — 재결제되면 다음 업로드에서 정상 상태로 갱신됩니다.</li>
+  <li><b>덮어쓰기 재업로드</b>를 해도 수집완료 처리·작업 진행 단계·첨부 이미지는 보존됩니다.</li>
 </ul>
 
 <h3 id="dispatch">4-3. 출고상태 전송 (쿠팡·네이버)</h3>
@@ -281,6 +294,28 @@ code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px
   <li>데코소품 탭에서만 동작합니다 (작업 기록이 데코 품목에 남습니다). 봉투 추가·청첩장 수량 변경처럼 <b>데코 품목과 무관한 변경은 표시하지 않습니다</b>.</li>
 </ul>
 
+<h3 id="sms-list">4-5. 출고안내문자</h3>
+<div class="img-wrap"><img src="manual-assets/sms-list.png" alt="출고안내문자 탭"><div class="img-cap">출고안내문자 — 기프트팀 시트에서 출고 정보를 읽어 출고완료 문자를 보냅니다</div></div>
+<p>기프트팀 <b>매입상품 입고·주문관리 스프레드시트</b>(커스텀 상품 / 월별 답례품 시트)에서 성함·연락처·출고일·송장을 읽어
+고객에게 <b>출고완료 안내 문자</b>를 보내는 화면입니다. 시트를 고치면 여기도 그대로 따라옵니다.</p>
+<ul>
+  <li><b>시트 선택</b>: 오늘이 속한 월 시트가 기본. 커스텀 상품 시트도 선택할 수 있습니다.</li>
+  <li><b>주문사이트</b>: 시트에 없는 정보라 주문번호로 사내 DB(바른손카드/제휴사 → 더기프트 → 쿠팡 → 네이버)를 찾아 채웁니다.
+    어디에도 없는 번호는 <span class="badge">미확인</span>으로 표시됩니다.</li>
+  <li><b>성함·연락처는 주문자 기준</b>: 시트의 연락처1은 수령인 번호라서, 사내 DB의 <b>주문자</b> 이름·휴대폰으로 바꿔 보여주고 발송합니다.
+    수령자가 다르면 <b>주문자명(수령자명)</b>으로 표기하고, 주문자를 못 찾으면(오픈마켓 등) 시트 값 그대로 쓰며 <span class="badge b-amber">수령인 번호</span>가 붙습니다.</li>
+  <li><b>발송이력</b>: 이 화면에서 보낸 문자의 성공 횟수·최근 발송시각(KST)이 표시되고, 이미 보낸 주문은 발송 시 자동으로 건너뜁니다.
+    송장이 바뀌어 다시 보내야 하면 <b>중복 재발송 허용</b>을 체크하세요 (확인창이 한 번 더 뜹니다).</li>
+  <li><b>발송 방법 두 가지</b>: <b>문자발송 엑셀 다운로드</b>(문자 시스템 업로드용 양식) 또는 <b>문자 바로 발송</b>(선택한 행을 즉시 발송 — 실발송이니 주의).</li>
+</ul>
+<div class="img-wrap"><img src="manual-assets/sms-template.png" alt="발송 본문 편집"><div class="img-cap">발송 메시지 본문 — 변수 치환 미리보기와 글자/바이트 수(단문·장문 판정)를 함께 보여줍니다</div></div>
+<ul>
+  <li><b>본문 편집</b>: <code>{이름}</code> <code>{출고일}</code> <code>{송장번호}</code> 변수가 발송 시 각 주문 값으로 바뀝니다.
+    비우고 저장하면 기본 문구로 돌아가고, 엑셀 다운로드·본문 복사에도 같은 문구가 쓰입니다.</li>
+  <li><b>바이트 수</b>는 문자 표준(한글 2바이트) 기준으로, 80바이트를 넘으면 장문(LMS/MMS)으로 나갑니다.</li>
+</ul>
+<div class="warn">[문자 바로 발송]은 고객에게 <b>실제 문자가 나가는</b> 동작입니다. 발신번호·건수·첫 건 미리보기를 확인창에서 반드시 확인하세요.</div>
+
 <h2 id="unified">5. 정보입력현황</h2>
 <div class="img-wrap"><img src="manual-assets/bg-unified.png" alt="정보입력현황"><div class="img-cap">정보입력현황 — 조회줄 / 접이식 필터 구역 / 탭 · 표 (개인정보 블러)</div></div>
 <p>화면은 주문조회와 <b>같은 3단</b>으로 정리돼 있습니다. 자주 쓰지 않는 설정은 접혀 있고, 접은 상태는 다음에 들어와도 유지됩니다.</p>
@@ -294,7 +329,7 @@ code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px
     <br>조건·사이트·컬럼 세 구역은 <b>전체 탭에서만</b> 나옵니다(다른 탭에는 적용되지 않는 필터라 감춥니다). 주문상태 필터는 모든 탭에 적용되어 항상 보입니다.</li>
   <li><b>3단 — 탭과 표</b>: 워크플로 단계별 탭과 목록</li>
   <li>모든 채널의 답례품 주문이 모여 <b>스티커 종류·문구·박스·희망출고일</b>을 관리하는 핵심 작업 화면입니다.</li>
-  <li><b>상태 흐름</b>: <span class="badge">미입력</span> → <span class="badge b-blue">입력완료</span> → <span class="badge b-green">스티커완료</span> → 인쇄 → 제본 → 포장 → 출고. 각 단계 버튼으로 진행 처리합니다.</li>
+  <li><b>상태 흐름</b>: <span class="badge">미입력</span> → <span class="badge b-blue">입력완료</span> → <span class="badge b-green">스티커완료</span> → 인쇄 → 제본 → 포장 → 출고. 각 단계 버튼으로 진행 처리합니다.<br><b># 현재 스티커 인쇄 ~ 출고까지의 작업 처리는 스프레드시트로 진행하고 있습니다. (2026-07-29 기준)</b></li>
   <li><b>🏬 쿠팡창고 탭</b>: 로켓그로스 주문 중 아직 배송완료가 아닌 건이 여기 모입니다. 쿠팡 물류센터가 보관·출고하므로 <b>우리가 할 작업이 없고</b>, 그래서 포장완료 탭에는 섞이지 않습니다. 배송완료되면 출고완료로 넘어갑니다.</li>
   <li>로켓그로스 주문은 <b>희망출고일이 비어 있는 것이 정상</b>입니다. 우리가 맞춰야 할 출고 기한이 없습니다.</li>
   <li><b>입력일시 칸의 채널 표시</b>: <code>✅ 쿠팡 자동</code> = 판매자배송, <code>🏬 쿠팡 로켓그로스</code> = 로켓그로스. 같은 쿠팡이라도 우리 손이 닿는 범위가 달라 구분합니다.</li>
@@ -364,12 +399,46 @@ code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px
   재무는 엑셀을 받아 처리합니다.
 </div>
 
+<h3 id="alimtalk">5-2. 알림톡 발송·발송이력 (미입력 탭)</h3>
+<div class="img-wrap"><img src="manual-assets/uni-alimtalk-btn.png" alt="알림톡 발송과 이력"><div class="img-cap">미입력 탭 — 알림톡 컬럼(최근 발송·횟수)과 [💬 알림톡 발송] 버튼, 우상단 [📋 수집누락 점검]</div></div>
+<ul>
+  <li>미입력 주문을 체크하면 <b>💬 알림톡 발송</b> 버튼이 나타납니다 — 고객에게 <b>정보입력 안내 알림톡</b>이 나갑니다.</li>
+  <li>템플릿은 주문 사이트에 따라 자동 선택됩니다: 바른손카드 계열 = <code>BHGIFT_01</code>(발신 1644-0708), 바른손몰 = <code>BMGIFT_01</code>(발신 1644-7413). 수신은 <b>주문자 휴대폰</b>입니다.</li>
+  <li><b>알림톡 컬럼</b>: 최근 발송시각(KST)과 성공 횟수 — <span class="badge b-green">✓ 08-28 15:48 · 2회</span> 형태. 이미 발송된 주문이 선택에 섞이면 확인창에 경고가 뜹니다.</li>
+  <li>발송 경로(사내 SP → 통합관리자 → PublicApi)는 서버가 자동으로 고릅니다. 이력은 PublicApi 경로 발송만 표시됩니다 (과거 다른 경로 발송분은 바른손 백엔드에만 기록).</li>
+</ul>
+
+<h3 id="collect-check">5-3. 수집누락 점검</h3>
+<div class="img-wrap"><img src="manual-assets/uni-collect-check.png" alt="수집누락 점검 배너"><div class="img-cap">점검 결과 — 어느 월 시트에도 없는 주문(누락)과 다른 월 시트에 있는 주문(월 착오)을 구분해 보여줍니다</div></div>
+<ul>
+  <li>조회줄 오른쪽 <b>📋 수집누락 점검</b>을 누르면, <b>수집완료 처리된 주문</b>이 고객 희망출고월의 주문수집 스프레드시트에 실제로 등록됐는지 대조합니다 (최근 30일 이후 희망출고 기준).</li>
+  <li><span class="badge b-red">어느 월 시트에도 없음</span> = 진짜 누락 — 주문번호를 눌러 복사해 시트에 등록하세요.</li>
+  <li><span class="badge b-amber">다른 월 시트에 있음</span> = 월 착오 — 등록은 됐지만 희망출고월과 다른 시트입니다.</li>
+  <li>시트 여러 장을 읽는 작업이라 자동 실행되지 않습니다 — 버튼을 누를 때만 새로 대조하고, 이상이 없으면 "이상 없음" 알림만 뜹니다.</li>
+</ul>
+
+<h3 id="combine">5-4. 합포장 검토 배지 📦</h3>
+<div class="img-wrap"><img src="manual-assets/orders-combine-badge.png" alt="합포장 배지"><div class="img-cap">주문번호 옆 📦2종→1박스 — 같은 배송지 2개 품목이 용량상 1박스면 충분하다는 뜻</div></div>
+<ul>
+  <li>같은 주문·같은 배송지로 <b>품목이 2개 이상</b> 나가면 주문번호 옆에 <span class="badge b-blue">📦N종→M박스</span> 배지가 붙습니다 (주문조회·정보입력현황 공통).</li>
+  <li><b>M박스</b>는 상품별 <b>1박스 실측 용량</b>(최근 6개월 출고 실적에서 자동 학습, 2회 이상 재현된 최대만 인정)으로 계산한 필요 최소 박스 수입니다.
+    <code>📦3종→1박스</code>인데 3박스로 나누면 택배비가 2박스만큼 낭비됩니다.</li>
+  <li><b>나눔배송</b>(배송지 2곳 이상) 주문에는 배지가 붙지 않습니다 — 합포장이 원래 불가능합니다.</li>
+  <li>대상은 자사 출고 채널(바른손카드·바른손몰·더기프트)만입니다. 쿠팡·네이버·정수당은 출고 방식이 달라 제외됩니다.</li>
+  <li>상품별 수량→박스 구간표는 물류팀 공유용 <b>답례품 포장 기준표</b> 문서를 참고하세요 (운영 담당자 보유).</li>
+</ul>
+
 <h2 id="stickers">6. 스티커 관리</h2>
 <div class="img-wrap"><img src="manual-assets/bg-stickers.png" alt="스티커 관리"><div class="img-cap">스티커 — 코드/이름/이미지/입력 필드 정의</div></div>
 <ul>
   <li>스티커 등록: 코드(예: <code>TGJSD07S2</code>), 이름(예: 클로버), 미리보기 이미지.</li>
   <li><b>입력 필드(custom fields)</b>: "상단문구/하단문구"처럼 고객 입력란을 정의합니다. 정의하면 정보입력 편집 화면에 칸이 나뉘어 표시됩니다.</li>
+  <li><b>다른 스티커에서 필드 복사</b>: 입력 필드 구역의 <b>[다른 스티커에서 복사…]</b> 드롭다운에서 기준 스티커를 고르고
+    <b>[복사]</b>를 누르면 라벨·타입·필수·글자수·선택옵션이 그대로 들어옵니다. 기존 필드가 있으면 확인 후 전체 교체되며, 저장을 눌러야 반영됩니다.</li>
 </ul>
+
+<div class="img-wrap"><img src="manual-assets/sticker-copy-fields.png" alt="입력 필드 복사"><div class="img-cap">스티커 생성 — [다른 스티커에서 복사…]로 기존 스티커의 입력 필드 구성을 그대로 가져옵니다</div></div>
+<div class="tip">스티커·상품·거래처 등 입력 창은 바깥(어두운 배경)을 잘못 눌러도 바로 닫히지 않습니다 — "작성 중인 내용은 저장되지 않습니다" 확인창이 한 번 묻습니다.</div>
 
 <h2 id="products">7. 상품설정</h2>
 <div class="img-wrap"><img src="manual-assets/bg-products.png" alt="상품설정"><div class="img-cap">상품설정 — 상품별 스티커 매핑 · 박스 · 위탁 거래처 · ERP 코드</div></div>
@@ -658,7 +727,7 @@ code{background:var(--gray-100);padding:2px 6px;border-radius:4px;font-size:12px
 </table>
 
 <p style="margin-top:48px;color:var(--gray-400);font-size:12px;border-top:1px solid var(--gray-200);padding-top:16px">
-문의: 운영 담당자 · 이 매뉴얼은 시스템 업데이트에 따라 갱신됩니다. (최종 갱신 2026-08-07 — 로켓그로스 연동)
+문의: 운영 담당자 · 이 매뉴얼은 시스템 업데이트에 따라 갱신됩니다. (최종 갱신 2026-08-31 — 출고안내문자 · 알림톡 발송/이력 · 수집누락 점검 · 합포장 배지 · 주문번호 검색 · 더기프트 매입/위탁 · 스티커 필드 복사)
 </p>
 </main>
 </div>
