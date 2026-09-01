@@ -2237,7 +2237,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   if (pathname === '/api/bg/sms/history' && method === 'POST') {
     try {
       const body = await parseBody(req);
-      const ids = Array.isArray(body.order_ids) ? body.order_ids.slice(0, 1000) : [];
+      const ids = Array.isArray(body.order_ids) ? body.order_ids.slice(0, 2000) : [];   // 커스텀 시트 1,299행 대응 (store 가 150개씩 나눠 조회)
       const map = await store.getSmsSendHistory(ids, SMS_TEMPLATE_CODE);
       const history = {};
       for (const [k, v] of map) history[k] = v;
@@ -2364,7 +2364,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   if (pathname === '/api/bg/alimtalk/history' && method === 'POST') {
     try {
       const body = await parseBody(req);
-      const ids = Array.isArray(body.order_ids) ? body.order_ids.slice(0, 1000) : [];
+      const ids = Array.isArray(body.order_ids) ? body.order_ids.slice(0, 2000) : [];   // 커스텀 시트 1,299행 대응 (store 가 150개씩 나눠 조회)
       const map = await store.getSmsSendHistory(ids, ['BHGIFT_01', 'BMGIFT_01']);
       const history = {};
       for (const [k, v] of map) history[k] = v;

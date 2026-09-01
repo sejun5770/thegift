@@ -1064,18 +1064,26 @@ async function getSmsSendHistory(orderIds, templateCode) {
   const jsonMatch = r => ids.includes(String(r.order_id)) && codes.includes(r.template_code);
   let rows = [];
   if (USE_SUPABASE) {
-    try {
-      const inList = ids.map(id => `"${encodeURIComponent(id)}"`).join(',');
-      const codeFilter = codes.length === 1
-        ? `template_code=eq.${encodeURIComponent(codes[0])}`
-        : `template_code=in.(${codes.map(c => `"${encodeURIComponent(c)}"`).join(',')})`;
-      rows = await sbGet('bg_alimtalk_log',
-        `order_id=in.(${inList})&${codeFilter}&order=sent_at.desc`);
-    } catch (e) {
-      // 테이블 미적용(PGRST205) 등 — 저장이 JSON 으로 폴백됐을 수 있으니 그쪽도 본다.
-      console.warn('[store] sms history Supabase 조회 실패, JSON 폴백:', e.message);
-      rows = (readJson(FILES.alimtalkLog, [])).filter(jsonMatch);
+    // ⚠ in.(...) 을 한 번에 보내면 커스텀 시트(1,299행)처럼 ID 가 많을 때 URL 길이 초과로
+    //   요청이 통째로 실패하고, JSON 폴백(운영에선 빈 파일)이 빈 이력을 돌려줬다 —
+    //   발송은 됐는데 발송이력이 '-' 로 보인 원인 (2026-09-01). 150개씩 나눠 조회한다.
+    const codeFilter = codes.length === 1
+      ? `template_code=eq.${encodeURIComponent(codes[0])}`
+      : `template_code=in.(${codes.map(c => `"${encodeURIComponent(c)}"`).join(',')})`;
+    let anyFail = false;
+    for (let i = 0; i < ids.length; i += 150) {
+      const inList = ids.slice(i, i + 150).map(id => `"${encodeURIComponent(id)}"`).join(',');
+      try {
+        const chunk = await sbGet('bg_alimtalk_log',
+          `order_id=in.(${inList})&${codeFilter}&order=sent_at.desc`);
+        rows.push(...(chunk || []));
+      } catch (e) {
+        anyFail = true;
+        console.warn(`[store] sms history 조회 실패 (${i}~${i + 150}):`, e.message);
+      }
     }
+    // 전 청크 실패(테이블 미적용 등)일 때만 JSON 폴백 — 일부 실패는 부분 결과가 낫다
+    if (anyFail && !rows.length) rows = (readJson(FILES.alimtalkLog, [])).filter(jsonMatch);
   } else {
     rows = (readJson(FILES.alimtalkLog, [])).filter(jsonMatch);
   }
