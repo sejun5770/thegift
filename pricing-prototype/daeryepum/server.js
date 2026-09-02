@@ -1568,6 +1568,11 @@ async function apiOrders(query) {
     display_name: mergeNames(r.recv_name, r.order_name),
   }));
 
+  // CARD 세트 주문의 고객 선택 구성품(ETCSET)을 먼저 부모 행에 붙인다 — 아래 옵션 처리와 같은 모양.
+  //   옵션을 못 읽어도 목록 자체는 보여준다 (수집 K열이 폴백으로 떨어지므로 로그만 남긴다).
+  try { await attachCardSetOptions(p, rows); }
+  catch (e) { console.warn('[apiOrders] ETCSET 세트 옵션 조회 실패 (수집 K/L 은 폴백):', e.message); }
+
   // 옵션(비용변동) 라인 합산 — 프론트 신규 옵션 기능 (수건/주방세제 등).
   //   옵션 행(card_opt = 부모 아이템 card_seq)의 금액을 부모(item_card_seq = card_opt)에 합산하고
   //   옵션 행은 제거 → 주문조회·정보입력현황에 부모(세트)만, 결제금액은 옵션 합으로 표시.
@@ -4741,6 +4746,78 @@ async function apiDashboardSummary(query) {
 // ============================================
 // 위탁업체 정산 API (Phase 2)
 // ============================================
+
+/**
+ * CARD(자사몰 custom_order) 세트 주문의 고객 선택 구성품을 부모 행에 `_options` 로 붙인다.
+ *
+ * ETC 는 구성품이 아이템 행(card_opt)으로 전개되지만, CARD 는 세트 아이템 1행만 오고
+ * 실제 선택은 `custom_order_custom_option`(input_type='ETCSET') 의
+ * selected_value(card_seq CSV)에만 있다.
+ *
+ * 안 붙이면 수집복사 K열이 baseCode 폴백으로 떨어지는데, 세트코드에서 접미사를 뗀 값이
+ * 실존하는 **다른 원물** 코드인 경우가 있어 (TGJBK09O7_A → TGJBK09O7 = 솔리드 뱀부 진청)
+ * 그럴듯하지만 틀린 원물이 수집 시트로 나간다. (주문 4783594: 아이보리+회색 → 진청 오출력)
+ *
+ * 주의 — ETCSET 행은 장바구니 잔재로 고아가 남는다(주문 아이템이 없는데 order_seq 로는 조회됨).
+ * 반드시 아이템 존재를 확인하고, selected_value 의 0 은 미선택이므로 버린다.
+ */
+async function attachCardSetOptions(p, rows) {
+  const parents = new Map(); // `${order_seq}::${item_card_seq}` → row
+  for (const r of rows) {
+    if (r.order_type === 'CARD' && r.item_card_seq != null) {
+      parents.set(`${r.order_seq}::${r.item_card_seq}`, r);
+    }
+  }
+  if (!parents.size) return;
+  const orderSeqs = [...new Set(rows.filter(r => r.order_type === 'CARD').map(r => Number(r.order_seq)))]
+    .filter(n => Number.isFinite(n));
+  if (!orderSeqs.length) return;
+
+  const optRows = [];
+  for (let i = 0; i < orderSeqs.length; i += 700) {
+    const inl = orderSeqs.slice(i, i + 700).join(',');
+    if (!inl) continue;
+    const rr = await p.request().query(`
+      SELECT cco.order_seq, cco.card_seq, CAST(cco.selected_value AS varchar(400)) AS selected_value
+      FROM custom_order_custom_option cco WITH (NOLOCK)
+      WHERE cco.input_type = 'ETCSET' AND cco.order_seq IN (${inl})`);
+    optRows.push(...rr.recordset);
+  }
+  // 실제 주문 아이템이 있는 옵션만 채택 (고아행 배제)
+  const usable = optRows.map(o => ({
+    parent: parents.get(`${o.order_seq}::${o.card_seq}`),
+    seqs: String(o.selected_value || '').split(',')
+      .map(v => Number(String(v).trim()))
+      .filter(n => Number.isFinite(n) && n > 0), // 0 = 미선택
+  })).filter(o => o.parent && o.seqs.length);
+  if (!usable.length) return;
+
+  const needSeqs = [...new Set(usable.flatMap(o => o.seqs))];
+  const cardBySeq = new Map();
+  for (let i = 0; i < needSeqs.length; i += 700) {
+    const inl = needSeqs.slice(i, i + 700).join(',');
+    if (!inl) continue;
+    const cr = await p.request().query(`
+      SELECT Card_Seq, Card_Code, Card_Name FROM S2_Card WITH (NOLOCK)
+      WHERE Card_Seq IN (${inl})`);
+    for (const c of cr.recordset) cardBySeq.set(Number(c.Card_Seq), c);
+  }
+  for (const o of usable) {
+    if (Array.isArray(o.parent._options) && o.parent._options.length) continue; // 기존 병합분 보존
+    // 순서 = 고객이 고른 CSV 순서 그대로 → 수집복사 K=1번째, L=2번째
+    // 수량 = 세트 수량 (2구 세트는 상자마다 각 수건 1장씩)
+    const opts = o.seqs.map((sq, idx) => {
+      const c = cardBySeq.get(sq);
+      if (!c) return null;
+      return {
+        code: c.Card_Code || '',
+        name: cleanName(c.Card_Name) || c.Card_Code || '',
+        amount: 0, qty: o.parent.item_count, seq: idx,
+      };
+    }).filter(Boolean);
+    if (opts.length) o.parent._options = opts;
+  }
+}
 
 /** ERP 변형 코드(예: TGJSD0104_A) → BASE 코드(TGJSD0104). 클라이언트 resolveBgMappedProductCode 와 동일. */
 function _baseProductCode(rawCode) {
