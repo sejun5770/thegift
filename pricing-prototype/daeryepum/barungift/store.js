@@ -2408,6 +2408,12 @@ function _normIncidentItems(v) {
   return [...merged.values()];
 }
 
+/** 'YYYY-MM-DD' 만 통과. 그 외(빈 값·형식 오류)는 null — 잘못된 값이 정산 기준에 섞이면 안 된다 */
+function _normShippedDate(v) {
+  const s = String(v ?? '').trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
 function _normIncident(data, createdBy) {
   const type = INCIDENT_TYPES.includes(data?.incident_type) ? data.incident_type : 'other';
   const disp = INCIDENT_DISPOSITIONS.includes(data?.disposition) ? data.disposition : 'operation';
@@ -2422,6 +2428,8 @@ function _normIncident(data, createdBy) {
     items: disp === 'extra_shipment' ? items : [],
     recv_name: data?.recv_name ? String(data.recv_name) : null,
     order_date: data?.order_date || null,
+    // 실제 출고일 (078) — 출고월 정산 기준. 운영사고는 출고가 없어 비워 둔다.
+    shipped_date: disp === 'extra_shipment' ? _normShippedDate(data?.shipped_date) : null,
     created_by: createdBy || null,
   };
 }
@@ -2452,7 +2460,19 @@ async function createIncident(data, createdBy = null) {
   if (payload.disposition === 'extra_shipment' && !payload.items.length) {
     throw new Error('기타출고는 실제 출고된 품목과 수량을 입력해야 합니다');
   }
-  if (USE_SUPABASE) return sbInsert('bg_incidents', payload);
+  if (USE_SUPABASE) {
+    try { return await sbInsert('bg_incidents', payload); }
+    catch (err) {
+      // 078 미실행이면 shipped_date 컬럼이 없다 — 그 필드만 빼고 저장한다.
+      //   출고일 하나 때문에 사고건 등록 자체가 막히면 안 된다 (마이그레이션 전 호환).
+      if (/shipped_date/.test(err.message || '')) {
+        const { shipped_date, ...rest } = payload;
+        console.warn('[incidents] shipped_date 컬럼 없음 — 제외하고 저장 (마이그레이션 078 필요)');
+        return sbInsert('bg_incidents', rest);
+      }
+      throw err;
+    }
+  }
   const list = readJson(FILES.incidents, []);
   const row = { id: uuid(), ...payload, created_at: now(), updated_at: now() };
   list.push(row);
@@ -2479,8 +2499,23 @@ async function updateIncident(id, data) {
     }
     patch.disposition = disp;
     patch.items = disp === 'extra_shipment' ? items : [];
+    // 운영사고로 바꾸면 출고일도 비운다 — 나가지 않은 건에 출고일이 남으면 안 된다
+    if (disp !== 'extra_shipment') patch.shipped_date = null;
   }
-  if (USE_SUPABASE) return sbUpdate('bg_incidents', `id=eq.${encodeURIComponent(id)}`, patch);
+  if ('shipped_date' in data && patch.shipped_date === undefined) {
+    patch.shipped_date = _normShippedDate(data.shipped_date);
+  }
+  if (USE_SUPABASE) {
+    try { return await sbUpdate('bg_incidents', `id=eq.${encodeURIComponent(id)}`, patch); }
+    catch (err) {
+      if (/shipped_date/.test(err.message || '')) {
+        const { shipped_date, ...rest } = patch;
+        console.warn('[incidents] shipped_date 컬럼 없음 — 제외하고 수정 (마이그레이션 078 필요)');
+        return sbUpdate('bg_incidents', `id=eq.${encodeURIComponent(id)}`, rest);
+      }
+      throw err;
+    }
+  }
   const list = readJson(FILES.incidents, []);
   const idx = list.findIndex(r => r.id === id);
   if (idx < 0) return null;
