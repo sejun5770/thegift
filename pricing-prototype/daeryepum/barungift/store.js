@@ -1822,6 +1822,54 @@ function normAlertFormat(src) {
   return out;
 }
 
+/**
+ * 공유 자유 옵션 그룹 정규화 (078) — 모르는 키·이상값은 버린다.
+ *   저장 시점에 여기서 전부 걸러내므로, 고객 화면은 형태를 다시 의심하지 않아도 된다.
+ *   코드가 없는 선택지는 수집복사에 쓸 수 없으니 버린다 (이름만 있으면 물류가 집을 수 없다).
+ */
+function normSharedOptionGroups(src) {
+  if (src == null) return null;
+  if (!Array.isArray(src)) return [];
+  const str = (v, max) => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ').trim().slice(0, max);
+  const out = [];
+  const seenId = new Set();
+  for (const g of src.slice(0, 50)) {
+    if (!g || typeof g !== 'object') continue;
+    const name = str(g.name, 40);
+    if (!name) continue;                       // 그룹명 = 고객 화면 라벨. 없으면 의미 없다.
+    let id = str(g.id, 40) || ('og-' + Math.random().toString(36).slice(2, 10));
+    while (seenId.has(id)) id += 'x';
+    seenId.add(id);
+    const options = [];
+    const seenCode = new Set();
+    for (const o of (Array.isArray(g.options) ? g.options : []).slice(0, 100)) {
+      if (!o || typeof o !== 'object') continue;
+      const code = str(o.code, 40);
+      if (!code || seenCode.has(code)) continue;   // 코드 없으면 수집복사에 못 쓴다
+      seenCode.add(code);
+      const opt = { code, name: str(o.name, 60) || code, sold_out: !!o.sold_out };
+      const img = str(o.preview_image_url, 500);
+      if (img) opt.preview_image_url = img;
+      const color = str(o.color, 20);
+      if (color) opt.color = color;
+      options.push(opt);
+    }
+    const codes = [];
+    for (const c of (Array.isArray(g.product_codes) ? g.product_codes : []).slice(0, 300)) {
+      const pc = str(c, 60);
+      if (pc && !codes.includes(pc)) codes.push(pc);
+    }
+    out.push({
+      id, name,
+      use_images: g.use_images !== false,
+      is_active: g.is_active !== false,
+      product_codes: codes,
+      options,
+    });
+  }
+  return out;
+}
+
 async function updateSiteSettings(patch, updatedBy = null) {
   if (!USE_SUPABASE) throw new Error('Supabase 미설정 — 사이트 설정 저장 불가');
   const allowed = ['custom_guide_title', 'custom_guide_text', 'sms_ship_template',
@@ -1835,6 +1883,10 @@ async function updateSiteSettings(patch, updatedBy = null) {
   // 메시지 구성 (074) — 모르는 키·이상값은 버린다. 잘못 저장돼도 발송이 깨지면 안 된다.
   if ('stock_alert_format' in patch) {
     clean.stock_alert_format = normAlertFormat(patch.stock_alert_format);
+  }
+  // 공유 자유 옵션 그룹 (078) — JSONB. 형태 검증은 normSharedOptionGroups 가 한다.
+  if ('shared_option_groups' in patch) {
+    clean.shared_option_groups = normSharedOptionGroups(patch.shared_option_groups);
   }
   // 구분별 경고 기준일 (073) — JSONB. 키는 ITEM_KINDS 만, 값은 1~365 정수만 남긴다.
   if ('stock_alert_warn_days' in patch) {
@@ -1860,13 +1912,13 @@ async function updateSiteSettings(patch, updatedBy = null) {
     // 073/074 마이그레이션 전에는 새 컬럼이 없어 PGRST204 가 난다. 그 컬럼만 빼고
     // 다시 저장한다 — 새 기능 하나 때문에 채널·시각 저장까지 막히면 안 된다.
     const m = /Could not find the '([a-z_]+)' column/.exec(err.message || '');
-    if (m && ['stock_alert_format', 'stock_alert_warn_days'].includes(m[1]) && m[1] in clean) {
+    if (m && ['stock_alert_format', 'stock_alert_warn_days', 'shared_option_groups'].includes(m[1]) && m[1] in clean) {
       delete clean[m[1]];
       const retried = Object.keys(clean).some(k => !['updated_at', 'updated_by'].includes(k))
         ? ((await sbUpdate('bg_site_settings', 'id=eq.1', clean)) || (await sbInsert('bg_site_settings', { id: 1, ...clean })))
         : { id: 1 };
       return { ...retried, _skipped_column: m[1],
-        _warning: `${m[1]} 컬럼이 아직 없습니다 — 해당 설정은 저장되지 않았습니다. supabase/migrations/${m[1] === 'stock_alert_format' ? '074' : '073'}_*.sql 을 실행하세요.` };
+        _warning: `${m[1]} 컬럼이 아직 없습니다 — 해당 설정은 저장되지 않았습니다. supabase/migrations/${({ stock_alert_format: '074', stock_alert_warn_days: '073', shared_option_groups: '078' })[m[1]] || '0??'}_*.sql 을 실행하세요.` };
     }
     throw err;
   }
@@ -2624,4 +2676,5 @@ module.exports = {
   // 사이트 공통 설정 (migration 036)
   getSiteSettings,
   updateSiteSettings,
+  normSharedOptionGroups,
 };

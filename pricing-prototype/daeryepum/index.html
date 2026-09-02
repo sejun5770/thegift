@@ -302,7 +302,7 @@ nav.nav-loading a[href^="#"] {
   <a href="#bg-unified" onclick="showPage('bg-unified')">정보입력현황</a>
   <a href="#sns" onclick="showPage('sns')">SNS 인사이트</a>
   <a href="#worklog" onclick="showPage('worklog')">일지</a>
-  <a href="#bg-stickers" onclick="showPage('bg-stickers')">스티커</a>
+  <a href="#bg-stickers" onclick="showPage('bg-stickers')">부가옵션설정</a>
   <a href="#bg-products" onclick="showPage('bg-products')">상품설정</a>
   <a href="#bg-shipping" onclick="showPage('bg-shipping')">출고일설정</a>
   <a href="#coupang-rfm" onclick="showPage('coupang-rfm')">로켓그로스</a>
@@ -1867,10 +1867,19 @@ nav.nav-loading a[href^="#"] {
   </div>
 </div>
 
-<!-- ========== 바른기프트: 스티커 관리 ========== -->
+<!-- ========== 바른기프트: 부가옵션 설정 (스티커 / 자유옵션) ========== -->
 <div id="page-bg-stickers" class="page">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-    <h2 style="margin:0">🏷️ 바른기프트 스티커 관리</h2>
+  <h2 style="margin:0 0 14px">🏷️ 바른기프트 부가옵션 설정</h2>
+  <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--gray-200)">
+    <button id="bgopt-tab-sticker" onclick="setBgOptTab('sticker')"
+      style="border:none;background:none;padding:8px 16px;font-size:13px;font-weight:700;color:var(--primary);border-bottom:2px solid var(--primary);cursor:pointer">스티커</button>
+    <button id="bgopt-tab-group" onclick="setBgOptTab('group')"
+      style="border:none;background:none;padding:8px 16px;font-size:13px;font-weight:500;color:var(--gray-500);border-bottom:2px solid transparent;cursor:pointer">자유옵션</button>
+  </div>
+
+<div id="bgopt-pane-sticker">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+    <div style="font-size:12px;color:var(--gray-500)">고객이 상품당 <b>1개</b>를 고르는 인쇄 장식. 문구 입력(커스텀)을 받을 수 있습니다.</div>
     <button class="btn btn-primary" onclick="openBgStickerForm()">+ 스티커 생성</button>
   </div>
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
@@ -1896,6 +1905,45 @@ nav.nav-loading a[href^="#"] {
     </table>
     <div id="bg-sticker-empty" class="hidden" style="text-align:center;padding:40px;color:var(--gray-500)">
       등록된 스티커가 없습니다. <a href="javascript:void(0)" onclick="openBgStickerForm();return false" style="color:var(--primary);cursor:pointer">새 스티커 생성</a>
+    </div>
+  </div>
+</div>
+
+<!-- ── 자유옵션 (공유 옵션 그룹) ── -->
+<div id="bgopt-pane-group" style="display:none">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+    <div style="font-size:12px;color:var(--gray-500)">
+      스티커와 <b>별도로</b> 고객이 이미지로 고르는 옵션(기획전 미니카드 등). 문구 입력은 없습니다.<br>
+      여기서 <b>한 번 등록하고 적용 상품을 지정</b>하면 그 상품들의 주문 화면에 함께 나옵니다.
+    </div>
+    <div style="display:flex;gap:6px">
+      <button class="btn" onclick="loadBgOptionGroups()">↻ 새로고침</button>
+      <button class="btn btn-primary" onclick="bgOgAddGroup()">+ 그룹 추가</button>
+    </div>
+  </div>
+  <div id="bgopt-group-list"></div>
+  <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:14px">
+    <span id="bgopt-group-status" style="font-size:12px;color:var(--gray-500)"></span>
+    <button class="btn btn-primary" id="bgopt-group-save" onclick="saveBgOptionGroups()">저장</button>
+  </div>
+</div>
+</div>
+
+<!-- 적용 상품 선택 모달 -->
+<div id="bgopt-prod-modal" onclick="if(event.target===this)closeBgOgProducts()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;max-width:560px;width:92%;max-height:86vh;display:flex;flex-direction:column;padding:20px">
+    <h3 style="margin:0 0 4px;font-size:16px">적용 상품 선택</h3>
+    <div id="bgopt-prod-group" style="font-size:12px;color:var(--gray-500);margin-bottom:12px"></div>
+    <input type="text" id="bgopt-prod-search" placeholder="🔍 상품명/코드 검색" oninput="renderBgOgProductList()"
+      style="padding:7px 12px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px;margin-bottom:8px">
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;font-size:12px">
+      <button class="btn" style="padding:3px 10px;font-size:11px" onclick="bgOgProductToggleAll(true)">검색결과 전체 선택</button>
+      <button class="btn" style="padding:3px 10px;font-size:11px" onclick="bgOgProductToggleAll(false)">전체 해제</button>
+      <span id="bgopt-prod-count" style="margin-left:auto;color:var(--gray-500)"></span>
+    </div>
+    <div id="bgopt-prod-list" style="flex:1;overflow:auto;border:1px solid var(--gray-200);border-radius:8px;padding:6px"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn" onclick="closeBgOgProducts()">닫기</button>
     </div>
   </div>
 </div>
@@ -13733,6 +13781,241 @@ function renderWorklogMetricsChart() {
 // ============================================
 // 바른기프트: 스티커 관리
 // ============================================
+// ============================================
+// 부가옵션 설정 — 서브탭 (스티커 / 자유옵션)
+// ============================================
+let _bgOptTab = 'sticker';
+function setBgOptTab(t) {
+  _bgOptTab = t;
+  for (const k of ['sticker', 'group']) {
+    const on = k === t;
+    const tab = document.getElementById('bgopt-tab-' + k);
+    const pane = document.getElementById('bgopt-pane-' + k);
+    if (tab) {
+      tab.style.color = on ? 'var(--primary)' : 'var(--gray-500)';
+      tab.style.fontWeight = on ? '700' : '500';
+      tab.style.borderBottomColor = on ? 'var(--primary)' : 'transparent';
+    }
+    if (pane) pane.style.display = on ? '' : 'none';
+  }
+  if (t === 'group' && _bgOgGroups === null) loadBgOptionGroups();
+}
+
+// ============================================
+// 자유옵션 — 공유 옵션 그룹 (078)
+//   한 번 등록하고 적용 상품을 지정하면 그 상품들의 주문 화면에 함께 나온다.
+//   상품별 custom_options 와 그룹명이 겹치면 상품별 설정이 이긴다 (서버에서 병합).
+// ============================================
+let _bgOgGroups = null;     // null = 아직 로드 전
+let _bgOgDirty = false;
+let _bgOgProdTarget = null; // 적용 상품 모달이 편집 중인 그룹 id
+
+function _bgOgStatus(msg, color) {
+  const el = document.getElementById('bgopt-group-status');
+  if (el) { el.textContent = msg || ''; el.style.color = color || 'var(--gray-500)'; }
+}
+async function loadBgOptionGroups() {
+  try {
+    _bgOgStatus('불러오는 중…');
+    const [gr, pr] = await Promise.all([
+      fetch(API + '/api/bg/option-groups'),
+      bgProductSettings.length ? Promise.resolve(null) : fetch(API + '/api/bg/products/settings'),
+    ]);
+    const j = await gr.json();
+    if (j.error) throw new Error(j.error);
+    _bgOgGroups = Array.isArray(j.groups) ? j.groups : [];
+    if (pr) bgProductSettings = (await pr.json()).settings || [];
+    _bgOgDirty = false;
+    renderBgOptionGroups();
+    _bgOgStatus('');
+  } catch (e) {
+    _bgOgGroups = _bgOgGroups || [];
+    renderBgOptionGroups();
+    _bgOgStatus('불러오기 실패: ' + e.message, '#dc2626');
+  }
+}
+function _bgOgFind(id) { return (_bgOgGroups || []).find(g => g.id === id); }
+function _bgOgMark() { _bgOgDirty = true; _bgOgStatus('저장하지 않은 변경이 있습니다', '#b45309'); }
+
+function bgOgAddGroup() {
+  const name = (prompt('옵션 그룹명 (고객 화면에 그대로 보입니다 — 예: 추석 미니카드)') || '').trim();
+  if (!name) return;
+  if (!_bgOgGroups) _bgOgGroups = [];
+  if (_bgOgGroups.some(g => g.name === name)) { alert('같은 이름의 그룹이 이미 있습니다.'); return; }
+  _bgOgGroups.push({ id: 'og-' + Date.now().toString(36), name, use_images: true, is_active: true, product_codes: [], options: [] });
+  _bgOgMark(); renderBgOptionGroups();
+}
+function bgOgRemoveGroup(id) {
+  const g = _bgOgFind(id); if (!g) return;
+  if (!confirm(`'${g.name}' 그룹을 삭제할까요?\n적용된 ${g.product_codes.length}개 상품의 주문 화면에서 즉시 사라집니다.`)) return;
+  _bgOgGroups = _bgOgGroups.filter(x => x.id !== id);
+  _bgOgMark(); renderBgOptionGroups();
+}
+function bgOgSetGroup(id, field, val) {
+  const g = _bgOgFind(id); if (!g) return;
+  g[field] = val; _bgOgMark();
+  if (field === 'use_images') renderBgOptionGroups();
+}
+function bgOgAddOption(id) {
+  const g = _bgOgFind(id); if (!g) return;
+  g.options.push({ code: '', name: '', preview_image_url: '', sold_out: false });
+  _bgOgMark(); renderBgOptionGroups();
+}
+function bgOgRemoveOption(id, i) {
+  const g = _bgOgFind(id); if (!g) return;
+  g.options.splice(i, 1); _bgOgMark(); renderBgOptionGroups();
+}
+function bgOgSetOption(id, i, field, val) {
+  const g = _bgOgFind(id); if (!g || !g.options[i]) return;
+  g.options[i][field] = val; _bgOgMark();
+  if (field === 'sold_out') renderBgOptionGroups();
+}
+
+function renderBgOptionGroups() {
+  const wrap = document.getElementById('bgopt-group-list');
+  if (!wrap) return;
+  const groups = _bgOgGroups || [];
+  if (!groups.length) {
+    wrap.innerHTML = '<div style="padding:30px;text-align:center;color:var(--gray-400);font-size:13px;background:#fff;border:1px dashed var(--gray-200);border-radius:8px">등록된 자유옵션 그룹이 없습니다. [+ 그룹 추가] 로 시작하세요.</div>';
+    return;
+  }
+  wrap.innerHTML = groups.map(g => {
+    const optsHtml = g.options.length ? g.options.map((o, i) => `
+      <div style="background:#fff;padding:6px;border:1px solid var(--gray-200);border-radius:6px;${o.sold_out ? 'opacity:.7' : ''}">
+        <div style="display:grid;grid-template-columns:120px 1fr 28px;gap:6px;align-items:center">
+          <input type="text" value="${esc(o.code || '')}" placeholder="코드"
+            oninput="bgOgSetOption('${g.id}',${i},'code',this.value)"
+            style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;font-family:monospace">
+          <input type="text" value="${esc(o.name || '')}" placeholder="표시명 (예: 포토)"
+            oninput="bgOgSetOption('${g.id}',${i},'name',this.value)"
+            style="padding:5px 7px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+          <button type="button" onclick="bgOgRemoveOption('${g.id}',${i})" title="삭제"
+            style="border:none;background:#fee;color:#dc2626;width:28px;height:28px;border-radius:4px;cursor:pointer">&times;</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:5px">
+          <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;padding:3px 8px;border-radius:4px;font-size:10.5px;${o.sold_out ? 'background:#fee2e2;color:#b91c1c;font-weight:600' : 'background:#f3f4f6;color:var(--gray-500)'};flex-shrink:0">
+            <input type="checkbox" ${o.sold_out ? 'checked' : ''} onchange="bgOgSetOption('${g.id}',${i},'sold_out',this.checked)" style="margin:0;cursor:pointer">
+            ${o.sold_out ? '🚫 품절' : '품절 표시'}
+          </label>
+          ${g.use_images !== false ? `<input type="text" value="${esc(o.preview_image_url || '')}" placeholder="이미지 URL"
+            oninput="bgOgSetOption('${g.id}',${i},'preview_image_url',this.value)"
+            style="flex:1;padding:3px 6px;border:1px solid var(--gray-200);border-radius:3px;font-size:10.5px;background:#fafafa">
+          ${o.preview_image_url ? `<img src="${esc(o.preview_image_url)}" alt="" style="width:28px;height:28px;object-fit:contain;border:1px solid var(--gray-200);border-radius:3px;background:#fff">` : ''}` : ''}
+        </div>
+      </div>`).join('') : '<div style="padding:8px;text-align:center;color:var(--gray-400);font-size:11px;background:#fff;border:1px dashed var(--gray-200);border-radius:4px">선택지 없음 — 최소 1개는 있어야 고객 화면에 나옵니다</div>';
+
+    const codes = g.product_codes || [];
+    const chips = codes.slice(0, 8).map(c => {
+      const ps = bgProductSettings.find(p => p.product_id === c);
+      return `<span title="${esc(ps?.product_name || '')}" style="display:inline-block;font-family:monospace;font-size:10px;background:var(--gray-50);border:1px solid var(--gray-200);color:var(--gray-700);padding:2px 6px;border-radius:3px;margin:1px 2px 1px 0">${esc(c)}</span>`;
+    }).join('') + (codes.length > 8 ? `<span style="font-size:10px;color:var(--gray-500)">외 ${codes.length - 8}개</span>` : '');
+
+    return `
+    <div style="border:1px solid var(--gray-200);border-radius:10px;background:#f9fafb;padding:12px;margin-bottom:12px;${g.is_active === false ? 'opacity:.65' : ''}">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <input type="text" value="${esc(g.name)}" placeholder="그룹명 (고객 화면 라벨)"
+          onchange="bgOgSetGroup('${g.id}','name',this.value.trim())"
+          style="flex:1;min-width:180px;padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;font-weight:600;background:#fff">
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;padding:4px 10px;border:1px solid ${g.use_images !== false ? 'var(--primary)' : 'var(--gray-300)'};background:${g.use_images !== false ? '#eff6ff' : '#fff'};color:${g.use_images !== false ? 'var(--primary)' : 'var(--gray-600)'};border-radius:4px;font-size:11px;white-space:nowrap" title="체크 시 선택지에 이미지 URL 필드가 노출되고 고객 화면이 이미지 카드로 보입니다">
+          <input type="checkbox" ${g.use_images !== false ? 'checked' : ''} onchange="bgOgSetGroup('${g.id}','use_images',this.checked)" style="margin:0;cursor:pointer"> 🖼️ 이미지 사용
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;padding:4px 10px;border:1px solid ${g.is_active !== false ? '#a7f3d0' : 'var(--gray-300)'};background:${g.is_active !== false ? '#ecfdf5' : '#fff'};color:${g.is_active !== false ? '#047857' : 'var(--gray-600)'};border-radius:4px;font-size:11px;white-space:nowrap" title="끄면 적용 상품 전체의 주문 화면에서 즉시 내려갑니다 (기획전 종료)">
+          <input type="checkbox" ${g.is_active !== false ? 'checked' : ''} onchange="bgOgSetGroup('${g.id}','is_active',this.checked)" style="margin:0;cursor:pointer"> 사용
+        </label>
+        <button type="button" onclick="bgOgRemoveGroup('${g.id}')"
+          style="padding:4px 10px;border:1px solid #fca5a5;background:#fee;color:#dc2626;border-radius:4px;font-size:11px;cursor:pointer;white-space:nowrap">그룹 삭제</button>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#fff;border:1px solid var(--gray-200);border-radius:6px;padding:8px 10px;margin-bottom:10px">
+        <span style="font-size:11.5px;font-weight:600;color:var(--gray-600);white-space:nowrap">적용 상품 ${codes.length}개</span>
+        <div style="flex:1;min-width:120px">${codes.length ? chips : '<span style="font-size:11px;color:#b45309">지정된 상품이 없어 어디에도 안 보입니다</span>'}</div>
+        <button class="btn" style="padding:4px 10px;font-size:11px;white-space:nowrap" onclick="openBgOgProducts('${g.id}')">상품 선택</button>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:6px">${optsHtml}</div>
+      <button type="button" onclick="bgOgAddOption('${g.id}')" class="btn" style="font-size:11px;padding:4px 10px;width:100%;margin-top:8px">➕ 선택지 추가</button>
+    </div>`;
+  }).join('');
+}
+
+// ── 적용 상품 선택 모달 ──
+function openBgOgProducts(id) {
+  const g = _bgOgFind(id); if (!g) return;
+  _bgOgProdTarget = id;
+  document.getElementById('bgopt-prod-group').textContent = `'${g.name}' 그룹을 어떤 상품에 붙일지 고르세요.`;
+  document.getElementById('bgopt-prod-search').value = '';
+  document.getElementById('bgopt-prod-modal').style.display = 'flex';
+  renderBgOgProductList();
+}
+function closeBgOgProducts() {
+  document.getElementById('bgopt-prod-modal').style.display = 'none';
+  _bgOgProdTarget = null;
+  renderBgOptionGroups();
+}
+function _bgOgFilteredProducts() {
+  const q = (document.getElementById('bgopt-prod-search')?.value || '').trim().toLowerCase();
+  const list = (bgProductSettings || []).slice().sort((a, b) => String(a.product_id).localeCompare(String(b.product_id)));
+  if (!q) return list;
+  return list.filter(p => String(p.product_id).toLowerCase().includes(q) || String(p.product_name || '').toLowerCase().includes(q));
+}
+function renderBgOgProductList() {
+  const g = _bgOgFind(_bgOgProdTarget); if (!g) return;
+  const list = _bgOgFilteredProducts();
+  const sel = new Set(g.product_codes || []);
+  document.getElementById('bgopt-prod-count').textContent = `선택 ${sel.size}개 · 검색결과 ${list.length}개`;
+  document.getElementById('bgopt-prod-list').innerHTML = list.length ? list.map(p => `
+    <label style="display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:5px;cursor:pointer;font-size:12.5px;${sel.has(p.product_id) ? 'background:#eff6ff' : ''}">
+      <input type="checkbox" ${sel.has(p.product_id) ? 'checked' : ''} onchange="bgOgToggleProduct('${esc(p.product_id)}',this.checked)" style="margin:0;cursor:pointer">
+      <span style="font-family:monospace;font-size:11px;color:var(--gray-600);min-width:96px">${esc(p.product_id)}</span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.product_name || '')}</span>
+    </label>`).join('') : '<div style="padding:20px;text-align:center;color:var(--gray-400);font-size:12px">검색 결과 없음</div>';
+}
+function bgOgToggleProduct(code, on) {
+  const g = _bgOgFind(_bgOgProdTarget); if (!g) return;
+  const set = new Set(g.product_codes || []);
+  if (on) set.add(code); else set.delete(code);
+  g.product_codes = [...set];
+  _bgOgMark(); renderBgOgProductList();
+}
+function bgOgProductToggleAll(on) {
+  const g = _bgOgFind(_bgOgProdTarget); if (!g) return;
+  const set = new Set(g.product_codes || []);
+  for (const p of _bgOgFilteredProducts()) { if (on) set.add(p.product_id); else set.delete(p.product_id); }
+  g.product_codes = [...set];
+  _bgOgMark(); renderBgOgProductList();
+}
+
+async function saveBgOptionGroups() {
+  const groups = _bgOgGroups || [];
+  // 저장 전 검증 — 코드 없는 선택지는 수집복사에 못 쓰이므로 서버가 버린다. 미리 알린다.
+  const bad = [];
+  for (const g of groups) {
+    if (!g.name) bad.push('이름 없는 그룹이 있습니다');
+    const noCode = g.options.filter(o => !String(o.code || '').trim()).length;
+    if (noCode) bad.push(`'${g.name}' 그룹에 코드 없는 선택지 ${noCode}개 (저장 시 제외됩니다)`);
+    if (g.is_active !== false && !g.options.filter(o => o.code).length) bad.push(`'${g.name}' 그룹에 선택지가 없습니다`);
+    if (g.is_active !== false && !(g.product_codes || []).length) bad.push(`'${g.name}' 그룹에 적용 상품이 없습니다`);
+  }
+  if (bad.length && !confirm('확인해주세요:\n\n· ' + bad.join('\n· ') + '\n\n그대로 저장할까요?')) return;
+  const btn = document.getElementById('bgopt-group-save');
+  btn.disabled = true; _bgOgStatus('저장 중…');
+  try {
+    const r = await fetch(API + '/api/bg/option-groups', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ groups }),
+    });
+    const j = await r.json();
+    if (!r.ok || j.error) throw new Error(j.error || ('HTTP ' + r.status));
+    _bgOgGroups = Array.isArray(j.groups) ? j.groups : groups;
+    _bgOgDirty = false;
+    renderBgOptionGroups();
+    _bgOgStatus('저장했습니다', '#047857');
+  } catch (e) {
+    _bgOgStatus('저장 실패: ' + e.message, '#dc2626');
+  }
+  btn.disabled = false;
+}
+
 let bgStickers = [];
 
 async function loadBgStickers() {
@@ -24217,17 +24500,20 @@ function copyBgUnified() {
   // 23열 구조: A='', B=택배, C=일반, D=주문번호, E=수령인, F=연락처, G='', H=배송지, I='',
   //            J=상품명, K=품목코드1(1번째 자유옵션 코드 or baseCode),
   //            L=품목코드2(2번째 자유옵션 코드), M=박스컬러(box_code or TGJBK09O_ 조합코드),
-  //            N=스티커코드(수량), O='',
-  //            P=옵션선택(K/L 로 매핑 안 된 3번째+ 그룹들만, '그룹명: 이름' / ' / ' 구분),
+  //            N=스티커코드(수량) [시트: 스티커타입1],
+  //            O=자유옵션 1번째 그룹 '코드(수량)' [시트: 스티커타입2] — 기획전 미니카드 등,
+  //            P=남은 옵션(구성품 3번째+ / 자유옵션 2번째+, '라벨: 이름' / ' / ' 구분),
   //            Q=스티커 문구(고객 입력), R=배송메세지(MSSQL recv_msg), S=주문수량, T='', U='',
   //            V=희망출고일(빠른출고시 짙은빨강), W=희망출고일
   //
-  // 자유 옵션 매핑 정책 (신상품 등 사례):
-  //   - 상품의 custom_options 그룹 정의 순서 기준 (admin 이 그룹을 만든 순서 = insertion order)
-  //   - 1번째 그룹 (예: 수건 색상 / 핸드워시) → K열 덮어쓰기. 옵션 미선택이면 baseCode fallback.
-  //   - 2번째 그룹 (예: 고리수건 타입) → L열 덮어쓰기. 옵션 미선택이면 빈 값.
-  //   - 3번째 이상 그룹 → P열에 '그룹명: 이름' 형태로 노출 (K/L 로 매핑된 그룹은 제외)
-  //   - custom_options 정의가 없는 상품은 K=baseCode, L=빈 값.
+  // 옵션 매핑 정책 — 성격이 다른 두 소스를 칸으로 분리한다:
+  //   · 몰 구성품 (_options: card_opt 라인 / CARD 세트의 ETCSET 선택) = 세트를 이루는 품목 그 자체
+  //       → K=1번째, L=2번째, 3번째+ 는 P열. 없으면 K=상품코드(baseCode).
+  //   · 자유 옵션 (custom_options: 상품별 설정 + 공유 그룹 078) = 상품에 딸린 선택 옵션
+  //       → O열에 1번째 그룹 '코드(수량)', 2번째+ 는 P열. K/L 은 건드리지 않는다.
+  //     (예전엔 자유 옵션도 K를 덮었는데 답례품 상품코드가 사라져 물류가 품목을 잃었다.
+  //      수건 색상은 이제 몰 구성품으로 들어오므로 자유 옵션이 K를 덮을 이유가 없다.)
+  //   그룹 순서는 상품설정의 정의 순서를 우선하고, 거기 없는 그룹은 뒤에 붙인다.
   //
   // M열(박스컬러) 정책:
   //   - TGJBK09O_ 수건 답례품 세트: 자유옵션 그룹명 기준 조합 판정 코드
@@ -24259,29 +24545,33 @@ function copyBgUnified() {
     const rawCodeForLookup = sel?.product_code || product_code || '';
     const baseCode = resolveBgMappedProductCode(rawCodeForLookup);
     const _frontOpts = Array.isArray(order?._options) ? order._options : [];
-    let optList;      // [{code, name, label}] — label 은 P열 '라벨: 이름' 표기용 (custom_options 그룹명)
-    let optBoxTokens; // M열(박스컬러) 판정용 토큰 (custom_options 그룹명 or 옵션 상품명)
-    if (_frontOpts.length) {
-      optList = _frontOpts.map(o => ({ code: o.code || '', name: o.name || o.code || '', label: '' }));
-      optBoxTokens = _frontOpts.map(o => String(o.name || '').toLowerCase());
-    } else {
-      const selKeys = Object.keys(customOpts);
-      const psEntry = bgProductSettings.find(p => p.product_id === baseCode || p.product_id === rawCodeForLookup);
-      const psCustomKeys = (psEntry && psEntry.custom_options && typeof psEntry.custom_options === 'object' && !Array.isArray(psEntry.custom_options))
-        ? Object.keys(psEntry.custom_options) : [];
-      const orderedGroupNames = [
-        ...psCustomKeys.filter(k => customOpts[k] != null),
-        ...selKeys.filter(k => !psCustomKeys.includes(k)),
-      ];
-      const getOpt = (gName) => {
-        const val = customOpts[gName];
-        if (!val) return null;
-        if (typeof val === 'string') return { code: val, name: val };
-        return { code: val.code || '', name: val.name || val.code || '' };
-      };
-      optList = orderedGroupNames.map(g => { const o = getOpt(g); return o ? { ...o, label: g } : null; }).filter(Boolean);
-      optBoxTokens = orderedGroupNames.map(g => String(g).toLowerCase());
-    }
+    // 몰 구성품(_options) 과 자유 옵션(custom_options)은 성격이 다르므로 칸을 나눈다.
+    //   · 구성품 = 세트를 이루는 품목 그 자체       → K/L(품목코드1·2), 3번째+ 는 P열
+    //   · 자유 옵션 = 상품에 딸린 선택 옵션(미니카드) → O열(스티커타입2), 2번째+ 는 P열
+    //   예전엔 자유 옵션도 K열을 덮어썼는데, 그러면 답례품 상품코드가 사라진다.
+    //   (수건 색상은 이제 몰 구성품으로 들어오므로 자유 옵션이 K를 덮을 이유가 없다.)
+    const compList = _frontOpts.map(o => ({ code: o.code || '', name: o.name || o.code || '', label: '' }));
+    const selKeys = Object.keys(customOpts);
+    const psEntry = bgProductSettings.find(p => p.product_id === baseCode || p.product_id === rawCodeForLookup);
+    const psCustomKeys = (psEntry && psEntry.custom_options && typeof psEntry.custom_options === 'object' && !Array.isArray(psEntry.custom_options))
+      ? Object.keys(psEntry.custom_options) : [];
+    // 그룹 순서 — 상품설정의 정의 순서를 우선하고, 거기 없는 그룹(공유 그룹 등)은 뒤에 붙인다.
+    const orderedGroupNames = [
+      ...psCustomKeys.filter(k => customOpts[k] != null),
+      ...selKeys.filter(k => !psCustomKeys.includes(k)),
+    ];
+    const customList = orderedGroupNames.map(g => {
+      const val = customOpts[g];
+      if (!val) return null;
+      if (typeof val === 'string') return { code: val, name: val, label: g };
+      return { code: val.code || '', name: val.name || val.code || '', label: g };
+    }).filter(Boolean);
+    // M열(박스컬러) 판정 토큰 — 구성품 상품명 + 자유 옵션 그룹명 둘 다 본다.
+    const optBoxTokens = [
+      ...compList.map(o => String(o.name || '').toLowerCase()),
+      ...orderedGroupNames.map(g => String(g).toLowerCase()),
+    ];
+    const optList = compList;   // K/L/P 매핑은 구성품 기준
 
     // K열(index 10) = 품목코드1 — 옵션1 code, 없으면 baseCode
     //   단 '구성 선택이 있는 세트'인데 옵션을 못 받은 경우 baseCode 는 사실이 아니라 추측이다.
@@ -24312,11 +24602,20 @@ function copyBgUnified() {
       cells[13] = `${sel.sticker_code || sel.sticker_name}${qtyStr}`;
     }
 
-    // P열(index 15) = K/L 로 매핑되지 않은 3번째+ 그룹들만 '그룹명: 이름' 형태로 노출 (canonical 순서).
-    //   TSV 안전: 탭/개행 → 공백 치환. 매핑할 그룹 없으면 셀 빈 채로 유지.
-    if (optList.length > 2) {
+    // O열(index 14) = 스티커타입2 — 자유 옵션 1번째 그룹(미니카드 등)을 '코드(수량)' 로.
+    //   시트의 스티커타입 칸은 3개(N/O/P)이고 형식이 코드(수량)라 물류가 그대로 읽는다.
+    //   K열(품목코드1)은 답례품 상품코드를 그대로 유지한다.
+    if (customList[0] && customList[0].code) {
+      const oQty = product_qty || sel?.quantity;
+      cells[14] = `${customList[0].code}${oQty ? `(${oQty}개)` : ''}`;
+    }
+
+    // P열(index 15) = 남은 옵션 — 구성품 3번째+ / 자유 옵션 2번째+ 를 '라벨: 이름' 으로 노출.
+    //   TSV 안전: 탭/개행 → 공백 치환. 매핑할 것 없으면 셀 빈 채로 유지.
+    const _pOpts = [...optList.slice(2), ...customList.slice(1)];
+    if (_pOpts.length) {
       const safeStr = v => String(v).replace(/[\t\r\n]+/g, ' ').trim();
-      const parts = optList.slice(2).map(o => {
+      const parts = _pOpts.map(o => {
         if (!o || !o.name) return '';
         return o.label ? `${safeStr(o.label)}: ${safeStr(o.name)}` : safeStr(o.name);
       }).filter(Boolean);
