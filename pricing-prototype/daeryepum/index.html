@@ -24521,15 +24521,21 @@ function resolveBgMappedProductCode(rawCode) {
   return cur;
 }
 
+// 수집 시트 A열 채널 마커 — 운영이 쓰던 표기 그대로 (6~9월 시트 실측: 네이버/쿠팡/정수당).
+//   자사 채널(CARD·ETC·MANUAL)은 빈칸으로 둔다. A열은 운영이 ⭐·취소·반품 예정 같은
+//   메모를 직접 적는 칸이라, 우리가 값을 넣으면 그 표기를 덮어쓴다.
+const _SHEET_CHANNEL_LABEL = { NAVER: '네이버', COUPANG: '쿠팡', CAFE24: '정수당' };
+
 function copyBgUnified() {
   const checked = [...document.querySelectorAll('.uni-row-check:checked')];
   if (!checked.length) { showToast('복사할 행을 선택해주세요'); return; }
 
   const selectedRows = checked.map(cb => bgUnifiedRows[parseInt(cb.dataset.idx)]);
 
-  // 23열 구조: A='', B=택배, C=일반, D=주문번호, E=수령인, F=연락처, G='', H=배송지, I='',
-  //            J=상품명, K=품목코드1(1번째 자유옵션 코드 or baseCode),
-  //            L=품목코드2(2번째 자유옵션 코드), M=박스컬러(box_code or TGJBK09O_ 조합코드),
+  // 23열 구조: A=외부채널명(네이버/쿠팡/정수당, 자사는 빈칸), B=택배, C=일반, D=주문번호,
+  //            E=수령인, F=연락처, G='', H=배송지, I='',
+  //            J=상품명, K=품목코드1(구성품1 or 상품코드),
+  //            L=품목코드2(구성품2), M=박스컬러(box_code or TGJBK09O_ 조합코드),
   //            N=스티커코드(수량) [시트: 스티커타입1],
   //            O=자유옵션 1번째 그룹 '코드(수량)' [시트: 스티커타입2] — 기획전 미니카드 등,
   //            P=남은 옵션(구성품 3번째+ / 자유옵션 2번째+, '라벨: 이름' / ' / ' 구분),
@@ -24553,6 +24559,8 @@ function copyBgUnified() {
   //   - 그 외 상품: sel.box_code (박스 컬러 선택된 상품)
   const buildCells = ({ order, ci, sel, product_code, product_name, product_qty }) => {
     const cells = Array(23).fill('');
+    // A열(index 0) = 외부 채널명. 자사 주문은 빈칸 (운영 메모 칸을 침범하지 않는다).
+    cells[0] = _SHEET_CHANNEL_LABEL[order.order_type] || '';
     cells[1] = '택배';
     cells[2] = '일반';
     cells[3] = String(order.order_seq).replace(/^ETC-/, '');
