@@ -24223,7 +24223,14 @@ function copyBgUnified() {
     }
 
     // K열(index 10) = 품목코드1 — 옵션1 code, 없으면 baseCode
-    cells[10] = (optList[0] && optList[0].code) ? optList[0].code : baseCode;
+    //   단 '구성 선택이 있는 세트'인데 옵션을 못 받은 경우 baseCode 는 사실이 아니라 추측이다.
+    //   세트코드에서 접미사를 뗀 값이 실존하는 다른 원물 코드일 수 있어
+    //   (TGJBK09O7_A → TGJBK09O7 = 솔리드 뱀부 진청) 그대로 내보내면
+    //   그럴듯하지만 틀린 원물이 시트에 들어간다 → 원본 세트코드를 그대로 남겨 눈에 띄게 한다.
+    const isSetProduct = /\(\s*\d+\s*구\s*\)|세트/.test(String(sel?.product_name || product_name || ''));
+    const kFallback = (isSetProduct && rawCodeForLookup && rawCodeForLookup !== baseCode)
+      ? rawCodeForLookup : baseCode;
+    cells[10] = (optList[0] && optList[0].code) ? optList[0].code : kFallback;
     // L열(index 11) = 품목코드2 — 옵션2 code (없으면 빈 값)
     if (optList[1] && optList[1].code) cells[11] = optList[1].code;
 
