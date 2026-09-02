@@ -5344,9 +5344,13 @@ function _buildCombineMap(rows, getInfo) {
     const key = String(info.order_seq || '');
     if (!key) continue;
     let e = m.get(key);
-    if (!e) { e = { lines: 0, dseqs: new Set(), items: new Map(), splitSeen: new Set() }; m.set(key, e); }
-    // 수건 분할담기로 나뉜 형제 행은 원래 한 품목이다 — 품목 수를 부풀리면 합포장 배지가
-    //   1품목 주문에도 뜬다. 같은 상품코드의 분할 행은 한 번만 센다.
+    if (!e) { e = { lines: 0, rows: 0, dseqs: new Set(), items: new Map(), splitSeen: new Set() }; m.set(key, e); }
+    // 두 가지를 따로 센다 — 뜻이 다르고 배지 문구도 달라진다.
+    //   lines = 품목 수. 수건 분할담기로 나뉜 형제는 원래 한 품목이므로 한 번만 센다
+    //           (여기를 부풀리면 1품목 주문에 '다품종' 배지가 뜬다).
+    //   rows  = 수집 시트에 실제로 나가는 행 수. 분할 형제는 각각 센다
+    //           (행이 갈리면 물류가 별건으로 처리해 송장이 나뉠 수 있다).
+    e.rows++;
     const splitKey = info.split_code ? String(info.code || '') : '';
     if (!splitKey) e.lines++;
     else if (!e.splitSeen.has(splitKey)) { e.splitSeen.add(splitKey); e.lines++; }
@@ -5373,17 +5377,36 @@ function _estimateMinBoxes(e) {
   return Math.max(1, Math.ceil(frac));
 }
 
-/** 배지 HTML — 품목 2개 이상 + 배송지 1곳일 때만. 용량표가 있으면 최소 박스 추정을 함께 표시. */
+/**
+ * 배지 HTML — 배송지 1곳일 때만. 용량표가 있으면 최소 박스 추정을 함께 표시.
+ *
+ * 두 종류를 구분한다:
+ *   📦 다품종  — 서로 다른 품목 2개 이상. 원래의 합포장 검토 대상.
+ *   🔗 분할    — 품목은 하나인데 수건 종류별로 행이 갈린 주문. 시트에 여러 행으로 나가
+ *                물류가 별건으로 처리하면 송장이 나뉜다. 한 박스로 묶으라는 표시.
+ */
 function _combineBadge(map, orderSeq) {
   const e = map && map.get(String(orderSeq || ''));
-  if (!e || e.lines < 2 || e.dseqs.size > 1) return '';
+  if (!e || e.dseqs.size > 1) return '';
   const est = _estimateMinBoxes(e);
-  const label = est !== null ? `📦${e.lines}종→${est}박스` : `📦${e.lines}`;
-  const tip = est !== null
-    ? `합포장 검토 — 같은 배송지로 ${e.lines}개 품목. 실측 박스 용량 기준 최소 ${est}박스면 발송 가능합니다 (나눔배송 제외됨)`
-    : `합포장 검토 — 같은 배송지로 ${e.lines}개 품목이 나갑니다. 한 박스로 묶을 수 있는지 확인하세요 (나눔배송은 제외됨)`;
-  return `<span title="${tip}"
-    style="background:#eff6ff;color:#1d4ed8;font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px;margin-right:3px;white-space:nowrap">${label}</span>`;
+  const chip = (label, tip, bg, fg) => `<span title="${tip}"
+    style="background:${bg};color:${fg};font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px;margin-right:3px;white-space:nowrap">${label}</span>`;
+
+  if (e.lines >= 2) {
+    const label = est !== null ? `📦${e.lines}종→${est}박스` : `📦${e.lines}`;
+    const tip = est !== null
+      ? `합포장 검토 — 같은 배송지로 ${e.lines}개 품목. 실측 박스 용량 기준 최소 ${est}박스면 발송 가능합니다 (나눔배송 제외됨)`
+      : `합포장 검토 — 같은 배송지로 ${e.lines}개 품목이 나갑니다. 한 박스로 묶을 수 있는지 확인하세요 (나눔배송은 제외됨)`;
+    return chip(label, tip, '#eff6ff', '#1d4ed8');
+  }
+  if (e.rows >= 2) {
+    const label = est !== null ? `🔗분할 ${e.rows}행→${est}박스` : `🔗분할 ${e.rows}행`;
+    const tip = est !== null
+      ? `같은 상품인데 수건 종류가 달라 ${e.rows}행으로 나뉜 주문입니다. 배송지가 같으니 최소 ${est}박스로 함께 보내세요 (행마다 따로 보내면 송장이 나뉩니다)`
+      : `같은 상품인데 수건 종류가 달라 ${e.rows}행으로 나뉜 주문입니다. 배송지가 같으니 함께 보낼 수 있는지 확인하세요`;
+    return chip(label, tip, '#f5f3ff', '#6d28d9');
+  }
+  return '';
 }
 
 function _ordDriftBadge(r) {
