@@ -394,6 +394,17 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const customGuideByProduct = {};     // migration 034 — 관리자 자유 안내 텍스트
       const customGuideTitleByProduct = {}; // migration 035 — 안내 박스 타이틀
       const stickerById = new Map(allActiveStickers.map(s => [s.id, s]));
+      // 공유 자유 옵션 그룹 (078) — 한 번 등록해 여러 상품에 붙이는 그룹 (기획전 미니카드 등).
+      //   상품별 custom_options 와 여기서 합쳐 내려주므로 고객 화면은 둘을 구분하지 않는다.
+      //   조회 실패해도 주문 화면은 떠야 한다 — 공유 그룹만 빠진다.
+      let sharedOptionGroups = [];
+      try {
+        const site = await store.getSiteSettings();
+        sharedOptionGroups = (store.normSharedOptionGroups(site?.shared_option_groups) || [])
+          .filter(g => g.is_active && g.options.length && g.product_codes.length);
+      } catch (e) {
+        console.warn('[order-info] 공유 옵션 그룹 로드 실패 (상품별 옵션만 적용):', e.message);
+      }
       for (const p of products) {
         if (!p.product_code) continue;
         const ps = await lookupProductSettings(p.product_code);
@@ -433,6 +444,20 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
               options: Array.isArray(val.options) ? val.options : [],
             };
           }
+        }
+        // 공유 그룹 병합 (078) — 이 상품이 적용 대상인 그룹만.
+        //   같은 그룹명이 상품별 설정에도 있으면 상품별을 남긴다 (개별 예외가 공유를 이긴다).
+        //   ERP 변형 코드(TGJSD04D1_A)로 들어와도 붙도록 BASE 코드까지 함께 본다.
+        const pcBase = stripVariantSuffix(p.product_code) || p.product_code;
+        for (const g of sharedOptionGroups) {
+          if (normalizedCustom[g.name]) continue;
+          const hit = g.product_codes.some(c =>
+            c === p.product_code || c === pcBase || (stripVariantSuffix(c) || c) === pcBase);
+          if (!hit) continue;
+          normalizedCustom[g.name] = {
+            use_images: g.use_images,
+            options: g.options.filter(o => o.code),
+          };
         }
         customOptionsByProduct[p.product_code] = normalizedCustom;
       }
@@ -1672,6 +1697,31 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       return json(res, { error: err.message }, 500);
     }
   }
+  // 공유 자유 옵션 그룹 (078) — 기획전 미니카드처럼 여러 상품에 같은 옵션을 붙일 때.
+  //   site-settings 컬럼에 얹혀 있지만 권한은 스티커와 같다 (기획전 담당자가 직접 관리).
+  //   site-settings PUT 은 알림·공통안내까지 건드리므로 super admin 을 유지하고, 여기만 연다.
+  if (pathname === '/api/bg/option-groups' && method === 'GET') {
+    try {
+      const s = await store.getSiteSettings();
+      return json(res, { groups: store.normSharedOptionGroups(s?.shared_option_groups) || [] });
+    } catch (err) {
+      console.error('[option-groups GET] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+  if (pathname === '/api/bg/option-groups' && method === 'PUT') {
+    try {
+      const body = await parseBody(req).catch(() => ({}));
+      if (!Array.isArray(body.groups)) return json(res, { error: 'groups 배열이 필요합니다.' }, 400);
+      const updated = await store.updateSiteSettings({ shared_option_groups: body.groups }, session?.email);
+      if (updated && updated._skipped_column) return json(res, { error: updated._warning }, 500);
+      return json(res, { groups: store.normSharedOptionGroups(updated?.shared_option_groups) || [] });
+    } catch (err) {
+      console.error('[option-groups PUT] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
   // PUT /api/bg/site-settings — 공통 안내 저장 (super admin 만).
   if (pathname === '/api/bg/site-settings' && method === 'PUT') {
     try {
