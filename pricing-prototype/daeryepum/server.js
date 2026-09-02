@@ -1302,6 +1302,79 @@ function today() {
 }
 function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
 
+// 수건 원물 코드 (TGJBK09O1 ~ O23, _A/_B 등 변형 접미사 허용). 세트 코드(TGJBK09O7_A)와는
+//   다른 축이라 접두만 보고 자르면 안 된다 — 여기서는 옵션 라인에만 쓰므로 세트와 섞이지 않는다.
+const TOWEL_OPTION_CODE = /^TGJBK09O\d+/i;
+
+// total 을 weights 비율로 정수 배분 (마지막 항목이 잔여를 흡수해 합계가 정확히 total).
+function allocateInt(total, weights) {
+  const sum = weights.reduce((a, b) => a + b, 0) || 1;
+  const out = [];
+  let used = 0;
+  for (let i = 0; i < weights.length; i++) {
+    const v = (i === weights.length - 1) ? (total - used) : Math.round(total * weights[i] / sum);
+    out.push(v);
+    used += v;
+  }
+  return out;
+}
+
+/**
+ * 수건 분할담기 → 수건 종류별로 부모(세트) 행을 나눈다.
+ *
+ * 몰(ETC) 상품 페이지는 한 번에 수건 한 색만 고를 수 있어, 색을 섞으려면 장바구니에
+ * 색상별로 나눠 담는다. 그러면 한 주문에 세트 1행 + 수건 여러 행이 들어오는데,
+ * 옵션 합산이 이를 한 행으로 뭉치면 수건 한 종류만 남고 나머지는 사라진다
+ * (주문 3249861: 세트 20 = 회색 10 + 아이보리 10 인데 회색만 표시됨 → 오출고).
+ *
+ * 분할담기 판별: 수건 옵션 수량의 합 == 세트 수량. (상자마다 수건이 다르다)
+ * 2구 세트(한 상자에 수건 2장, 예: 돌잔치 2구)는 각 수건 수량 == 세트 수량 이므로 제외 —
+ * 나누면 한 상자를 두 건으로 세어 수량이 배로 잡힌다.
+ *
+ * @returns {Array|null} 나눌 필요가 없으면 null
+ */
+function splitTowelVariants(row) {
+  const opts = Array.isArray(row._options) ? row._options : null;
+  if (!opts || opts.length < 2) return null;
+
+  const towels = opts.filter(o => TOWEL_OPTION_CODE.test(String(o.code || '')));
+  if (towels.length < 2) return null;
+  if (new Set(towels.map(o => String(o.code))).size < 2) return null; // 같은 코드 중복은 분리 의미 없음
+
+  const setQty = Number(row.item_count) || 0;
+  const towelQtys = towels.map(o => Number(o.qty) || 0);
+  if (!setQty || towelQtys.some(q => q <= 0)) return null;
+  if (towelQtys.every(q => q === setQty)) return null;   // 2구 세트 — 한 상자에 여러 장
+  if (towelQtys.reduce((a, b) => a + b, 0) !== setQty) return null; // 판단 근거 부족 → 건드리지 않음
+
+  const common = opts.filter(o => !towels.includes(o));
+  // 세트 자체 금액과 공통 옵션(주방세제 등)의 금액·수량을 수건 수량 비율로 안분.
+  //   나뉜 행을 다시 더하면 원래 주문 금액·수량이 되도록 잔여는 마지막 행이 흡수한다.
+  const baseShares = allocateInt(Number(row._base_amount) || 0, towelQtys);
+  const commonShares = common.map(o => ({
+    qty: allocateInt(Number(o.qty) || 0, towelQtys),
+    amount: allocateInt(Number(o.amount) || 0, towelQtys),
+  }));
+  const couponTotal = Number(row.coupon_price) || 0;
+
+  return towels.map((towel, i) => ({
+    ...row,
+    item_count: towelQtys[i],
+    item_amount: (Number(towel.amount) || 0) + baseShares[i]
+      + commonShares.reduce((s, c) => s + c.amount[i], 0),
+    // 쿠폰 안분액도 나눠야 행을 합산했을 때 주문 단위 금액이 유지된다.
+    coupon_price: couponTotal * towelQtys[i] / setQty,
+    _options: [
+      ...common.map((o, ci) => ({ ...o, qty: commonShares[ci].qty[i], amount: commonShares[ci].amount[i] })),
+      towel,
+    ].sort((a, b) => (a.seq || 0) - (b.seq || 0)),
+    _split_code: String(towel.code || ''),
+    _split_name: towel.name || '',
+    _split_index: i,
+    _split_total: towels.length,
+  }));
+}
+
 // --- API handlers ---
 
 async function apiOrders(query) {
@@ -1584,6 +1657,8 @@ async function apiOrders(query) {
       if (r.card_opt != null) {
         const parent = parentByKey.get(`${r.order_seq}::${r.card_opt}`);
         if (parent) {
+          // 옵션을 합치기 전 부모 자체 금액을 남겨둔다 — 분할담기 분리 시 안분 기준.
+          if (parent._options == null) parent._base_amount = Number(parent.item_amount) || 0;
           parent.item_amount = (Number(parent.item_amount) || 0) + (Number(r.item_amount) || 0);
           (parent._options = parent._options || []).push({
             code: r.card_code, name: r.card_name,
@@ -1598,7 +1673,10 @@ async function apiOrders(query) {
     }
     // 옵션 순서 고정 — 아이템 seq 오름차순 (옵션1=주방세제, 옵션2=수건 …). 수집복사 K/L 순서 일관.
     for (const r of kept) { if (Array.isArray(r._options)) r._options.sort((a, b) => (a.seq || 0) - (b.seq || 0)); }
-    rows.splice(0, rows.length, ...kept);
+    // 수건 분할담기 → 수건 종류별 행 분리 (splitTowelVariants 주석 참조)
+    const expanded = [];
+    for (const r of kept) expanded.push(...(splitTowelVariants(r) || [r]));
+    rows.splice(0, rows.length, ...expanded);
   }
 
   // 쿠팡 주문 UNION — Supabase coupang_orders 에서 같은 기간 조회 후 MSSQL row 와 동일 schema 로 정규화.

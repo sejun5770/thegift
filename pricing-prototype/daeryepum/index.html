@@ -5174,6 +5174,9 @@ async function loadOrders() {
       r.file_count_fmt = r.file_count > 0
         ? `<a href="javascript:void(0)" onclick="showOrderFiles(${r.order_seq});return false" style="color:var(--primary);text-decoration:underline;cursor:pointer">📎 ${r.file_count}건</a>`
         : '';
+      // 수건 분할담기로 나뉜 행은 상품코드·상품명이 세트로 같아 두 줄이 똑같아 보인다.
+      //   어느 수건인지 상품명에 붙여 구분한다 (코드는 세트 코드 그대로 — 정산·용량표 기준).
+      if (r._split_name) r.card_name = `${r.card_name} · ${r._split_name}`;
       const rawLead = r.wedding_date && r.order_date ? Math.round((new Date(r.wedding_date) - new Date(r.order_date)) / 86400000) : null;
       r.lead_days_raw = rawLead;
       r.lead_days = rawLead !== null ? (rawLead < 0 ? `예식후 ${Math.abs(rawLead)}일` : `${rawLead}일`) : '';
@@ -5274,8 +5277,12 @@ function _buildCombineMap(rows, getInfo) {
     const key = String(info.order_seq || '');
     if (!key) continue;
     let e = m.get(key);
-    if (!e) { e = { lines: 0, dseqs: new Set(), items: new Map() }; m.set(key, e); }
-    e.lines++;
+    if (!e) { e = { lines: 0, dseqs: new Set(), items: new Map(), splitSeen: new Set() }; m.set(key, e); }
+    // 수건 분할담기로 나뉜 형제 행은 원래 한 품목이다 — 품목 수를 부풀리면 합포장 배지가
+    //   1품목 주문에도 뜬다. 같은 상품코드의 분할 행은 한 번만 센다.
+    const splitKey = info.split_code ? String(info.code || '') : '';
+    if (!splitKey) e.lines++;
+    else if (!e.splitSeen.has(splitKey)) { e.splitSeen.add(splitKey); e.lines++; }
     e.dseqs.add(String(info.delivery_seq || 1));
     const pk = _packKey(info.code, info.name);
     const qty = Number(info.qty);
@@ -5459,7 +5466,7 @@ function renderOrderTable() {
   _ordUpdateFilterBadge();
   // 화면 필터와 무관하게 주문 전체 품목을 세야 하므로 ordersData 원본 기준으로 계산한다.
   _ordCombine = _buildCombineMap(ordersData,
-    r => ({ order_seq: r.order_seq, delivery_seq: r.delivery_seq, order_type: r.order_type, code: r.card_code, name: r.card_name, qty: r.item_count }));
+    r => ({ order_seq: r.order_seq, delivery_seq: r.delivery_seq, order_type: r.order_type, code: r.card_code, name: r.card_name, qty: r.item_count, split_code: r._split_code }));
   _loadPackCapacity().then(() => {});   // 최초 1회 — 로드 전 렌더는 품목 수만 표시
   const cols = getSelectedCols();
   const hideCollected = document.getElementById('hide-collected')?.checked;
@@ -21530,10 +21537,11 @@ async function loadBgUnified() {
       if (r.card_code && r.card_name) {
         if (!productMap.has(compositeKey)) productMap.set(compositeKey, new Map());
         const pm = productMap.get(compositeKey);
-        if (!pm.has(r.card_code)) {
-          pm.set(r.card_code, { card_name: r.card_name, item_count: 0 });
+        const pkey = _bgProductKey(r);
+        if (!pm.has(pkey)) {
+          pm.set(pkey, _bgNewProductEntry(r));
         }
-        pm.get(r.card_code).item_count += (r.item_count || 0);
+        pm.get(pkey).item_count += (r.item_count || 0);
         _bgRegisterCodeAlias(r);
       }
     });
@@ -21607,10 +21615,11 @@ async function loadBgUnified() {
             if (r.card_code && r.card_name) {
               if (!productMap.has(compositeKey)) productMap.set(compositeKey, new Map());
               const pm = productMap.get(compositeKey);
-              if (!pm.has(r.card_code)) {
-                pm.set(r.card_code, { card_name: r.card_name, item_count: 0 });
+              const pkey = _bgProductKey(r);
+              if (!pm.has(pkey)) {
+                pm.set(pkey, _bgNewProductEntry(r));
               }
-              pm.get(r.card_code).item_count += (r.item_count || 0);
+              pm.get(pkey).item_count += (r.item_count || 0);
               _bgRegisterCodeAlias(r);
             }
           });
@@ -21902,6 +21911,29 @@ function _bgRegisterCodeAlias(r) {
   }
 }
 
+/**
+ * productMap 키 — 같은 상품코드라도 수건 분할담기로 나뉜 행(_split_code)은 따로 센다.
+ * 서버가 세트 행을 수건 종류별로 나눠 내려주는데, 코드만으로 묶으면 다시 한 행이 되어
+ * 수건 한 종류가 사라진다 (주문 3249861: 회색 10 + 아이보리 10).
+ */
+function _bgProductKey(r) {
+  const code = r.card_code;
+  return r._split_code ? `${code}::${r._split_code}` : code;  // '::' 는 이 파일의 복합키 관례
+}
+
+/**
+ * productMap 항목 생성 — base_code 는 sel(고객입력) 매칭용 원래 상품코드.
+ * split_src: 분할담기 행은 자기 행을 들고 있어야 한다. 렌더는 주문당 첫 행만 order 로 쓰는데,
+ *   그러면 나뉜 두 행이 첫 행의 _options(수건 한 종류)를 함께 보게 되어 나머지 수건이 또 사라진다.
+ */
+function _bgNewProductEntry(r) {
+  return {
+    card_name: r.card_name, item_count: 0, base_code: r.card_code,
+    split_name: r._split_name || null,
+    split_src: r._split_code ? r : null,
+  };
+}
+
 /** 입력 내역 접기/펼치기 — 기본은 접힘 */
 function toggleRfmList() {
   const t = document.getElementById('rfm-list-table');
@@ -22021,33 +22053,48 @@ function renderBgUnified() {
       //   → 정보입력현황에 실제와 다른 상품이 표시돼 출고누락/오출고 유발 (주문 4760779 사례).
       const isManualOrder = order.order_type === 'MANUAL';
       const usedSelIdx = new Set();
+      const splitSelPos = new Map(); // 분할담기 형제 행이 같은 고객입력을 함께 보도록 기억
       let fallbackIter = 0;
-      for (const [productCode, productInfo] of pm) {
-        // 1) product_code 정확 매칭
-        // 옛 ci 는 원본 쿠팡 코드로 저장돼 있다 — 별칭도 같은 상품으로 인정한다 (057)
-        let selPos = selEntries.findIndex((e, i) => !usedSelIdx.has(i)
-          && (e.s.product_code === productCode || _bgAliasHas(productCode, e.s.product_code)));
-        // 2) fallback — 남은 sel 을 순서대로 (MANUAL CSV 파생 코드 전용)
-        if (selPos < 0 && selEntries.length && isManualOrder) {
-          while (fallbackIter < selEntries.length && usedSelIdx.has(fallbackIter)) fallbackIter++;
-          if (fallbackIter < selEntries.length) selPos = fallbackIter++;
+      for (const [productKey, productInfo] of pm) {
+        // 분할담기로 나뉜 행은 키에만 수건코드가 붙어 있다 — 매칭·표시는 원래 상품코드로.
+        const productCode = productInfo.base_code || productKey;
+        let selPos = splitSelPos.has(productCode) ? splitSelPos.get(productCode) : -1;
+        if (selPos < 0) {
+          // 1) product_code 정확 매칭
+          // 옛 ci 는 원본 쿠팡 코드로 저장돼 있다 — 별칭도 같은 상품으로 인정한다 (057)
+          selPos = selEntries.findIndex((e, i) => !usedSelIdx.has(i)
+            && (e.s.product_code === productCode || _bgAliasHas(productCode, e.s.product_code)));
+          // 2) fallback — 남은 sel 을 순서대로 (MANUAL CSV 파생 코드 전용)
+          if (selPos < 0 && selEntries.length && isManualOrder) {
+            while (fallbackIter < selEntries.length && usedSelIdx.has(fallbackIter)) fallbackIter++;
+            if (fallbackIter < selEntries.length) selPos = fallbackIter++;
+          }
+          if (selPos >= 0) usedSelIdx.add(selPos);
+          // 스티커·희망출고일은 주문 단위 1개다. 나뉜 형제 행이 각자 sel 을 찾으면 두 번째 행이
+          //   빈손이 되어 '미입력' 으로 잘못 보인다 → 첫 행이 잡은 sel 을 형제가 공유한다.
+          if (productInfo.split_name) splitSelPos.set(productCode, selPos);
         }
-        if (selPos >= 0) usedSelIdx.add(selPos);
         const sel = selPos >= 0 ? selEntries[selPos].s : null;
         bgUnifiedRows.push({
-          order, ci, sel, sticker_index: selPos >= 0 ? selEntries[selPos].gi : -1,
+          // 분할담기 행은 자기 행(옵션·수량이 그 수건 몫) 을 order 로 쓴다.
+          order: productInfo.split_src || order,
+          ci, sel, sticker_index: selPos >= 0 ? selEntries[selPos].gi : -1,
           product_code: productCode,
-          product_name: productInfo.card_name,
+          product_name: productInfo.split_name
+            ? `${productInfo.card_name} · ${productInfo.split_name}`
+            : productInfo.card_name,
           product_qty: productInfo.item_count,
         });
       }
       // 상품코드가 없는 sticker_selection이 있으면 별도 행 추가 (비정상 데이터지만 누락 방지)
       //   이미 위 루프에서 소비된 sel 은 제외 — 안 그러면 코드가 파생코드라 pm.has() 가 false 인
       //   MANUAL 주문에서 같은 상품이 두 번 나온다.
+      //   pm 키는 분할담기 때 합성키라, 비교는 원래 상품코드(base_code) 집합으로 한다.
+      const pmBaseCodes = new Set([...pm.values()].map(v => v.base_code).filter(Boolean));
       selEntries.forEach((e, i) => {
         if (usedSelIdx.has(i)) return;
         const s = e.s;
-        if (s.product_code && !pm.has(s.product_code) && ![...pm.keys()].some(k => _bgAliasHas(k, s.product_code))) {
+        if (s.product_code && !pmBaseCodes.has(s.product_code) && ![...pmBaseCodes].some(k => _bgAliasHas(k, s.product_code))) {
           bgUnifiedRows.push({
             order, ci, sel: s, sticker_index: e.gi,
             product_code: s.product_code,
@@ -22083,7 +22130,8 @@ function renderBgUnified() {
   // 합포장 배지 — 탭/필터로 행이 걸러지기 전에 계산해야 주문의 실제 품목 수가 나온다.
   _uniCombine = _buildCombineMap(bgUnifiedRows,
     r => r.order && ({ order_seq: r.order.order_seq, delivery_seq: r.order.delivery_seq, order_type: r.order.order_type,
-      code: r.product_code || r.sel?.product_code, name: r.product_name, qty: r.product_qty || r.sel?.quantity }));
+      code: r.product_code || r.sel?.product_code, name: r.product_name, qty: r.product_qty || r.sel?.quantity,
+      split_code: r.order._split_code }));
   _loadPackCapacity().then(() => {});
 
   bgUnifiedRows.forEach(r => {
@@ -24402,7 +24450,9 @@ function _bgGetProductsForOrderSeq(orderSeq) {
   const prefix = `${orderSeq}::`;
   for (const [compositeKey, pm] of bgUnifiedProductMap.entries()) {
     if (!compositeKey.startsWith(prefix)) continue;
-    for (const [code, info] of pm.entries()) {
+    for (const [key, info] of pm.entries()) {
+      // 스티커 입력은 주문 단위라, 수건 분할담기로 나뉜 행은 원래 상품코드로 다시 합친다.
+      const code = info.base_code || key;
       if (!merged.has(code)) {
         merged.set(code, { card_name: info.card_name, item_count: 0 });
       }
