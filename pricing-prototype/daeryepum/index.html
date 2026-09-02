@@ -310,7 +310,6 @@ nav.nav-loading a[href^="#"] {
   <a href="#bg-vendors" onclick="showPage('bg-vendors')">위탁업체</a>
   <a href="#bg-artists" onclick="showPage('bg-artists')">작가 정산</a>
   <a href="#daeryepum-stock" onclick="showPage('daeryepum-stock')">답례품 재고</a>
-  <a href="#wedding-calendar" onclick="showPage('wedding-calendar')">예식일 캘린더</a>
   <a href="#admin-nav-settings" onclick="showPage('admin-nav-settings')" id="nav-link-admin-nav-settings" style="display:none">GNB 설정</a>
   <div class="user-area" id="user-area"></div>
 </nav>
@@ -343,6 +342,7 @@ nav.nav-loading a[href^="#"] {
     <button class="btn" id="dash-subtab-3" onclick="setDashSubTab(3)" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">🔮 보조지표2</button>
     <button class="btn" id="dash-subtab-4" onclick="setDashSubTab(4)" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">📦 상품별 판매통계</button>
     <button class="btn" id="dash-subtab-5" onclick="setDashSubTab(5)" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">🤝 위탁</button>
+    <button class="btn" id="dash-subtab-6" onclick="setDashSubTab(6)" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">💍 예식일 캘린더</button>
   </div>
 
   <!-- 기간 매출 현황 블록 (.section 래퍼 없음 → lazy-load 태깅용 wrap) -->
@@ -1131,6 +1131,10 @@ nav.nav-loading a[href^="#"] {
 
   <!-- 위탁 대시보드 (하위 탭 5) — 콘텐츠는 JS(_tagDashSections)에서 #page-bg-vendor-dashboard 에서 reparent -->
   <div data-dash-section="5" id="dash-sec-vendor" data-dash-only="daeryepum"></div>
+  <!-- 예식일 캘린더 — GNB 에서 대시보드 하위 탭으로 이동 (2026-09-02 요청).
+       위탁 탭과 같은 방식: 원래 페이지(#page-wedding-calendar) 내용을 여기로 1회 옮긴다.
+       회원 예식일 기준이라 답례품 카테고리 한정이 아니다 (data-dash-only 없음). -->
+  <div data-dash-section="6" id="dash-sec-wedding"></div>
 
 </div>
 
@@ -4967,6 +4971,14 @@ function pctChange(cur,prev) { if(!prev) return cur > 0 ? 100 : 0; return Math.r
 
 // --- Pages ---
 function showPage(name) {
+  // 예식일 캘린더는 대시보드 하위 탭으로 옮겼다 (2026-09-02) — 옛 #wedding-calendar 북마크·
+  //   저장된 GNB 설정으로 들어오면 대시보드 해당 탭으로 넘긴다. 링크가 없어 querySelector 가
+  //   null 이 되는 것도 여기서 막는다.
+  if (name === 'wedding-calendar') {
+    showPage('dashboard');
+    setDashSubTab(6);
+    return;
+  }
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
@@ -4990,7 +5002,6 @@ function showPage(name) {
   if (name === 'bg-artists') initArtistsPreview();
   if (name === 'daeryepum-stock') initDaeryepumStock();
   if (name === 'bhands-gift') initBhgOrders();
-  if (name === 'wedding-calendar') initWeddingCalendar();
 }
 
 // --- Category Tabs ---
@@ -8830,6 +8841,13 @@ function _tagDashSections() {
     if (settlePage) while (settlePage.firstChild) vendorPane.appendChild(settlePage.firstChild);
     vendorPane.dataset.reparented = '1';
   }
+  // 예식일 캘린더 — 페이지 내용을 섹션6 컨테이너로 1회 이동 (id 보존 → 기존 렌더 코드 그대로)
+  const weddingPane = document.getElementById('dash-sec-wedding');
+  if (weddingPane && !weddingPane.dataset.reparented) {
+    const weddingPage = document.getElementById('page-wedding-calendar');
+    if (weddingPage) while (weddingPage.firstChild) weddingPane.appendChild(weddingPage.firstChild);
+    weddingPane.dataset.reparented = '1';
+  }
   page.querySelectorAll('[data-dash-section-wrap]').forEach(el => {
     el.dataset.dashSection = el.getAttribute('data-dash-section-wrap');
   });
@@ -8863,7 +8881,7 @@ function _applyDashVisibility() {
 //   활성 탭이 숨겨지면 매출현황(1)로 전환. (_tagDashSections 이후 호출 필요)
 function _applyDashTabVisibility() {
   let hiddenActive = false;
-  for (let n = 1; n <= 5; n++) {
+  for (let n = 1; n <= 6; n++) {
     const btn = document.getElementById('dash-subtab-' + n);
     if (!btn) continue;
     let hasVisible = false;
@@ -8876,7 +8894,7 @@ function _applyDashTabVisibility() {
   }
   if (hiddenActive) {
     dashSubTab = 1;
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 6; i++) {
       const b = document.getElementById('dash-subtab-' + i);
       if (!b) continue;
       const active = (i === 1);
@@ -8891,7 +8909,7 @@ function _applyDashTabVisibility() {
 // 하위 탭 전환 — 스타일 갱신 + 표시 갱신 + (아직 안 불린 탭이면) 로드.
 function setDashSubTab(n) {
   dashSubTab = n;
-  for (let i = 1; i <= 5; i++) {
+  for (let i = 1; i <= 6; i++) {
     const btn = document.getElementById('dash-subtab-' + i);
     if (!btn) continue;
     const active = (i === n);
@@ -8956,6 +8974,9 @@ async function _loadDashSection(n) {
         initBgVendorDashboard();
         initBgSettlements();
       }
+    } else if (n === 6) {
+      // 예식일 캘린더 — 자체 연/월 셀렉트로 조회한다 (대시보드 기간과 무관).
+      initWeddingCalendar();
     }
   } catch(e) { console.error(e); showToast('대시보드 로딩 실패: ' + e.message); }
 }
