@@ -683,6 +683,55 @@ nav.nav-loading a[href^="#"] {
     </div>
   </div>
 
+  <!-- 구매확정일별 매출 (마켓 정산 기준) — 결제일 매출과 기간 차원이 다르다 (paid_at vs confirmed_at) -->
+  <div class="section" data-dash-only="daeryepum">
+    <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <span>✅ 구매확정일별 매출 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(쿠팡 일반 · 네이버 — 마켓 정산 기준)</span></span>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;font-weight:400">
+        <button class="btn btn-sm bcd-preset" onclick="setBcdPreset('this-month', this)">이번달</button>
+        <button class="btn btn-sm bcd-preset" onclick="setBcdPreset('last-month', this)">지난달</button>
+        <button class="btn btn-sm bcd-preset btn-primary" onclick="setBcdPreset('past-30', this)">지난 30일</button>
+        <button class="btn btn-sm bcd-preset" onclick="setBcdPreset('past-90', this)">지난 90일</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <input type="date" id="bcd-start" style="padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+        <span style="color:var(--gray-400)">~</span>
+        <input type="date" id="bcd-end" style="padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
+        <button class="btn btn-primary" style="padding:6px 14px;font-size:13px" onclick="loadByConfirmDate()">조회</button>
+        <span id="bcd-loading" style="color:var(--gray-500);font-size:12px;margin-left:8px"></span>
+        <div style="flex:1"></div>
+        <div style="display:inline-flex;border:1px solid var(--gray-300);border-radius:6px;overflow:hidden">
+          <button id="bcd-view-chart" onclick="setBcdView('chart')" style="padding:6px 12px;font-size:12px;border:none;background:var(--primary);color:#fff;cursor:pointer">📊 차트</button>
+          <button id="bcd-view-table" onclick="setBcdView('table')" style="padding:6px 12px;font-size:12px;border:none;background:#fff;color:var(--gray-700);cursor:pointer;border-left:1px solid var(--gray-300)">📋 테이블</button>
+        </div>
+        <button class="btn btn-sm" onclick="downloadBcdExcel()" style="border-color:#10b981;color:#047857;padding:6px 12px;font-size:12px" title="현재 조회된 구매확정일별 매출을 엑셀로 다운로드">엑셀</button>
+      </div>
+      <div style="display:flex;gap:24px;margin-bottom:12px;flex-wrap:wrap">
+        <div><span style="font-size:12px;color:var(--gray-500)">총 매출</span><br><strong id="bcd-total-amount" style="font-size:16px">-</strong></div>
+        <div><span style="font-size:12px;color:var(--gray-500)">총 주문</span><br><strong id="bcd-total-orders">-</strong></div>
+        <div><span style="font-size:12px;color:var(--gray-500)">총 수량</span><br><strong id="bcd-total-qty">-</strong></div>
+        <div id="bcd-pending-wrap" style="display:none"><span style="font-size:12px;color:var(--gray-500)">미확정</span><br><strong id="bcd-pending" style="color:#b45309">-</strong></div>
+        <div style="flex:1"></div>
+        <div id="bcd-legend" style="display:flex;gap:12px;font-size:11px;color:var(--gray-600);align-items:center">
+          <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:#3b82f6;border-radius:2px"></span> 쿠팡(일반)</span>
+          <span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:#10b981;border-radius:2px"></span> 네이버</span>
+        </div>
+      </div>
+      <div id="bcd-chart-wrap" style="overflow-x:auto;border:1px solid var(--gray-200);border-radius:6px;background:var(--gray-50);padding:14px 8px 8px;margin-bottom:12px">
+        <div id="bcd-chart" style="display:flex;align-items:flex-end;gap:6px;min-height:300px;padding-bottom:8px"></div>
+      </div>
+      <div id="bcd-table-wrap" style="overflow-x:auto;display:none">
+        <table id="bcd-table" style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead id="bcd-thead"></thead>
+          <tbody id="bcd-tbody"></tbody>
+        </table>
+      </div>
+      <div class="feedback" id="bcd-feedback"></div>
+    </div>
+  </div>
+
   <!-- ============================================
        주차별 예식·주문·매출 상관관계 (주간보고) — 상품별 판매통계 탭 최상단
        데이터가 답례품 전용(예식·D01 필터 고정)이라 데코소품 탭에서는 숨김
@@ -9144,6 +9193,7 @@ async function _loadDashSection(n) {
       renderSummary(summaryRows, leadtime, orderCounts);
       try { renderComparison(cmp); } catch(e) { console.warn('Comparison render failed:', e); }
       setBsdPreset('next-30');
+      setBcdPreset('past-30');
     } else if (n === 2) {
       // 보조지표1: 마케팅 / 주차별 전환율 / 샘플
       //   전환율 카드는 마케팅 렌더 후 예식 윈도우 기반(conversion-window)으로 덮어씀.
@@ -11024,6 +11074,191 @@ function setBsdView(view) {
     btnChart.style.background = '#fff'; btnChart.style.color = 'var(--gray-700)';
     btnTable.style.background = 'var(--primary)'; btnTable.style.color = '#fff';
   }
+}
+
+// ============================================
+// 구매확정일별 매출 (마켓 정산 기준) — 쿠팡(일반) · 네이버
+//   결제일 매출과 기간 차원이 다르다: 마켓은 '구매확정' 시점에 정산이 잡힌다.
+//   확정일은 두 채널 모두 실제 값이다 (쿠팡 정산현황 recognitionDate / 네이버 PURCHASE_DECIDED).
+// ============================================
+let _bcdView = 'chart';
+let _lastBcdData = null;
+const BCD_COLOR = { '쿠팡(일반)': '#3b82f6', '네이버': '#10b981' };
+
+function setBcdView(view) {
+  _bcdView = view;
+  const chart = document.getElementById('bcd-chart-wrap');
+  const table = document.getElementById('bcd-table-wrap');
+  const btnChart = document.getElementById('bcd-view-chart');
+  const btnTable = document.getElementById('bcd-view-table');
+  if (view === 'chart') {
+    chart.style.display = ''; table.style.display = 'none';
+    btnChart.style.background = 'var(--primary)'; btnChart.style.color = '#fff';
+    btnTable.style.background = '#fff'; btnTable.style.color = 'var(--gray-700)';
+  } else {
+    chart.style.display = 'none'; table.style.display = '';
+    btnChart.style.background = '#fff'; btnChart.style.color = 'var(--gray-700)';
+    btnTable.style.background = 'var(--primary)'; btnTable.style.color = '#fff';
+  }
+}
+
+function setBcdPreset(preset, btn) {
+  const t = new Date();
+  let s, e;
+  if (preset === 'this-month') {
+    s = new Date(t.getFullYear(), t.getMonth(), 1); e = t;
+  } else if (preset === 'last-month') {
+    s = new Date(t.getFullYear(), t.getMonth() - 1, 1);
+    e = new Date(t.getFullYear(), t.getMonth(), 0);
+  } else if (preset === 'past-90') {
+    s = new Date(t.getTime() - 89 * 86400000); e = t;
+  } else {
+    s = new Date(t.getTime() - 29 * 86400000); e = t;
+  }
+  document.getElementById('bcd-start').value = fmt(s);
+  document.getElementById('bcd-end').value = fmt(e);
+  document.querySelectorAll('.bcd-preset').forEach(b => b.classList.remove('btn-primary'));
+  if (btn) btn.classList.add('btn-primary');
+  loadByConfirmDate();
+}
+
+async function loadByConfirmDate() {
+  const start = document.getElementById('bcd-start').value;
+  const end = document.getElementById('bcd-end').value;
+  const $loading = document.getElementById('bcd-loading');
+  if (!start || !end) { if ($loading) $loading.textContent = '시작일과 종료일을 선택하세요.'; return; }
+  if (start > end) { if ($loading) $loading.textContent = '시작일이 종료일보다 늦을 수 없습니다.'; return; }
+  // end+1 day = exclusive (서버는 end 를 exclusive 로 받음)
+  const endPlus = fmt(new Date(new Date(end).getTime() + 86400000));
+  if ($loading) $loading.textContent = '조회 중...';
+  try {
+    const data = await fetch(`${API}/api/dashboard/by-confirm-date?start_date=${start}&end_date=${endPlus}`).then(r => r.json());
+    if ($loading) $loading.textContent = '';
+    renderByConfirmDate(data);
+  } catch (e) {
+    console.warn('[byConfirmDate] 조회 실패:', e);
+    if ($loading) $loading.textContent = '조회 실패: ' + (e.message || '오류');
+  }
+}
+
+function renderByConfirmDate(data) {
+  _lastBcdData = data;
+  const safe = data || {};
+  const total = safe.total || { amount: 0, orders: 0, qty: 0 };
+  const dates = Array.isArray(safe.confirm_dates) ? safe.confirm_dates : [];
+  const channels = (Array.isArray(safe.channels) ? safe.channels : []).map(c => c.channel);
+
+  document.getElementById('bcd-total-amount').textContent = fmtKRW(total.amount);
+  document.getElementById('bcd-total-orders').textContent = fmtNum(total.orders) + '건';
+  document.getElementById('bcd-total-qty').textContent = fmtNum(total.qty);
+
+  // 미확정 — '매출이 적은 것' 과 '아직 확정이 안 된 것' 을 구분해서 보여준다
+  const pend = safe.pending || {};
+  const pendTotal = Object.values(pend).reduce((s, n) => s + (Number(n) || 0), 0);
+  const $pw = document.getElementById('bcd-pending-wrap');
+  if (pendTotal > 0) {
+    $pw.style.display = '';
+    document.getElementById('bcd-pending').textContent = fmtNum(pendTotal) + '건';
+    $pw.title = Object.entries(pend).filter(([, n]) => n > 0)
+      .map(([k, n]) => `${k} ${fmtNum(n)}건`).join(' · ')
+      + String.fromCharCode(10) + '이 기간에 결제됐지만 아직 구매확정 전이라 위 매출에 안 잡힌 주문입니다.';
+  } else $pw.style.display = 'none';
+
+  const thead = document.getElementById('bcd-thead');
+  const tbody = document.getElementById('bcd-tbody');
+  const chartEl = document.getElementById('bcd-chart');
+
+  thead.innerHTML = `<tr style="background:var(--gray-50)">
+    <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:110px">구매확정일</th>
+    <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:120px">매출</th>
+    <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:80px">주문</th>
+    <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:80px">수량</th>
+    ${channels.map(c => {
+      const ch = (safe.channels || []).find(x => x.channel === c) || { amount: 0, orders: 0 };
+      const pct = total.amount > 0 ? Math.round(ch.amount / total.amount * 100) : 0;
+      return `<th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200);min-width:120px;border-left:1px solid var(--gray-200)" title="${esc(c)} 총 ${fmtKRW(ch.amount)} (${pct}%), ${fmtNum(ch.orders)}건">${esc(c)} <span style="color:var(--gray-400);font-size:10px;font-weight:400">${pct}%</span></th>`;
+    }).join('')}
+  </tr>`;
+
+  const colspan = 4 + channels.length;
+  if (!dates.length) {
+    const msg = safe.error
+      ? `조회 실패: ${esc(safe.error)}`
+      : '조회 기간에 구매확정된 마켓 주문이 없습니다.'
+        + (pendTotal > 0 ? ` (결제 후 확정 대기 ${fmtNum(pendTotal)}건)` : '');
+    tbody.innerHTML = `<tr><td colspan="${colspan}" style="text-align:center;padding:20px;color:var(--gray-500);font-size:12px">${msg}</td></tr>`;
+    chartEl.innerHTML = `<div style="text-align:center;padding:40px;color:var(--gray-500);font-size:12px;width:100%">${msg}</div>`;
+    document.getElementById('bcd-feedback').innerHTML = '';
+    return;
+  }
+
+  // 차트 — 채널 적층 막대 (희망출고일별 카드와 같은 형태)
+  const CHART_MAX_H = 240, BAR_W = 60;
+  const todayStr = fmt(new Date());
+  const maxTotal = Math.max(...dates.map(d => d.amount || 0), 1);
+  chartEl.innerHTML = dates.map(d => {
+    const dow = ['일','월','화','수','목','금','토'][new Date(d.date + 'T00:00:00').getDay()];
+    const dowColor = dow === '일' ? '#dc2626' : (dow === '토' ? '#2563eb' : 'var(--gray-500)');
+    const isToday = d.date === todayStr;
+    const totalAmt = d.amount || 0;
+    const totalH = Math.max(2, Math.round(totalAmt / maxTotal * CHART_MAX_H));
+    // 적층 — 채널별 높이. 반올림 오차는 마지막 조각이 흡수해 총합 높이를 유지한다.
+    let used = 0;
+    const segs = channels.map((c, i) => {
+      const amt = d.channels?.[c]?.amount || 0;
+      let h = (i === channels.length - 1)
+        ? totalH - used
+        : (totalAmt > 0 ? Math.round(amt / totalAmt * totalH) : 0);
+      if (h < 0) h = 0;
+      used += h;
+      if (!amt && !h) return '';
+      const pct = totalAmt > 0 ? Math.round(amt / totalAmt * 100) : 0;
+      return `<div style="height:${h}px;background:${BCD_COLOR[c] || '#94a3b8'}" title="${esc(c)} ${fmtKRW(amt)} (${pct}%) · ${fmtNum(d.channels?.[c]?.orders || 0)}건"></div>`;
+    }).join('');
+    const [, mm, dd] = d.date.split('-');
+    return `<div style="flex:0 0 ${BAR_W}px;display:flex;flex-direction:column;align-items:center;gap:4px">
+      <div style="font-size:10px;color:var(--gray-600);white-space:nowrap">${fmtNum(Math.round(totalAmt / 10000))}만</div>
+      <div style="width:100%;display:flex;flex-direction:column-reverse;border-radius:3px 3px 0 0;overflow:hidden">${segs}</div>
+      <div style="font-size:10px;color:${dowColor};white-space:nowrap;${isToday ? 'font-weight:700;text-decoration:underline' : ''}">${parseInt(mm)}/${parseInt(dd)} ${dow}</div>
+      <div style="font-size:10px;color:var(--gray-400)">${fmtNum(d.orders)}건</div>
+    </div>`;
+  }).join('');
+
+  tbody.innerHTML = dates.map(d => {
+    const dow = ['일','월','화','수','목','금','토'][new Date(d.date + 'T00:00:00').getDay()];
+    const isToday = d.date === todayStr;
+    return `<tr style="${isToday ? 'background:#fffbeb' : ''}">
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100)">${d.date} <span style="color:var(--gray-400);font-size:11px">(${dow})</span></td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;font-weight:600">${fmtKRW(d.amount)}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${fmtNum(d.orders)}</td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${fmtNum(d.qty)}</td>
+      ${channels.map(c => `<td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;border-left:1px solid var(--gray-100);color:var(--gray-600)">${d.channels?.[c] ? fmtKRW(d.channels[c].amount) : '-'}</td>`).join('')}
+    </tr>`;
+  }).join('');
+
+  document.getElementById('bcd-feedback').innerHTML = safe.error
+    ? `<span style="color:#b45309">일부 채널 조회 실패: ${esc(safe.error)}</span>` : '';
+}
+
+/** 구매확정일별 매출 엑셀 다운로드 — 현재 조회된 데이터를 TSV 로 export. */
+function downloadBcdExcel() {
+  const data = _lastBcdData;
+  if (!data || !Array.isArray(data.confirm_dates) || !data.confirm_dates.length) {
+    showToast('다운로드할 데이터가 없습니다');
+    return;
+  }
+  const channels = (data.channels || []).map(c => c.channel);
+  const headers = ['구매확정일', '요일', '매출', '주문', '수량']
+    .concat(channels.flatMap(c => [`${c} 매출`, `${c} 건수`]));
+  const lines = [headers.join(',')];
+  for (const d of data.confirm_dates) {
+    const dow = ['일','월','화','수','목','금','토'][new Date(d.date + 'T00:00:00').getDay()];
+    lines.push([d.date, dow, d.amount, d.orders, d.qty]
+      .concat(channels.flatMap(c => [d.channels?.[c]?.amount || 0, d.channels?.[c]?.orders || 0])).join(','));
+  }
+  const csv = '﻿' + lines.join('\r\n');
+  downloadXlsxFromCsv(csv, `구매확정일별매출_${new Date().toISOString().slice(0, 10)}`, '구매확정일별매출');
+  showToast('엑셀 다운로드 완료');
 }
 
 // 희망출고일별 매출 — 마지막 응답 cache (엑셀 다운로드 재활용용).

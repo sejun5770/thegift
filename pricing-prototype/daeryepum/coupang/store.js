@@ -100,9 +100,11 @@ async function updateCoupangOrderStatus(orderId, status, statusLabel) {
  *   서버에서 거르지 않고 받아온 뒤 거른다 — 062 마이그레이션 전이면 컬럼이 없어
  *   PostgREST 필터가 400 을 내고 대시보드가 통째로 죽는다.
  */
-async function listCoupangOrders({ startStr, endStr, byPaid = false, orderIds, excludeRocketGrowth = false } = {}) {
+async function listCoupangOrders({ startStr, endStr, byPaid = false, byConfirmed = false, orderIds, excludeRocketGrowth = false } = {}) {
   if (!USE_SUPABASE) return [];
-  const col = byPaid ? 'paid_at' : 'ordered_at';
+  // byConfirmed: 구매확정일(080) 기준 — 정산 시점으로 매출을 보는 화면용.
+  //   confirmed_at 이 NULL 인 행은 gte/lt 비교에서 자동으로 빠진다 (아직 미확정).
+  const col = byConfirmed ? 'confirmed_at' : (byPaid ? 'paid_at' : 'ordered_at');
   const post = rows => (excludeRocketGrowth
     ? (rows || []).filter(r => !r.is_rocket_growth)
     : rows);

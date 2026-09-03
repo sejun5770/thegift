@@ -5869,6 +5869,105 @@ async function apiDashboardByShipDate(query) {
 }
 
 /**
+ * 구매확정일별 매출 — 마켓 채널(쿠팡 일반 · 네이버).
+ *
+ * 왜 따로 두는가:
+ *   마켓은 결제일이 아니라 '구매확정' 시점에 정산이 잡힌다. 결제일 기준 매출과 기간 차원이
+ *   달라 같은 카드에 섞을 수 없어, 희망출고일별 카드와 같은 방식으로 별도 카드를 둔다.
+ *
+ * 확정일 출처 (둘 다 실제 값 — 추정하지 않는다):
+ *   · 쿠팡  coupang_orders.confirmed_at (080) — 정산현황 매출내역 recognitionDate
+ *   · 네이버 naver_orders.confirmed_at (037) — PURCHASE_DECIDED 시점
+ *   confirmed_at 이 NULL 인 주문(아직 미확정)은 자연히 빠진다. 그 건수는 pending 으로 함께 낸다 —
+ *   '매출이 적은 것' 과 '아직 확정이 안 된 것' 을 화면에서 구분해야 하기 때문.
+ *
+ * 로켓그로스 제외:
+ *   RG 는 쿠팡이 직접 출고·정산하는 별개 흐름이고 confirmed_at 이 채워지지 않는다.
+ *   excludeRocketGrowth 로 걷어내 '쿠팡(일반)' 만 센다.
+ */
+async function apiDashboardByConfirmDate(query) {
+  const startDate = query.start_date || fmtDate(addDays(today(), -30));
+  const endDate = query.end_date || fmtDate(addDays(today(), 1));   // exclusive
+
+  const empty = {
+    period: { start: startDate, end: endDate },
+    confirm_dates: [], channels: [],
+    total: { amount: 0, orders: 0, qty: 0, by_channel: {} },
+    pending: { 쿠팡: 0, 네이버: 0 },
+  };
+
+  const CH_COUPANG = '쿠팡(일반)';
+  const CH_NAVER = '네이버';
+  const isCancelled = (r) => /취소|반품/.test(String(r.status_label || r.status || ''));
+
+  let cpRows = [], nvRows = [], cpPending = 0, nvPending = 0;
+  const errors = [];
+  try {
+    const cpStore = require('./coupang/store');
+    cpRows = await cpStore.listCoupangOrders({
+      startStr: startDate, endStr: endDate, byConfirmed: true, excludeRocketGrowth: true,
+    });
+    // 미확정 건수 — 같은 기간의 '결제일' 기준으로 세어, 확정만 기다리는 물량을 보여준다.
+    const cpPaid = await cpStore.listCoupangOrders({
+      startStr: startDate, endStr: endDate, byPaid: true, excludeRocketGrowth: true,
+    });
+    cpPending = (cpPaid || []).filter(r => !r.confirmed_at && !isCancelled(r)).length;
+  } catch (e) {
+    errors.push('쿠팡: ' + e.message);
+    console.warn('[by-confirm-date] 쿠팡 조회 실패:', e.message);
+  }
+  try {
+    const nvStore = require('./naver/store');
+    nvRows = await nvStore.listNaverOrders({ startStr: startDate, endStr: endDate, byConfirmed: true });
+    const nvPaid = await nvStore.listNaverOrders({ startStr: startDate, endStr: endDate, byPaid: true });
+    nvPending = (nvPaid || []).filter(r => !r.confirmed_at && !isCancelled(r)).length;
+  } catch (e) {
+    errors.push('네이버: ' + e.message);
+    console.warn('[by-confirm-date] 네이버 조회 실패:', e.message);
+  }
+
+  const buckets = {};
+  const ensure = (date) => (buckets[date] ||= {
+    date, amount: 0, orders: 0, qty: 0, channels: {},
+  });
+  const totalByChannel = {};
+  let totalAmount = 0, totalOrders = 0, totalQty = 0;
+
+  const add = (rows, channel) => {
+    for (const r of (rows || [])) {
+      if (!r.confirmed_at || isCancelled(r)) continue;
+      // KST 기준 날짜 — confirmed_at 은 timestamptz 라 UTC 로 자르면 하루 밀린다.
+      const date = new Date(Date.parse(r.confirmed_at) + 9 * 3600000).toISOString().slice(0, 10);
+      const amount = Math.round(Number(r.item_total_price) || 0);
+      const qty = Number(r.item_count) || 0;
+      const b = ensure(date);
+      b.amount += amount; b.orders += 1; b.qty += qty;
+      const cb = (b.channels[channel] ||= { amount: 0, orders: 0, qty: 0 });
+      cb.amount += amount; cb.orders += 1; cb.qty += qty;
+      const tb = (totalByChannel[channel] ||= { amount: 0, orders: 0, qty: 0 });
+      tb.amount += amount; tb.orders += 1; tb.qty += qty;
+      totalAmount += amount; totalOrders += 1; totalQty += qty;
+    }
+  };
+  add(cpRows, CH_COUPANG);
+  add(nvRows, CH_NAVER);
+
+  const confirm_dates = Object.values(buckets).sort((a, b) => a.date.localeCompare(b.date));
+  const channels = Object.entries(totalByChannel)
+    .sort((a, b) => b[1].amount - a[1].amount)
+    .map(([name, v]) => ({ channel: name, ...v }));
+
+  return {
+    ...empty,
+    confirm_dates,
+    channels,
+    total: { amount: totalAmount, orders: totalOrders, qty: totalQty, by_channel: totalByChannel },
+    pending: { [CH_COUPANG]: cpPending, [CH_NAVER]: nvPending },
+    error: errors.length ? errors.join(' / ') : null,
+  };
+}
+
+/**
  * 리드타임 분석 (진단 endpoint) — min_select_days=2 조정 효과 측정용.
  *
  * 응답:
@@ -11449,6 +11548,8 @@ const server = http.createServer(async (req, res) => {
         data = await apiExpressAnalysis(parsed.query);
       } else if (pathname === '/api/dashboard/by-ship-date') {
         data = await apiDashboardByShipDate(parsed.query);
+      } else if (pathname === '/api/dashboard/by-confirm-date') {
+        data = await apiDashboardByConfirmDate(parsed.query);
       } else if (pathname === '/api/dashboard/leadtime-analysis') {
         data = await apiLeadtimeAnalysis(parsed.query);
       } else if (pathname === '/api/dashboard/forecast') {

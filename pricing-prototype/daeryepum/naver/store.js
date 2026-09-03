@@ -91,9 +91,11 @@ async function patchNaverStubEnrichment(orderId, { sticker_selections, desired_s
  *   주문조회 / 정보입력완료 등 모든 호출에서 취소 row 도 포함되어 표시 / 추적 가능.
  *   매출 집계 측 (apiSummary 등) 에서 자체적으로 status_label='주문취소' row 를 필터.
  */
-async function listNaverOrders({ startStr, endStr, byPaid = false, orderIds } = {}) {
+async function listNaverOrders({ startStr, endStr, byPaid = false, byConfirmed = false, orderIds } = {}) {
   if (!USE_SUPABASE) return [];
-  const col = byPaid ? 'paid_at' : 'ordered_at';
+  // byConfirmed: 구매확정일(037) 기준 — 정산 시점으로 매출을 보는 화면용.
+  //   confirmed_at 이 NULL 인 행은 gte/lt 비교에서 자동으로 빠진다 (아직 미확정).
+  const col = byConfirmed ? 'confirmed_at' : (byPaid ? 'paid_at' : 'ordered_at');
   // orderIds OR 모드 — product_order_id 기준 (옛날 customer_info 매칭용).
   if (Array.isArray(orderIds) && orderIds.length) {
     const params = [];
