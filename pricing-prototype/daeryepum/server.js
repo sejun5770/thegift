@@ -1553,6 +1553,137 @@ function splitTowelVariants(row) {
   }));
 }
 
+/**
+ * 옵션(구성품) 행인가 — card_opt 가 부모 아이템의 card_seq 를 가리킨다.
+ *   card_opt 가 자기 자신(card_seq)을 가리키는 행은 '자기참조형 부모' (B2B 몰 경로, 주문 3250164)
+ *   → 옵션이 아니라 부모로 본다. card_opt 는 varchar 라 문자열로 비교한다.
+ */
+function isEtcOptionRow(r) {
+  if (r.card_opt == null) return false;
+  const opt = String(r.card_opt).trim();
+  if (!opt || opt === '0') return false;
+  return opt !== String(r.item_card_seq ?? '');
+}
+
+/** 부모 행이 없는 옵션들이 가리키는 세트 card_seq 목록 (숫자만, 중복 제거). */
+function collectMissingSetSeqs(rows) {
+  const parents = new Set();
+  for (const r of rows) {
+    if (!isEtcOptionRow(r) && r.item_card_seq != null) parents.add(`${r.order_seq}::${String(r.item_card_seq)}`);
+  }
+  const missing = new Set();
+  for (const r of rows) {
+    if (!isEtcOptionRow(r)) continue;
+    const opt = String(r.card_opt).trim();
+    if (!parents.has(`${r.order_seq}::${opt}`) && /^\d+$/.test(opt)) missing.add(opt);
+  }
+  return [...missing];
+}
+
+/**
+ * 세트 상품 조회 — 답례품 필터(D01 / COM_)에 걸리는 것만. 그 밖(식권·리스 그룹 등)은 합성하지 않는다.
+ *   반환 Map(card_seq 문자열 → { code, name, unit_value })
+ */
+async function lookupEtcSetProducts(pool, seqs) {
+  const ids = seqs.map(x => parseInt(x, 10)).filter(n => Number.isInteger(n) && n > 0).slice(0, 500);
+  const map = new Map();
+  if (!ids.length) return map;
+  const r = await pool.request().query(`
+    SELECT c.Card_Seq, c.Card_Code, c.Card_Name, ISNULL(NULLIF(c.Unit_Value, 0), 1) AS unit_value
+    FROM S2_Card c WITH (NOLOCK)
+    WHERE c.Card_Seq IN (${ids.join(',')}) AND ${DAERYEPUM_FILTER_SQL}`);
+  for (const x of r.recordset) {
+    map.set(String(x.Card_Seq), { code: x.Card_Code || '', name: cleanName(x.Card_Name || ''), unit_value: Number(x.unit_value) || 1 });
+  }
+  return map;
+}
+
+/**
+ * 합성 부모의 세트 수량 — 구성품 수량에서 유추.
+ *   · 수건 아닌 구성품(핸드워시 등)이 있으면 그 최대 수량 = 세트 수 (상자마다 하나씩 들어간다)
+ *   · 수건만 있으면: 이름에 '2구' 면 한 상자에 여러 장이라 최대 수량, 아니면 색을 나눠 담은 것이라 합
+ */
+function inferSetQty(options, setName) {
+  const towels = options.filter(o => TOWEL_OPTION_CODE.test(String(o.code || '')));
+  const others = options.filter(o => !towels.includes(o));
+  const qty = o => Number(o.qty) || 0;
+  if (others.length) return Math.max(...others.map(qty));
+  if (!towels.length) return 0;
+  return /2구/.test(String(setName || '')) ? Math.max(...towels.map(qty)) : towels.reduce((a, o) => a + qty(o), 0);
+}
+
+/**
+ * 옵션(비용변동) 라인 합산 — 프론트 신규 옵션 기능 (수건/주방세제 등).
+ *   옵션 행(card_opt = 부모 아이템 card_seq)의 금액을 부모(item_card_seq = card_opt)에 합산하고
+ *   옵션 행은 제거 → 주문조회·정보입력현황에 부모(세트)만, 결제금액은 옵션 합으로 표시.
+ *   ETC 전용 (CARD 는 card_opt 항상 NULL → 영향 없음). 부모에 _options 첨부 (옵션선택 표시용).
+ *
+ *   부모가 없는 옵션은 setBySeq(답례품 세트만)에 있으면 부모 행을 합성해 붙이고(B2B 몰 경로),
+ *   없으면 누락 방지를 위해 옵션 행을 그대로 둔다. rows 를 제자리에서 바꾼다.
+ */
+function mergeEtcOptionRows(rows, setBySeq = new Map()) {
+  const parentByKey = new Map(); // `${order_seq}::${item_card_seq}` → 부모 row
+  for (const r of rows) {
+    if (!isEtcOptionRow(r) && r.item_card_seq != null) parentByKey.set(`${r.order_seq}::${String(r.item_card_seq)}`, r);
+  }
+  // 부모 합성 — 첫 옵션 행 자리에 끼운다 (주문 안 순서 유지)
+  const withSynth = [];
+  for (const r of rows) {
+    if (isEtcOptionRow(r)) {
+      const opt = String(r.card_opt).trim();
+      const key = `${r.order_seq}::${opt}`;
+      if (!parentByKey.has(key) && setBySeq.has(opt)) {
+        const set = setBySeq.get(opt);
+        const parent = {
+          ...r,
+          card_code: set.code, card_name: set.name, card_name_raw: set.name,
+          unit_value: set.unit_value,
+          item_card_seq: Number(opt), card_opt: null, item_seq: 0,
+          item_count: 0, item_amount: 0, coupon_price: 0,
+          _synth_parent: true,   // 세트 행이 원본에 없어 구성품에서 만든 행
+        };
+        parentByKey.set(key, parent);
+        withSynth.push(parent);
+      }
+    }
+    withSynth.push(r);
+  }
+  const kept = [];
+  for (const r of withSynth) {
+    if (isEtcOptionRow(r)) {
+      const parent = parentByKey.get(`${r.order_seq}::${String(r.card_opt).trim()}`);
+      if (parent) {
+        // 옵션을 합치기 전 부모 자체 금액을 남겨둔다 — 분할담기 분리 시 안분 기준.
+        if (parent._options == null) parent._base_amount = Number(parent.item_amount) || 0;
+        parent.item_amount = (Number(parent.item_amount) || 0) + (Number(r.item_amount) || 0);
+        // 합성 부모는 자기 몫 쿠폰이 없다 — 구성품 몫을 모아 주문 합계를 지킨다
+        if (parent._synth_parent) parent.coupon_price = (Number(parent.coupon_price) || 0) + (Number(r.coupon_price) || 0);
+        (parent._options = parent._options || []).push({
+          code: r.card_code, name: r.card_name,
+          amount: Number(r.item_amount) || 0, qty: r.item_count,
+          seq: Number(r.item_seq) || 0, // 옵션 순서(옵션1/2 = 아이템 seq) — 수집복사 K/L 매핑용
+          // 무료 옵션 = 사은품(추석 미니엽서 등). 세트를 이루는 구성품(수건·핸드워시)은 값이 붙는다.
+          //   수집복사에서 구성품은 K/L(품목코드), 사은품은 O열(스티커타입2)로 갈린다.
+          //   답례품 옵션 365일 실측: 무료는 미니엽서 코드뿐, 구성품은 전부 유료로 갈림이 명확.
+          addon: (Number(r.item_amount) || 0) === 0,
+        });
+        continue; // 옵션 행 제거
+      }
+      // 부모 못 찾은 옵션은 (비정상) 누락 방지 위해 유지
+    }
+    kept.push(r);
+  }
+  for (const r of kept) {
+    // 옵션 순서 고정 — 아이템 seq 오름차순 (옵션1=주방세제, 옵션2=수건 …). 수집복사 K/L 순서 일관.
+    if (Array.isArray(r._options)) r._options.sort((a, b) => (a.seq || 0) - (b.seq || 0));
+    if (r._synth_parent) r.item_count = inferSetQty(r._options || [], r.card_name);
+  }
+  // 수건 분할담기 → 수건 종류별 행 분리 (splitTowelVariants 주석 참조)
+  const expanded = [];
+  for (const r of kept) expanded.push(...(splitTowelVariants(r) || [r]));
+  rows.splice(0, rows.length, ...expanded);
+}
+
 // --- API handlers ---
 
 async function apiOrders(query) {
@@ -1829,41 +1960,16 @@ async function apiOrders(query) {
   //   옵션 행은 제거 → 주문조회·정보입력현황에 부모(세트)만, 결제금액은 옵션 합으로 표시.
   //   ETC 전용 (CARD 는 card_opt 항상 NULL → 영향 없음). 부모에 _options 첨부 (옵션선택 표시용).
   if (rows.some(r => r.card_opt != null)) {
-    const parentByKey = new Map(); // `${order_seq}::${item_card_seq}` → 부모 row
-    for (const r of rows) {
-      if (r.card_opt == null && r.item_card_seq != null) {
-        parentByKey.set(`${r.order_seq}::${r.item_card_seq}`, r);
-      }
+    // 부모 행이 없는 옵션이 가리키는 세트 — 답례품 세트면 S2_Card 로 부모 행을 만들어 붙인다.
+    //   B2B 몰(bhands_b2b) 경로는 0원 세트 행을 쓰지 않고 구성품 행만 남긴다 (주문 3250185, 2026-09-04).
+    //   청첩장 식권·리스(FST) 의 '그룹 상품' 참조는 답례품 필터에 안 걸려 그대로 둔다 (원래 그런 구조).
+    let setBySeq = new Map();
+    const missing = collectMissingSetSeqs(rows);
+    if (missing.length) {
+      try { setBySeq = await lookupEtcSetProducts(p, missing); }
+      catch (e) { console.warn('[apiOrders] 세트 상품 조회 실패 (부모 합성 생략):', e.message); }
     }
-    const kept = [];
-    for (const r of rows) {
-      if (r.card_opt != null) {
-        const parent = parentByKey.get(`${r.order_seq}::${r.card_opt}`);
-        if (parent) {
-          // 옵션을 합치기 전 부모 자체 금액을 남겨둔다 — 분할담기 분리 시 안분 기준.
-          if (parent._options == null) parent._base_amount = Number(parent.item_amount) || 0;
-          parent.item_amount = (Number(parent.item_amount) || 0) + (Number(r.item_amount) || 0);
-          (parent._options = parent._options || []).push({
-            code: r.card_code, name: r.card_name,
-            amount: Number(r.item_amount) || 0, qty: r.item_count,
-            seq: Number(r.item_seq) || 0, // 옵션 순서(옵션1/2 = 아이템 seq) — 수집복사 K/L 매핑용
-            // 무료 옵션 = 사은품(추석 미니엽서 등). 세트를 이루는 구성품(수건·핸드워시)은 값이 붙는다.
-            //   수집복사에서 구성품은 K/L(품목코드), 사은품은 O열(스티커타입2)로 갈린다.
-            //   답례품 옵션 365일 실측: 무료는 미니엽서 코드뿐, 구성품은 전부 유료로 갈림이 명확.
-            addon: (Number(r.item_amount) || 0) === 0,
-          });
-          continue; // 옵션 행 제거
-        }
-        // 부모 못 찾은 옵션은 (비정상) 누락 방지 위해 유지
-      }
-      kept.push(r);
-    }
-    // 옵션 순서 고정 — 아이템 seq 오름차순 (옵션1=주방세제, 옵션2=수건 …). 수집복사 K/L 순서 일관.
-    for (const r of kept) { if (Array.isArray(r._options)) r._options.sort((a, b) => (a.seq || 0) - (b.seq || 0)); }
-    // 수건 분할담기 → 수건 종류별 행 분리 (splitTowelVariants 주석 참조)
-    const expanded = [];
-    for (const r of kept) expanded.push(...(splitTowelVariants(r) || [r]));
-    rows.splice(0, rows.length, ...expanded);
+    mergeEtcOptionRows(rows, setBySeq);
   }
 
   // 쿠팡 주문 UNION — Supabase coupang_orders 에서 같은 기간 조회 후 MSSQL row 와 동일 schema 로 정규화.
