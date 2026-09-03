@@ -21841,7 +21841,29 @@ async function loadPartnerOrders() {
       .filter(([k]) => k !== '이미 등록됨')
       .map(([k, v]) => `· ${k} — ${v.length}건 (${[...new Set(v.map(x => x.product_code))].slice(0, 4).join(', ')})`);
     const already = (byReason['이미 등록됨'] || []).length;
+    const updatable = d.updatable || [];
+    // 신규가 없어도 이미 등록된 건을 시트 값으로 갱신할 수 있다 —
+    //   스티커·문구를 나중에 가져오게 됐을 때 기존 건을 보강하는 경로.
     if (!planned.length) {
+      if (updatable.length) {
+        const up = updatable.slice(0, 10)
+          .map(p => `  ${p.ship_date}  ${p.name || ''}  ${p.product_code} ${p.quantity}개`
+            + `\n      스티커: ${p.sticker || '(없음)'}  ·  문구: ${String(p.message || '(없음)').replace(/\s+/g, ' ').slice(0, 40)}`)
+          .join('\n');
+        const upMsg = `새로 등록할 건은 없습니다.\n\n이미 등록된 ${updatable.length}건을 시트 값으로 `
+          + `다시 채울 수 있습니다 (스티커·문구·금액).\n`
+          + `수집완료·작업 진행·업로드한 이미지는 그대로 유지됩니다.\n\n`
+          + up + (updatable.length > 10 ? `\n  … 외 ${updatable.length - 10}건` : '')
+          + `\n\n갱신할까요?`;
+        if (!confirm(upMsg)) return;
+        btn.textContent = '🤝 갱신 중…';
+        const ru = await fetch(`${API}/api/bg/partner-orders/register?overwrite=1`, { method: 'POST' });
+        const du = await ru.json();
+        if (!ru.ok || du.error) { showToast('갱신 실패: ' + (du.error || `HTTP ${ru.status}`)); return; }
+        showToast(`제휴 주문 ${du.updated}건 갱신 완료`);
+        await loadBgUnified();
+        return;
+      }
       alert(`등록할 제휴 주문이 없습니다.\n\n시트에서 찾은 제휴 행: ${d.total}건`
         + (already ? `\n이미 등록됨: ${already}건` : '')
         + (reasonLines.length ? `\n\n건너뜀:\n${reasonLines.join('\n')}` : ''));
@@ -21855,7 +21877,7 @@ async function loadPartnerOrders() {
       + `합계 ${Number(d.amount).toLocaleString()}원 (매출 날짜 = 희망출고일)\n\n`
       + preview + (planned.length > 10 ? `\n  … 외 ${planned.length - 10}건` : '')
       + ((d.no_sticker || d.no_message) ? `\n\n※ 스티커 없음 ${d.no_sticker || 0}건 · 문구 없음 ${d.no_message || 0}건 (그대로 등록됩니다)` : '')
-      + (already ? `\n\n이미 등록된 ${already}건은 건너뜁니다.` : '')
+      + (already ? `\n\n이미 등록된 ${already}건은 건너뜁니다 (다시 눌러 갱신할 수 있습니다).` : '')
       + (reasonLines.length ? `\n\n⚠️ 아래는 등록되지 않습니다:\n${reasonLines.join('\n')}` : '')
       + `\n\n진행할까요?`;
     if (!confirm(msg)) return;

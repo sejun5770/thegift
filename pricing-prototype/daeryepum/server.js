@@ -1226,10 +1226,12 @@ async function giftPartnerRows(force = false) {
  * 제휴 주문을 수기주문(bg_manual_orders)으로 등록한다 — 등록되면 기존 매출 집계에 그대로 잡힌다.
  * @param {boolean} dryRun true 면 저장하지 않고 무엇이 등록될지만 돌려준다.
  */
-async function giftPartnerRegister({ dryRun = true, force = false } = {}) {
+async function giftPartnerRegister({ dryRun = true, force = false, overwrite = false } = {}) {
   const bgStore = require('./barungift/store');
   const rows = await giftPartnerRows(force);
-  const out = { total: rows.length, created: 0, skipped: [], planned: [], amount: 0 };
+  // planned  = 새로 등록할 건
+  // updatable = 이미 등록됐지만 시트 값으로 갱신할 수 있는 건 (스티커·문구가 나중에 붙었을 때)
+  const out = { total: rows.length, created: 0, updated: 0, skipped: [], planned: [], updatable: [], amount: 0 };
   // 공급단가 조회 — 상품설정에 없으면 변형 접미사를 뗀 BASE 코드로 한 번 더 본다.
   const priceCache = new Map();
   const supplyPriceOf = async (code) => {
@@ -1249,7 +1251,17 @@ async function giftPartnerRegister({ dryRun = true, force = false } = {}) {
     if (!r.quantity) { why('주문수량 없음'); continue; }
     if (!r.ship_date) { why('희망출고일 없음 — 매출 날짜를 정할 수 없음'); continue; }
     const existing = await bgStore.getManualOrder(r.order_id).catch(() => null);
-    if (existing) { why('이미 등록됨'); continue; }
+    if (existing && !overwrite) {
+      // 갱신 대상으로만 남긴다 — 스티커·문구가 나중에 붙은 경우 여기서 다시 채울 수 있다.
+      const p = await supplyPriceOf(r.product_code);
+      if (p.price) {
+        out.updatable.push({ order_id: r.order_id, channel: r.channel, product_code: r.product_code,
+          quantity: r.quantity, unit_price: p.price, amount: p.price * r.quantity, ship_date: r.ship_date,
+          name: r.name, sticker: (r.stickers || []).map(s => s.raw).join(' / '), message: r.message || '' });
+      }
+      why('이미 등록됨');
+      continue;
+    }
     const { price, name } = await supplyPriceOf(r.product_code);
     if (!price) { why(`공급단가 미설정 (${r.product_code})`); continue; }
     const amount = price * r.quantity;
@@ -1291,9 +1303,12 @@ async function giftPartnerRegister({ dryRun = true, force = false } = {}) {
       // bulkCreateManualOrders 를 쓴다 — createManualOrder 만 부르면 정보입력현황 stub 이
       //   생기지 않아 주문조회에만 뜨고 작업 목록에는 안 나온다.
       //   _desired_ship_date 를 넘겨 stub 의 희망출고일을 시트 값으로 채운다.
-      const res = await bgStore.bulkCreateManualOrders([{ ...payload, _desired_ship_date: r.ship_date }], {});
-      if (!res || !res.success) { why(`등록 실패: ${(res && res.details && res.details[0] && res.details[0].reason) || '알 수 없음'}`); continue; }
-      out.created++;
+      //   overwrite=true 면 이미 있는 주문의 items(스티커·문구 포함)를 시트 값으로 갱신한다.
+      //   stub 은 force 재생성이라 수집완료·작업 진행·업로드 이미지는 보존된다.
+      const res = await bgStore.bulkCreateManualOrders([{ ...payload, _desired_ship_date: r.ship_date }], { overwrite });
+      const okCount = (res && (res.success || 0)) + (res && (res.updated || 0));
+      if (!okCount) { why(`등록 실패: ${(res && res.details && res.details[0] && res.details[0].reason) || '알 수 없음'}`); continue; }
+      if (res.updated) out.updated++; else out.created++;
       // 시트에 이미 올라와 있는 주문 = 수집이 끝난 건이다. 운영이 다시 수집처리를 누를 이유가 없어
       //   등록과 동시에 수집완료로 표시한다 (실패해도 주문 자체는 남는다).
       try { await bgStore.setProcessed(r.order_id, { processed: true, processed_by: 'partner-collect' }); }
@@ -15721,8 +15736,9 @@ const server = http.createServer(async (req, res) => {
           return;
         }
       } else if (pathname === '/api/bg/partner-orders/register' && req.method === 'POST') {
-        // 실제 등록 — 미리보기에서 확인한 건들을 수기주문으로 만든다 (이미 등록된 건은 건너뜀).
-        try { data = await giftPartnerRegister({ dryRun: false, force: true }); }
+        // 실제 등록 — 미리보기에서 확인한 건들을 수기주문으로 만든다.
+        //   overwrite=1 이면 이미 등록된 건도 시트 값으로 갱신한다 (스티커·문구 보강용).
+        try { data = await giftPartnerRegister({ dryRun: false, force: true, overwrite: parsed.query.overwrite === '1' }); }
         catch (e) {
           res.writeHead(502, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: e.message }));
