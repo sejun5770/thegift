@@ -5649,7 +5649,7 @@ async function apiDashboardByShipDate(query) {
   const ciByCardSeq = new Map();   // CARD: order_seq → ci
   const ciByEtcSeq = new Map();    // ETC: order_seq → ci
   const ciByManualId = new Map();  // MANUAL (바른손더기프트): manual_order_id → ci
-  const ciByMarketId = new Map();  // 마켓 (쿠팡/네이버/정수당): 'CP-…' 등 order_id 그대로 → ci
+  const ciByMarketId = new Map();  // 마켓 (쿠팡/정수당): 'CP-…' 등 order_id 그대로 → ci
   inWindow.forEach(ci => {
     const oid = String(ci.order_id || '');
     if (oid.startsWith('ETC-')) {
@@ -5657,10 +5657,13 @@ async function apiDashboardByShipDate(query) {
       if (seq) ciByEtcSeq.set(seq, ci);
     } else if (oid.startsWith('MO-')) {
       ciByManualId.set(oid.slice(3), ci);
-    } else if (oid.startsWith('CP-') || oid.startsWith('NV-') || oid.startsWith('CF-')) {
+    } else if (oid.startsWith('CP-') || oid.startsWith('CF-')) {
       // 마켓 채널 — 접두가 붙어 parseInt 가 NaN 이라 여태 통째로 빠져 있었다.
       //   우리가 출고하는 주문이므로 출고 일정에 잡혀야 한다 (2026-08-12 수정).
       //   로켓그로스는 희망출고일을 아예 넣지 않으므로 여기까지 오지 않는다 (쿠팡이 출고).
+      //
+      //   네이버(NV-)는 제외한다 (2026-09-04 운영 결정) — 주문 성격이 이 카드와 맞지 않는다.
+      //   네이버 매출은 구매확정일별 매출 카드에서 본다.
       ciByMarketId.set(oid, ci);
     } else {
       const seq = parseInt(oid);
@@ -5755,8 +5758,9 @@ async function apiDashboardByShipDate(query) {
     } catch (e) { console.warn('[by-ship-date] MANUAL lookup 실패:', e.message); }
   }
 
-  // 마켓 (쿠팡 판매자배송 / 네이버 / 정수당) — 주문 단위 합계.
+  // 마켓 (쿠팡 판매자배송 / 정수당) — 주문 단위 합계.
   //   copurchase 개념이 없어 전부 단독주문으로 본다.
+  //   네이버는 이 카드에서 뺐다 (2026-09-04) — 위 ciByMarketId 분류에서 이미 걸러진다.
   if (ciByMarketId.size) {
     const MARKET_CANCELLED = new Set([
       'CANCELED', 'RETURNED', 'EXCHANGED', 'CANCEL', 'RETURNS',
@@ -5765,8 +5769,6 @@ async function apiDashboardByShipDate(query) {
     const CHANNELS = [
       { prefix: 'CP-', site: '쿠팡', key: r => `CP-${r.coupang_order_id}`,
         load: ids => require('./coupang/store').listCoupangOrders({ orderIds: ids, excludeRocketGrowth: true }) },
-      { prefix: 'NV-', site: '네이버', key: r => `NV-${r.product_order_id}`,
-        load: ids => require('./naver/store').listNaverOrders({ orderIds: ids }) },
       { prefix: 'CF-', site: '정수당', key: r => `CF-${r.cafe24_order_id}`,
         load: ids => require('./cafe24/store').listCafe24Orders({ orderIds: ids }) },
     ];
