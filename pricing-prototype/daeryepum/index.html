@@ -3356,6 +3356,14 @@ nav.nav-loading a[href^="#"] {
           로켓그로스 탭에서 <b>마진 = 정산금액 − (원가 + 입고 부대비) × 상품수량</b> 으로 계산합니다.
           입고 부대비는 회차·박스 단위로 드는 실비를 개당으로 나눈 근사치입니다.
         </div>
+        <div style="grid-column:1/-1;border-top:1px dashed var(--gray-300);padding-top:8px">
+          <label style="display:block;font-size:11px;color:var(--gray-500);margin-bottom:4px" title="웅진 등 API 연동이 없는 제휴 채널이 우리에게 지불하는 개당 금액. 주문수집 시트에서 그 채널 주문을 매출로 만들 때 이 값을 씁니다.">🤝 제휴 공급단가 (개당)</label>
+          <input type="number" id="bg-p-meta-supply-price" min="0" step="1" placeholder="미입력 시 제휴 주문 매출 생성 안 함" style="width:100%;padding:8px 10px;border:1px solid var(--gray-300);border-radius:8px;font-size:13px">
+          <div style="font-size:11px;color:var(--gray-500);margin-top:4px;line-height:1.5">
+            원가가 아니라 <b>제휴사가 지불하는 금액</b>입니다. 주문수집 시트 A열이 <b>웅진·프리드라이프</b>인 주문을
+            매출로 넣을 때 <b>공급단가 × 수량</b> 으로 계산합니다 (매출 날짜 = 희망출고일).
+          </div>
+        </div>
       </div>
 
       <!-- 출고일 그룹 선택 -->
@@ -3637,6 +3645,8 @@ nav.nav-loading a[href^="#"] {
     </div>
     <button class="btn" id="uni-collect-check-btn" onclick="loadMissedCollectAlert()" style="padding:4px 10px;font-size:12px"
       title="수집완료 주문의 희망출고월 시트에 주문번호가 등록됐는지 대조합니다 (시트 여러 장을 읽어 수 초 걸립니다)">📋 수집누락 점검</button>
+    <button class="btn" id="uni-partner-btn" onclick="loadPartnerOrders()" style="padding:4px 10px;font-size:12px"
+      title="주문수집 시트 A열이 웅진·프리드라이프인 주문을 찾아 매출로 등록합니다 (공급단가 × 수량, 매출 날짜=희망출고일)">🤝 제휴주문 수집</button>
     <button class="btn" onclick="loadBgUnified()" title="목록 새로고침" style="padding:4px 10px;font-size:12px">🔄 새로고침</button>
   </div>
 
@@ -14831,6 +14841,8 @@ async function openBgProductForm(productId) {
         const ic = document.getElementById('bg-p-meta-inbound-cost');
         if (uc) uc.value = (s?.unit_cost !== null && s?.unit_cost !== undefined) ? s.unit_cost : '';
         if (ic) ic.value = (s?.inbound_unit_cost !== null && s?.inbound_unit_cost !== undefined) ? s.inbound_unit_cost : '';
+        const sp = document.getElementById('bg-p-meta-supply-price');
+        if (sp) sp.value = (s?.supply_price !== null && s?.supply_price !== undefined) ? s.supply_price : '';
         const v = vendors.find(vv => vv.id === s?.vendor_id);
         cInput.placeholder = v ? `거래처 기본 ${Number(v.default_commission_rate || 0).toFixed(1)}%` : '거래처 선택 시 기본 노출';
       }
@@ -15486,6 +15498,7 @@ async function saveBgProduct() {
     commission_rate: commissionRate,
     unit_cost: _costOf('bg-p-meta-unit-cost'),
     inbound_unit_cost: _costOf('bg-p-meta-inbound-cost'),
+    supply_price: _costOf('bg-p-meta-supply-price'),   // 제휴 공급단가 (079)
     shipping_group_id: shippingGroupId,
     allow_logo_upload: allowLogoUpload,
     canonical_group_key: canonKey,
@@ -21795,6 +21808,60 @@ async function loadMissedCollectAlert() {
   if (!box) return;
   const btn = document.getElementById('uni-collect-check-btn');
   if (btn) { btn.disabled = true; btn.textContent = '📋 점검 중…'; }
+  return _loadMissedCollectAlertBody(box, btn);
+}
+
+/**
+ * 제휴 채널(웅진·프리드라이프) 주문 수집 — 시트 A열 마커로 찾아 매출(수기주문)로 등록.
+ *   먼저 미리보기(저장 안 함)로 무엇이 등록될지 보여주고, 확인을 받아야 저장한다.
+ *   금액 = 상품설정의 제휴 공급단가 × 수량, 매출 날짜 = 희망출고일.
+ */
+async function loadPartnerOrders() {
+  const btn = document.getElementById('uni-partner-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '🤝 조회 중…'; }
+  try {
+    const r = await fetch(`${API}/api/bg/partner-orders?refresh=1`);
+    const d = await r.json();
+    if (!r.ok || d.error) { showToast('제휴주문 조회 실패: ' + (d.error || `HTTP ${r.status}`)); return; }
+    const planned = d.planned || [];
+    const skipped = d.skipped || [];
+    // 건너뛴 사유별 묶음 — '공급단가 미설정' 이 가장 흔하고, 그건 상품설정에서 고쳐야 한다.
+    const byReason = {};
+    for (const s of skipped) (byReason[s.reason] = byReason[s.reason] || []).push(s);
+    const reasonLines = Object.entries(byReason)
+      .filter(([k]) => k !== '이미 등록됨')
+      .map(([k, v]) => `· ${k} — ${v.length}건 (${[...new Set(v.map(x => x.product_code))].slice(0, 4).join(', ')})`);
+    const already = (byReason['이미 등록됨'] || []).length;
+    if (!planned.length) {
+      alert(`등록할 제휴 주문이 없습니다.\n\n시트에서 찾은 제휴 행: ${d.total}건`
+        + (already ? `\n이미 등록됨: ${already}건` : '')
+        + (reasonLines.length ? `\n\n건너뜀:\n${reasonLines.join('\n')}` : ''));
+      return;
+    }
+    const preview = planned.slice(0, 12)
+      .map(p => `  ${p.ship_date}  ${p.channel}  ${p.name || ''}  ${p.product_code} ${p.quantity}개 × ${Number(p.unit_price).toLocaleString()}원 = ${Number(p.amount).toLocaleString()}원`)
+      .join('\n');
+    const msg = `제휴 주문 ${planned.length}건을 매출로 등록합니다.\n`
+      + `합계 ${Number(d.amount).toLocaleString()}원 (매출 날짜 = 희망출고일)\n\n`
+      + preview + (planned.length > 12 ? `\n  … 외 ${planned.length - 12}건` : '')
+      + (already ? `\n\n이미 등록된 ${already}건은 건너뜁니다.` : '')
+      + (reasonLines.length ? `\n\n⚠️ 아래는 등록되지 않습니다:\n${reasonLines.join('\n')}` : '')
+      + `\n\n진행할까요?`;
+    if (!confirm(msg)) return;
+    btn.textContent = '🤝 등록 중…';
+    const rr = await fetch(`${API}/api/bg/partner-orders/register`, { method: 'POST' });
+    const dd = await rr.json();
+    if (!rr.ok || dd.error) { showToast('등록 실패: ' + (dd.error || `HTTP ${rr.status}`)); return; }
+    showToast(`제휴 주문 ${dd.created}건 등록 완료 · ${Number(dd.amount).toLocaleString()}원`);
+    await loadBgUnified();
+  } catch (e) {
+    showToast('제휴주문 수집 실패: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🤝 제휴주문 수집'; }
+  }
+}
+
+async function _loadMissedCollectAlertBody(box, btn) {
   try {
     // 명시적 트리거 = 지금 상태가 궁금한 것 — 서버 캐시를 건너뛰고 시트를 새로 읽는다.
     const r = await fetch(`${API}/api/orders/missed-collect?refresh=1`);

@@ -361,6 +361,9 @@ async function upsertProductSettings(productId, data) {
     //   빈 문자열은 NULL 로 떨어뜨리고 숫자만 통과시킨다.
     unit_cost: _numOrNull(data.unit_cost),
     inbound_unit_cost: _numOrNull(data.inbound_unit_cost),
+    // 제휴 채널 공급단가 (079) — 웅진처럼 API 연동이 없어 시트에만 남는 주문의 매출 근거.
+    //   원가가 아니라 '제휴사가 우리에게 지불하는 금액'. NULL 이면 매출을 만들지 않는다.
+    supply_price: _numOrNull(data.supply_price),
     shipping_group_id: data.shipping_group_id ?? null,
     express_available: data.express_available ?? (data.shipping_type === 'today_shipping'),
     express_fee: data.express_fee ?? 0,

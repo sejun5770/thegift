@@ -679,9 +679,19 @@ function bgIsVendorItem(mo, it) {
   if (v !== '혼합') return true;              // 위탁 단독 주문
   return !!(it && it.vendor);                 // 혼합 — 품목이 결정한다
 }
+// 더기프트가 아닌 제휴 채널(웅진 등)은 site_name 을 그대로 채널명으로 쓴다.
+//   bg_manual_orders 는 원래 더기프트 전용이라 site_name 이 전부 '바른손더기프트' 였고
+//   (2026-09-03 전수 5,115건 확인) 채널은 vendor_name 으로만 갈렸다.
+//   웅진처럼 API 연동이 없어 시트로만 들어오는 채널을 여기 담으면서, 그 건들이
+//   더기프트 매출에 섞이지 않도록 site_name 이 다르면 별도 채널로 본다.
+const BG_SITE_DEFAULT = '바른손더기프트';
+function bgPartnerSite(mo) {
+  const s = mo && mo.site_name ? String(mo.site_name).trim() : '';
+  return (s && s !== BG_SITE_DEFAULT) ? s : '';
+}
 /** 대시보드에 쓸 채널명. */
 function bgSiteOf(mo, it) {
-  return bgIsVendorItem(mo, it) ? BG_SITE_VENDOR : BG_SITE_OWN;
+  return bgPartnerSite(mo) || (bgIsVendorItem(mo, it) ? BG_SITE_VENDOR : BG_SITE_OWN);
 }
 /**
  * 이 주문을 '한 건' 으로 셀 채널.
@@ -689,6 +699,8 @@ function bgSiteOf(mo, it) {
  *   ('혼합' 라벨은 위탁업체 2곳이 섞인 주문에도 붙는다 — 라벨만 보면 매입으로 오분류된다.)
  */
 function bgPrimarySiteOf(mo) {
+  const partner = bgPartnerSite(mo);
+  if (partner) return partner;
   const items = Array.isArray(mo && mo.items) ? mo.items : [];
   return items.some(it => !bgIsVendorItem(mo, it)) ? BG_SITE_OWN : BG_SITE_VENDOR;
 }
@@ -1138,6 +1150,119 @@ async function giftSmsRows(gid) {
   const result = { sheet: tab.name, kind, rows };
   _giftCacheSet(cacheKey, result);
   return result;
+}
+
+// ── 🤝 제휴 채널 주문 (웅진 등) — 주문수집 시트 A열 마커로 수집 ────────────
+//   API 연동이 없어 주문이 시트에만 남는 채널이다. 시트에는 품목코드·수량만 있고
+//   금액이 없어, 상품설정의 공급단가(supply_price, 079)를 곱해 매출을 만든다.
+//   매출 날짜는 희망출고일을 쓴다 — 시트에 결제일이 없고, 이 채널은 출고 시점에 정산된다.
+//   희망출고일이나 공급단가가 없으면 그 행은 건너뛴다 (날짜·금액을 지어내지 않는다).
+const PARTNER_SHEET_CHANNELS = new Set(['웅진', '프리드라이프']);
+
+/** 월 시트들에서 A열이 제휴 채널인 행을 모은다. */
+async function giftPartnerRows(force = false) {
+  const cacheKey = 'partnerRows';
+  if (!force) { const c = _giftCacheGet(cacheKey, 10 * 60 * 1000); if (c) return c; }
+  const { sheets } = await giftSheetTabs();
+  const kst = new Date(Date.now() + 9 * 3600000);
+  const nowOrd = (kst.getUTCFullYear() % 100) * 12 + (kst.getUTCMonth() + 1);
+  // 월 시트만, 현재 월 이하로 최근 12개 (미리 만들어 둔 빈 미래 탭 제외)
+  const monthly = sheets
+    .map(t => { const m = /^(\d{2})년 (\d{1,2})월$/.exec(String(t.name).trim()); return m ? { ...t, ord: (+m[1]) * 12 + (+m[2]) } : null; })
+    .filter(t => t && t.ord <= nowOrd).sort((a, b) => b.ord - a.ord).slice(0, 12);
+  const rows = [];
+  for (const tab of monthly) {
+    const csv = await _giftFetch(`https://docs.google.com/spreadsheets/d/${GIFT_SHEET_ID}/export?format=csv&gid=${tab.gid}`, { expectCsv: true });
+    const raw = _giftParseCsv(csv);
+    // 열 위치가 월마다 달라 헤더 이름으로 찾는다 (giftPackCapacity 와 같은 방식)
+    const hi = raw.findIndex(r => r.some(v => String(v).trim() === '주문번호'));
+    if (hi < 0) continue;
+    const h = raw[hi];
+    const col = lbl => h.findIndex(v => String(v).trim() === lbl);
+    const C = { order: col('주문번호'), name: col('성함'), phone: col('연락처1'), addr: col('수령지(도로명)'),
+      pname: col('상품명'), code: col('품목코드1'), qty: col('주문수량'), ship: col('희망출고일') };
+    if (C.order < 0 || C.code < 0 || C.qty < 0) continue;
+    const get = (r, i) => (i >= 0 && i < r.length) ? String(r[i] ?? '').trim() : '';
+    for (const r of raw.slice(hi + 1)) {
+      const channel = String(r[0] ?? '').trim();
+      if (!PARTNER_SHEET_CHANNELS.has(channel)) continue;
+      const orderId = get(r, C.order);
+      if (!orderId) continue;
+      const qty = parseInt(String(get(r, C.qty)).replace(/[^\d]/g, ''), 10);
+      const shipRaw = get(r, C.ship);
+      const dm = shipRaw.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+      rows.push({
+        channel, sheet: tab.name, order_id: orderId,
+        name: get(r, C.name), phone: get(r, C.phone), address: get(r, C.addr),
+        product_name: get(r, C.pname), product_code: get(r, C.code),
+        quantity: Number.isFinite(qty) ? qty : 0,
+        ship_date: dm ? `${dm[1]}-${String(dm[2]).padStart(2, '0')}-${String(dm[3]).padStart(2, '0')}` : '',
+      });
+    }
+  }
+  _giftCacheSet(cacheKey, rows);
+  return rows;
+}
+
+/**
+ * 제휴 주문을 수기주문(bg_manual_orders)으로 등록한다 — 등록되면 기존 매출 집계에 그대로 잡힌다.
+ * @param {boolean} dryRun true 면 저장하지 않고 무엇이 등록될지만 돌려준다.
+ */
+async function giftPartnerRegister({ dryRun = true, force = false } = {}) {
+  const bgStore = require('./barungift/store');
+  const rows = await giftPartnerRows(force);
+  const out = { total: rows.length, created: 0, skipped: [], planned: [], amount: 0 };
+  // 공급단가 조회 — 상품설정에 없으면 변형 접미사를 뗀 BASE 코드로 한 번 더 본다.
+  const priceCache = new Map();
+  const supplyPriceOf = async (code) => {
+    if (priceCache.has(code)) return priceCache.get(code);
+    let ps = await bgStore.getProductSettings(code).catch(() => null);
+    if (!ps) {
+      const base = _baseProductCode(code);
+      if (base && base !== code) ps = await bgStore.getProductSettings(base).catch(() => null);
+    }
+    const v = ps && ps.supply_price != null ? Number(ps.supply_price) : null;
+    const r = { price: Number.isFinite(v) && v > 0 ? v : null, name: ps ? ps.product_name : '' };
+    priceCache.set(code, r);
+    return r;
+  };
+  for (const r of rows) {
+    const why = (reason) => out.skipped.push({ order_id: r.order_id, channel: r.channel, reason, product_code: r.product_code });
+    if (!r.quantity) { why('주문수량 없음'); continue; }
+    if (!r.ship_date) { why('희망출고일 없음 — 매출 날짜를 정할 수 없음'); continue; }
+    const existing = await bgStore.getManualOrder(r.order_id).catch(() => null);
+    if (existing) { why('이미 등록됨'); continue; }
+    const { price, name } = await supplyPriceOf(r.product_code);
+    if (!price) { why(`공급단가 미설정 (${r.product_code})`); continue; }
+    const amount = price * r.quantity;
+    const payload = {
+      order_id: r.order_id,
+      order_name: r.name || r.channel,
+      recv_name: r.name || null,
+      recv_hphone: r.phone || null,
+      recv_address: r.address || null,
+      order_date: `${r.ship_date}T00:00:00+09:00`,   // 매출 날짜 = 희망출고일
+      settle_price: amount,
+      status_seq: 4,
+      site_name: r.channel,                          // 채널 그대로 (더기프트와 섞이지 않는다)
+      category: 'daeryepum',
+      source_memo: `주문수집 시트 ${r.sheet} A열 '${r.channel}' 자동 수집`,
+      items: [{
+        product_code: r.product_code,
+        product_name: r.product_name || name || r.product_code,
+        quantity: r.quantity,
+        unit_price: price,
+        item_amount: amount,
+        stickers: [], box_code: '', product_code_2: '', vendor: null,
+      }],
+      created_by: 'partner-collect',
+    };
+    out.planned.push({ order_id: r.order_id, channel: r.channel, product_code: r.product_code,
+      quantity: r.quantity, unit_price: price, amount, ship_date: r.ship_date, name: r.name });
+    out.amount += amount;
+    if (!dryRun) { await bgStore.createManualOrder(payload); out.created++; }
+  }
+  return out;
 }
 
 // 모듈 레벨 D01_FILTER — 위탁답례품 포함 답례품 기본 필터로 alias
@@ -15544,6 +15669,22 @@ const server = http.createServer(async (req, res) => {
       } else if (pathname === '/api/bg/pack-capacity' && req.method === 'GET') {
         // 합포장 배지용 용량표 — 로그인만 필요 (조회 전용)
         try { data = await giftPackCapacity(parsed.query.refresh === '1'); }
+        catch (e) {
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/bg/partner-orders' && req.method === 'GET') {
+        // 제휴 채널(웅진 등) 미등록 주문 미리보기 — 저장하지 않는다.
+        try { data = await giftPartnerRegister({ dryRun: true, force: parsed.query.refresh === '1' }); }
+        catch (e) {
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/bg/partner-orders/register' && req.method === 'POST') {
+        // 실제 등록 — 미리보기에서 확인한 건들을 수기주문으로 만든다 (이미 등록된 건은 건너뜀).
+        try { data = await giftPartnerRegister({ dryRun: false, force: true }); }
         catch (e) {
           res.writeHead(502, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: e.message }));
