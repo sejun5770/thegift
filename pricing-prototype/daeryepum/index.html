@@ -21847,12 +21847,14 @@ async function loadPartnerOrders() {
         + (reasonLines.length ? `\n\n건너뜀:\n${reasonLines.join('\n')}` : ''));
       return;
     }
-    const preview = planned.slice(0, 12)
-      .map(p => `  ${p.ship_date}  ${p.channel}  ${p.name || ''}  ${p.product_code} ${p.quantity}개 × ${Number(p.unit_price).toLocaleString()}원 = ${Number(p.amount).toLocaleString()}원`)
+    const preview = planned.slice(0, 10)
+      .map(p => `  ${p.ship_date}  ${p.channel}  ${p.name || ''}  ${p.product_code} ${p.quantity}개 × ${Number(p.unit_price).toLocaleString()}원 = ${Number(p.amount).toLocaleString()}원`
+        + `\n      스티커: ${p.sticker || '(없음)'}  ·  문구: ${String(p.message || '(없음)').replace(/\s+/g, ' ').slice(0, 40)}`)
       .join('\n');
     const msg = `제휴 주문 ${planned.length}건을 매출로 등록합니다.\n`
       + `합계 ${Number(d.amount).toLocaleString()}원 (매출 날짜 = 희망출고일)\n\n`
-      + preview + (planned.length > 12 ? `\n  … 외 ${planned.length - 12}건` : '')
+      + preview + (planned.length > 10 ? `\n  … 외 ${planned.length - 10}건` : '')
+      + ((d.no_sticker || d.no_message) ? `\n\n※ 스티커 없음 ${d.no_sticker || 0}건 · 문구 없음 ${d.no_message || 0}건 (그대로 등록됩니다)` : '')
       + (already ? `\n\n이미 등록된 ${already}건은 건너뜁니다.` : '')
       + (reasonLines.length ? `\n\n⚠️ 아래는 등록되지 않습니다:\n${reasonLines.join('\n')}` : '')
       + `\n\n진행할까요?`;
