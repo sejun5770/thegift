@@ -1489,8 +1489,10 @@ async function _ensureStubForManualOrder(mo, { force = false, stickerMap = null 
     const stickerInfo = codeKey ? stickerMap.get(codeKey) : null;
     // 문구 — sticker_note (K열 추가입력옵션) 을 custom_values.text 로 매핑 → 정보입력현황 문구 컬럼 노출
     const noteText = String(it.sticker_note || '').trim();
-    // custom_options — 수집복사가 K/L 열을 이 값에서 뽑음 (그룹명 순서로 firstGroupOpt/secondGroupOpt).
-    //   수건 등 자유옵션 2개 있는 상품은 두 code 를 그룹으로 저장 → 수집복사 K/L 모두 정상.
+    // custom_options 의 '품목1'·'품목2' — 자유 옵션이 아니라 이 주문의 품목코드 그 자체다.
+    //   수집복사는 이 두 이름을 특별 취급해 K/L(품목코드1·2) 로만 쓰고, O열(자유 옵션)에서는 뺀다.
+    //   이름을 바꾸려면 index.html 의 STUB_ITEM_GROUPS 도 함께 고쳐야 한다 —
+    //   안 그러면 상품코드가 O열에 한 번 더 찍힌다.
     const customOptions = {};
     if (it.product_code) customOptions['품목1'] = { code: it.product_code, name: it.product_name || it.product_code };
     if (it.product_code_2) customOptions['품목2'] = { code: it.product_code_2, name: '' };

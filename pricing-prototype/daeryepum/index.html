@@ -24589,7 +24589,16 @@ function copyBgUnified() {
     //   예전엔 자유 옵션도 K열을 덮어썼는데, 그러면 답례품 상품코드가 사라진다.
     //   (수건 색상은 이제 몰 구성품으로 들어오므로 자유 옵션이 K를 덮을 이유가 없다.)
     const compList = _frontOpts.map(o => ({ code: o.code || '', name: o.name || o.code || '', label: '' }));
-    const selKeys = Object.keys(customOpts);
+    // 마켓/더기프트 stub 이 만드는 '품목1'·'품목2' 는 자유 옵션이 아니라 품목코드 그 자체다
+    //   (store.buildStubSelections 가 product_code / product_code_2 를 이 이름으로 넣는다).
+    //   자유 옵션과 섞으면 상품코드가 O열에 한 번 더 찍힌다 → K/L 폴백으로만 쓰고 목록에서 뺀다.
+    const STUB_ITEM_GROUPS = ['품목1', '품목2'];
+    const stubItemCode = (g) => {
+      const v = customOpts[g];
+      if (!v) return '';
+      return String((typeof v === 'string' ? v : v.code) || '').trim();
+    };
+    const selKeys = Object.keys(customOpts).filter(k => !STUB_ITEM_GROUPS.includes(k));
     const psEntry = bgProductSettings.find(p => p.product_id === baseCode || p.product_id === rawCodeForLookup);
     const psCustomKeys = (psEntry && psEntry.custom_options && typeof psEntry.custom_options === 'object' && !Array.isArray(psEntry.custom_options))
       ? Object.keys(psEntry.custom_options) : [];
@@ -24617,11 +24626,14 @@ function copyBgUnified() {
     //   (TGJBK09O7_A → TGJBK09O7 = 솔리드 뱀부 진청) 그대로 내보내면
     //   그럴듯하지만 틀린 원물이 시트에 들어간다 → 원본 세트코드를 그대로 남겨 눈에 띄게 한다.
     const isSetProduct = /\(\s*\d+\s*구\s*\)|세트/.test(String(sel?.product_name || product_name || ''));
-    const kFallback = (isSetProduct && rawCodeForLookup && rawCodeForLookup !== baseCode)
-      ? rawCodeForLookup : baseCode;
+    //   stub 의 '품목1' 은 마켓 주문의 품목코드다 — 구성품이 없을 때 baseCode 보다 우선한다
+    //   (마켓은 상품코드가 상품설정과 다를 수 있어 stub 이 실제 코드를 들고 있다).
+    const kFallback = stubItemCode('품목1')
+      || ((isSetProduct && rawCodeForLookup && rawCodeForLookup !== baseCode) ? rawCodeForLookup : baseCode);
     cells[10] = (optList[0] && optList[0].code) ? optList[0].code : kFallback;
-    // L열(index 11) = 품목코드2 — 옵션2 code (없으면 빈 값)
-    if (optList[1] && optList[1].code) cells[11] = optList[1].code;
+    // L열(index 11) = 품목코드2 — 구성품2, 없으면 stub 의 '품목2'
+    const lCode = (optList[1] && optList[1].code) ? optList[1].code : stubItemCode('품목2');
+    if (lCode) cells[11] = lCode;
 
     // M열(index 12) = 박스컬러 — TGJBK09O_ 세트: 옵션(그룹명/상품명) 기준 조합 판정.
     if (/^TGJBK09O\d+/i.test(baseCode)) {
