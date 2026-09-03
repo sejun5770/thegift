@@ -9128,7 +9128,9 @@ const server = http.createServer(async (req, res) => {
           // XERP 원본 재고 (MF01) — bar_shop1 복제본에 빠진 품목도 여기서 잡힌다.
           //   실패해도 화면이 죽지 않도록 폴백 (bar_shop1 값 사용).
           const xerpQty = new Map();
+          const poQty = new Map();
           let xerpError = null;
+          let poError = null;
           try {
             const xp = await getXerpPool();
             const codes = [...new Set(regRows.map(r => r.stock))];
@@ -9145,9 +9147,79 @@ const server = http.createServer(async (req, res) => {
             for (const row of (xr.recordset || [])) {
               xerpQty.set(row.item_code, { qty: Number(row.qty) || 0, breakdown: row.breakdown || '' });
             }
+
+            // 미입고 발주 잔량 (poOrderItem) — '가용재고 + 입고예정' 을 담당자가 함께 보게 한다.
+            //   OrderItemStatus: PA=발주(미입고) · PB=부분입고 · PC=입고완료.
+            //   잔량 = OrderQty − InQty (PC 는 잔량 0 이라 애초에 대상이 아니다).
+            //   창고는 재고와 같은 목록으로 거른다 — 다른 창고로 들어올 발주를 MF01 가용에
+            //   더하면 실제로 쓸 수 없는 수량이 잡힌다.
+            //
+            //   ⚠ 미마감 발주(유령)를 반드시 갈라 놓아야 한다 (2026-09-03 원장 확인).
+            //     답례품 미입고 20건 중 12건(98,654개)이 납기가 3개월 넘게 지났는데 InQty=0 이다.
+            //     예) TGJBK01B1 2025-11-26 발주 10,000 미입고 · TGJSD01O1 2026-03-25 발주 15,240 미입고.
+            //     실제로 안 들어오는 물량인데 ERP 에서 마감만 안 된 것으로, 이것을 가용에 더하면
+            //     담당자가 있지도 않은 재고를 믿고 발주를 거른다. 그래서 합계는 '유효' 만 쓰고
+            //     경과분은 따로 세어 화면에서 경고로 보여준다.
+            const staleDays = Math.max(1, parseInt(process.env.XERP_PO_STALE_DAYS || '90', 10) || 90);
+            const kstNow = new Date(Date.now() + 9 * 3600000);
+            const ymd8 = (d) => d.toISOString().slice(0, 10).replace(/-/g, '');
+            const staleBefore = ymd8(new Date(kstNow.getTime() - staleDays * 86400000));
+            const pr = await xp.request().query(`
+                SELECT LTRIM(RTRIM(i.ItemCode)) AS item_code,
+                       h.OrderDate AS order_date,
+                       i.DueDate   AS due_date,
+                       LTRIM(RTRIM(i.OrderNo)) AS order_no,
+                       LTRIM(RTRIM(i.WhCode))  AS wh_code,
+                       LTRIM(RTRIM(i.OrderItemStatus)) AS item_status,
+                       i.OrderQty AS order_qty,
+                       ISNULL(i.InQty, 0) AS in_qty
+                FROM poOrderItem i WITH (NOLOCK)
+                JOIN poOrderHeader h WITH (NOLOCK)
+                  ON h.OrderNo = i.OrderNo AND h.SiteCode = i.SiteCode
+                WHERE LTRIM(RTRIM(i.OrderItemStatus)) IN ('PA','PB')
+                  AND i.OrderQty > ISNULL(i.InQty, 0)
+                  AND LTRIM(RTRIM(i.WhCode)) IN (${XERP_WAREHOUSES.map(w => `'${w}'`).join(',')})
+                  AND LTRIM(RTRIM(i.ItemCode)) IN (${codes.map(c => `'${c}'`).join(',')})
+                ORDER BY i.DueDate
+              `);
+            for (const row of (pr.recordset || [])) {
+              const code = row.item_code;
+              const remain = (Number(row.order_qty) || 0) - (Number(row.in_qty) || 0);
+              if (remain <= 0) continue;
+              const due = String(row.due_date || '').trim();
+              // 납기가 staleDays 넘게 지났으면 '유령 의심' — 합계에서 뺀다.
+              const stale = !!due && due < staleBefore;
+              if (!poQty.has(code)) poQty.set(code, { total: 0, live: 0, stale: 0, lines: [], nextDue: null });
+              const rec = poQty.get(code);
+              rec.total += remain;
+              if (stale) rec.stale += remain;
+              else {
+                rec.live += remain;
+                if (due && (!rec.nextDue || due < rec.nextDue)) rec.nextDue = due;
+              }
+              if (rec.lines.length < 20) {
+                rec.lines.push({
+                  order_no: row.order_no,
+                  order_date: String(row.order_date || '').trim() || null,
+                  due_date: due || null,
+                  wh_code: row.wh_code,
+                  status: row.item_status,          // PA=발주 · PB=부분입고
+                  order_qty: Number(row.order_qty) || 0,
+                  in_qty: Number(row.in_qty) || 0,
+                  remain_qty: remain,
+                  stale,
+                });
+              }
+            }
           } catch (e) {
-            xerpError = e.message;
-            console.error('[daeryepum-stock] XERP 조회 실패 — bar_shop1 값 사용:', e.message);
+            // 재고 조회까지 성공했는지에 따라 어느 쪽 실패인지 갈린다 — 재고가 비어 있으면 재고 실패.
+            if (!xerpQty.size) {
+              xerpError = e.message;
+              console.error('[daeryepum-stock] XERP 조회 실패 — bar_shop1 값 사용:', e.message);
+            } else {
+              poError = e.message;
+              console.error('[daeryepum-stock] 발주 조회 실패 — 재고만 표시:', e.message);
+            }
           }
 
           // 품목코드 → 가장 최근 판매 단가
@@ -9208,6 +9280,8 @@ const server = http.createServer(async (req, res) => {
               return sum + (s ? s.qty * c.mult : 0);
             }, 0);
 
+            const poRec = poQty.get(r.stock_code) || { total: 0, live: 0, stale: 0, lines: [], nextDue: null };
+
             // 재고는 XERP 원본(MF01) 우선, 없으면 bar_shop1 복제본
             const xrec = xerpQty.get(r.stock_code);
             const hasXerp = !!xrec;
@@ -9262,6 +9336,16 @@ const server = http.createServer(async (req, res) => {
               current_qty: currentQty,
               available_qty: availableQty,
               stock_source: hasXerp ? 'xerp' : 'bar_shop1',
+              // 미입고 발주 — 가용재고에 더하지 않고 별도로 낸다 (화면에서 '가용 + 발주' 로 합산).
+              //   po_qty_live   납기가 아직 유효한 잔량 (합계에 쓰는 값)
+              //   po_qty_stale  납기 초과 미마감 잔량 — 실제로 안 들어올 가능성이 큰 물량
+              po_qty: poRec.total,
+              po_qty_live: poRec.live,
+              po_qty_stale: poRec.stale,
+              po_next_due: poRec.nextDue,
+              po_lines: poRec.lines,
+              // 발주까지 감안한 재고 — 담당자가 발주 여부를 판단하는 값
+              projected_qty: availableQty + poRec.live,
               // 로켓창고 재고 — 이 품목이 소진되는 판매코드들의 쿠팡 창고 수량 합 (061).
               //   coupang_qty 는 판매코드 개수(= 옵션수량 × 채널 판매단위).
               //   구성품 행이면 소요수량(mult)을 곱해 '원물 상당량' 도 함께 낸다.
@@ -9309,6 +9393,8 @@ const server = http.createServer(async (req, res) => {
             registered: regItems.length,
             stock_warehouse: XERP_WAREHOUSE,
             xerp_error: xerpError,
+            po_error: poError,
+            po_stale_days: Math.max(1, parseInt(process.env.XERP_PO_STALE_DAYS || '90', 10) || 90),
             summary: {
               total: items.length,
               from_xerp: items.filter(x => x.stock_source === 'xerp').length,
@@ -9317,6 +9403,11 @@ const server = http.createServer(async (req, res) => {
               soldout: items.filter(x => x.available_qty <= 0).length,
               urgent_30d: items.filter(x => x.days_to_soldout !== null && x.days_to_soldout <= 30).length,
               total_stock_value: items.reduce((s, x) => s + (Number(x.stock_value) || 0), 0),
+              // 입고예정 — 발주 잔량 합계. 유효분과 납기초과분을 갈라서 낸다.
+              po_items: items.filter(x => x.po_qty > 0).length,
+              po_qty_live: items.reduce((s, x) => s + (Number(x.po_qty_live) || 0), 0),
+              po_qty_stale: items.reduce((s, x) => s + (Number(x.po_qty_stale) || 0), 0),
+              po_stale_items: items.filter(x => x.po_qty_stale > 0).length,
               // 품목코드 dedup 후 합계 — 한 품목코드가 두 ERP코드에 걸려도 이중계상 안 됨
               total_sales_30d: dedupSales30d,
               // 로켓창고 재고가 붙은 품목 수 — 0 이면 아직 동기화 전이거나 매핑이 없다

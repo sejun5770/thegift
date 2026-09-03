@@ -2818,6 +2818,8 @@ nav.nav-loading a[href^="#"] {
           <th style="text-align:left;padding:8px 12px;border-bottom:1px solid var(--gray-200)">상품명</th>
           <th style="text-align:center;padding:8px 12px;border-bottom:1px solid var(--gray-200)">구분</th>
           <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="창고이동 제외 가용재고 — 마우스를 올리면 창고별 내역">가용 재고</th>
+          <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="XERP 개별발주 중 아직 입고되지 않은 수량 (발주량 − 입고량). 재고와 같은 창고로 들어올 발주만 셉니다. 마우스를 올리면 발주별 내역이 나옵니다.">발주 잔량</th>
+          <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="가용 재고 + 발주 잔량 — 발주가 예정대로 들어왔을 때의 재고입니다. 납기가 크게 지난 미마감 발주는 합산에서 제외됩니다.">가용+발주</th>
           <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="로켓창고(쿠팡 물류센터)의 주문가능 수량. 판매코드 개수 기준이며 채널 판매단위가 반영된 값입니다. 갱신은 '쿠팡재고 갱신' 버튼으로 합니다.">쿠팡창고</th>
           <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="현재 판매가 — 매출코드의 가장 최근 실판매 단가 (0원 세트 구성품 라인 제외)">판매가</th>
           <th style="text-align:right;padding:8px 12px;border-bottom:1px solid var(--gray-200)" title="가용 재고 × 판매가">재고 자산</th>
@@ -16782,6 +16784,9 @@ async function loadDaeryepumStock() {
       <span style="padding:4px 10px;background:#dcfce7;color:#166534;border-radius:4px;font-weight:600">재고 있음 ${s.with_stock || 0}개</span>
       <span style="padding:4px 10px;background:#fef3c7;color:#92400e;border-radius:4px;font-weight:600">⚠️ 30일 내 소진 ${s.urgent_30d || 0}개</span>
       <span style="padding:4px 10px;background:#fee2e2;color:#991b1b;border-radius:4px;font-weight:600">❌ 소진 ${s.soldout || 0}개</span>
+      ${s.po_qty_live ? `<span style="padding:4px 10px;background:#ccfbf1;color:#0f766e;border-radius:4px;font-weight:600" title="아직 입고되지 않은 발주 수량의 합계입니다 (${s.po_items || 0}개 품목). 재고와 같은 창고로 들어올 발주만 셉니다.">📦 입고예정 ${fmtNum(s.po_qty_live)}개 <span style="opacity:.75;font-size:11px">· ${s.po_items || 0}품목</span></span>` : ''}
+      ${s.po_qty_stale ? `<span style="padding:4px 10px;background:#fef3c7;color:#b45309;border-radius:4px;font-weight:600" title="납기가 ${d.po_stale_days || 90}일 넘게 지났는데 입고 기록이 없는 발주입니다 (${s.po_stale_items || 0}개 품목). 실제로 들어오지 않을 가능성이 커 '가용+발주' 합계에서 뺐습니다 — ERP에서 마감 여부를 확인해 주세요.">⚠️ 미마감 발주 ${fmtNum(s.po_qty_stale)}개 <span style="opacity:.75;font-size:11px">· ${s.po_stale_items || 0}품목</span></span>` : ''}
+      ${d.po_error ? `<span style="padding:4px 10px;background:#fee2e2;color:#991b1b;border-radius:4px" title="${esc(d.po_error)}">발주 조회 실패 — 재고만 표시</span>` : ''}
       <span style="padding:4px 10px;background:#f1f5f9;color:#0f172a;border-radius:4px;font-weight:600" title="가용 재고 × 단가 합계">💰 재고 자산 ${fmtNum(s.total_stock_value || 0)}원</span>
       <span style="padding:4px 10px;background:#f1f5f9;color:#0f172a;border-radius:4px;font-weight:600" title="TOTAL_SALE_PRICE_30_DAY 합계">📈 30일 매출 ${fmtNum(s.total_sales_30d || 0)}원</span>
     `;
@@ -16872,6 +16877,8 @@ function _stockItemRow(it) {
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100)">${esc(it.product_name || '-')}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center;font-size:10px;color:var(--gray-500);white-space:nowrap">${it.is_com ? '위탁' : '자체'}<br>${_stockKindBadge(it)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;${it.available_qty <= 0 ? 'color:#dc2626;font-weight:600' : ''}"${it.stock_breakdown ? ` title="창고별: ${esc(it.stock_breakdown)}"` : ''}>${fmtNum(it.available_qty)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${_stockPoCell(it)}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${_stockProjectedCell(it)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${_stockCoupangCell(it)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;color:var(--gray-600)">${_stockSalePriceCell(it)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right;font-weight:600">${it.stock_value === null ? '<span style="color:var(--gray-400)">-</span>' : fmtNum(it.stock_value)}</td>
@@ -16891,6 +16898,55 @@ function _stockItemRow(it) {
  *   자사 창고와 섞이지 않게 색을 달리한다. 매핑이 없으면 '-' 로 조용히 비운다 —
  *   쿠팡에 안 파는 품목이 대부분이라 경고로 표시하면 화면이 온통 노랗게 된다.
  */
+/** 'YYYYMMDD' → 'YYYY-MM-DD' (XERP 날짜는 8자리 문자열) */
+function _poDate(s) {
+  const t = String(s || '').trim();
+  return /^\d{8}$/.test(t) ? `${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6)}` : (t || '-');
+}
+
+const PO_STATUS_LABEL = { PA: '발주', PB: '부분입고' };
+
+/**
+ * 발주 잔량 셀 — 아직 입고되지 않은 발주 수량.
+ *   유효분(live)을 크게 보여주고, 납기가 크게 지난 미마감분(stale)은 따로 회색 경고로 붙인다.
+ *   둘을 더해 한 숫자로 보여주면 안 된다: 답례품 미입고 물량의 절반 이상이 1년 가까이
+ *   납기가 지난 미마감 발주라, 합치면 있지도 않은 입고예정이 잡힌다 (2026-09-03 원장 확인).
+ */
+function _stockPoCell(it) {
+  const live = Number(it.po_qty_live) || 0;
+  const stale = Number(it.po_qty_stale) || 0;
+  if (!live && !stale) return '<span style="color:var(--gray-300)">-</span>';
+
+  const lines = (it.po_lines || []).map(l =>
+    `${_poDate(l.order_date)} 발주 · 납기 ${_poDate(l.due_date)}`
+    + ` · 잔량 ${fmtNum(l.remain_qty)}개 (발주 ${fmtNum(l.order_qty)} / 입고 ${fmtNum(l.in_qty)})`
+    + ` · ${PO_STATUS_LABEL[l.status] || l.status} · ${l.wh_code}`
+    + (l.stale ? '  ⚠ 납기 초과 미마감' : ''));
+  if ((it.po_lines || []).length >= 20) lines.push('… (20건까지만 표시)');
+
+  const parts = [];
+  if (live) {
+    parts.push(`<span style="color:#0f766e;font-weight:600">+${fmtNum(live)}</span>`);
+    if (it.po_next_due) {
+      parts.push(`<br><span style="font-size:9px;color:var(--gray-500)">납기 ${_poDate(it.po_next_due)}</span>`);
+    }
+  }
+  if (stale) {
+    parts.push(`${live ? '<br>' : ''}<span style="font-size:9px;color:#b45309" `
+      + `title="납기가 지났는데 입고 기록이 없는 발주입니다. 실제로 들어오지 않을 가능성이 커 '가용+발주' 합계에서 뺐습니다. ERP에서 마감 여부를 확인해 주세요.">`
+      + `⚠ 미마감 ${fmtNum(stale)}</span>`);
+  }
+  return `<span title="${esc(lines.join(String.fromCharCode(10)))}">${parts.join('')}</span>`;
+}
+
+/** 가용 + 발주(유효분) — 발주가 예정대로 들어왔을 때의 재고 */
+function _stockProjectedCell(it) {
+  const live = Number(it.po_qty_live) || 0;
+  const avail = Number(it.available_qty) || 0;
+  if (!live) return `<span style="color:var(--gray-400)">${fmtNum(avail)}</span>`;
+  return `<span style="font-weight:600" title="가용 ${fmtNum(avail)} + 발주 잔량 ${fmtNum(live)}">${fmtNum(avail + live)}</span>`;
+}
+
 function _stockCoupangCell(it) {
   const cp = it.coupang_stock;
   if (!cp) return '<span style="color:var(--gray-300)">-</span>';
@@ -18158,7 +18214,8 @@ async function sendStockAlertNow() {
 
 function downloadStockCsv() {
   if (!_stockData.length) { alert('데이터가 없습니다.'); return; }
-  const headers = ['재고코드', '매출코드', '소진 기준', '상품명', '구분', '재고조회 성공', '가용 재고', '쿠팡창고',
+  const headers = ['재고코드', '매출코드', '소진 기준', '상품명', '구분', '재고조회 성공', '가용 재고',
+                   '발주 잔량', '미마감 발주', '최근 납기', '가용+발주', '쿠팡창고',
                    '판매가', '판매가 기준일', '재고 자산', '30일 판매', '30일 소진', '30일 매출액', '일평균', '소진 예상일수'];
   const lines = [headers.join(',')];
   for (const it of _stockData) {
@@ -18169,6 +18226,10 @@ function downloadStockCsv() {
       it.is_com ? '위탁' : '자체',
       it.stock_found ? 'Y' : 'N',
       it.available_qty,
+      it.po_qty_live || 0,
+      it.po_qty_stale || 0,
+      it.po_next_due ? _poDate(it.po_next_due) : '',
+      (Number(it.available_qty) || 0) + (Number(it.po_qty_live) || 0),
       it.coupang_stock ? it.coupang_stock.qty : '',
       it.sale_price ?? '', it.sale_price_date ? String(it.sale_price_date).slice(0, 10) : '', it.stock_value,
       it.sales_qty_30d, it.consume_qty_30d, it.sales_amount_30d,
