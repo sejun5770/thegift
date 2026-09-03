@@ -1180,7 +1180,10 @@ async function giftPartnerRows(force = false) {
     const h = raw[hi];
     const col = lbl => h.findIndex(v => String(v).trim() === lbl);
     const C = { order: col('주문번호'), name: col('성함'), phone: col('연락처1'), addr: col('수령지(도로명)'),
-      pname: col('상품명'), code: col('품목코드1'), qty: col('주문수량'), ship: col('희망출고일') };
+      pname: col('상품명'), code: col('품목코드1'), qty: col('주문수량'), ship: col('희망출고일'),
+      msg: col('입력메시지'), dmsg: col('배송메세지1'), box: col('박스컬러') };
+    // 스티커타입 칸은 여러 개다 (N/O/P) — 이름이 같아 전부 모은다.
+    const stickerCols = h.map((v, i) => (String(v).trim() === '스티커타입' ? i : -1)).filter(i => i >= 0);
     if (C.order < 0 || C.code < 0 || C.qty < 0) continue;
     const get = (r, i) => (i >= 0 && i < r.length) ? String(r[i] ?? '').trim() : '';
     for (const r of raw.slice(hi + 1)) {
@@ -1191,12 +1194,27 @@ async function giftPartnerRows(force = false) {
       const qty = parseInt(String(get(r, C.qty)).replace(/[^\d]/g, ''), 10);
       const shipRaw = get(r, C.ship);
       const dm = shipRaw.match(/^(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+      // 스티커타입 — 시트 표기는 '코드(수량개)' 또는 '코드 (수량개)'. 수량이 없으면 주문수량으로 본다.
+      const stickers = [];
+      for (const si of stickerCols) {
+        const raw = get(r, si);
+        if (!raw) continue;
+        const m = raw.match(/^([A-Za-z0-9_]+)\s*(?:\(\s*(\d+)\s*개?\s*\))?/);
+        if (!m) continue;
+        const sq = m[2] ? parseInt(m[2], 10) : null;
+        stickers.push({ code: m[1], qty: Number.isFinite(sq) ? sq : (Number.isFinite(qty) ? qty : 0), raw });
+      }
       rows.push({
         channel, sheet: tab.name, order_id: orderId,
         name: get(r, C.name), phone: get(r, C.phone), address: get(r, C.addr),
         product_name: get(r, C.pname), product_code: get(r, C.code),
         quantity: Number.isFinite(qty) ? qty : 0,
         ship_date: dm ? `${dm[1]}-${String(dm[2]).padStart(2, '0')}-${String(dm[3]).padStart(2, '0')}` : '',
+        stickers,
+        // 입력메시지는 여러 줄이다 (시트에서 줄바꿈 그대로) — 원문을 보존한다.
+        message: get(r, C.msg),
+        delivery_msg: get(r, C.dmsg),
+        box_code: get(r, C.box),
       });
     }
   }
@@ -1241,6 +1259,7 @@ async function giftPartnerRegister({ dryRun = true, force = false } = {}) {
       recv_name: r.name || null,
       recv_hphone: r.phone || null,
       recv_address: r.address || null,
+      recv_msg: r.delivery_msg || null,
       order_date: `${r.ship_date}T00:00:00+09:00`,   // 매출 날짜 = 희망출고일
       settle_price: amount,
       status_seq: 4,
@@ -1253,12 +1272,20 @@ async function giftPartnerRegister({ dryRun = true, force = false } = {}) {
         quantity: r.quantity,
         unit_price: price,
         item_amount: amount,
-        stickers: [], box_code: '', product_code_2: '', vendor: null,
+        // 스티커·문구도 시트에서 가져온다 — stub 이 stickers[0].code 로 스티커를,
+        //   sticker_note 로 문구(custom_values.text)를 채운다.
+        stickers: (r.stickers || []).map(s => ({ code: s.code, qty: s.qty })),
+        sticker_note: r.message || '',
+        box_code: r.box_code || '', product_code_2: '', vendor: null,
       }],
       created_by: 'partner-collect',
     };
     out.planned.push({ order_id: r.order_id, channel: r.channel, product_code: r.product_code,
-      quantity: r.quantity, unit_price: price, amount, ship_date: r.ship_date, name: r.name });
+      quantity: r.quantity, unit_price: price, amount, ship_date: r.ship_date, name: r.name,
+      sticker: (r.stickers || []).map(s => s.raw).join(' / '),
+      message: r.message || '' });
+    if (!(r.stickers || []).length) out.no_sticker = (out.no_sticker || 0) + 1;
+    if (!r.message) out.no_message = (out.no_message || 0) + 1;
     out.amount += amount;
     if (!dryRun) {
       // bulkCreateManualOrders 를 쓴다 — createManualOrder 만 부르면 정보입력현황 stub 이
