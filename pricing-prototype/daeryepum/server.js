@@ -3031,10 +3031,13 @@ async function apiProductRanking(query = {}) {
         //   어느 채널에서 팔린 건지 구분이 안 된다 (운영 요청 2026-08-12).
         //   매입/위탁도 갈라 본다 (076) — 위탁은 우리가 만들지 않는 매출이라 같은 줄에 두면
         //   상품별 판매현황에서 자체 제작분이 부풀려 보인다.
+        // 제휴 채널(웅진 등)은 더기프트가 아니다 — 같은 섹션에 두면 어디서 팔린 건지 알 수 없다.
+        //   bgPartnerSite 가 site_name 이 '바른손더기프트' 가 아닐 때 채널명을 준다.
+        const partner = bgPartnerSite(mo);
         const isVen = bgIsVendorItem(mo, it);
         addEntry(gName || it.product_name, qty, amt,
-          isVen ? BG_SITE_VENDOR : BG_SITE_OWN,
-          isVen ? 'own:thegift_vendor' : 'own:thegift', mSpec);
+          partner || (isVen ? BG_SITE_VENDOR : BG_SITE_OWN),
+          partner ? `partner:${partner}` : (isVen ? 'own:thegift_vendor' : 'own:thegift'), mSpec);
       }
     }
   } catch (e) {
