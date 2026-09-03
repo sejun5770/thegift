@@ -1260,7 +1260,18 @@ async function giftPartnerRegister({ dryRun = true, force = false } = {}) {
     out.planned.push({ order_id: r.order_id, channel: r.channel, product_code: r.product_code,
       quantity: r.quantity, unit_price: price, amount, ship_date: r.ship_date, name: r.name });
     out.amount += amount;
-    if (!dryRun) { await bgStore.createManualOrder(payload); out.created++; }
+    if (!dryRun) {
+      // bulkCreateManualOrders 를 쓴다 — createManualOrder 만 부르면 정보입력현황 stub 이
+      //   생기지 않아 주문조회에만 뜨고 작업 목록에는 안 나온다.
+      //   _desired_ship_date 를 넘겨 stub 의 희망출고일을 시트 값으로 채운다.
+      const res = await bgStore.bulkCreateManualOrders([{ ...payload, _desired_ship_date: r.ship_date }], {});
+      if (!res || !res.success) { why(`등록 실패: ${(res && res.details && res.details[0] && res.details[0].reason) || '알 수 없음'}`); continue; }
+      out.created++;
+      // 시트에 이미 올라와 있는 주문 = 수집이 끝난 건이다. 운영이 다시 수집처리를 누를 이유가 없어
+      //   등록과 동시에 수집완료로 표시한다 (실패해도 주문 자체는 남는다).
+      try { await bgStore.setProcessed(r.order_id, { processed: true, processed_by: 'partner-collect' }); }
+      catch (e) { console.warn(`[partner-collect] ${r.order_id} 수집처리 실패 (주문은 등록됨):`, e.message); }
+    }
   }
   return out;
 }
