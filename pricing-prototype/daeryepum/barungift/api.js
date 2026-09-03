@@ -48,6 +48,77 @@ function stripVariantSuffix(code) {
  *   3순위: 그 base 의 base (이중 변형 'A_B_S' → 'A_B' → 'A', 최대 3 단계)
  * admin 이 base 코드로 등록한 매핑이 모든 변형에 자동 적용되도록.
  */
+// ── ETC 세트 옵션 행 해석 (server.js isEtcOptionRow / inferSetQty 와 같은 규칙) ──────────
+//   card_opt = 부모 아이템 card_seq 를 가리키는 옵션(구성품) 행. 자기 자신을 가리키면 부모(B2B 몰 경로).
+const TOWEL_OPTION_CODE = /^TGJBK09O\d+/i;
+function isEtcOptionRow(r) {
+  if (r.card_opt == null) return false;
+  const opt = String(r.card_opt).trim();
+  if (!opt || opt === '0') return false;
+  return opt !== String(r.card_seq ?? '');
+}
+/** 부모 행이 없는 옵션들이 가리키는 세트 card_seq (숫자만). */
+function collectMissingSetSeqs(records) {
+  const parents = new Set(records.filter(r => !isEtcOptionRow(r) && r.card_seq != null).map(r => String(r.card_seq)));
+  const out = new Set();
+  for (const r of records) {
+    if (!isEtcOptionRow(r)) continue;
+    const opt = String(r.card_opt).trim();
+    if (!parents.has(opt) && /^\d+$/.test(opt)) out.add(opt);
+  }
+  return [...out];
+}
+/** 세트 수량 유추 — 수건 아닌 구성품이 있으면 그 최대 수량, 수건만이면 '2구' 는 최대·아니면 합. */
+function inferSetQty(options, setName) {
+  const towels = options.filter(o => TOWEL_OPTION_CODE.test(String(o.code || '')));
+  const others = options.filter(o => !towels.includes(o));
+  const qty = o => Number(o.qty) || 0;
+  if (others.length) return Math.max(...others.map(qty));
+  if (!towels.length) return 0;
+  return /2구/.test(String(setName || '')) ? Math.max(...towels.map(qty)) : towels.reduce((a, o) => a + qty(o), 0);
+}
+/**
+ * 부모 행이 없는 답례품 세트를 구성품 행에서 합성 — B2B 몰(bhands_b2b)은 0원 세트 행을 쓰지 않는다 (주문 3250185).
+ *   setBySeq: Map(card_seq → { code, name }) — 답례품 필터를 통과한 세트만 (식권 그룹 등은 빠진다).
+ *   반환: products 에 넣을 항목 배열 (id 'set-<card_seq>', _card_seq 로 사은품 연결 가능).
+ */
+function synthesizeEtcSetProducts(records, setBySeq) {
+  const groups = new Map();
+  for (const r of records) {
+    if (!isEtcOptionRow(r)) continue;
+    const opt = String(r.card_opt).trim();
+    if (!setBySeq.has(opt)) continue;
+    if (!groups.has(opt)) groups.set(opt, []);
+    groups.get(opt).push({ code: r.Card_Code || '', qty: r.item_count || 0, price: Number(r.item_sale_price) || 0 });
+  }
+  const out = [];
+  for (const [seq, opts] of groups) {
+    const set = setBySeq.get(seq);
+    const quantity = inferSetQty(opts, set.name) || 1;
+    // 세트 단가 = 유료 구성품 단가 합 (0원 세트 행 대신 구성품에 값이 붙는다)
+    const item_price = opts.reduce((a, o) => a + o.price, 0);
+    out.push({
+      id: `set-${seq}`, product_id: null,
+      product_name: set.name || '답례품', product_code: set.code || null,
+      quantity, item_price, _card_seq: seq, addons: [],
+      _synthesized: true,
+    });
+  }
+  return out;
+}
+/** 세트 상품 조회 — 답례품 필터(DAERYEPUM_WHERE)에 걸리는 것만. */
+async function lookupEtcSetProducts(pool, seqs) {
+  const ids = seqs.map(x => parseInt(x, 10)).filter(n => Number.isInteger(n) && n > 0).slice(0, 200);
+  const map = new Map();
+  if (!ids.length) return map;
+  const r = await pool.request().query(`
+    SELECT c.Card_Seq, c.Card_Code, c.Card_Name
+    FROM S2_Card c WITH (NOLOCK)
+    WHERE c.Card_Seq IN (${ids.join(',')}) AND ${DAERYEPUM_WHERE}`);
+  for (const x of r.recordset) map.set(String(x.Card_Seq), { code: x.Card_Code || '', name: String(x.Card_Name || '').replace(/^\[.*?\]\s*/g, '') });
+  return map;
+}
+
 async function lookupProductSettings(code) {
   if (!code) return null;
   let ps = await store.getProductSettings(code);
@@ -360,10 +431,11 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const seenItems = new Set();
       const products = [];
       for (const r of result.recordset) {
-        // 옵션 라인(card_opt≠null: 비용변동 옵션, 예 주방세제/수건) 은 프론트에서 이미 선택됨 →
-        //   order-info 에선 스티커/출고일 대상에서 제외. 부모(세트/메인, card_opt=null) 만 노출.
+        // 옵션 라인(card_opt = 부모 card_seq: 비용변동 옵션, 예 주방세제/수건) 은 프론트에서 이미 선택됨 →
+        //   order-info 에선 스티커/출고일 대상에서 제외. 부모(세트/메인) 만 노출.
+        //   card_opt 가 자기 자신을 가리키는 행은 부모다 (B2B 몰 경로, 주문 3250164).
         //   card_opt 은 ETC 전용 컬럼 (CARD 주문은 SELECT 에 없어 undefined → 제외 안 됨, 정상).
-        if (r.card_opt != null) continue;
+        if (isEtcOptionRow(r)) continue;
         const itemId = String(r.item_id || r.order_seq);
         if (seenItems.has(itemId)) continue;
         seenItems.add(itemId);
@@ -378,6 +450,17 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
           addons: [],
         });
       }
+      // 부모 행이 없는 답례품 세트 — B2B 몰 경로는 0원 세트 행 없이 구성품 행만 남긴다 (주문 3250185).
+      //   세트 상품을 S2_Card 에서 찾아 부모로 세운다. 못 찾으면(식권 그룹 등) 그대로 둔다.
+      if (isEtc) {
+        const missing = collectMissingSetSeqs(result.recordset);
+        if (missing.length) {
+          try {
+            const setBySeq = await lookupEtcSetProducts(pool, missing);
+            products.push(...synthesizeEtcSetProducts(result.recordset, setBySeq));
+          } catch (e) { console.warn('[order-info] 세트 상품 조회 실패 (부모 합성 생략):', e.message); }
+        }
+      }
       // 무료 사은품(추석 미니엽서 등) — 몰 프론트에서 고른 0원 옵션 라인을 부모 상품에 붙인다.
       //   고객은 여기서 바꿀 수 없고 무엇을 골랐는지 확인만 한다.
       //   유료 옵션(수건·핸드워시 등 세트 구성품)은 상품 자체의 구성이라 여기 넣지 않는다.
@@ -385,7 +468,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         const byCardSeq = new Map();
         for (const p of products) if (p._card_seq) byCardSeq.set(p._card_seq, p);
         for (const r of result.recordset) {
-          if (r.card_opt == null) continue;
+          if (!isEtcOptionRow(r)) continue;
           if ((Number(r.item_sale_price) || 0) !== 0) continue;   // 유료 = 구성품
           const parent = byCardSeq.get(String(r.card_opt)) || products[0];
           if (!parent) continue;
@@ -396,7 +479,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
             quantity: r.item_count || 0,
           });
         }
-        for (const p of products) delete p._card_seq;
+        for (const p of products) { delete p._card_seq; delete p._synthesized; }
       }
 
       // 상품별 스티커 / 박스옵션 / 자유옵션그룹 / 장식명칭 / 출고일그룹 매핑 + 합집합 계산
