@@ -1952,6 +1952,8 @@ async function apiOrders(query) {
           source: 'coupang',
           coupang_status: r.status,
           coupang_shipment_box_id: r.shipment_box_id,
+          // 구매확정(매출인식)일 (080) — 정산현황 백필·동기화가 채운 값. 미확정이면 null.
+          confirmed_at: r.confirmed_at || null,
           // 주문자명/받는사람 — 쿠팡은 받는사람만 있음
           display_name: r.recv_name || '',
         }));
@@ -12516,6 +12518,44 @@ const server = http.createServer(async (req, res) => {
           includeAllStatus: !!body.include_all_status,   // true 이면 취소 제외 전체 대상
           alsoUpdateStatus: !!body.also_update_status,   // true 이면 detail 응답 status 로 우리 DB 도 정정
         });
+      } else if (pathname === '/api/coupang/backfill-confirmed-at' && req.method === 'POST') {
+        // 쿠팡 구매확정일 소급 (080) — 정산현황(매출내역 조회 API) 매출인식일을 기간으로 훑어 채운다.
+        //   body: { days_back?: number (기본 45, 최대 400), end_date?: 'yyyy-MM-dd' (기본 전일) }
+        //   response: { window, segments, pages, sales_rows, keys, candidates, updated, unmatched, failed }
+        logAdminAccess(session, req, 'coupang-backfill-confirmed', {});
+        const body = await new Promise((resolve) => {
+          let raw = ''; req.on('data', c => raw += c);
+          req.on('end', () => {
+            try { resolve(raw ? JSON.parse(raw) : {}); } catch { resolve({}); }
+          });
+        });
+        const coupangSync = require('./coupang/sync');
+        data = await coupangSync.backfillConfirmedAt({
+          daysBack: parseInt(body.days_back) || 45,
+          endDate: body.end_date || null,
+        });
+      } else if (pathname === '/api/coupang/backfill-confirmed-at/upload' && req.method === 'POST') {
+        // 정산현황 > 매출내역 상세 엑셀 업로드로 구매확정일 채우기 (080) — API 키 없이도 즉시.
+        //   body: { file_base64, filename }
+        //   response: { parsed_rows, skipped, keys, candidates, updated, unmatched, failed }
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        const body = await new Promise((resolve) => {
+          let raw = ''; req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(raw ? JSON.parse(raw) : {}); } catch { resolve({}); } });
+        });
+        logAdminAccess(session, req, 'coupang-backfill-confirmed-upload', { filename: body.filename });
+        try {
+          if (!body.file_base64) throw new Error('파일이 없습니다');
+          const buf = Buffer.from(String(body.file_base64), 'base64');
+          if (!buf.length) throw new Error('빈 파일입니다');
+          data = await require('./coupang/sync').backfillConfirmedAtFromXlsx(buf);
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
       } else if (pathname === '/api/naver/sync-state') {
         // ?store=<id> 로 특정 스토어 조회. 미지정 시 모든 스토어 sync state 반환.
         const naverStore = require('./naver/store');
@@ -16961,6 +17001,58 @@ function scheduleNaverConfirmBackfill() {
   console.log(`[naver confirm-backfill] 매일 ${hh}:${mm} KST 실행 (끄려면 NAVER_CONFIRM_BACKFILL_DISABLED=1)`);
 }
 
+/**
+ * 쿠팡 구매확정일 백필 스케줄 (080) — 네이버와 같은 이유·같은 모양.
+ * 쿠팡 자동확정(매출인식)도 배송완료 며칠 뒤라 7일 동기화 창을 벗어난다. 정산현황(매출내역)을
+ * 최근 45일치 훑어 비어 있는 행을 채운다 (호출 몇 번이면 끝나 매일 돌려도 가볍다).
+ * 기본 04:20 KST, 끄려면 COUPANG_CONFIRM_BACKFILL_DISABLED=1, 시각은 COUPANG_CONFIRM_BACKFILL_TIME=HH:MM.
+ */
+function scheduleCoupangConfirmBackfill() {
+  if (process.env.COUPANG_CONFIRM_BACKFILL_DISABLED === '1') {
+    console.log('[coupang confirm-backfill] 비활성 (COUPANG_CONFIRM_BACKFILL_DISABLED=1)');
+    return;
+  }
+  if (!require('./coupang/api').isConfigured()) {
+    console.log('[coupang confirm-backfill] 쿠팡 API 키 미설정 — 건너뜀');
+    return;
+  }
+  const target = (() => {
+    const m = /^(\d{1,2}):(\d{1,2})$/.exec(process.env.COUPANG_CONFIRM_BACKFILL_TIME || '04:20');
+    if (!m) return 4 * 60 + 20;
+    const h = Number(m[1]), mi = Number(m[2]);
+    return (h >= 0 && h <= 23 && mi >= 0 && mi <= 59) ? h * 60 + mi : 4 * 60 + 20;
+  })();
+  let lastRunDate = null;
+  let running = false;
+
+  async function tick() {
+    if (running) return;
+    const kst = new Date(Date.now() + 9 * 3600 * 1000);
+    const today = kst.toISOString().slice(0, 10);
+    if (lastRunDate === today) return;
+    const nowMin = kst.getUTCHours() * 60 + kst.getUTCMinutes();
+    const delta = nowMin - target;
+    if (delta < 0 || delta > 10) return;
+    lastRunDate = today;
+    running = true;
+    try {
+      const r = await require('./coupang/sync').backfillConfirmedAt({ daysBack: 45 });
+      if (r.error) throw new Error(r.error);
+      console.log(`[coupang confirm-backfill] 완료 — 매출행 ${r.sales_rows} / 대상 ${r.candidates}`
+        + ` / 채움 ${r.updated} / 미매칭 ${r.unmatched}${r.failed ? ` / 실패 ${r.failed}` : ''}`);
+    } catch (e) {
+      console.error('[coupang confirm-backfill] 실패:', e.message);
+    } finally {
+      running = false;
+    }
+  }
+
+  setInterval(() => { tick().catch(() => {}); }, 60000);
+  const hh = String(Math.floor(target / 60)).padStart(2, '0');
+  const mm = String(target % 60).padStart(2, '0');
+  console.log(`[coupang confirm-backfill] 매일 ${hh}:${mm} KST 실행 (끄려면 COUPANG_CONFIRM_BACKFILL_DISABLED=1)`);
+}
+
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`답례품 관리 서버: http://localhost:${PORT}${BASE_PATH || ''}`);
   // 재고 데일리 슬랙 알림 — BG_STOCK_ALERT_ENABLED=1 일 때만 등록
@@ -16968,6 +17060,7 @@ server.listen(PORT, '0.0.0.0', () => {
     .scheduleDailyStockAlert(`http://localhost:${PORT}${BASE_PATH || ''}`);
   scheduleCoupangSync(`http://localhost:${PORT}${BASE_PATH || ''}`);
   scheduleNaverConfirmBackfill();
+  scheduleCoupangConfirmBackfill();
   schedulePriceSnapshot();
 });
 

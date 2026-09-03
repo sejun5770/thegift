@@ -224,6 +224,27 @@ async function getOrderSheet(orderId) {
 }
 
 /**
+ * 매출내역 조회 (정산현황) — GET /v2/providers/openapi/apis/api/v1/revenue-history
+ *   recognitionDateFrom/To: yyyy-MM-dd, 한 번에 최대 31일, 전일까지만 조회 가능.
+ *   token: 첫 페이지는 빈 문자열. maxPerPage 1~50.
+ *   응답: { code, message, hasNext, nextToken,
+ *           data: [{ orderId, saleType: 'SALE'|'REFUND', recognitionDate, settlementDate,
+ *                    finalSettlementDate, deliveryFee, items: [{ vendorItemId, productId, quantity,
+ *                    salePrice, saleAmount, serviceFee, settlementAmount, ... }] }] }
+ *   recognitionDate(매출인식일) = "'배송완료 + 7day' 또는 '구매확정'" 중 빠른 시점 (쿠팡 문서).
+ */
+async function listRevenueHistory({ from, to, token = '', maxPerPage = 50 } = {}) {
+  if (!from || !to) throw new Error('listRevenueHistory: from/to (yyyy-MM-dd) 필수');
+  const params = new URLSearchParams();
+  params.set('vendorId', VENDOR_ID);
+  params.set('recognitionDateFrom', from);
+  params.set('recognitionDateTo', to);
+  params.set('token', token || '');
+  params.set('maxPerPage', String(maxPerPage));
+  return callCoupang('GET', '/v2/providers/openapi/apis/api/v1/revenue-history', params.toString());
+}
+
+/**
  * 등록상품 목록 — 옵션ID ↔ 등록상품ID 를 잇기 위해 쓴다.
  *   GET /v2/providers/seller_api/apis/api/v1/marketplace/seller-products
  *   businessTypes='rocketGrowth' 면 로켓그로스 상품만.
@@ -391,6 +412,7 @@ module.exports = {
   listAllRgInventory,
   buildAuthHeader,
   getOrderSheet,
+  listRevenueHistory,
   buildDatetime,
   fmtKstDate,
   fmtKstDateTime,
