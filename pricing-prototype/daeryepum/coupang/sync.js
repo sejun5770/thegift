@@ -74,6 +74,8 @@ function parseCoupangDate(s) {
   if (!str) return null;
   // 'YYYY-MM-DD HH:mm:ss' 공백 구분 → ISO 'T' 로 정규화
   if (str.includes(' ') && !str.includes('T')) str = str.replace(' ', 'T');
+  // 날짜만 오는 값 (매출인식일 yyyy-MM-dd) → KST 자정
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) str += 'T00:00:00';
   const hasTz = /[+-]\d{2}:?\d{2}$|Z$/i.test(str);
   if (!hasTz) str = str + '+09:00';
   const d = new Date(str);
@@ -118,6 +120,10 @@ function normalizeOrderSheet(sheet, unitOf = null) {
         : null;
       const setSize = configured || extractSetSize(productNameForSet);
       const effectiveCount = cartQty * setSize;
+      // 구매확정일자 (080). 확정은 배송완료 뒤에 걸려 동기화 창(7일) 안에서는 대개 비어 있다.
+      //   비어 있으면 키 자체를 싣지 않는다 — upsert 가 백필해 둔 값을 null 로 덮어쓰지 않게
+      //   (store.upsertCoupangOrders 가 키 집합별로 나눠 올린다).
+      const confirmedAt = parseCoupangDate(item.confirmDate);
       return {
         coupang_order_id: orderId,
         shipment_box_id: shipmentBoxId,
@@ -141,6 +147,7 @@ function normalizeOrderSheet(sheet, unitOf = null) {
         settle_method: sheet.payment?.paymentMethod || sheet.paymentMethod || null,
         status,
         status_label: statusLabel,
+        ...(confirmedAt ? { confirmed_at: confirmedAt } : {}),
         // raw_payload: 진단용 — set_size/cart_qty 보존 (재처리 가능)
         raw_payload: { sheet_keys: Object.keys(sheet), item, _cart_qty: cartQty, _set_size: setSize },
         synced_at: new Date().toISOString(),
@@ -413,9 +420,161 @@ async function reconcileCancelled({ daysBack = 14, maxChecks = 300, delayMs = 12
   };
 }
 
+/**
+ * 구매확정일 소급 채우기 (080) — 정산현황(매출내역 조회 API)의 매출인식일로 채운다.
+ *
+ * 왜 이쪽인가: 쿠팡 자동 구매확정은 배송완료 며칠 뒤에 걸려 주문 동기화(최근 7일)가
+ * 그 주문을 이미 지나친 뒤다. ordersheet 의 confirmDate 를 주문마다 다시 두드리는 대신,
+ * 매출내역을 기간으로 한 번 훑으면 그 기간에 매출이 인식된 주문이 전부 나온다.
+ * 매출인식일 = "'배송완료 + 7day' 또는 '구매확정'" 중 빠른 시점 (쿠팡 문서) — 정산이
+ * 걸리는 기준이라 화면의 '구매확정일'이 뜻하는 바와 같다.
+ *
+ * 제약: 한 호출 최대 31일 → 31일씩 잘라 돈다. 전일까지만 조회된다. 페이지 50건.
+ * 매칭 키 = (orderId, vendorItemId). REFUND 행은 무시(취소는 동기화가 status 로 잡는다).
+ * 로켓그로스는 매출내역에 잡히면 같이 채워지고, 아니면 NULL 로 남는다 (따로 걸러내지 않는다).
+ *
+ * 반환: { window:{from,to}, segments, pages, sales_rows, keys, candidates, updated, unmatched, failed }
+ */
+async function backfillConfirmedAt({ daysBack = 45, endDate = null } = {}) {
+  if (!store.USE_SUPABASE) return { error: 'Supabase 미설정' };
+  if (!api.isConfigured()) return { error: 'Coupang API 키 미설정 (COUPANG_VENDOR_ID/ACCESS_KEY/SECRET_KEY)' };
+
+  const days = Math.min(Math.max(parseInt(daysBack, 10) || 45, 1), 400);
+  const ymd = d => api.fmtKstDate(d);
+  const addDays = (s, n) => ymd(new Date(new Date(`${s}T00:00:00+09:00`).getTime() + n * 86400000));
+  // 전일까지만 조회된다 — 오늘을 넣으면 400.
+  const to = /^\d{4}-\d{2}-\d{2}$/.test(String(endDate || '')) ? String(endDate) : addDays(ymd(new Date()), -1);
+  const from = addDays(to, -(days - 1));
+
+  const result = { window: { from, to }, segments: 0, pages: 0, sales_rows: 0, keys: 0, candidates: 0, updated: 0, unmatched: 0, failed: 0 };
+  // (orderId|vendorItemId) → 가장 이른 매출인식일
+  const byKey = new Map();
+  const MAX_PAGES_PER_SEG = 400;   // 31일 × 50건/페이지 — 2만 행 상한 (실제는 수백 건)
+  for (let segFrom = from; segFrom <= to; segFrom = addDays(segFrom, 31)) {
+    const segTo = addDays(segFrom, 30) < to ? addDays(segFrom, 30) : to;
+    result.segments += 1;
+    let token = '';
+    for (let page = 0; page < MAX_PAGES_PER_SEG; page++) {
+      let res;
+      try {
+        res = await api.listRevenueHistory({ from: segFrom, to: segTo, token });
+      } catch (e) {
+        return { ...result, error: `매출내역 조회 실패 (${segFrom}~${segTo}): ${e.message}` };
+      }
+      result.pages += 1;
+      for (const row of (Array.isArray(res?.data) ? res.data : [])) {
+        result.sales_rows += 1;
+        if (String(row.saleType || '').toUpperCase() !== 'SALE') continue;
+        const date = String(row.recognitionDate || '').slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+        for (const it of (row.items || [])) {
+          const key = `${row.orderId ?? ''}|${it.vendorItemId ?? ''}`;
+          const prev = byKey.get(key);
+          if (!prev || date < prev) byKey.set(key, date);
+        }
+      }
+      token = res?.nextToken || '';
+      if (!res?.hasNext || !token) break;
+      await new Promise(r => setTimeout(r, 120));   // 호출 간격
+    }
+  }
+  result.keys = byKey.size;
+  if (!byKey.size) return result;
+  const applied = await applyConfirmMap(byKey);
+  return { ...result, ...applied };
+}
+
+/**
+ * (주문번호|옵션ID) → 매출인식일(yyyy-MM-dd) 맵을 우리 DB 에 적용 — 비어 있는 행만 채운다.
+ *   API 백필과 엑셀 업로드가 같이 쓴다. 반환 { candidates, updated, unmatched, failed, error? }
+ */
+async function applyConfirmMap(byKey) {
+  const result = { candidates: 0, updated: 0, unmatched: 0, failed: 0 };
+  if (!byKey.size) return result;
+  const REST = `${process.env.SUPABASE_URL}/rest/v1`;
+  const hdr = { apikey: process.env.SUPABASE_ANON_KEY, Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY}` };
+  const orderIds = [...new Set([...byKey.keys()].map(k => k.split('|')[0]).filter(Boolean))];
+  const idsByDate = new Map();   // 매출인식일 → [row id]
+  for (let i = 0; i < orderIds.length; i += 100) {
+    const chunk = orderIds.slice(i, i + 100);
+    const url = `${REST}/coupang_orders?select=id,coupang_order_id,vendor_item_id&confirmed_at=is.null`
+      + `&coupang_order_id=in.(${chunk.map(encodeURIComponent).join(',')})`;
+    const r = await fetch(url, { headers: hdr });
+    if (!r.ok) return { ...result, error: `Supabase list [${r.status}]: ${(await r.text()).slice(0, 200)}` };
+    for (const row of await r.json()) {
+      result.candidates += 1;
+      const date = byKey.get(`${row.coupang_order_id ?? ''}|${row.vendor_item_id ?? ''}`);
+      if (!date) { result.unmatched += 1; continue; }
+      if (!idsByDate.has(date)) idsByDate.set(date, []);
+      idsByDate.get(date).push(row.id);
+    }
+  }
+  for (const [date, ids] of idsByDate) {
+    const confirmedAt = parseCoupangDate(date);   // yyyy-MM-dd → KST 자정
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200);
+      const r = await fetch(`${REST}/coupang_orders?id=in.(${chunk.map(encodeURIComponent).join(',')})`, {
+        method: 'PATCH',
+        headers: { ...hdr, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+        body: JSON.stringify({ confirmed_at: confirmedAt }),
+      });
+      if (r.ok) result.updated += chunk.length;
+      else { result.failed += chunk.length; console.warn(`[coupang backfill] PATCH ${r.status} (${date}, ${chunk.length}건)`); }
+    }
+  }
+  return result;
+}
+
+/** 엑셀 셀 → yyyy-MM-dd ('2026-08-04', '2026-08-04 00:00', 엑셀 일련번호 모두) */
+function _xlsxCellDate(v) {
+  const str = String(v ?? '').trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0, 10);
+  if (/^\d{5}(\.\d+)?$/.test(str)) return new Date((Number(str) - 25569) * 86400000).toISOString().slice(0, 10);
+  return '';
+}
+
+/**
+ * 정산현황 > 매출내역 상세 엑셀(MSF_PAYMENT_REVENUE_DETAIL-*.xlsx)로 채우기 — API 없이도 즉시.
+ *   시트 'Order Detail Report' 헤더: 주문번호 · 옵션 ID · … · 배송완료일 · 구매확정일 · 취소완료일 · 정산예정일
+ *   배송료 행(옵션 ID = <기본배송료>/<추가배송료>)과 구매확정일이 빈 행은 건너뛴다.
+ *   반환 { parsed_rows, skipped, keys, candidates, updated, unmatched, failed }
+ */
+async function backfillConfirmedAtFromXlsx(buf) {
+  if (!store.USE_SUPABASE) return { error: 'Supabase 미설정' };
+  const { parseAllSheets } = require('./rfm-lines');
+  const byKey = new Map();
+  let parsed = 0, skipped = 0, headerFound = false;
+  for (const sh of parseAllSheets(buf)) {
+    const hi = sh.rows.findIndex(r => r && r.some(c => String(c).trim() === '주문번호') && r.some(c => String(c).trim() === '구매확정일'));
+    if (hi < 0) continue;
+    const header = sh.rows[hi].map(c => String(c ?? '').trim());
+    const cOrder = header.indexOf('주문번호'), cOpt = header.indexOf('옵션 ID'), cConf = header.indexOf('구매확정일');
+    if (cOpt < 0) continue;
+    headerFound = true;
+    for (const r of sh.rows.slice(hi + 1)) {
+      if (!r) continue;
+      const order = String(r[cOrder] ?? '').trim();
+      const opt = String(r[cOpt] ?? '').trim();
+      if (!/^\d+$/.test(order) || !/^\d+$/.test(opt)) { skipped += 1; continue; }
+      parsed += 1;
+      const conf = _xlsxCellDate(r[cConf]);
+      if (!conf) continue;   // 아직 미확정
+      const key = `${order}|${opt}`;
+      const prev = byKey.get(key);
+      if (!prev || conf < prev) byKey.set(key, conf);
+    }
+  }
+  if (!headerFound) throw new Error("정산현황 매출내역 파일이 아닙니다 ('주문번호'·'옵션 ID'·'구매확정일' 헤더가 필요합니다)");
+  const applied = await applyConfirmMap(byKey);
+  return { parsed_rows: parsed, skipped, keys: byKey.size, ...applied };
+}
+
 module.exports = {
   syncRecent,
   reconcileCancelled,
+  backfillConfirmedAt,
+  backfillConfirmedAtFromXlsx,
   normalizeOrderSheet, // for testing
+  parseCoupangDate,    // for testing
   STATUS_LABEL,
 };

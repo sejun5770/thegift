@@ -35,14 +35,25 @@ async function upsertCoupangOrders(rows) {
   if (!USE_SUPABASE) return { upserted: 0, skipped: rows.length, reason: 'supabase_not_configured' };
   if (!rows.length) return { upserted: 0 };
   const url = `${REST_BASE}/coupang_orders?on_conflict=coupang_order_id,shipment_box_id,vendor_item_id`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { ...HEADERS, Prefer: 'resolution=merge-duplicates,return=minimal' },
-    body: JSON.stringify(rows),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Supabase upsert coupang_orders [${res.status}]: ${text.slice(0, 500)}`);
+  // 행마다 키 집합이 다르면 PostgREST 가 한 요청으로 받지 않는다 (All object keys must match).
+  //   confirmed_at(080) 처럼 값이 있을 때만 싣는 컬럼이 있어 키 집합별로 나눠 올린다 —
+  //   빠진 키를 null 로 채워 올리면 merge 가 백필해 둔 값을 지운다.
+  const groups = new Map();
+  for (const r of rows) {
+    const sig = Object.keys(r).sort().join(',');
+    if (!groups.has(sig)) groups.set(sig, []);
+    groups.get(sig).push(r);
+  }
+  for (const batch of groups.values()) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { ...HEADERS, Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(batch),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Supabase upsert coupang_orders [${res.status}]: ${text.slice(0, 500)}`);
+    }
   }
   return { upserted: rows.length };
 }

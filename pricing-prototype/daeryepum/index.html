@@ -1633,7 +1633,10 @@ nav.nav-loading a[href^="#"] {
       <div class="ord-tools-panel">
         <button class="btn" id="ord-btn-coupang-sync" onclick="syncCoupangOrders(this)" style="padding:5px 12px;font-size:12px;background:#fef2f2;border-color:#fecaca" title="쿠팡 Wing API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟥 쿠팡 동기화 <span id="ord-coupang-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
         <button class="btn" id="ord-btn-naver-sync" onclick="syncNaverOrders(this)" style="padding:5px 12px;font-size:12px;background:#ecfdf5;border-color:#a7f3d0" title="네이버 커머스 API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟩 네이버 동기화 <span id="ord-naver-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
-        <button class="btn" id="ord-btn-naver-confirm" onclick="backfillNaverConfirmedAt(this)" style="padding:5px 12px;font-size:12px" title="구매확정일이 비어 있는 네이버 주문을 상세 조회로 채웁니다. 동기화 시점에 필드가 안 왔거나 그 전에 들어온 옛 주문을 소급 적용합니다.">📅 구매확정일 채우기</button>
+        <button class="btn" id="ord-btn-naver-confirm" onclick="backfillNaverConfirmedAt(this)" style="padding:5px 12px;font-size:12px" title="구매확정일이 비어 있는 네이버 주문을 상세 조회로 채웁니다. 동기화 시점에 필드가 안 왔거나 그 전에 들어온 옛 주문을 소급 적용합니다.">📅 네이버 구매확정일 채우기</button>
+        <button class="btn" id="ord-btn-coupang-confirm" onclick="backfillCoupangConfirmedAt(this)" style="padding:5px 12px;font-size:12px" title="쿠팡 정산현황(매출내역)을 기간으로 훑어, 구매확정일이 비어 있는 쿠팡 주문에 매출인식일(배송완료+7일 또는 구매확정 중 빠른 시점)을 채웁니다.">📅 쿠팡 구매확정일 채우기</button>
+        <button class="btn" id="ord-btn-coupang-confirm-xlsx" onclick="document.getElementById('ord-cp-confirm-file').click()" style="padding:5px 12px;font-size:12px" title="쿠팡 Wing 정산현황 > 매출내역에서 내려받은 상세 엑셀(MSF_PAYMENT_REVENUE_DETAIL-*.xlsx)을 올려 구매확정일을 채웁니다. API 연동과 무관하게 바로 반영됩니다.">📤 정산현황 엑셀로 채우기</button>
+        <input type="file" id="ord-cp-confirm-file" accept=".xlsx" style="display:none" onchange="uploadCoupangConfirmXlsx(this)">
         <button class="btn" id="ord-btn-cafe24-sync" onclick="syncCafe24Orders(this)" style="padding:5px 12px;font-size:12px;background:#fff7ed;border-color:#fed7aa" title="카페24(정수당) Admin API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟧 정수당 동기화 <span id="ord-cafe24-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
         <button class="btn" id="ord-btn-csv-upload" onclick="openBgCsvUpload()" style="padding:5px 12px;font-size:12px;background:#dbeafe;border-color:#93c5fd;color:#1e40af;display:none" title="바른손더기프트 퍼스트몰 원본 Excel(.xlsx) 또는 CSV 를 업로드하여 여러 주문을 한 번에 등록합니다">📤 CSV/Excel 업로드</button>
         <button class="btn" id="ord-btn-bhg-backfill" onclick="backfillBhgStubs()" style="padding:5px 12px;font-size:12px;background:#eef2ff;border-color:#c7d2fe;color:#4338ca;display:none" title="이전에 등록된 바른손더기프트 주문 중 정보입력현황 stub 이 없는 것을 일괄 생성 (스티커/희망출고일 정보 backfill)">🔧 stub 재생성</button>
@@ -4791,7 +4794,7 @@ const ALL_COLS = [
   {key:'file_count_fmt',label:'첨부파일',default:true},
   {key:'order_type_label',label:'주문유형',default:false},
   {key:'status_label',label:'주문상태',default:false},
-  {key:'confirmed_at_fmt',label:'구매확정일',default:false},   // 바른손카드 src_confirm_date / 네이버 confirmed_at (migration 037)
+  {key:'confirmed_at_fmt',label:'구매확정일',default:false},   // 바른손카드 src_confirm_date / 네이버 confirmed_at (037) / 쿠팡 confirmed_at (080, 정산현황 매출인식일)
 ];
 
 let ordersData = [];
@@ -5100,6 +5103,11 @@ function switchCategory(cat) {
   const cpBtn = document.getElementById('ord-btn-coupang-sync');
   const nvBtn = document.getElementById('ord-btn-naver-sync');
   const cfBtn = document.getElementById('ord-btn-cafe24-sync');
+  // 구매확정일 채우기(네이버 037 · 쿠팡 080)도 마켓플레이스 채널이 있는 답례품에서만
+  for (const id of ['ord-btn-naver-confirm', 'ord-btn-coupang-confirm', 'ord-btn-coupang-confirm-xlsx']) {
+    const b = document.getElementById(id);
+    if (b) b.style.display = showMarketplaceSync ? '' : 'none';
+  }
   const csvBtn = document.getElementById('ord-btn-csv-upload');
   const bhgBackfillBtn = document.getElementById('ord-btn-bhg-backfill');
   if (cpBtn) cpBtn.style.display = showMarketplaceSync ? '' : 'none';
@@ -5232,7 +5240,7 @@ async function loadOrders() {
       //   쿠팡/네이버: ISO with 'Z' (UTC) → +9h
       //   CARD/ETC:  '+09:00' 또는 TZ 없음 → 그대로 (이미 KST)
       r.order_date_fmt = fmtKstDate(r.order_date);
-      // 구매확정일 (migration 037) — CARD(src_confirm_date) / 네이버(confirmed_at). NULL 이면 미확정.
+      // 구매확정일 — CARD(src_confirm_date) / 네이버(037) / 쿠팡(080, 정산현황 매출인식일) confirmed_at. NULL 이면 미확정.
       r.confirmed_at_fmt = r.confirmed_at ? fmtKstDate(r.confirmed_at) : '';
       r.item_amount_fmt = fmtKRW(r.item_amount);
       // 상품 결제액 = 주문총액 - 쿠폰할인 (행 단위 실 결제). 음수 방지(쿠폰이 정가 초과하는 비정상 케이스).
@@ -6192,6 +6200,85 @@ async function refreshCoupangSyncMeta() {
  *   서버는 한 번에 100건씩만 처리한다(상세 API 호출량 때문). 끝까지 자동으로 돌린다.
  *   중간에 실패해도 앞서 채운 건 그대로 남는다 — 다시 눌러 이어서 하면 된다.
  */
+// 쿠팡 구매확정일 소급 (080) — 정산현황(매출내역 조회 API) 매출인식일. 기간 한 번 조회로 끝난다.
+async function backfillCoupangConfirmedAt(btn) {
+  const NL = String.fromCharCode(10);
+  const raw = prompt([
+    '쿠팡 정산현황(매출내역)을 훑어 구매확정일이 비어 있는 주문을 채웁니다.',
+    '',
+    '· 매출인식일 = 배송완료+7일 또는 구매확정 중 빠른 시점 (쿠팡 정산 기준)',
+    '· 전일까지 조회되며, 31일씩 잘라 돌립니다',
+    '· 이미 값이 있는 주문은 건너뜁니다',
+    '',
+    '며칠 전까지 훑을까요? (기본 60, 최대 400)',
+  ].join(NL), '60');
+  if (raw === null) return;
+  const daysBack = Math.min(Math.max(parseInt(raw, 10) || 60, 1), 400);
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ 정산현황 조회 중…';
+  try {
+    const res = await fetch(`${API}/api/coupang/backfill-confirmed-at`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days_back: daysBack }),
+    });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    alert([
+      '쿠팡 구매확정일 소급 적용이 끝났습니다.',
+      '',
+      `· 조회 기간 ${d.window?.from || ''} ~ ${d.window?.to || ''} (${fmtNum(d.pages || 0)}페이지)`,
+      `· 매출내역 ${fmtNum(d.sales_rows || 0)}행 → 주문·옵션 ${fmtNum(d.keys || 0)}건`,
+      `· 비어 있던 주문행 ${fmtNum(d.candidates || 0)}건 중 채움 ${fmtNum(d.updated || 0)}건`,
+      ...(d.unmatched ? [`· 옵션이 안 맞아 못 채움 ${fmtNum(d.unmatched)}건`] : []),
+      ...(d.failed ? [`· 저장 실패 ${fmtNum(d.failed)}건`] : []),
+      '',
+      '조회를 다시 누르면 화면에 반영됩니다.',
+    ].join(NL));
+    loadOrders();
+  } catch (e) {
+    alert('쿠팡 구매확정일 채우기 실패: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+// 정산현황 매출내역 엑셀 → 구매확정일 (080). 파일은 base64 로 올린다 (_rglToB64 재사용).
+async function uploadCoupangConfirmXlsx(input) {
+  const f = input.files && input.files[0];
+  input.value = '';
+  if (!f) return;
+  const NL = String.fromCharCode(10);
+  const btn = document.getElementById('ord-btn-coupang-confirm-xlsx');
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ 올리는 중…'; }
+  try {
+    const b64 = await _rglToB64(f);
+    const res = await fetch(`${API}/api/coupang/backfill-confirmed-at/upload`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_base64: b64, filename: f.name }),
+    });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    alert([
+      `정산현황 엑셀 반영이 끝났습니다. (${f.name})`,
+      '',
+      `· 품목행 ${fmtNum(d.parsed_rows || 0)}건 (배송료 행 ${fmtNum(d.skipped || 0)}건 제외) → 확정일 있는 주문·옵션 ${fmtNum(d.keys || 0)}건`,
+      `· 비어 있던 주문행 ${fmtNum(d.candidates || 0)}건 중 채움 ${fmtNum(d.updated || 0)}건`,
+      ...(d.unmatched ? [`· 옵션이 안 맞아 못 채움 ${fmtNum(d.unmatched)}건`] : []),
+      ...(d.failed ? [`· 저장 실패 ${fmtNum(d.failed)}건`] : []),
+      '',
+      '조회를 다시 누르면 화면에 반영됩니다.',
+    ].join(NL));
+    loadOrders();
+  } catch (e) {
+    alert('정산현황 엑셀 반영 실패: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+  }
+}
+
 async function backfillNaverConfirmedAt(btn) {
   const NL = String.fromCharCode(10);
   if (!confirm([
