@@ -2316,7 +2316,9 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   if (pathname === '/api/bg/sms/history' && method === 'POST') {
     try {
       const body = await parseBody(req);
-      const ids = Array.isArray(body.order_ids) ? body.order_ids.slice(0, 2000) : [];   // 커스텀 시트 1,299행 대응 (store 가 150개씩 나눠 조회)
+      // 커스텀 시트 1,299행 × (신규 '주문#송장' 키 + 레거시 주문번호 키) 대응
+      //   (store 가 150개씩 나눠 조회하므로 개수 자체는 부담이 아니다)
+      const ids = Array.isArray(body.order_ids) ? body.order_ids.slice(0, 5000) : [];
       const map = await store.getSmsSendHistory(ids, SMS_TEMPLATE_CODE);
       const history = {};
       for (const [k, v] of map) history[k] = v;
@@ -2341,27 +2343,49 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       if (!rows.length) return json(res, { error: '발송할 행이 없습니다.' }, 400);
       if (rows.length > 50) return json(res, { error: '한 번에 최대 50건까지 발송할 수 있습니다 (화면이 나눠 보냅니다).' }, 400);
 
-      // 중복 방지 — 주문번호 없는 행은 연락처 기반 PH- 키.
-      const keyOf = r => (String(r.order_id || '').trim()) || ('PH-' + String(r.phone || '').replace(/\D/g, ''));
-      const history = await store.getSmsSendHistory(rows.map(keyOf), SMS_TEMPLATE_CODE);
+      // 중복 방지 키 = 주문번호 + 송장번호. 주문번호 없는 행은 연락처 기반 PH- 키.
+      //   한 주문이 상품별로 여러 행이 되는데, 송장이 같으면(합포장) 안내가 하나라 1건만,
+      //   송장이 다르면(박스 분리) 각 송장을 따로 안내해야 한다. 주문번호만으로는 구분이 안 된다.
+      const baseKeyOf = r => (String(r.order_id || '').trim()) || ('PH-' + String(r.phone || '').replace(/\D/g, ''));
+      const keyOf = r => {
+        const inv = String(r.invoice || '').replace(/\D/g, '');
+        return inv ? `${baseKeyOf(r)}#${inv}` : baseKeyOf(r);
+      };
+      // 이력은 신규 키와 레거시 주문번호 키를 함께 조회한다 — 송장별 기록 이전에 보낸 건은
+      //   주문번호로만 남아 있어, 그대로 두면 이미 받은 고객에게 또 나간다.
+      const history = await store.getSmsSendHistory(
+        rows.flatMap(r => [keyOf(r), baseKeyOf(r)]), SMS_TEMPLATE_CODE);
+
+      // 같은 주문·송장 행이 여러 개면(상품 분리) 문자는 한 번만 — 첫 행으로 합친다.
+      const collapsed = [];
+      const uniqueRows = [];
+      {
+        const seen = new Set();
+        for (const r of rows) {
+          const k = keyOf(r);
+          if (seen.has(k)) { collapsed.push({ order_id: k, success: false, duplicate: true, error: '같은 주문·송장 행이 여러 개 — 1건으로 합쳤습니다' }); continue; }
+          seen.add(k);
+          uniqueRows.push(r);
+        }
+      }
 
       const tpl = await _smsTemplate();
-      logAccess(req, 'sms_send_start', null, { metadata: { count: rows.length } });
-      const results = [];
-      for (const raw of rows) {
-        const orderId = String(raw.order_id || '').trim();
+      logAccess(req, 'sms_send_start', null, { metadata: { count: rows.length, unique: uniqueRows.length } });
+      const results = [...collapsed];
+      for (const raw of uniqueRows) {
         const name = String(raw.name || '').trim();
         const shipDate = String(raw.ship_date || '').trim();
         const invoice = String(raw.invoice || '').trim();
         const digits = String(raw.phone || '').replace(/\D/g, '');
-        const logKey = orderId || `PH-${digits}`;
+        const logKey = keyOf(raw);          // 기록·중복판정 키 (주문번호#송장)
+        const legacyKey = baseKeyOf(raw);   // 송장별 기록 이전 이력
         // 서버에서 한 번 더 검증 — 화면 값을 그대로 믿지 않는다
         if (!name) { results.push({ order_id: logKey, success: false, error: '성함 누락' }); continue; }
         const isSafeNum = /^050\d{8,9}$/.test(digits);
         if (!/^01[016789]\d{7,8}$/.test(digits) && !isSafeNum) { results.push({ order_id: logKey, success: false, error: '휴대폰 번호 형식 오류' }); continue; }
         if (!/^\d{4}-\d{2}-\d{2}$/.test(shipDate)) { results.push({ order_id: logKey, success: false, error: '출고일 형식 오류 (YYYY-MM-DD)' }); continue; }
         if (!/^[\d-]{9,}$/.test(invoice)) { results.push({ order_id: logKey, success: false, error: '송장번호 형식 오류' }); continue; }
-        const dup = history.get(logKey);
+        const dup = history.get(logKey) || history.get(legacyKey);
         if (dup && dup.successCount > 0 && !body.force) {
           results.push({ order_id: logKey, success: false, duplicate: true, error: `이미 발송됨 (${(d => Number.isFinite(d) ? new Date(d + 9 * 3600000).toISOString().replace('T', ' ').slice(0, 16) + ' KST' : String(dup.lastSentAt).slice(0, 16))(Date.parse(dup.lastSentAt))})` });
           continue;
