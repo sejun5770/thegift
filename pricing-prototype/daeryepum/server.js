@@ -1669,6 +1669,10 @@ async function apiOrders(query) {
             code: r.card_code, name: r.card_name,
             amount: Number(r.item_amount) || 0, qty: r.item_count,
             seq: Number(r.item_seq) || 0, // 옵션 순서(옵션1/2 = 아이템 seq) — 수집복사 K/L 매핑용
+            // 무료 옵션 = 사은품(추석 미니엽서 등). 세트를 이루는 구성품(수건·핸드워시)은 값이 붙는다.
+            //   수집복사에서 구성품은 K/L(품목코드), 사은품은 O열(스티커타입2)로 갈린다.
+            //   답례품 옵션 365일 실측: 무료는 미니엽서 코드뿐, 구성품은 전부 유료로 갈림이 명확.
+            addon: (Number(r.item_amount) || 0) === 0,
           });
           continue; // 옵션 행 제거
         }
@@ -4890,7 +4894,8 @@ async function attachCardSetOptions(p, rows) {
       return {
         code: c.Card_Code || '',
         name: cleanName(c.Card_Name) || c.Card_Code || '',
-        amount: 0, qty: o.parent.item_count, seq: idx,
+        // 금액은 세트가에 포함돼 개별 값이 없다 — 0 이라고 사은품이 아니므로 addon 을 명시한다.
+        amount: 0, qty: o.parent.item_count, seq: idx, addon: false,
       };
     }).filter(Boolean);
     if (opts.length) o.parent._options = opts;

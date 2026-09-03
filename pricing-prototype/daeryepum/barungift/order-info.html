@@ -2094,8 +2094,40 @@
       // 이런 상품은 고객이 Step0 에서 결정할 사항이 없음 → 시각적 noise 만 됨.
       //   stInputHtml 은 매핑 스티커 없으면 빈 wrapper '<div id="sticker-input-wrap-X"></div>' 만 리턴하므로
       //   매핑 스티커 0 + stTypeHtml=='' 일 때 stInputHtml 도 효과적으로 빈 콘텐츠로 간주.
+      // 증정 사은품(추석 미니엽서 등) — 몰 프론트에서 이미 고른 무료 옵션. 확인만 하고 바꿀 수 없다.
+      //   썸네일·이름은 부가옵션 설정의 공유 그룹(addon_catalog)에서 코드로 찾는다.
+      var addons = Array.isArray(p.addons) ? p.addons : [];
+      var addonHtml = '';
+      if (addons.length) {
+        var catalog = orderData?.addon_catalog || {};
+        addonHtml = ''
+          + '<div class="mt-4">'
+          +   '<label class="block text-[12px] font-semibold text-slate-700 mb-2">증정 사은품 '
+          +     '<span class="text-[11px] font-normal text-slate-400">· 주문 시 선택하신 항목입니다</span>'
+          +   '</label>'
+          +   '<div class="grid grid-cols-3 sm:grid-cols-4 gap-2">'
+          +   addons.map(function(a) {
+                var meta = catalog[a.code] || {};
+                var nm = meta.name || a.name || a.code || '';
+                var img = meta.preview_image_url || '';
+                var thumb = img
+                  ? '<img src="' + esc(img) + '" alt="' + esc(nm) + '" class="w-full aspect-square object-contain bg-white" loading="lazy" />'
+                  : '<div class="w-full aspect-square bg-slate-100 flex items-center justify-center text-[11px] text-slate-400">이미지 없음</div>';
+                return ''
+                  + '<div class="ring-1 ring-slate-200 bg-white rounded-xl overflow-hidden">'
+                  +   thumb
+                  +   '<div class="px-2 py-1.5 text-xs">'
+                  +     '<div class="font-semibold text-slate-800 truncate">' + esc(nm) + '</div>'
+                  +     (a.quantity ? '<div class="text-[10.5px] text-slate-400">' + (Number(a.quantity) || 0) + '개</div>' : '')
+                  +   '</div>'
+                  + '</div>';
+              }).join('')
+          +   '</div>'
+          + '</div>';
+      }
+
       var hasStickerContent = (matching.length > 0);
-      if (!boxHtml && !customHtml && !hasStickerContent) {
+      if (!boxHtml && !customHtml && !addonHtml && !hasStickerContent) {
         return '';
       }
 
@@ -2104,6 +2136,7 @@
           '<h3 class="text-[15px] font-bold text-slate-900 mb-1">' + esc(p.product_name || '상품') + '</h3>' +
           '<p class="text-[12px] text-slate-400">수량 ' + (Number(p.quantity) || 1) + '개 · <span class="font-mono">' + esc(productCode) + '</span></p>' +
           boxHtml +       // 박스 패키지 선택 (해당 상품만)
+          addonHtml +     // 증정 사은품 (몰에서 이미 선택 — 읽기 전용 확인)
           customHtml +    // 자유 옵션 그룹 (수건 색상, 고리수건 타입 등)
           stTypeHtml +    // 스티커 타입 선택
           stLogoHtml +    // 이미지 첨부 (미니카드/스티커 타입 아래)

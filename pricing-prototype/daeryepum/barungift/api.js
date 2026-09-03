@@ -315,6 +315,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
               co.order_name, co.order_hphone, co.status_seq, co.settle_date,
               ei.seq AS item_id, ei.order_count AS item_count, ei.card_price AS item_price, ei.card_sale_price AS item_sale_price,
               ei.card_opt AS card_opt, -- 옵션 라인(비용변동 옵션): 부모 아이템 card_seq 참조. NULL=부모(세트/메인)
+              ei.card_seq AS card_seq, -- 부모 식별용 (옵션의 card_opt 가 이 값을 가리킨다)
               c.Card_Code, c.Card_Name, c.Card_Price,
               co.recv_name AS delivery_name, co.recv_hphone AS delivery_hphone, co.recv_address AS delivery_addr
             FROM CUSTOM_ETC_ORDER co WITH (NOLOCK)
@@ -373,7 +374,29 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
           product_code: r.Card_Code || null,
           quantity: r.item_count || 1,
           item_price: r.item_sale_price || r.Card_Price || 0,
+          _card_seq: r.card_seq != null ? String(r.card_seq) : null,  // 아래 사은품 연결용 (응답 전 제거)
+          addons: [],
         });
+      }
+      // 무료 사은품(추석 미니엽서 등) — 몰 프론트에서 고른 0원 옵션 라인을 부모 상품에 붙인다.
+      //   고객은 여기서 바꿀 수 없고 무엇을 골랐는지 확인만 한다.
+      //   유료 옵션(수건·핸드워시 등 세트 구성품)은 상품 자체의 구성이라 여기 넣지 않는다.
+      {
+        const byCardSeq = new Map();
+        for (const p of products) if (p._card_seq) byCardSeq.set(p._card_seq, p);
+        for (const r of result.recordset) {
+          if (r.card_opt == null) continue;
+          if ((Number(r.item_sale_price) || 0) !== 0) continue;   // 유료 = 구성품
+          const parent = byCardSeq.get(String(r.card_opt)) || products[0];
+          if (!parent) continue;
+          if (parent.addons.some(a => a.code === r.Card_Code)) continue;
+          parent.addons.push({
+            code: r.Card_Code || '',
+            name: r.Card_Name || r.Card_Code || '',
+            quantity: r.item_count || 0,
+          });
+        }
+        for (const p of products) delete p._card_seq;
       }
 
       // 상품별 스티커 / 박스옵션 / 자유옵션그룹 / 장식명칭 / 출고일그룹 매핑 + 합집합 계산
@@ -397,11 +420,13 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       // 공유 자유 옵션 그룹 (078) — 한 번 등록해 여러 상품에 붙이는 그룹 (기획전 미니카드 등).
       //   상품별 custom_options 와 여기서 합쳐 내려주므로 고객 화면은 둘을 구분하지 않는다.
       //   조회 실패해도 주문 화면은 떠야 한다 — 공유 그룹만 빠진다.
-      let sharedOptionGroups = [];
+      let allSharedGroups = [];      // 활성 그룹 전체 — 사은품 썸네일 사전으로도 쓴다
+      let sharedOptionGroups = [];   // 그중 적용 상품이 지정된 것만 — 고객이 고르는 옵션
       try {
         const site = await store.getSiteSettings();
-        sharedOptionGroups = (store.normSharedOptionGroups(site?.shared_option_groups) || [])
-          .filter(g => g.is_active && g.options.length && g.product_codes.length);
+        allSharedGroups = (store.normSharedOptionGroups(site?.shared_option_groups) || [])
+          .filter(g => g.is_active && g.options.length);
+        sharedOptionGroups = allSharedGroups.filter(g => g.product_codes.length);
       } catch (e) {
         console.warn('[order-info] 공유 옵션 그룹 로드 실패 (상품별 옵션만 적용):', e.message);
       }
@@ -599,6 +624,10 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         stickers_by_product: stickersByProduct,
         box_options_by_product: boxOptionsByProduct, // { product_code: [{code,name,color,preview_image_url}] }
         custom_options_by_product: customOptionsByProduct, // { product_code: { groupName: {use_images, options:[...]} } }
+        // 사은품 썸네일 사전 — products[].addons 의 코드로 이름·이미지를 찾는다 (읽기 전용 표시용).
+        //   공유 옵션 그룹에 등록해 둔 이미지를 재사용한다 (선택은 몰 프론트에서 이미 끝났다).
+        addon_catalog: Object.fromEntries(allSharedGroups.flatMap(g =>
+          g.options.map(o => [o.code, { name: o.name, preview_image_url: o.preview_image_url || '' }]))),
         decoration_label_by_product: decorationLabelByProduct, // { product_code: '스티커' | '띠지' | ... | null }
         allow_logo_upload_by_product: allowLogoUploadByProduct, // { product_code: bool } — migration 026
         custom_guide_by_product: customGuideByProduct,          // { product_code: string|null } — migration 034
