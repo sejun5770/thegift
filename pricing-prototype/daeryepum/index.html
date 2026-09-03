@@ -25663,7 +25663,7 @@ function renderSmsList() {
       }</td>
       <td>${esc(r.ship_date || '-')}</td>
       <td style="font-family:monospace">${r.invoice_ok ? esc(r.invoice) : '-'}</td>
-      <td>${_smsHistBadge(_smsKey(r))}</td>
+      <td>${_smsHistBadge(r)}</td>
       <td><div style="display:flex;gap:4px;flex-wrap:wrap">${marks.join('')}</div></td>
     </tr>`;
   }).join('');
@@ -25759,10 +25759,22 @@ function resetSmsTemplate() {
 // ── 문자 바로 발송 (서버가 문자 API 호출) ──────────────────────
 let _smsHistory = {};   // 발송키 → {count, lastSentAt, successCount}
 // 발송 이력 키 — 주문번호가 없으면 연락처 기반 (서버 PH- 키와 동일 규칙)
-function _smsKey(r) { return r.order_id || ('PH-' + String(r.phone || '').replace(/\D/g, '')); }
+// 발송 이력 키 — 주문번호 + 송장번호.
+//   한 주문이 상품별로 여러 행이 되는데, 송장이 같으면(합포장) 안내가 하나라 1건만 보내야 하고
+//   송장이 다르면(박스 분리) 각 송장을 따로 안내해야 한다. 주문번호만으로는 둘을 구분 못 한다.
+//   송장이 아직 없는 행은 주문번호만으로 잡는다 (발송 대상이 아니라 판정에 영향 없음).
+function _smsBaseKey(r) { return r.order_id || ('PH-' + String(r.phone || '').replace(/\D/g, '')); }
+function _smsKey(r) {
+  const base = _smsBaseKey(r);
+  const inv = String(r.invoice || '').replace(/\D/g, '');
+  return inv ? `${base}#${inv}` : base;
+}
+/** 이력 조회 — 신규 키(주문+송장) 우선, 없으면 레거시 키(주문번호만)로 본다.
+ *   송장별 기록 이전에 보낸 건은 주문번호로만 남아 있어, 그것도 '발송됨' 으로 인정한다. */
+function _smsHist(r) { return _smsHistory[_smsKey(r)] || _smsHistory[_smsBaseKey(r)] || null; }
 
 function _smsHistBadge(orderId) {
-  const h = _smsHistory[orderId];
+  const h = typeof orderId === 'object' ? _smsHist(orderId) : _smsHistory[orderId];
   if (!h || !h.count) return '<span style="color:var(--gray-300)">-</span>';
   const okPart = h.successCount > 0
     ? `<span style="background:#dcfce7;color:#166534;font-size:10px;padding:1px 6px;border-radius:3px" title="마지막 발송 ${esc(_fmtKstShort(h.lastSentAt))} (KST)">✓ 발송 ${h.successCount}회</span>`
@@ -25772,7 +25784,8 @@ function _smsHistBadge(orderId) {
 
 async function _smsLoadHistory() {
   try {
-    const ids = [...new Set(_smsRows.map(_smsKey))];
+    // 신규 키와 레거시 주문번호 키를 함께 조회한다 (과거 이력은 주문번호로만 남아 있다).
+    const ids = [...new Set(_smsRows.flatMap(r => [_smsKey(r), _smsBaseKey(r)]))];
     if (!ids.length) { _smsHistory = {}; return; }
     const r = await fetch(`${API}/api/bg/sms/history`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -25792,7 +25805,7 @@ async function sendSmsDirect() {
   const ready = picked.filter(r => r.name && r.phone_ok && /^\d{4}-\d{2}-\d{2}$/.test(r.ship_date || '') && r.invoice_ok);
   const skipped = picked.length - ready.length;
   if (!ready.length) { showToast('발송 가능한 행이 없습니다 (연락처/출고일/송장 확인)'); return; }
-  const already = ready.filter(r => (_smsHistory[_smsKey(r)]?.successCount || 0) > 0);
+  const already = ready.filter(r => (_smsHist(r)?.successCount || 0) > 0);
   // 중복 재발송 — 체크했을 때만. 실수 방지로 대상이 있으면 한 번 더 묻는다.
   const force = !!document.getElementById('sms-force')?.checked;
   const sample = ready[0];
