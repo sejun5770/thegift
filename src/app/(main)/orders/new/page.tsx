@@ -17,16 +17,10 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Calendar } from '@/components/ui/calendar';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
-import { CalendarIcon, Plus, Trash2, ArrowLeft, Search } from 'lucide-react';
+import { Plus, Trash2, ArrowLeft, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { cn } from '@/lib/utils';
 import { SHIPPING_METHOD_LABELS } from '@/lib/constants';
 import type { ShippingMethod } from '@/types/enums';
 
@@ -244,43 +238,32 @@ export default function NewOrderPage() {
           <CardTitle className="text-sm">기본 정보</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label className="text-xs">주문번호 *</Label>
-              <Input
-                value={orderNumber}
-                onChange={(e) => setOrderNumber(e.target.value)}
-                placeholder="주문번호 입력"
-                className="text-sm"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs">희망출고일 *</Label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className={cn(
-                      'w-full justify-start text-left font-normal text-sm',
-                      !desiredShippingDate && 'text-muted-foreground'
-                    )}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {desiredShippingDate
-                      ? format(desiredShippingDate, 'yyyy.MM.dd', { locale: ko })
-                      : '날짜 선택'}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={desiredShippingDate}
-                    onSelect={setDesiredShippingDate}
-                    locale={ko}
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
+          <div className="space-y-2">
+            <Label className="text-xs">주문번호 *</Label>
+            <Input
+              value={orderNumber}
+              onChange={(e) => setOrderNumber(e.target.value)}
+              placeholder="주문번호 입력"
+              className="text-sm"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-xs">
+              희망출고일 *
+              {desiredShippingDate && (
+                <span className="ml-2 font-semibold text-blue-600">
+                  {format(desiredShippingDate, 'yyyy.MM.dd (eee)', { locale: ko })}
+                </span>
+              )}
+            </Label>
+            <Calendar
+              mode="single"
+              selected={desiredShippingDate}
+              onSelect={setDesiredShippingDate}
+              locale={ko}
+              className="rounded-lg border w-fit"
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-4">

@@ -93,13 +93,14 @@ export async function getOrderForCustomer(orderId: string): Promise<BgOrderForCu
   };
 }
 
-/** 고객 입력 정보 저장 */
+/** 고객 입력 정보 저장 + 관리자 orders/order_items 자동 반영 */
 export async function saveOrderCustomerInfo(
-  orderId: string,
+  orderId: string, // order_number (VARCHAR)
   data: BgCustomerInfoSubmitBody
 ): Promise<BgOrderCustomerInfo> {
   const supabase = await getSupabase();
 
+  // ── 1. bg_order_customer_info 저장 ─────────────────────────────
   const { data: saved, error } = await supabase
     .from('bg_order_customer_info')
     .insert({
@@ -117,11 +118,80 @@ export async function saveOrderCustomerInfo(
     .single();
 
   if (error) {
-    if (error.code === '23505') {
-      throw new Error('ALREADY_SUBMITTED');
-    }
+    if (error.code === '23505') throw new Error('ALREADY_SUBMITTED');
     throw new Error(error.message);
   }
+
+  // ── 2. orders 테이블에서 UUID + order_items 조회 ───────────────
+  const { data: order } = await supabase
+    .from('orders')
+    .select('id, order_items(id)')
+    .eq('order_number', orderId)
+    .eq('is_deleted', false)
+    .single();
+
+  if (!order) return saved; // orders에 없으면 bg 저장만 완료
+
+  // ── 3. orders 핵심 필드 업데이트 ───────────────────────────────
+  const orderUpdates: Record<string, unknown> = {
+    desired_shipping_date: data.desired_ship_date,
+  };
+  if (data.is_express) {
+    orderUpdates.shipping_method = 'same_day';
+  }
+  await supabase.from('orders').update(orderUpdates).eq('id', order.id);
+
+  // ── 4. 스티커 선택 → order_items 반영 ─────────────────────────
+  const firstItem = (order.order_items as { id: string }[])?.[0];
+  const firstSel = data.sticker_selections?.[0];
+
+  if (firstItem && firstSel?.sticker_id) {
+    // 스티커 이름 + custom_fields(레이블) 조회
+    const { data: sticker } = await supabase
+      .from('bg_stickers')
+      .select('name, custom_fields')
+      .eq('id', firstSel.sticker_id)
+      .single();
+
+    let stickerName = sticker?.name ?? '';
+    let inputMessage: string | null = null;
+
+    if (sticker?.custom_fields) {
+      const fields = sticker.custom_fields as Array<{
+        field_id: string;
+        field_label: string;
+      }>;
+      const parts = fields
+        .filter((f) => firstSel.custom_values?.[f.field_id])
+        .map((f) => `${f.field_label}: ${firstSel.custom_values[f.field_id]}`);
+      if (parts.length) inputMessage = parts.join(' / ');
+    }
+
+    await supabase
+      .from('order_items')
+      .update({
+        sticker_type1_name: stickerName || null,
+        input_message: inputMessage,
+      })
+      .eq('id', firstItem.id);
+  }
+
+  // ── 5. 현금영수증 → admin_memo 자동 추가 ──────────────────────
+  if (data.cash_receipt_yn && data.receipt_number) {
+    const typeLabel = data.receipt_type === 'business' ? '사업자' : '개인';
+    await supabase.from('admin_memos').insert({
+      order_id: order.id,
+      memo_text: `[현금영수증] ${typeLabel} / ${data.receipt_number}`,
+    });
+  }
+
+  // ── 6. order_history 기록 ─────────────────────────────────────
+  await supabase.from('order_history').insert({
+    order_id: order.id,
+    action: 'customer_info_submitted',
+    description: '고객이 스티커·출고일 정보를 입력했습니다.',
+    new_value: data.desired_ship_date,
+  });
 
   return saved;
 }
