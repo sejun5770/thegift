@@ -24588,7 +24588,13 @@ function copyBgUnified() {
     //   · 자유 옵션 = 상품에 딸린 선택 옵션(미니카드) → O열(스티커타입2), 2번째+ 는 P열
     //   예전엔 자유 옵션도 K열을 덮어썼는데, 그러면 답례품 상품코드가 사라진다.
     //   (수건 색상은 이제 몰 구성품으로 들어오므로 자유 옵션이 K를 덮을 이유가 없다.)
-    const compList = _frontOpts.map(o => ({ code: o.code || '', name: o.name || o.code || '', label: '' }));
+    // 몰 옵션은 두 갈래다 — 서버가 addon 으로 표시해 내려준다.
+    //   · 구성품(유료: 수건·핸드워시·주방세제) = 세트를 이루는 품목 → K/L
+    //   · 사은품(무료: 추석 미니엽서 등)       = 상품에 딸린 증정물 → O열 (스티커처럼 무료)
+    const compList = _frontOpts.filter(o => !o.addon)
+      .map(o => ({ code: o.code || '', name: o.name || o.code || '', label: '' }));
+    const addonList = _frontOpts.filter(o => o.addon)
+      .map(o => ({ code: o.code || '', name: o.name || o.code || '', label: '', qty: o.qty }));
     // 마켓/더기프트 stub 이 만드는 '품목1'·'품목2' 는 자유 옵션이 아니라 품목코드 그 자체다
     //   (store.buildStubSelections 가 product_code / product_code_2 를 이 이름으로 넣는다).
     //   자유 옵션과 섞으면 상품코드가 O열에 한 번 더 찍힌다 → K/L 폴백으로만 쓰고 목록에서 뺀다.
@@ -24652,17 +24658,20 @@ function copyBgUnified() {
       cells[13] = `${sel.sticker_code || sel.sticker_name}${qtyStr}`;
     }
 
-    // O열(index 14) = 스티커타입2 — 자유 옵션 1번째 그룹(미니카드 등)을 '코드(수량)' 로.
+    // O열(index 14) = 스티커타입2 — 무료 사은품(미니엽서)을 '코드(수량)' 로.
+    //   몰 프론트에서 고른 무료 옵션(addon)이 우선, 없으면 자유 옵션 그룹 1번째.
     //   시트의 스티커타입 칸은 3개(N/O/P)이고 형식이 코드(수량)라 물류가 그대로 읽는다.
     //   K열(품목코드1)은 답례품 상품코드를 그대로 유지한다.
-    if (customList[0] && customList[0].code) {
-      const oQty = product_qty || sel?.quantity;
-      cells[14] = `${customList[0].code}${oQty ? `(${oQty}개)` : ''}`;
+    const oPick = addonList[0] || customList[0];
+    if (oPick && oPick.code) {
+      const oQty = oPick.qty || product_qty || sel?.quantity;
+      cells[14] = `${oPick.code}${oQty ? `(${oQty}개)` : ''}`;
     }
 
-    // P열(index 15) = 남은 옵션 — 구성품 3번째+ / 자유 옵션 2번째+ 를 '라벨: 이름' 으로 노출.
+    // P열(index 15) = 남은 옵션 — 구성품 3번째+ / O열에 못 실은 사은품·자유 옵션.
     //   TSV 안전: 탭/개행 → 공백 치환. 매핑할 것 없으면 셀 빈 채로 유지.
-    const _pOpts = [...optList.slice(2), ...customList.slice(1)];
+    const _pOpts = [...optList.slice(2), ...addonList.slice(1),
+      ...(addonList.length ? customList : customList.slice(1))];
     if (_pOpts.length) {
       const safeStr = v => String(v).replace(/[\t\r\n]+/g, ' ').trim();
       const parts = _pOpts.map(o => {
