@@ -168,6 +168,12 @@ nav a:hover{color:var(--gray-900)}
 .ord-tools>summary:hover{background:var(--gray-50)}
 .ord-tools .ord-tools-panel{position:absolute;right:0;top:calc(100% + 4px);z-index:30;background:#fff;border:1px solid var(--gray-200);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:8px;display:flex;flex-direction:column;gap:6px;min-width:230px}
 .ord-tools .ord-tools-panel button{width:100%;text-align:left}
+.ord-tools .ord-tools-sub{border-top:1px dashed var(--gray-200);margin-top:2px;padding-top:6px}
+.ord-tools .ord-tools-sub>summary{cursor:pointer;list-style:none;font-size:11px;color:var(--gray-500);padding:2px 4px;white-space:nowrap}
+.ord-tools .ord-tools-sub>summary::-webkit-details-marker{display:none}
+.ord-tools .ord-tools-sub>summary span{font-size:10px;color:var(--gray-400);margin-left:4px}
+.ord-tools .ord-tools-sub[open]>summary{color:var(--gray-700)}
+.ord-tools .ord-tools-sub>div{display:flex;flex-direction:column;gap:6px;margin-top:6px}
 .col-selector{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;padding:12px;background:var(--gray-50);border-radius:var(--radius)}
 .col-selector label{display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;padding:4px 8px;border-radius:4px;background:#fff;border:1px solid var(--gray-200)}
 .col-selector label:hover{border-color:var(--primary)}
@@ -1631,13 +1637,10 @@ nav.nav-loading a[href^="#"] {
     <details class="ord-tools" id="ord-tools">
       <summary>동기화 · 도구 ▾</summary>
       <div class="ord-tools-panel">
-        <button class="btn" id="ord-btn-coupang-sync" onclick="syncCoupangOrders(this)" style="padding:5px 12px;font-size:12px;background:#fef2f2;border-color:#fecaca" title="쿠팡 Wing API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟥 쿠팡 동기화 <span id="ord-coupang-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
-        <button class="btn" id="ord-btn-naver-sync" onclick="syncNaverOrders(this)" style="padding:5px 12px;font-size:12px;background:#ecfdf5;border-color:#a7f3d0" title="네이버 커머스 API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟩 네이버 동기화 <span id="ord-naver-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
         <button class="btn" id="ord-btn-naver-confirm" onclick="backfillNaverConfirmedAt(this)" style="padding:5px 12px;font-size:12px" title="구매확정일이 비어 있는 네이버 주문을 상세 조회로 채웁니다. 동기화 시점에 필드가 안 왔거나 그 전에 들어온 옛 주문을 소급 적용합니다.">📅 네이버 구매확정일 채우기</button>
         <button class="btn" id="ord-btn-coupang-confirm" onclick="backfillCoupangConfirmedAt(this)" style="padding:5px 12px;font-size:12px" title="쿠팡 정산현황(매출내역)을 기간으로 훑어, 구매확정일이 비어 있는 쿠팡 주문에 매출인식일(배송완료+7일 또는 구매확정 중 빠른 시점)을 채웁니다.">📅 쿠팡 구매확정일 채우기</button>
         <button class="btn" id="ord-btn-coupang-confirm-xlsx" onclick="document.getElementById('ord-cp-confirm-file').click()" style="padding:5px 12px;font-size:12px" title="쿠팡 Wing 정산현황 > 매출내역에서 내려받은 상세 엑셀(MSF_PAYMENT_REVENUE_DETAIL-*.xlsx)을 올려 구매확정일을 채웁니다. API 연동과 무관하게 바로 반영됩니다.">📤 정산현황 엑셀로 채우기</button>
         <input type="file" id="ord-cp-confirm-file" accept=".xlsx" style="display:none" onchange="uploadCoupangConfirmXlsx(this)">
-        <button class="btn" id="ord-btn-cafe24-sync" onclick="syncCafe24Orders(this)" style="padding:5px 12px;font-size:12px;background:#fff7ed;border-color:#fed7aa" title="카페24(정수당) Admin API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟧 정수당 동기화 <span id="ord-cafe24-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
         <button class="btn" id="ord-btn-csv-upload" onclick="openBgCsvUpload()" style="padding:5px 12px;font-size:12px;background:#dbeafe;border-color:#93c5fd;color:#1e40af;display:none" title="바른손더기프트 퍼스트몰 원본 Excel(.xlsx) 또는 CSV 를 업로드하여 여러 주문을 한 번에 등록합니다">📤 CSV/Excel 업로드</button>
         <button class="btn" id="ord-btn-bhg-backfill" onclick="backfillBhgStubs()" style="padding:5px 12px;font-size:12px;background:#eef2ff;border-color:#c7d2fe;color:#4338ca;display:none" title="이전에 등록된 바른손더기프트 주문 중 정보입력현황 stub 이 없는 것을 일괄 생성 (스티커/희망출고일 정보 backfill)">🔧 stub 재생성</button>
         <button class="btn" id="ord-btn-bhg-bulk-cancel" onclick="bulkCancelBhg()" style="padding:5px 12px;font-size:12px;background:#fef3c7;border-color:#fbbf24;color:#92400e;display:none" title="선택된 바른손더기프트 주문을 취소 상태 (status_seq=3) 로 변경">🚫 선택 취소</button>
@@ -1646,6 +1649,16 @@ nav.nav-loading a[href^="#"] {
         <button id="ord-cp-backfill" class="btn" style="display:none;padding:2px 10px;font-size:11px"
             title="상품설정에 넣은 채널 코드로, 이미 들어온 쿠팡 주문의 스티커와 상품코드를 채웁니다. 먼저 미리보기로 무엇이 바뀌는지 확인합니다."
             onclick="runCoupangStickerBackfill(true)">🩹 스티커 백필</button>
+        <!-- 채널 동기화 — 외부 크론이 15분마다 자동으로 가져온다. 지금 당장 가져올 때만 쓰므로 한 단계 더 접는다.
+             버튼 id 는 그대로라 카테고리별 표시/숨김·마지막 동기화 시각 표시가 그대로 동작한다. -->
+        <details class="ord-tools-sub" id="ord-tools-sync">
+          <summary>수동 동기화 ▸ <span>크론이 자동 수집 중 · 지금 당장 가져올 때만</span></summary>
+          <div>
+            <button class="btn" id="ord-btn-coupang-sync" onclick="syncCoupangOrders(this)" style="padding:5px 12px;font-size:12px;background:#fef2f2;border-color:#fecaca" title="쿠팡 Wing API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟥 쿠팡 동기화 <span id="ord-coupang-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
+            <button class="btn" id="ord-btn-naver-sync" onclick="syncNaverOrders(this)" style="padding:5px 12px;font-size:12px;background:#ecfdf5;border-color:#a7f3d0" title="네이버 커머스 API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟩 네이버 동기화 <span id="ord-naver-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
+            <button class="btn" id="ord-btn-cafe24-sync" onclick="syncCafe24Orders(this)" style="padding:5px 12px;font-size:12px;background:#fff7ed;border-color:#fed7aa" title="카페24(정수당) Admin API 에서 최근 7일치 주문 가져와 Supabase 에 저장 (그 후 조회 버튼으로 갱신)">🟧 정수당 동기화 <span id="ord-cafe24-sync-meta" style="color:var(--gray-500);font-size:11px;margin-left:3px"></span></button>
+          </div>
+        </details>
       </div>
     </details>
 
@@ -5113,6 +5126,9 @@ function switchCategory(cat) {
   if (cpBtn) cpBtn.style.display = showMarketplaceSync ? '' : 'none';
   if (nvBtn) nvBtn.style.display = showMarketplaceSync ? '' : 'none';
   if (cfBtn) cfBtn.style.display = showMarketplaceSync ? '' : 'none';
+  // 수동 동기화 묶음도 마켓플레이스 채널이 있는 답례품에서만 (안의 버튼 셋이 전부 그 조건이다)
+  const syncSub = document.getElementById('ord-tools-sync');
+  if (syncSub) syncSub.style.display = showMarketplaceSync ? '' : 'none';
   if (csvBtn) csvBtn.style.display = showCsvUpload ? '' : 'none';
   if (bhgBackfillBtn) bhgBackfillBtn.style.display = showCsvUpload ? '' : 'none';
   // 매입/위탁 서브탭 — 더기프트에서만. 들어올 때마다 '전체' 로 되돌린다
