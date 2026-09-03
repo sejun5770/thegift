@@ -424,7 +424,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const existingInfo = await store.getCustomerInfo(orderId);
 
       // 상품코드로 product_settings 조회 (변형 코드 fallback 적용)
-      const productSettings = row.Card_Code ? await lookupProductSettings(row.Card_Code) : null;
+      let productSettings = row.Card_Code ? await lookupProductSettings(row.Card_Code) : null;
       const allActiveStickers = await store.getAllStickers(true);
 
       // 아이템 수집 (DELIVERY_INFO JOIN으로 인한 중복 제거: item_id 기준)
@@ -460,6 +460,11 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
             products.push(...synthesizeEtcSetProducts(result.recordset, setBySeq));
           } catch (e) { console.warn('[order-info] 세트 상품 조회 실패 (부모 합성 생략):', e.message); }
         }
+      }
+      // 대표 상품 설정(product_settings / shipping_config) — 첫 행이 구성품(수건·핸드워시)이면
+      //   세트(부모) 기준으로 다시 잡는다. 옵션 행이 부모보다 먼저 오는 주문(3250174)과 B2B 경로 모두 해당.
+      if (products[0]?.product_code && products[0].product_code !== row.Card_Code) {
+        productSettings = await lookupProductSettings(products[0].product_code);
       }
       // 무료 사은품(추석 미니엽서 등) — 몰 프론트에서 고른 0원 옵션 라인을 부모 상품에 붙인다.
       //   고객은 여기서 바꿀 수 없고 무엇을 골랐는지 확인만 한다.
