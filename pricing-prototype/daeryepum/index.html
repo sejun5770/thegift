@@ -683,8 +683,10 @@ nav.nav-loading a[href^="#"] {
     </div>
   </div>
 
-  <!-- 구매확정일별 매출 (마켓 정산 기준) — 결제일 매출과 기간 차원이 다르다 (paid_at vs confirmed_at) -->
-  <div class="section" data-dash-only="daeryepum">
+  <!-- 구매확정일별 매출 (마켓 정산 기준) — 결제일 매출과 기간 차원이 다르다 (paid_at vs confirmed_at)
+       data-dash-section="1": 하위 탭 태깅(_tagDashSections)은 제목 문자열로 배정하는데 여기 빠지면
+       "매칭 안 되면 항상 표시" 규칙을 타서 예식일 캘린더 등 모든 탭에 보인다 (2026-09-06). -->
+  <div class="section" data-dash-section="1" data-dash-only="daeryepum">
     <div class="section-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
       <span>✅ 구매확정일별 매출 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(쿠팡 일반 · 네이버 — 마켓 정산 기준)</span></span>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;font-weight:400">
@@ -9105,7 +9107,7 @@ function _tagDashSections() {
     const t = titleEl ? titleEl.textContent : '';
     let n = 0;
     if (t.includes('위탁상품 요약')) n = 5; // 위탁 탭으로 이동
-    else if (t.includes('어제 vs 오늘') || t.includes('지난주 동기간') || t.includes('희망출고일별 매출')) n = 1;
+    else if (t.includes('어제 vs 오늘') || t.includes('지난주 동기간') || t.includes('희망출고일별 매출') || t.includes('구매확정일별 매출')) n = 1;
     else if (t.includes('마케팅 분석') || t.includes('주차별 전환율')) n = 2;
     else if (t.includes('빠른출고 분석') || t.includes('매출 예측') || t.includes('리드타임 분포') || t.includes('3-way 리드타임')) n = 3;
     else if (t.includes('상품별 판매 통계')) n = 4;
