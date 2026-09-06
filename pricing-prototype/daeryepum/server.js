@@ -1423,7 +1423,7 @@ async function getDailyMetricsSnapshot(dateStr) {
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
       ${ETC_COUPON_DIVISOR_JOIN_D01}
-      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+      WHERE ${D01_FILTER} AND ${etcNotFreeOptionClause('oi')} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
         AND CAST(o.order_date AS date) = @targetDate
     `);
   const row = result.recordset[0] || {};
@@ -1439,7 +1439,7 @@ async function getDailyMetricsSnapshot(dateStr) {
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
       ${ETC_COUPON_DIVISOR_JOIN_D01}
-      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+      WHERE ${D01_FILTER} AND ${etcNotFreeOptionClause('oi')} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
         AND CAST(o.order_date AS date) = @targetDate
       GROUP BY c.Card_Name
       ORDER BY SUM(${ETC_AMOUNT_EXPR}) DESC
@@ -2315,16 +2315,52 @@ function mergeNames(recvName, orderName) {
  *   GROUP BY 로 주문당 1행 → outer 행마다 재계산 X (성능).
  *   인자: cardDiv 문자열 'D01' (호환) 또는 filter clause "c_cpd.Card_Div = 'C29' OR ..."
  */
+/**
+ * 무료 옵션 행 판정 SQL — card_opt 가 다른 아이템(부모)을 가리키고 판매가 0 인 행.
+ *   몰 프론트 옵션 기능은 값을 옵션 행에 싣고 부모 행을 0원으로 쓰는데, 추석 미니엽서처럼
+ *   무료 옵션이면 옵션 행도 0원이라 아이템 행 어디에도 금액이 없다 (2026-09-03~, 주문 3250299).
+ *   집계에서 이 행을 세면 수량이 부풀고 '엽서' 가 상품 줄로 잡힌다 → 집계 WHERE 에서 뺀다.
+ *   card_opt 가 자기 자신(card_seq)을 가리키는 행은 부모(B2B 몰 경로)라 옵션이 아니다.
+ */
+function etcFreeOptionRowSql(alias = 'oi') {
+  return `(${alias}.card_opt IS NOT NULL AND ${alias}.card_opt <> '' AND ${alias}.card_opt <> CAST(${alias}.card_seq AS varchar(20)) AND ISNULL(${alias}.card_sale_price, 0) = 0)`;
+}
+function etcNotFreeOptionClause(alias = 'oi') {
+  return `NOT ${etcFreeOptionRowSql(alias)}`;
+}
+/** 부모(세트/메인) 행 판정 SQL — card_opt 없음 또는 자기참조. */
+function etcParentRowSql(alias = 'oi') {
+  return `(${alias}.card_opt IS NULL OR ${alias}.card_opt = '' OR ${alias}.card_opt = CAST(${alias}.card_seq AS varchar(20)))`;
+}
+
 function etcCouponDivisorJoin(input = 'D01') {
   // 인자가 단순 cardDiv ('D01') 인지 또는 filter clause (공백 포함) 인지 자동 판별
   const filter = /\s|=|\(/.test(input) ? input : `c_cpd.Card_Div = '${input}'`;
+  // item_count: 쿠폰 분배 분모 — 무료 옵션 행은 빼서 집계 WHERE(etcNotFreeOptionClause)와 맞춘다.
+  // item_sum / parent_qty: 아이템 행에 금액이 전혀 없는 주문(무료 옵션만 붙은 주문)을 헤더
+  //   option_price 로 복원할 때 쓴다 (etcAmountExpr / etcAmountGrossExpr 폴백).
   return `LEFT JOIN (
-    SELECT order_seq, COUNT(*) AS item_count
+    SELECT order_seq,
+           SUM(CASE WHEN ${etcFreeOptionRowSql('oi_cpd')} THEN 0 ELSE 1 END) AS item_count,
+           SUM(CAST(ISNULL(oi_cpd.card_sale_price, 0) AS float) * oi_cpd.order_count) AS item_sum,
+           SUM(CASE WHEN ${etcParentRowSql('oi_cpd')} THEN oi_cpd.order_count ELSE 0 END) AS parent_qty
     FROM CUSTOM_ETC_ORDER_ITEM oi_cpd WITH (NOLOCK)
     INNER JOIN S2_Card c_cpd WITH (NOLOCK) ON oi_cpd.card_seq = c_cpd.Card_Seq
     WHERE ${filter}
     GROUP BY order_seq
   ) ecd ON o.order_seq = ecd.order_seq`;
+}
+
+/**
+ * 헤더 금액 폴백 조건 — 주문의 아이템 행 금액 합이 0 인데 헤더 option_price(상품 총액, 배송비 제외) 가 있다.
+ *   무료 옵션(엽서)만 붙은 주문이 여기에 걸린다. 부모 행에 option_price 를 부모 수량 비율로 귀속.
+ *   (바른손카드 답례품 331건 전수: option_price == settle_price - delivery_price, 2026-09-06 확인)
+ */
+function etcHeaderFallbackSql(alias = 'oi') {
+  return `ISNULL(ecd.item_sum, 0) = 0 AND ISNULL(o.option_price, 0) > 0 AND ${etcParentRowSql(alias)}`;
+}
+function etcHeaderFallbackAmountSql(alias = 'oi') {
+  return `CAST(o.option_price AS float) * ${alias}.order_count / NULLIF(ecd.parent_qty, 0)`;
 }
 
 /** ETC 행 단위 매출 식 (집계용, 쿠폰 차감 포함) — outer 에 ecd.item_count alias 필요.
@@ -2334,8 +2370,13 @@ function etcCouponDivisorJoin(input = 'D01') {
 function etcAmountExpr(arg = 'D01') {
   const skipUnitValue = (typeof arg === 'object' && arg !== null) ? !!arg.skipUnitValue : false;
   const unitDivisor = skipUnitValue ? '1' : 'ISNULL(NULLIF(c.Unit_Value, 0), 1)';
+  // 첫 분기: 아이템 행에 금액이 전혀 없는 주문(무료 옵션만 붙은 주문) → 헤더 option_price 폴백.
+  //   option_price 는 쿠폰 반영 전 상품 총액이라 쿠폰 몫은 그대로 뺀다.
   return `
   CASE
+    WHEN ${etcHeaderFallbackSql('oi')}
+    THEN ${etcHeaderFallbackAmountSql('oi')}
+         - ISNULL(o.coupon_price, 0) * 1.0 / NULLIF(ecd.item_count, 0)
     WHEN si.SiteName IS NULL
     THEN CAST(oi.card_sale_price AS float) * oi.order_count / ${unitDivisor}
          - ISNULL(o.coupon_price, 0) * 1.0 / NULLIF(ecd.item_count, 0)
@@ -2355,8 +2396,11 @@ function etcAmountExpr(arg = 'D01') {
  */
 function etcAmountGrossExpr({ skipUnitValue = false } = {}) {
   const unitDivisor = skipUnitValue ? '1' : 'ISNULL(NULLIF(c.Unit_Value, 0), 1)';
+  // 아이템 행에 금액이 전혀 없는 주문(무료 옵션만 붙은 주문) → 헤더 option_price 폴백 (etcAmountExpr 와 동일).
   return `
   CASE
+    WHEN ${etcHeaderFallbackSql('oi')}
+    THEN ${etcHeaderFallbackAmountSql('oi')}
     WHEN si.SiteName IS NULL
     THEN CAST(oi.card_sale_price AS float) * oi.order_count / ${unitDivisor}
     ELSE CAST(oi.card_sale_price AS float)
@@ -2486,7 +2530,9 @@ async function apiProductStats(query) {
              CAST(o.order_date AS DATE) AS d, o.order_seq,
              SUM(ei.order_count) AS qty,
              SUM(
-               CASE WHEN si.SiteName IS NULL
+               CASE WHEN ${etcHeaderFallbackSql('ei')}
+                    THEN ${etcHeaderFallbackAmountSql('ei')} - ISNULL(o.coupon_price, 0)
+                    WHEN si.SiteName IS NULL
                     THEN CAST(ei.card_sale_price AS float) * ei.order_count
                          / ISNULL(NULLIF(c.Unit_Value, 0), 1)
                          - ISNULL(o.coupon_price, 0)
@@ -2497,7 +2543,8 @@ async function apiProductStats(query) {
       INNER JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON o.order_seq = ei.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
-      WHERE (${matchClause2})
+      ${ETC_COUPON_DIVISOR_JOIN_D01}
+      WHERE (${matchClause2}) AND ${etcNotFreeOptionClause('ei')}
         AND o.order_date >= @s AND o.order_date < @e
         AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
       GROUP BY c.Card_Code, CAST(o.order_date AS DATE), o.order_seq
@@ -2971,7 +3018,9 @@ async function apiProductRanking(query = {}) {
         SELECT o.order_seq, c.Card_Code AS card_code, c.Card_Name AS card_name,
                SUM(ei.order_count) AS qty,
                SUM(
-                 CASE WHEN si.SiteName IS NULL
+                 CASE WHEN ${etcHeaderFallbackSql('ei')}
+                      THEN ${etcHeaderFallbackAmountSql('ei')} - ISNULL(o.coupon_price, 0)
+                      WHEN si.SiteName IS NULL
                       THEN CAST(ei.card_sale_price AS float) * ei.order_count
                            / ISNULL(NULLIF(c.Unit_Value, 0), 1)
                            - ISNULL(o.coupon_price, 0)
@@ -2982,7 +3031,8 @@ async function apiProductRanking(query = {}) {
         INNER JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON o.order_seq = ei.order_seq
         INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
-        WHERE ${D01_FILTER}
+        ${ETC_COUPON_DIVISOR_JOIN_D01}
+        WHERE ${D01_FILTER} AND ${etcNotFreeOptionClause('ei')}
           AND o.order_date >= @s AND o.order_date < @e
           AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
         GROUP BY o.order_seq, c.Card_Code, c.Card_Name
@@ -3792,7 +3842,7 @@ async function apiArtistDiagnose() {
             FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
             INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
             INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-            WHERE c.Card_Code IN (${foundList})
+            WHERE c.Card_Code IN (${foundList}) AND ${etcNotFreeOptionClause('oi')}
               AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
               AND o.settle_date IS NOT NULL
               AND o.settle_date >= @s AND o.settle_date < @e
@@ -4009,7 +4059,7 @@ async function apiDashboardComparison(query = {}) {
           LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
           LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
           ${ETC_COUPON_DIVISOR_JOIN_D01}
-          WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+          WHERE ${D01_FILTER} AND ${etcNotFreeOptionClause('oi')} AND o.order_date >= @s AND o.order_date < @e AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
           GROUP BY ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)),
             CASE WHEN ecp.order_seq IS NOT NULL THEN 1 ELSE 0 END
         `),
@@ -4067,7 +4117,7 @@ async function apiDashboardComparison(query = {}) {
             INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
             LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
             ${ETC_COUPON_DIVISOR_JOIN_D01}
-            WHERE ${D01_FILTER} AND o.order_date >= @s AND o.order_date < @e
+            WHERE ${D01_FILTER} AND ${etcNotFreeOptionClause('oi')} AND o.order_date >= @s AND o.order_date < @e
               AND o.status_seq IN (1, 9) AND o.settle_date IS NULL
           ) AS etc
         `),
@@ -4420,7 +4470,7 @@ async function apiDashboardComparison(query = {}) {
             LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
             LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
             ${ETC_COUPON_DIVISOR_JOIN_D01}
-            WHERE ${D01_FILTER} AND o.order_seq IN (${inList})
+            WHERE ${D01_FILTER} AND ${etcNotFreeOptionClause('oi')} AND o.order_seq IN (${inList})
               AND o.order_date >= @s AND o.order_date < @e
               AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
             GROUP BY ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)),
@@ -4565,7 +4615,7 @@ async function apiDashboardSummary(query) {
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
         LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
         ${etcCouponDivisorForCategory}
-        WHERE ${categoryFilter} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+        WHERE ${categoryFilter} AND ${etcNotFreeOptionClause('oi')} AND o.order_date >= @startDate AND o.order_date < @endDate AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
         GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)),
           CASE WHEN ecp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END,
           CASE WHEN c.Card_Code LIKE 'COM[_]%' THEN N'위탁' ELSE N'일반' END
@@ -4806,7 +4856,7 @@ async function apiDashboardSummary(query) {
             LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
             LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
             ${ETC_COUPON_DIVISOR_JOIN_D01}
-            WHERE ${D01_FILTER} AND o.order_seq IN (${inList})
+            WHERE ${D01_FILTER} AND ${etcNotFreeOptionClause('oi')} AND o.order_seq IN (${inList})
               AND o.order_date >= @startDate AND o.order_date < @endDate
               AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
             GROUP BY CONVERT(varchar(10), o.order_date, 120), ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)),
@@ -5380,7 +5430,7 @@ async function apiVendorSettlements(query) {
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
       LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
       ${ETC_COUPON_DIVISOR_JOIN_D01}
-      WHERE ${D01_FILTER} AND o.order_seq IN (${inList})
+      WHERE ${D01_FILTER} AND ${etcNotFreeOptionClause('oi')} AND o.order_seq IN (${inList})
         AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
       GROUP BY o.order_seq, c.Card_Code, c.Card_Name,
         ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)),
@@ -5825,7 +5875,7 @@ async function apiDashboardByShipDate(query) {
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
       LEFT JOIN etc_copurchase_orders ecp ON o.order_seq = ecp.order_seq
       ${ETC_COUPON_DIVISOR_JOIN_D01}
-      WHERE ${D01_FILTER} AND o.order_seq IN (${inList})
+      WHERE ${D01_FILTER} AND ${etcNotFreeOptionClause('oi')} AND o.order_seq IN (${inList})
         AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5, 15)
       GROUP BY o.order_seq, ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR)),
                CASE WHEN ecp.order_seq IS NOT NULL THEN 1 ELSE 0 END
@@ -6169,7 +6219,7 @@ async function apiLeadtimeAnalysis(query) {
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
       ${ETC_COUPON_DIVISOR_JOIN_D01}
-      WHERE ${D01_FILTER} AND o.order_seq IN (${inList})
+      WHERE ${D01_FILTER} AND ${etcNotFreeOptionClause('oi')} AND o.order_seq IN (${inList})
         AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5, 15)
       GROUP BY o.order_seq, CONVERT(varchar(10), o.order_date, 120),
         ISNULL(si.SiteName, CAST(o.company_Seq AS VARCHAR))
@@ -8590,7 +8640,7 @@ async function apiMarketing(query = {}) {
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
       ${ETC_COUPON_DIVISOR_JOIN_D01}
-      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+      WHERE ${D01_FILTER} AND ${etcNotFreeOptionClause('oi')} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
         AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
       UNION ALL
       SELECT CONCAT('C', co.order_seq) AS order_key,
@@ -8623,7 +8673,7 @@ async function apiMarketing(query = {}) {
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
       ${ETC_COUPON_DIVISOR_JOIN_D01}
-      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+      WHERE ${D01_FILTER} AND ${etcNotFreeOptionClause('oi')} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
         AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
       UNION ALL
       SELECT co.order_date, CONCAT('C', co.order_seq) AS order_key,
@@ -9064,7 +9114,7 @@ async function apiMarketingChannel(query = {}) {
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
       ${ETC_COUPON_DIVISOR_JOIN_D01}
-      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+      WHERE ${D01_FILTER} AND ${etcNotFreeOptionClause('oi')} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
         AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
       UNION ALL
       SELECT CONCAT('C', co.order_seq) AS order_key,
@@ -9096,7 +9146,7 @@ async function apiMarketingChannel(query = {}) {
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
       ${ETC_COUPON_DIVISOR_JOIN_D01}
-      WHERE ${D01_FILTER} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
+      WHERE ${D01_FILTER} AND ${etcNotFreeOptionClause('oi')} AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
         AND o.order_date >= ${MK_FROM} AND o.order_date < ${MK_TO}
       UNION ALL
       SELECT co.order_date, CONCAT('C', co.order_seq) AS order_key,
@@ -10464,7 +10514,7 @@ const server = http.createServer(async (req, res) => {
                     INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
                     INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
                     LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
-                    WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesUp})
+                    WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesUp}) AND ${etcNotFreeOptionClause('oi')}
                       AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
                       ${etcNullClause}
                       AND o.${etcDateCol} >= @s AND o.${etcDateCol} < @e
@@ -11930,7 +11980,7 @@ const server = http.createServer(async (req, res) => {
               FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
               INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
               INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-              WHERE c.Card_Div = '${div}'
+              WHERE c.Card_Div = '${div}' AND ${etcNotFreeOptionClause('oi')}
                 ${codesFilter}
                 AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
                 ${nullClause.replace('{ALIAS}', 'o')}
@@ -12037,7 +12087,7 @@ const server = http.createServer(async (req, res) => {
               FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
               INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
               INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-              WHERE c.Card_Div = '${div}'
+              WHERE c.Card_Div = '${div}' AND ${etcNotFreeOptionClause('oi')}
                 AND o.status_seq >= 1
                 AND o.order_date >= @s AND o.order_date < @e
               GROUP BY UPPER(RTRIM(LTRIM(c.Card_Code))), c.Card_Div
@@ -12127,7 +12177,7 @@ const server = http.createServer(async (req, res) => {
                   FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
                   INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
                   INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-                  WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesUpperEscaped})
+                  WHERE UPPER(RTRIM(LTRIM(c.Card_Code))) IN (${codesUpperEscaped}) AND ${etcNotFreeOptionClause('oi')}
                   GROUP BY UPPER(RTRIM(LTRIM(c.Card_Code))), o.status_seq
                   ORDER BY UPPER(RTRIM(LTRIM(c.Card_Code))), o.status_seq
                 `);
@@ -13647,7 +13697,7 @@ const server = http.createServer(async (req, res) => {
                     INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
                     LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
                     ${ETC_COUPON_DIVISOR_JOIN_D01}
-                    WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')
+                    WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%') AND ${etcNotFreeOptionClause('oi')}
                       AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
                       AND o.settle_date IS NOT NULL
                       AND o.settle_date >= @s AND o.settle_date < @e
@@ -13872,7 +13922,7 @@ const server = http.createServer(async (req, res) => {
                   INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
                   LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
                   ${ETC_COUPON_DIVISOR_JOIN_D01}
-                  WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')
+                  WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%') AND ${etcNotFreeOptionClause('oi')}
                     AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
                     AND o.settle_date IS NOT NULL
                     AND o.settle_date >= @s AND o.settle_date < @e
@@ -14016,7 +14066,7 @@ const server = http.createServer(async (req, res) => {
                 INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
                 LEFT JOIN SiteInfo si WITH (NOLOCK) ON o.company_Seq = si.CompayCode
                 ${ETC_COUPON_DIVISOR_JOIN_D01}
-                WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')
+                WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%') AND ${etcNotFreeOptionClause('oi')}
                   AND o.status_seq >= 2 AND o.status_seq NOT IN (3, 5, 15)
                   AND o.settle_date IS NOT NULL
                   AND o.settle_date >= @s AND o.settle_date < @e
@@ -14701,7 +14751,7 @@ const server = http.createServer(async (req, res) => {
             FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
             INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
             INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
-            WHERE c.Card_Code LIKE 'COM[_]%'
+            WHERE c.Card_Code LIKE 'COM[_]%' AND ${etcNotFreeOptionClause('oi')}
               AND o.order_date >= DATEADD(day, -@days, GETDATE())
               AND o.status_seq >= 1 AND o.status_seq NOT IN (3, 5, 9)
             UNION ALL
