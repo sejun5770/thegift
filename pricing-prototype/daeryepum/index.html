@@ -4904,7 +4904,11 @@ const ALL_COLS = [
   {key:'file_count_fmt',label:'첨부파일',default:true},
   {key:'order_type_label',label:'주문유형',default:false},
   {key:'status_label',label:'주문상태',default:false},
-  {key:'confirmed_at_fmt',label:'구매확정일',default:false},   // 바른손카드 src_confirm_date / 네이버 confirmed_at (037) / 쿠팡 confirmed_at (080, 정산현황 매출인식일)
+  {key:'confirmed_at_fmt',label:'구매확정일',default:false},
+  // 환불(부분취소) — custom_order_refund. 주문 상태·품목 수량엔 반영되지 않아 별도로 보여준다.
+  {key:'refund_price_fmt',label:'환불액',default:false,num:true},
+  {key:'refund_date',label:'환불일',default:false},
+  {key:'refund_msg',label:'환불사유',default:false},   // 바른손카드 src_confirm_date / 네이버 confirmed_at (037) / 쿠팡 confirmed_at (080, 정산현황 매출인식일)
 ];
 
 let ordersData = [];
@@ -5355,6 +5359,8 @@ async function loadOrders() {
       r.order_date_fmt = fmtKstDate(r.order_date);
       // 구매확정일 — CARD(src_confirm_date) / 네이버(037) / 쿠팡(080, 정산현황 매출인식일) confirmed_at. NULL 이면 미확정.
       r.confirmed_at_fmt = r.confirmed_at ? fmtKstDate(r.confirmed_at) : '';
+      // 환불(부분취소) — 금액이 있을 때만 표시. 목록 배지(_ordRefundBadge)와 같은 원천.
+      r.refund_price_fmt = Number(r.refund_price) > 0 ? fmtKRW(r.refund_price) : '';
       r.item_amount_fmt = fmtKRW(r.item_amount);
       // 상품 결제액 = 주문총액 - 쿠폰할인 (행 단위 실 결제). 음수 방지(쿠폰이 정가 초과하는 비정상 케이스).
       r.item_paid = Math.max(0, (Number(r.item_amount) || 0) - (Number(r.coupon_price) || 0));
@@ -5613,6 +5619,27 @@ function _bgVendorBadge(r) {
     + ` style="display:inline-block;margin-right:4px;padding:1px 5px;border-radius:3px;font-size:11px;font-weight:600;`
     + `background:${mixed ? '#fef3c7' : '#ede9fe'};color:${mixed ? '#92400e' : '#5b21b6'}">${esc(r.vendor_name)}</span>`;
 }
+/**
+ * 환불(부분취소) 배지.
+ *   예식 취소로 '답례품만' 부분취소되는 건이 있는데, 주문 상태(status_seq)는 주문 전체 단위이고
+ *   품목 라인엔 취소 플래그가 없어 화면 어디에도 흔적이 남지 않는다 (2026-09-08 주문 4749335).
+ *   환불액이 답례품 금액과 정확히 일치하는 '전액취소' 는 서버가 매출에서 빼지만,
+ *   부분환불은 어느 품목 몇 개인지가 사유 텍스트에만 있어 기계적으로 못 가른다 — 사람이 본다.
+ */
+function _ordRefundBadge(r) {
+  const amt = Number(r && r.refund_price) || 0;
+  if (amt <= 0) return '';
+  const tip = [
+    `환불 ${fmtKRW(amt)}` + (r.refund_date ? ` (${r.refund_date})` : ''),
+    r.refund_msg ? `사유: ${r.refund_msg}` : '',
+    '',
+    '부분취소는 주문 상태와 품목 수량에 반영되지 않습니다.',
+    '이 행의 금액이 실제 청구액과 다를 수 있으니 확인해 주세요.',
+  ].filter(Boolean).join(String.fromCharCode(10));
+  return `<span title="${esc(tip)}" style="display:inline-block;margin-right:4px;padding:1px 5px;`
+    + `border-radius:3px;font-size:10px;font-weight:600;background:#fee2e2;color:#991b1b">↩ 환불</span>`;
+}
+
 /** 서브탭 건수 갱신 — 주문(=order_seq) 단위로 센다. 행 단위로 세면 품목 수만큼 부풀려진다. */
 function _bgVendorTabCounts(rows) {
   const own = new Set(), con = new Set();
@@ -5735,7 +5762,7 @@ function renderOrderTable() {
     return `<tr class="${cls}" style="cursor:pointer" onclick="_onOrderRowClick(${i}, event)">` +
       `<td><input type="checkbox" class="row-check" data-idx="${i}" onchange="updateSelectedCount()" onclick="event.stopPropagation()"></td>` +
       actionCell +
-      cols.map(c => `<td class="${c.num?'num':''}">${c.key === 'order_seq' ? _ordDriftBadge(r) + _bgVendorBadge(r) + _combineBadge(_ordCombine, r.order_seq) + (r[c.key] ?? '') : (r[c.key] ?? '')}</td>`).join('') +
+      cols.map(c => `<td class="${c.num?'num':''}">${c.key === 'order_seq' ? _ordDriftBadge(r) + _ordRefundBadge(r) + _bgVendorBadge(r) + _combineBadge(_ordCombine, r.order_seq) + (r[c.key] ?? '') : (r[c.key] ?? '')}</td>`).join('') +
       `</tr>`;
   }).join('');
   document.getElementById('order-count').textContent = filtered.length;

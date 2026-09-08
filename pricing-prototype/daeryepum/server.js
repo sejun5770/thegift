@@ -1787,6 +1787,9 @@ async function apiOrders(query) {
         1 AS delivery_seq,  -- ETC 주문은 단일 배송지
         -- 구매확정일 — CUSTOM_ETC_ORDER.confirm_date. 실제로는 2010년 이후 신규 값 없음 (미사용) 이나 스키마 통일 위해 SELECT.
         CONVERT(varchar(19), o.confirm_date, 120) AS confirmed_at,
+        -- 환불(부분취소) — custom_order_refund 는 custom_order 전용이라 ETC 는 항상 NULL.
+        CAST(NULL AS float) AS refund_price, CAST(NULL AS varchar(10)) AS refund_date,
+        CAST(NULL AS nvarchar(200)) AS refund_msg,
         -- 옵션(비용변동) 라인 식별: card_opt = 부모 아이템 card_seq. NULL=부모(세트/메인).
         --   백엔드에서 옵션을 부모로 합산 + 옵션 행 제거 (아래 JS). item_card_seq 로 매칭.
         oi.card_seq AS item_card_seq, oi.card_opt AS card_opt, oi.seq AS item_seq
@@ -1873,12 +1876,27 @@ async function apiOrders(query) {
         ISNULL(di.DELIVERY_SEQ, 1) AS delivery_seq,  -- 배송지별 행 구분 (나눔배송 대응)
         -- 구매확정일 — custom_order.src_confirm_date. 바른손카드에서 고객이 구매확정한 시점.
         CONVERT(varchar(19), co.src_confirm_date, 120) AS confirmed_at,
+        -- 환불(부분취소) — 예식 취소로 답례품만 취소되는 건이 있는데 주문 상태·품목 라인엔
+        --   흔적이 남지 않는다(2026-09-08 주문 4749335). 화면에서 사람이 확인하도록 실어 보낸다.
+        rfd.refund_price, rfd.refund_date, rfd.refund_msg,
         -- 옵션 라인 식별 (ETC 파트와 컬럼 통일). custom_order_item 엔 card_opt 없음 → NULL.
         coi.card_seq AS item_card_seq, NULL AS card_opt, NULL AS item_seq
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
+      -- 환불 요약 — 한 주문에 여러 번 환불될 수 있어 합계/최근일/사유를 묶는다.
+      OUTER APPLY (
+        SELECT SUM(r.refund_price) AS refund_price,
+               CONVERT(varchar(10), MAX(r.refund_date), 120) AS refund_date,
+               STUFF((SELECT N' / ' + LTRIM(RTRIM(r2.refund_msg))
+                      FROM custom_order_refund r2 WITH (NOLOCK)
+                      WHERE r2.order_tbl = '0' AND TRY_CAST(r2.order_seq AS int) = co.order_seq
+                        AND LTRIM(RTRIM(ISNULL(r2.refund_msg, ''))) <> ''
+                      FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 3, '') AS refund_msg
+        FROM custom_order_refund r WITH (NOLOCK)
+        WHERE r.order_tbl = '0' AND TRY_CAST(r.order_seq AS int) = co.order_seq
+      ) rfd
       LEFT JOIN card_copurchase_orders cp ON co.order_seq = cp.order_seq
       OUTER APPLY (
         -- canonical name — 같은 Card_Code 여러 Card_Seq 있을 때 대표 이름 선정
@@ -2476,6 +2494,8 @@ async function apiProductStats(query) {
   }
 
   const p = await getPool();
+  // 답례품 전액환불 주문 제외 — 부분취소가 라인에 반영되지 않아 매출이 남는 것을 막는다.
+  const _psRefundExcl = giftRefundExclSql(await _loadFullyRefundedGiftOrders(), 'co');
 
   // 기간 계산 helper
   const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000);
@@ -2516,7 +2536,7 @@ async function apiProductStats(query) {
       LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
       WHERE (${matchClause})
         AND co.order_date >= @s AND co.order_date < @e
-        AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+        AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)${_psRefundExcl}
       GROUP BY c.Card_Code, CAST(co.order_date AS DATE), co.order_seq
     `);
 
@@ -2782,6 +2802,88 @@ async function _loadGiftExclusions() {
     console.warn('[sales-exclusions] 로드 실패 (제외 미적용):', e.message);
     return EMPTY;
   }
+}
+
+/**
+ * 답례품 전액환불 주문 (custom_order_refund) — 매출에서 빼야 할 주문번호 집합.
+ *
+ * 왜 필요한가 (2026-09-08, 주문 4749335):
+ *   청첩장+답례품 동시주문에서 예식 취소로 '답례품만' 부분취소되는 일이 있다.
+ *   그런데 부분취소를 담을 자리가 없다 — 주문 상태(status_seq)는 주문 전체 단위이고
+ *   품목 라인에는 취소 플래그가 없다. 그래서 환불은 custom_order_refund 에만 남고
+ *   custom_order_item 은 취소 전 수량 그대로 남아 매출에 계속 잡힌다.
+ *   (4749335: 683,880원 환불됐는데 status_seq=15 로 필터를 통과 → 6월 매출에 그대로 남음)
+ *
+ * 판정 기준 — 환불액이 그 주문의 답례품 라인 합계와 1원 이내로 일치할 때만 제외한다.
+ *   부분환불(수량 일부·타품목)은 어느 품목 몇 개인지가 refund_msg 자유텍스트에만 있어
+ *   기계적으로 가를 수 없다. 잘못 빼면 매출이 과소계상되므로 전액 일치 건만 다룬다.
+ *   나머지는 주문조회 환불 배지로 사람이 확인한다.
+ *
+ * 헤더의 Etc003Price 를 쓰지 않는 이유: 라인 합계와 99.3% 만 일치한다(2026-09-08 실측).
+ *   금액 판정이라 라인에서 직접 계산한다.
+ *
+ * 조회 실패 시 빈 집합 — 제외를 못 하면 예전처럼 보이는 것이 화면이 죽는 것보다 낫다.
+ */
+let _giftRefundCache = { at: 0, set: null };
+async function _loadFullyRefundedGiftOrders() {
+  if (_giftRefundCache.set && Date.now() - _giftRefundCache.at < 60000) return _giftRefundCache.set;
+  const set = new Set();
+  try {
+    const p = await getPool();
+    // 2단계로 나눈다 — 환불 테이블에 custom_order 를 조인하고 주문별 CROSS APPLY 를 걸면
+    //   연결이 끊긴다(실측: ECONNRESET). custom_order 는 건드리지 않고 인덱스 조회만 쓴다.
+    //
+    //   1) 환불 테이블만 스캔해 주문별 환불 합계를 낸다 (order_tbl='0' = custom_order).
+    //      한 주문에 여러 번 환불될 수 있어 합계로 본다.
+    const rq = p.request();
+    rq.timeout = 60000;
+    const refunds = await rq.query(`
+      SELECT TRY_CAST(order_seq AS int) AS seq, SUM(refund_price) AS refund_total
+      FROM custom_order_refund WITH (NOLOCK)
+      WHERE order_tbl = '0' AND refund_price > 0
+        AND reg_date >= DATEADD(month, -18, GETDATE())
+      GROUP BY TRY_CAST(order_seq AS int)
+      HAVING TRY_CAST(order_seq AS int) IS NOT NULL
+    `);
+    const byOrder = new Map();
+    for (const r of (refunds.recordset || [])) byOrder.set(Number(r.seq), Number(r.refund_total) || 0);
+
+    //   2) 그 주문들의 답례품 라인 합계를 order_seq 인덱스로 끊어서 조회한다.
+    //      금액 판정이라 헤더 Etc003Price(라인합과 99.3% 일치) 대신 라인에서 직접 계산한다.
+    const ids = [...byOrder.keys()];
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      const cq = p.request();
+      cq.timeout = 60000;
+      const r = await cq.query(`
+        SELECT coi.order_seq,
+               SUM(CAST(coi.item_sale_price AS float) * coi.item_count
+                   / ISNULL(NULLIF(c.Unit_Value, 0), 1)) AS amt
+        FROM custom_order_item coi WITH (NOLOCK)
+        INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
+        WHERE coi.order_seq IN (${chunk.join(',')}) AND ${DAERYEPUM_FILTER_SQL}
+        GROUP BY coi.order_seq
+      `);
+      for (const row of (r.recordset || [])) {
+        const amt = Number(row.amt) || 0;
+        const ref = byOrder.get(Number(row.order_seq)) || 0;
+        if (amt > 0 && Math.abs(ref - amt) < 1) set.add(Number(row.order_seq));
+      }
+    }
+  } catch (e) {
+    console.warn('[gift-refund] 전액환불 목록 조회 실패 (제외 미적용):', e.message);
+  }
+  _giftRefundCache = { at: Date.now(), set };
+  return set;
+}
+
+/**
+ * 위 집합을 SQL 조건으로. alias 는 custom_order 별칭 (co / co_a …).
+ * 비어 있으면 빈 문자열 — 쿼리 모양을 바꾸지 않는다.
+ */
+function giftRefundExclSql(set, alias = 'co') {
+  if (!set || !set.size) return '';
+  return ` AND ${alias}.order_seq NOT IN (${[...set].join(',')})`;
 }
 
 async function _loadSalesGroupIndex(category = 'daeryepum') {
@@ -4574,6 +4676,10 @@ async function apiDashboardSummary(query) {
   //   flower: Card_Div='D02', unit_value 적용
   const categoryCfg = CATEGORY_FILTERS[query.category] || CATEGORY_FILTERS.daeryepum;
   const categoryFilter = categoryCfg.filter;
+  // 답례품 전액환불 주문 제외 — 부분취소가 라인에 반영되지 않아 매출이 남는 것을 막는다.
+  //   답례품 카테고리에만 적용한다 (판정 자체가 답례품 라인 합계 기준이라 다른 카테고리엔 의미 없음).
+  const _sumRefundExcl = (query.category || 'daeryepum') === 'daeryepum'
+    ? giftRefundExclSql(await _loadFullyRefundedGiftOrders(), 'co') : '';
   const skipUnitValue = query.category === 'deco';
   const etcAmountExprForCat = etcAmountExpr({ skipUnitValue });
   // 쿠폰 분배 분모도 카테고리 전체 filter 적용 (이전엔 D01 고정 → 데코주문 분배 오류)
@@ -4637,7 +4743,7 @@ async function apiDashboardSummary(query) {
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
         LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
-        WHERE ${categoryFilter} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+        WHERE ${categoryFilter} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)${_sumRefundExcl}
         GROUP BY c.Card_Name, c.Card_Code, CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
           CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END,
           CASE WHEN c.Card_Code LIKE 'COM[_]%' THEN N'위탁' ELSE N'일반' END
@@ -4689,7 +4795,7 @@ async function apiDashboardSummary(query) {
         INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
         LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
         LEFT JOIN copurchase_orders cp ON co.order_seq = cp.order_seq
-        WHERE ${categoryFilter} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+        WHERE ${categoryFilter} AND co.order_date >= @startDate AND co.order_date < @endDate AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)${_sumRefundExcl}
         GROUP BY CONVERT(varchar(10), co.order_date, 120), ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR)),
           CASE WHEN cp.order_seq IS NOT NULL THEN N'동시구매' ELSE N'단독주문' END,
           CASE WHEN c.Card_Code LIKE 'COM[_]%' THEN N'위탁' ELSE N'일반' END
@@ -9395,6 +9501,8 @@ const server = http.createServer(async (req, res) => {
           }
 
           const p = await getPool();
+          // 답례품 전액환불 주문 제외 — 부분취소가 라인에 남아 30일 판매가 부풀지 않게 한다.
+          const _stRefundExcl = giftRefundExclSql(await _loadFullyRefundedGiftOrders(), 'co');
           const [stockRes, salesRes, priceRes] = await Promise.all([
             p.request().query(`
               SELECT
@@ -9476,7 +9584,7 @@ const server = http.createServer(async (req, res) => {
                 INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
                 INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
                 WHERE (c.Card_Div = 'D01' OR c.Card_Code LIKE 'COM[_]%')
-                  AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+                  AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)${_stRefundExcl}
                   AND co.settle_date >= DATEADD(day, -30, GETDATE())
                 UNION ALL
                 -- ETC 는 card_sale_price 의 의미가 매출처마다 다르다 (앱 공통 규칙, etcAmountExpr 참조).
@@ -9957,6 +10065,8 @@ const server = http.createServer(async (req, res) => {
         const limit = Math.max(5, Math.min(200, parseInt(parsed.query.limit) || 30));
         try {
           const p = await getPool();
+          // 답례품 전액환불 주문 제외 (매출 집계와 같은 기준으로 맞춘다)
+          const _stRefundExcl = giftRefundExclSql(await _loadFullyRefundedGiftOrders(), 'co');
           const req0 = p.request();
           req0.timeout = 120000;
           // 1) 스키마
@@ -10030,7 +10140,7 @@ const server = http.createServer(async (req, res) => {
                 INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
                 INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
                 WHERE c.Card_Code IN (${codeList})
-                  AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)
+                  AND co.status_seq >= 2 AND co.status_seq NOT IN (3, 5, 9)${_stRefundExcl}
                   AND co.settle_date >= DATEADD(day, -30, GETDATE())
                 UNION ALL
                 -- ETC (CUSTOM_ETC_ORDER)
