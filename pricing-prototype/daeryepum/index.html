@@ -297,6 +297,25 @@ nav.nav-loading a[href^="#"] {
   0%, 100% { opacity: 0.65; }
   50% { opacity: 1; }
 }
+
+/* ── 톤앤매너 기초 (2026-09-08, 1단계) ─────────────────────────────
+   페이지 헤더는 한 구조만 쓴다: .page-header > (.page-title + .page-subtitle) + .page-actions
+   버튼 위계: btn-primary(화면당 1개, 주 동작) / btn-secondary(보조: 새로고침·내보내기) / btn-ghost(표 안 행 동작) / btn-danger(삭제·취소)
+   색 역할 토큰: 새 코드는 hex 대신 이 토큰을 쓴다. */
+:root{--ink:var(--gray-900);--ink-2:var(--gray-700);--muted:var(--gray-500);--line:var(--gray-200);--surface:#fff;
+  --info:#1d4ed8;--info-bg:#eff6ff;--success:#16a34a;--success-bg:#dcfce7;--warn:#b45309;--warn-bg:#fef3c7;--danger:#dc2626;--danger-bg:#fee2e2}
+.page-header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+.page-header>div:first-child{min-width:0}
+.page-title{margin:0;font-size:20px;font-weight:700;line-height:1.3;display:flex;align-items:center;gap:8px;color:var(--ink)}
+.page-subtitle{margin:4px 0 0;font-size:13px;color:var(--muted);line-height:1.5}
+.page-subtitle a{color:var(--info)}
+.page-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn-secondary{background:#fff;border-color:var(--gray-300);color:var(--gray-700)}
+.btn-secondary:hover{background:var(--gray-50)}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--gray-700)}
+.btn-ghost:hover{background:var(--gray-100)}
+.btn-danger{background:#fff;border-color:#fca5a5;color:var(--danger)}
+.btn-danger:hover{background:var(--danger-bg)}
 </style>
 </head>
 <body>
@@ -1316,10 +1335,10 @@ nav.nav-loading a[href^="#"] {
   날짜당 1 row, 같은 날 재제출 시 덮어쓰기. 대시보드 매출 합산에 net_amount 포함.
 -->
 <div id="page-coupang-rfm" class="page">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-    <div>
-      <h2 style="margin:0">🟥 쿠팡 로켓그로스 매출</h2>
-      <div style="font-size:12px;color:var(--gray-500);margin-top:4px">
+  <div class="page-header">
+  <div>
+  <h2 class="page-title">🟥 쿠팡 로켓그로스 매출</h2>
+  <div class="page-subtitle">
         <b>매출</b> 탭은 정산 리포트로 본 실적, <b>판매가</b> 탭은 마진 분석과 판매단위 기획입니다. 주문은 쿠팡 API 로도 함께 수집됩니다.
         <a href="https://wing.coupang.com/tenants/rfm/rfm-home/view" target="_blank" rel="noopener" style="color:#1d4ed8">Wing RFM 홈 열기 ↗</a>
       </div>
@@ -1450,7 +1469,7 @@ nav.nav-loading a[href^="#"] {
 <div id="page-channel-inquiries" class="page">
   <div class="card" style="margin-bottom:12px">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <div style="font-weight:700;font-size:16px">💬 상품문의</div>
+      <h2 class="page-title">💬 상품문의</h2>
       <span style="font-size:12px;color:var(--gray-500)">쿠팡·네이버 고객문의를 한자리에서 봅니다.</span>
       <div style="flex:1"></div>
       <select id="ciq-days" style="padding:5px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
@@ -1490,7 +1509,7 @@ nav.nav-loading a[href^="#"] {
 <div id="page-admin-nav-settings" class="page">
   <div class="card" style="margin-bottom:16px">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-      <div style="font-weight:700;font-size:16px">⚙️ GNB 메뉴 설정</div>
+      <h2 class="page-title">⚙️ GNB 메뉴 설정</h2>
       <span id="ans-permission-tag" style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--gray-100);color:var(--gray-500)">권한 확인 중...</span>
     </div>
     <div style="font-size:13px;color:var(--gray-500)">
@@ -1805,9 +1824,9 @@ nav.nav-loading a[href^="#"] {
 
 <!-- ========== SNS INSIGHT ========== -->
 <div id="page-sns" class="page">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-    <h2 style="margin:0">💡 SNS 콘텐츠 인사이트</h2>
-    <button class="btn btn-primary" onclick="loadSnsInsight()">🔄 새로고침</button>
+  <div class="page-header">
+  <h2 class="page-title">💡 SNS 콘텐츠 인사이트</h2>
+  <div class="page-actions"><button class="btn btn-secondary" onclick="loadSnsInsight()">🔄 새로고침</button></div>
   </div>
 
   <!-- 이번 주 추천 콘텐츠 -->
@@ -1859,9 +1878,9 @@ nav.nav-loading a[href^="#"] {
 
 <!-- ========== WORKLOG (일지) ========== -->
 <div id="page-worklog" class="page">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-    <h2 style="margin:0">📝 업무 일지</h2>
-    <button class="btn btn-primary" onclick="loadWorklog()">🔄 새로고침</button>
+  <div class="page-header">
+  <h2 class="page-title">📝 업무 일지</h2>
+  <div class="page-actions"><button class="btn btn-secondary" onclick="loadWorklog()">🔄 새로고침</button></div>
   </div>
 
   <!-- 입력 폼 -->
@@ -1939,7 +1958,7 @@ nav.nav-loading a[href^="#"] {
 
 <!-- ========== 바른기프트: 부가옵션 설정 (스티커 / 자유옵션) ========== -->
 <div id="page-bg-stickers" class="page">
-  <h2 style="margin:0 0 14px">🏷️ 바른기프트 부가옵션 설정</h2>
+  <div class="page-header"><h2 class="page-title">🏷️ 바른기프트 부가옵션 설정</h2></div>
   <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--gray-200)">
     <button id="bgopt-tab-sticker" onclick="setBgOptTab('sticker')"
       style="border:none;background:none;padding:8px 16px;font-size:13px;font-weight:700;color:var(--primary);border-bottom:2px solid var(--primary);cursor:pointer">스티커</button>
@@ -2086,12 +2105,12 @@ nav.nav-loading a[href^="#"] {
 
 <!-- ========== 위탁업체 관리 (Phase 1) ========== -->
 <div id="page-bg-vendors" class="page">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-    <h2 style="margin:0">🤝 위탁업체 관리</h2>
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-primary" onclick="openBgVendorForm()">+ 거래처 추가</button>
-      <button class="btn" onclick="loadBgVendors()">🔄 새로고침</button>
-    </div>
+  <div class="page-header">
+  <h2 class="page-title">🤝 위탁업체 관리</h2>
+  <div class="page-actions">
+  <button class="btn btn-primary" onclick="openBgVendorForm()">+ 거래처 추가</button>
+  <button class="btn btn-secondary" onclick="loadBgVendors()">🔄 새로고침</button>
+  </div>
   </div>
   <p style="color:var(--gray-500);font-size:13px;margin:0 0 16px">
     위탁받은 답례품 상품의 거래처를 관리합니다. 등록한 거래처는 <b>⚙️ 상품설정</b> 페이지에서 품목별로 매핑할 수 있습니다.
@@ -2230,9 +2249,9 @@ nav.nav-loading a[href^="#"] {
 
 <!-- ========== 위탁업체 정산 (Phase 2) ========== -->
 <div id="page-bg-settlements" class="page">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <h2 style="margin:0">💰 위탁업체 정산</h2>
-    <button class="btn" onclick="loadBgSettlements()">🔄 새로고침</button>
+  <div class="page-header">
+  <h2 class="page-title">💰 위탁업체 정산</h2>
+  <div class="page-actions"><button class="btn btn-secondary" onclick="loadBgSettlements()">🔄 새로고침</button></div>
   </div>
   <p style="color:var(--gray-500);font-size:13px;margin:0 0 16px">
     희망 출고일 기준 위탁상품 매출의 정산 처리 현황입니다. 청첩장 동시구매 / 단독구매 구분 + 거래처별 / 기간별 / 정산상태별 필터 가능.
@@ -2342,9 +2361,9 @@ nav.nav-loading a[href^="#"] {
 
 <!-- ========== 위탁 대시보드 (Phase 3) ========== -->
 <div id="page-bg-vendor-dashboard" class="page">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-    <h2 style="margin:0">📈 위탁업체 대시보드</h2>
-    <button class="btn" onclick="loadBgVendorDashboard()">🔄 새로고침</button>
+  <div class="page-header">
+  <h2 class="page-title">📈 위탁업체 대시보드</h2>
+  <div class="page-actions"><button class="btn btn-secondary" onclick="loadBgVendorDashboard()">🔄 새로고침</button></div>
   </div>
   <p style="color:var(--gray-500);font-size:13px;margin:0 0 16px">
     희망 출고일 기준 위탁상품 매출/수수료/정산 잔액을 거래처/일자/유형별로 집계합니다.
@@ -2431,11 +2450,11 @@ nav.nav-loading a[href^="#"] {
 
 <!-- ========== 작가 정산 (Phase 2: 관리 UI) ========== -->
 <div id="page-bg-artists" class="page">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-    <h2 style="margin:0">🎨 작가 정산</h2>
-    <div style="font-size:12px;color:var(--gray-500)">
-      바른손몰 · 바른손카드 품목 매출 기준 작가 수수료 정산 · Phase 3 (매출/정산) 진행 예정
-    </div>
+  <div class="page-header">
+  <div>
+  <h2 class="page-title">🎨 작가 정산</h2>
+  <div class="page-subtitle">바른손몰 · 바른손카드 품목 매출 기준 작가 수수료 정산</div>
+  </div>
   </div>
 
   <!-- 탭 -->
@@ -2713,11 +2732,11 @@ nav.nav-loading a[href^="#"] {
 
 <!-- ========== 답례품 재고 (Phase 1) ========== -->
 <div id="page-daeryepum-stock" class="page">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-    <h2 style="margin:0">📦 답례품 재고 현황</h2>
-    <div style="font-size:12px;color:var(--gray-500)">
-      S2_CARD_ERP_STOCK 실시간 조회 · 답례품 SKU (D01 + COM_) 전체
-    </div>
+  <div class="page-header">
+  <div>
+  <h2 class="page-title">📦 답례품 재고 현황</h2>
+  <div class="page-subtitle">ERP 재고 실시간 조회 · 답례품 전 품목 (자체매입 + 위탁)</div>
+  </div>
   </div>
 
   <!-- 요약 배지 -->
@@ -3023,9 +3042,11 @@ nav.nav-loading a[href^="#"] {
 
 <!-- ========== 바른손더기프트 주문 관리 ========== -->
 <div id="page-bhands-gift" class="page">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-    <h2 style="margin:0">🎁 바른손더기프트 주문 관리</h2>
-    <div style="font-size:12px;color:var(--gray-500)">API 미연동 채널 — CSV 업로드로 수동 등록, 상태/삭제 관리</div>
+  <div class="page-header">
+  <div>
+  <h2 class="page-title">🎁 바른손더기프트 주문 관리</h2>
+  <div class="page-subtitle">API 미연동 채널 — CSV 업로드로 수동 등록, 상태/삭제 관리</div>
+  </div>
   </div>
 
   <!-- 필터 툴바 -->
@@ -3115,10 +3136,10 @@ nav.nav-loading a[href^="#"] {
 
 <!-- ========== 예식일 캘린더 ========== -->
 <div id="page-wedding-calendar" class="page">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-    <h2 style="margin:0">💍 월별 예식일 캘린더</h2>
-    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-      <button class="btn" onclick="moveWcMonth(-1)" title="이전 달">◀</button>
+  <div class="page-header">
+  <h2 class="page-title">💍 월별 예식일 캘린더</h2>
+  <div class="page-actions">
+  <button class="btn" onclick="moveWcMonth(-1)" title="이전 달">◀</button>
       <select id="wc-year" onchange="loadWeddingCalendar()" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px"></select>
       <select id="wc-month" onchange="loadWeddingCalendar()" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px"></select>
       <button class="btn" onclick="moveWcMonth(1)" title="다음 달">▶</button>
@@ -3129,7 +3150,7 @@ nav.nav-loading a[href^="#"] {
     </div>
   </div>
   <p style="font-size:12px;color:var(--gray-500);margin:0 0 16px">
-    회원가입 시 입력한 예식일 기준 · S2_UserInfo (탈퇴 회원 제외) · 통합회원 중복 제거 · 사이트별 분리
+    회원가입 시 입력한 예식일 기준 · 탈퇴 회원 제외 · 통합회원 중복 제거 · 사이트별 분리
   </p>
 
   <div style="display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start">
@@ -3199,9 +3220,9 @@ nav.nav-loading a[href^="#"] {
 
 <!-- ========== 바른기프트: 상품 설정 ========== -->
 <div id="page-bg-products" class="page">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-    <h2 style="margin:0">⚙️ 바른기프트 상품 설정</h2>
-    <button class="btn" onclick="loadBgProducts()">🔄 새로고침</button>
+  <div class="page-header">
+  <h2 class="page-title">⚙️ 바른기프트 상품 설정</h2>
+  <div class="page-actions"><button class="btn btn-secondary" onclick="loadBgProducts()">🔄 새로고침</button></div>
   </div>
 
   <!-- 상품코드 입력 -->
@@ -3522,12 +3543,12 @@ nav.nav-loading a[href^="#"] {
 
 <!-- ========== 바른기프트: 출고일 설정 ========== -->
 <div id="page-bg-shipping" class="page">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-    <h2 style="margin:0">📅 출고일 설정</h2>
-    <div style="display:flex;gap:6px">
-      <button class="btn" onclick="addBgShippingGroup()">➕ 그룹 추가</button>
-      <button class="btn btn-primary" onclick="saveBgShipping()">현재 그룹 저장</button>
-    </div>
+  <div class="page-header">
+  <h2 class="page-title">📅 출고일 설정</h2>
+  <div class="page-actions">
+  <button class="btn btn-secondary" onclick="addBgShippingGroup()">➕ 그룹 추가</button>
+  <button class="btn btn-primary" onclick="saveBgShipping()">현재 그룹 저장</button>
+  </div>
   </div>
 
   <!-- 그룹 탭 -->
@@ -3695,8 +3716,8 @@ nav.nav-loading a[href^="#"] {
 <!-- ========== UNIFIED VIEW ========== -->
 <div id="page-bg-unified" class="page">
   <!-- 헤더: 타이틀만 -->
-  <div style="margin-bottom:12px">
-    <h2 style="margin:0">📋 정보입력현황</h2>
+  <div class="page-header">
+  <h2 class="page-title">📋 정보입력현황</h2>
   </div>
 
   <!-- 필터바: 날짜 + 필터 + 새로고침 -->
