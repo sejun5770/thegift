@@ -316,6 +316,23 @@ nav.nav-loading a[href^="#"] {
 .btn-ghost:hover{background:var(--gray-100)}
 .btn-danger{background:#fff;border-color:#fca5a5;color:var(--danger)}
 .btn-danger:hover{background:var(--danger-bg)}
+
+/* ── 탭 · 세그먼트 (2단계-A) ────────────────────────────────────
+   탭은 한 종류: 밑줄 탭. 건수는 <span class="cnt">(n)</span>. 활성은 .active 클래스 하나로만 바꾼다. */
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--gray-200);margin-bottom:16px;flex-wrap:wrap;align-items:flex-end}
+.tab{appearance:none;background:transparent;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;padding:9px 14px;font:inherit;font-size:13px;font-weight:500;line-height:1.4;color:var(--gray-500);cursor:pointer;white-space:nowrap;border-radius:0;display:inline-flex;align-items:center;gap:6px;transition:color .15s}
+.tab:hover{color:var(--gray-900);background:var(--gray-50)}
+.tab.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600}
+.tab .cnt{font-size:11px;font-weight:500;color:var(--gray-400)}
+.tab.active .cnt{color:var(--primary);opacity:.8}
+.tabs.tabs-lg .tab{font-size:14px;padding:10px 18px}
+.tab .tab-x{background:none;border:0;color:var(--gray-400);cursor:pointer;font-size:14px;line-height:1;padding:0 2px;margin-left:2px}
+.tab .tab-x:hover{color:var(--danger)}
+.seg{display:inline-flex;border:1px solid var(--gray-300);border-radius:6px;overflow:hidden;background:#fff}
+.seg-btn{appearance:none;border:0;border-right:1px solid var(--gray-300);background:transparent;padding:4px 12px;font:inherit;font-size:12px;color:var(--gray-700);cursor:pointer;line-height:1.5}
+.seg-btn:last-child{border-right:0}
+.seg-btn:hover{background:var(--gray-50)}
+.seg-btn.active{background:var(--primary);color:#fff}
 </style>
 </head>
 <body>
@@ -343,11 +360,11 @@ nav.nav-loading a[href^="#"] {
 <!-- ========== DASHBOARD ========== -->
 <div id="page-dashboard" class="page active">
   <!-- 카테고리 탭 -->
-  <div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--gray-200)">
-    <button class="btn" id="dash-tab-daeryepum" onclick="setDashCategory('daeryepum')" style="border:0;border-bottom:2px solid var(--primary);border-radius:0;color:var(--primary);font-weight:600;padding:8px 14px;background:transparent">
+  <div class="tabs tabs-lg">
+    <button class="tab active" id="dash-tab-daeryepum" onclick="setDashCategory('daeryepum')">
       🎁 답례품
     </button>
-    <button class="btn" id="dash-tab-deco" onclick="setDashCategory('deco')" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">
+    <button class="tab" id="dash-tab-deco" onclick="setDashCategory('deco')">
       📦 데코소품
     </button>
   </div>
@@ -361,13 +378,13 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- 대시보드 하위 탭 (활성 탭만 lazy-load) -->
-  <div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--gray-200)">
-    <button class="btn" id="dash-subtab-1" onclick="setDashSubTab(1)" style="border:0;border-bottom:2px solid var(--primary);border-radius:0;color:var(--primary);font-weight:600;padding:8px 14px;background:transparent">📋 매출현황</button>
-    <button class="btn" id="dash-subtab-2" onclick="setDashSubTab(2)" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">📊 보조지표1</button>
-    <button class="btn" id="dash-subtab-3" onclick="setDashSubTab(3)" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">🔮 보조지표2</button>
-    <button class="btn" id="dash-subtab-4" onclick="setDashSubTab(4)" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">📦 상품별 판매통계</button>
-    <button class="btn" id="dash-subtab-5" onclick="setDashSubTab(5)" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">🤝 위탁</button>
-    <button class="btn" id="dash-subtab-6" onclick="setDashSubTab(6)" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">💍 예식일 캘린더</button>
+  <div class="tabs">
+    <button class="tab active" id="dash-subtab-1" onclick="setDashSubTab(1)">📋 매출현황</button>
+    <button class="tab" id="dash-subtab-2" onclick="setDashSubTab(2)">📊 보조지표1</button>
+    <button class="tab" id="dash-subtab-3" onclick="setDashSubTab(3)">🔮 보조지표2</button>
+    <button class="tab" id="dash-subtab-4" onclick="setDashSubTab(4)">📦 상품별 판매통계</button>
+    <button class="tab" id="dash-subtab-5" onclick="setDashSubTab(5)">🤝 위탁</button>
+    <button class="tab" id="dash-subtab-6" onclick="setDashSubTab(6)">💍 예식일 캘린더</button>
   </div>
 
   <!-- 기간 매출 현황 블록 (.section 래퍼 없음 → lazy-load 태깅용 wrap) -->
@@ -1347,13 +1364,9 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- 탭 — 매출(정산 실적) / 판매가(마진·기획). 한 페이지에 다 쌓으니 너무 길어졌다. -->
-  <div style="display:flex;gap:4px;border-bottom:2px solid var(--gray-200);margin-bottom:16px">
-    <button id="rgtab-btn-sales" class="rgtab-btn" onclick="showRgTab('sales')"
-      style="padding:8px 18px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:700;border-bottom:2px solid #991b1b;color:#991b1b;margin-bottom:-2px">
-      🧾 매출</button>
-    <button id="rgtab-btn-price" class="rgtab-btn" onclick="showRgTab('price')"
-      style="padding:8px 18px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;border-bottom:2px solid transparent;color:var(--gray-500);margin-bottom:-2px">
-      💰 판매가</button>
+  <div class="tabs">
+  <button id="rgtab-btn-sales" class="tab active rgtab-btn" onclick="showRgTab('sales')">🧾 매출</button>
+  <button id="rgtab-btn-price" class="tab rgtab-btn" onclick="showRgTab('price')">💰 판매가</button>
   </div>
   <div id="rgtab-sales">
   <!-- 주문 단위 통합 (migration 055) — 두 리포트를 (주문ID, 옵션ID) 로 합쳐 한 줄로 본다 -->
@@ -1488,11 +1501,11 @@ nav.nav-loading a[href^="#"] {
     </div>
   </div>
 
-  <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
-    <button class="btn btn-sm btn-primary" data-ciq-tab="" onclick="setInquiryTab('')">전체 <span data-ciq-count="">(0)</span></button>
-    <button class="btn btn-sm" data-ciq-tab="coupang" onclick="setInquiryTab('coupang')">쿠팡 <span data-ciq-count="coupang">(0)</span></button>
-    <button class="btn btn-sm" data-ciq-tab="naver" onclick="setInquiryTab('naver')">네이버 <span data-ciq-count="naver">(0)</span></button>
-    <div style="width:12px"></div>
+  <div class="tabs" style="margin-bottom:10px;align-items:center">
+  <button class="tab active" data-ciq-tab="" onclick="setInquiryTab('')">전체 <span class="cnt" data-ciq-count="">(0)</span></button>
+  <button class="tab" data-ciq-tab="coupang" onclick="setInquiryTab('coupang')">쿠팡 <span class="cnt" data-ciq-count="coupang">(0)</span></button>
+  <button class="tab" data-ciq-tab="naver" onclick="setInquiryTab('naver')">네이버 <span class="cnt" data-ciq-count="naver">(0)</span></button>
+  <div style="width:12px"></div>
     <label style="font-size:12px;display:inline-flex;align-items:center;gap:4px;cursor:pointer">
       <input type="checkbox" id="ciq-unanswered" onchange="renderInquiries()"> 미답변만
     </label>
@@ -1584,9 +1597,11 @@ nav.nav-loading a[href^="#"] {
   <!-- 매입/위탁 서브탭 — 답례품_더기프트 전용 (076).
        업로드 파일 하나에 본사(매입) 와 위탁업체 주문이 함께 들어 있어 여기서 갈라 본다. -->
   <div id="ord-bg-vendor-tabs" style="display:none;gap:6px;margin:-8px 0 14px 0;align-items:center;flex-wrap:wrap">
-    <button class="btn bg-vtab" data-v="all" onclick="setBgVendorTab('all')" style="padding:4px 12px;font-size:12px">전체 <span class="bg-vtab-n"></span></button>
-    <button class="btn bg-vtab" data-v="own" onclick="setBgVendorTab('own')" style="padding:4px 12px;font-size:12px">🏢 매입 <span class="bg-vtab-n"></span></button>
-    <button class="btn bg-vtab" data-v="consign" onclick="setBgVendorTab('consign')" style="padding:4px 12px;font-size:12px">🤝 위탁 <span class="bg-vtab-n"></span></button>
+    <span class="seg">
+    <button class="seg-btn bg-vtab" data-v="all" onclick="setBgVendorTab('all')">전체 <span class="bg-vtab-n"></span></button>
+    <button class="seg-btn bg-vtab" data-v="own" onclick="setBgVendorTab('own')">🏢 매입 <span class="bg-vtab-n"></span></button>
+    <button class="seg-btn bg-vtab" data-v="consign" onclick="setBgVendorTab('consign')">🤝 위탁 <span class="bg-vtab-n"></span></button>
+    </span>
     <span style="font-size:11px;color:var(--gray-500)">위탁 주문은 주문수집(정보입력현황) 대상이 아닙니다 (혼합 주문의 본사 품목은 수집 대상)</span>
   </div>
 
@@ -1959,11 +1974,9 @@ nav.nav-loading a[href^="#"] {
 <!-- ========== 바른기프트: 부가옵션 설정 (스티커 / 자유옵션) ========== -->
 <div id="page-bg-stickers" class="page">
   <div class="page-header"><h2 class="page-title">🏷️ 바른기프트 부가옵션 설정</h2></div>
-  <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--gray-200)">
-    <button id="bgopt-tab-sticker" onclick="setBgOptTab('sticker')"
-      style="border:none;background:none;padding:8px 16px;font-size:13px;font-weight:700;color:var(--primary);border-bottom:2px solid var(--primary);cursor:pointer">스티커</button>
-    <button id="bgopt-tab-group" onclick="setBgOptTab('group')"
-      style="border:none;background:none;padding:8px 16px;font-size:13px;font-weight:500;color:var(--gray-500);border-bottom:2px solid transparent;cursor:pointer">자유옵션</button>
+  <div class="tabs">
+  <button class="tab active" id="bgopt-tab-sticker" onclick="setBgOptTab('sticker')">스티커</button>
+  <button class="tab" id="bgopt-tab-group" onclick="setBgOptTab('group')">자유옵션</button>
   </div>
 
 <div id="bgopt-pane-sticker">
@@ -2299,15 +2312,15 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- 동시/단독 탭 -->
-  <div style="display:flex;gap:6px;margin-bottom:12px;border-bottom:1px solid var(--gray-200)">
-    <button class="btn" id="bgs-tab-all" onclick="setBgsTypeTab('all')" style="border:0;border-bottom:2px solid var(--primary);border-radius:0;color:var(--primary);font-weight:600;padding:8px 14px;background:transparent">
-      📋 전체 <span id="bgs-tab-cnt-all" style="font-size:11px;color:var(--gray-400);font-weight:400">(0)</span>
+  <div class="tabs">
+    <button class="tab active" id="bgs-tab-all" onclick="setBgsTypeTab('all')">
+      📋 전체 <span id="bgs-tab-cnt-all" class="cnt">(0)</span>
     </button>
-    <button class="btn" id="bgs-tab-copurchase" onclick="setBgsTypeTab('copurchase')" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">
-      💍 동시주문 <span id="bgs-tab-cnt-copurchase" style="font-size:11px;color:var(--gray-400);font-weight:400">(0)</span>
+    <button class="tab" id="bgs-tab-copurchase" onclick="setBgsTypeTab('copurchase')">
+      💍 동시주문 <span id="bgs-tab-cnt-copurchase" class="cnt">(0)</span>
     </button>
-    <button class="btn" id="bgs-tab-standalone" onclick="setBgsTypeTab('standalone')" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">
-      🛍️ 단독주문 <span id="bgs-tab-cnt-standalone" style="font-size:11px;color:var(--gray-400);font-weight:400">(0)</span>
+    <button class="tab" id="bgs-tab-standalone" onclick="setBgsTypeTab('standalone')">
+      🛍️ 단독주문 <span id="bgs-tab-cnt-standalone" class="cnt">(0)</span>
     </button>
   </div>
 
@@ -2458,10 +2471,10 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- 탭 -->
-  <div style="display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--gray-200)">
-    <button class="btn" id="art-tab-settlements" onclick="setArtistTab('settlements')" style="border:0;border-bottom:2px solid var(--primary);border-radius:0;color:var(--primary);font-weight:600;padding:8px 14px;background:transparent">💰 정산 조회</button>
-    <button class="btn" id="art-tab-artists" onclick="setArtistTab('artists')" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">👩‍🎨 작가 관리</button>
-    <button class="btn" id="art-tab-products" onclick="setArtistTab('products')" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">🎫 품목 관리</button>
+  <div class="tabs">
+    <button class="tab active" id="art-tab-settlements" onclick="setArtistTab('settlements')">💰 정산 조회</button>
+    <button class="tab" id="art-tab-artists" onclick="setArtistTab('artists')">👩‍🎨 작가 관리</button>
+    <button class="tab" id="art-tab-products" onclick="setArtistTab('products')">🎫 품목 관리</button>
   </div>
 
   <!-- 정산 조회 섹션 -->
@@ -3237,15 +3250,15 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- 매입/위탁 탭 -->
-  <div style="display:flex;gap:6px;margin-bottom:12px;border-bottom:1px solid var(--gray-200)">
-    <button class="btn" id="bg-p-tab-all" onclick="setBgProductTab('all')" style="border:0;border-bottom:2px solid var(--primary);border-radius:0;color:var(--primary);font-weight:600;padding:8px 14px;background:transparent">
-      📋 전체 <span id="bg-p-tab-cnt-all" style="font-size:11px;color:var(--gray-400);font-weight:400">(0)</span>
+  <div class="tabs">
+    <button class="tab active" id="bg-p-tab-all" onclick="setBgProductTab('all')">
+      📋 전체 <span id="bg-p-tab-cnt-all" class="cnt">(0)</span>
     </button>
-    <button class="btn" id="bg-p-tab-owned" onclick="setBgProductTab('owned')" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">
-      🏭 자체매입 <span id="bg-p-tab-cnt-owned" style="font-size:11px;color:var(--gray-400);font-weight:400">(0)</span>
+    <button class="tab" id="bg-p-tab-owned" onclick="setBgProductTab('owned')">
+      🏭 자체매입 <span id="bg-p-tab-cnt-owned" class="cnt">(0)</span>
     </button>
-    <button class="btn" id="bg-p-tab-consigned" onclick="setBgProductTab('consigned')" style="border:0;border-bottom:2px solid transparent;border-radius:0;color:var(--gray-500);font-weight:500;padding:8px 14px;background:transparent">
-      🤝 위탁상품 <span id="bg-p-tab-cnt-consigned" style="font-size:11px;color:var(--gray-400);font-weight:400">(0)</span>
+    <button class="tab" id="bg-p-tab-consigned" onclick="setBgProductTab('consigned')">
+      🤝 위탁상품 <span id="bg-p-tab-cnt-consigned" class="cnt">(0)</span>
     </button>
     <!-- 판매채널 탭 (migration 053) — 매입형태와는 다른 축이라 구분선을 둔다.
          등록된 상품이 있는 채널만 뜬다 (자사 전용이면 이 영역 자체가 비어 있음). -->
@@ -3552,7 +3565,7 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- 그룹 탭 -->
-  <div id="bg-sh-group-tabs" style="display:flex;gap:2px;border-bottom:2px solid var(--gray-200);margin-bottom:16px;flex-wrap:wrap;align-items:center">
+  <div id="bg-sh-group-tabs" class="tabs">
     <!-- 동적 렌더 -->
     <div style="color:var(--gray-400);font-size:12px;padding:10px">불러오는 중…</div>
   </div>
@@ -3760,39 +3773,29 @@ nav.nav-loading a[href^="#"] {
   </details>
 
   <!-- 탭: 7단계 워크플로우 (미입력 → 출고완료) -->
-  <div id="uni-tab-strip" style="display:flex;gap:2px;border-bottom:2px solid var(--gray-200);margin-bottom:12px;flex-wrap:wrap;overflow-x:auto">
-    <button class="uni-tab" data-uni-tab="all" onclick="switchUniTab('all')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap"
-      title="스티커 여부와 관계없이 모든 답례품 카테고리 주문 노출 (주문자 정보 포함)">전체 <span id="uni-count-all" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+  <div id="uni-tab-strip" class="tabs" style="margin-bottom:12px">
+    <button class="tab uni-tab" data-uni-tab="all" onclick="switchUniTab('all')"
+      title="스티커 여부와 관계없이 모든 답례품 카테고리 주문 노출 (주문자 정보 포함)">전체 <span id="uni-count-all" class="cnt">(0)</span>
     </button>
-    <button class="uni-tab" data-uni-tab="incident" onclick="switchUniTab('incident')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap"
-      title="운영사고 / 기타출고 기록 — 기타출고는 실제 나간 품목·수량을 남겨 물류·재무가 매출을 잡습니다">기타출고(사고건) <span id="uni-count-incident" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+    <button class="tab uni-tab" data-uni-tab="incident" onclick="switchUniTab('incident')"
+      title="운영사고 / 기타출고 기록 — 기타출고는 실제 나간 품목·수량을 남겨 물류·재무가 매출을 잡습니다">기타출고(사고건) <span id="uni-count-incident" class="cnt">(0)</span>
     </button>
-    <button class="uni-tab" data-uni-tab="unsubmitted" onclick="switchUniTab('unsubmitted')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid var(--primary);color:var(--primary);font-weight:600;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">미입력 <span id="uni-count-unsubmitted" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+    <button class="tab uni-tab active" data-uni-tab="unsubmitted" onclick="switchUniTab('unsubmitted')">미입력 <span id="uni-count-unsubmitted" class="cnt">(0)</span>
     </button>
-    <button class="uni-tab" data-uni-tab="submitted" onclick="switchUniTab('submitted')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">입력완료 <span id="uni-count-submitted" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+    <button class="tab uni-tab" data-uni-tab="submitted" onclick="switchUniTab('submitted')">입력완료 <span id="uni-count-submitted" class="cnt">(0)</span>
     </button>
-    <button class="uni-tab" data-uni-tab="sticker_completed" onclick="switchUniTab('sticker_completed')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">스티커 작업완료 <span id="uni-count-sticker_completed" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+    <button class="tab uni-tab" data-uni-tab="sticker_completed" onclick="switchUniTab('sticker_completed')">스티커 작업완료 <span id="uni-count-sticker_completed" class="cnt">(0)</span>
     </button>
-    <button class="uni-tab" data-uni-tab="printed" onclick="switchUniTab('printed')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">인쇄완료 <span id="uni-count-printed" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+    <button class="tab uni-tab" data-uni-tab="printed" onclick="switchUniTab('printed')">인쇄완료 <span id="uni-count-printed" class="cnt">(0)</span>
     </button>
-    <button class="uni-tab" data-uni-tab="bound" onclick="switchUniTab('bound')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">제본완료 <span id="uni-count-bound" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+    <button class="tab uni-tab" data-uni-tab="bound" onclick="switchUniTab('bound')">제본완료 <span id="uni-count-bound" class="cnt">(0)</span>
     </button>
-    <button class="uni-tab" data-uni-tab="packed" onclick="switchUniTab('packed')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">포장완료 <span id="uni-count-packed" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+    <button class="tab uni-tab" data-uni-tab="packed" onclick="switchUniTab('packed')">포장완료 <span id="uni-count-packed" class="cnt">(0)</span>
     </button>
-    <button class="uni-tab" data-uni-tab="cp_warehouse" onclick="switchUniTab('cp_warehouse')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap"
-      title="로켓그로스 주문 중 아직 배송완료가 아닌 건 — 쿠팡 물류센터가 보관·출고합니다. 우리 쪽 작업은 없습니다.">쿠팡창고 <span id="uni-count-cp_warehouse" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+    <button class="tab uni-tab" data-uni-tab="cp_warehouse" onclick="switchUniTab('cp_warehouse')"
+      title="로켓그로스 주문 중 아직 배송완료가 아닌 건 — 쿠팡 물류센터가 보관·출고합니다. 우리 쪽 작업은 없습니다.">쿠팡창고 <span id="uni-count-cp_warehouse" class="cnt">(0)</span>
     </button>
-    <button class="uni-tab" data-uni-tab="shipped" onclick="switchUniTab('shipped')"
-      style="padding:9px 14px;background:none;border:none;border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500;font-size:13px;cursor:pointer;margin-bottom:-2px;white-space:nowrap">출고완료 <span id="uni-count-shipped" style="color:var(--gray-400);font-weight:500;font-size:11px;margin-left:3px">(0)</span>
+    <button class="tab uni-tab" data-uni-tab="shipped" onclick="switchUniTab('shipped')">출고완료 <span id="uni-count-shipped" class="cnt">(0)</span>
     </button>
   </div>
   <!-- 현재 활성 탭 상태 (내부) -->
@@ -5574,9 +5577,7 @@ function setBgVendorTab(v) {
   _bgVendorTab = v;
   document.querySelectorAll('#ord-bg-vendor-tabs .bg-vtab').forEach(b => {
     const on = b.dataset.v === v;
-    b.style.background = on ? '#1e40af' : '';
-    b.style.color = on ? '#fff' : '';
-    b.style.borderColor = on ? '#1e40af' : '';
+    b.classList.toggle('active', on);
   });
   renderOrderTable();
 }
@@ -9169,9 +9170,7 @@ function _applyDashTabVisibility() {
       const b = document.getElementById('dash-subtab-' + i);
       if (!b) continue;
       const active = (i === 1);
-      b.style.borderBottom = active ? '2px solid var(--primary)' : '2px solid transparent';
-      b.style.color = active ? 'var(--primary)' : 'var(--gray-500)';
-      b.style.fontWeight = active ? '600' : '500';
+      b.classList.toggle('active', active);
     }
     _applyDashVisibility();
   }
@@ -9184,9 +9183,7 @@ function setDashSubTab(n) {
     const btn = document.getElementById('dash-subtab-' + i);
     if (!btn) continue;
     const active = (i === n);
-    btn.style.borderBottom = active ? '2px solid var(--primary)' : '2px solid transparent';
-    btn.style.color = active ? 'var(--primary)' : 'var(--gray-500)';
-    btn.style.fontWeight = active ? '600' : '500';
+    btn.classList.toggle('active', active);
   }
   _applyDashVisibility();
   _loadDashSection(n);
@@ -9280,9 +9277,7 @@ function setDashCategory(cat) {
     const btn = document.getElementById('dash-tab-' + c);
     if (!btn) return;
     const active = (c === cat);
-    btn.style.borderBottom = active ? '2px solid var(--primary)' : '2px solid transparent';
-    btn.style.color = active ? 'var(--primary)' : 'var(--gray-500)';
-    btn.style.fontWeight = active ? '600' : '500';
+    btn.classList.toggle('active', active);
   });
   // 위탁상품 단락은 답례품 탭에서만 노출 (위탁 정산 = 답례품 한정 운영 정책)
   const vendorSection = document.getElementById('dash-vendor-summary');
@@ -14201,9 +14196,7 @@ function setBgOptTab(t) {
     const tab = document.getElementById('bgopt-tab-' + k);
     const pane = document.getElementById('bgopt-pane-' + k);
     if (tab) {
-      tab.style.color = on ? 'var(--primary)' : 'var(--gray-500)';
-      tab.style.fontWeight = on ? '700' : '500';
-      tab.style.borderBottomColor = on ? 'var(--primary)' : 'transparent';
+      tab.classList.toggle('active', on);
     }
     if (pane) pane.style.display = on ? '' : 'none';
   }
@@ -14796,15 +14789,11 @@ function setBgProductTab(tab) {
     const btn = document.getElementById('bg-p-tab-' + t);
     if (!btn) return;
     const active = (t === tab);
-    btn.style.borderBottom = active ? '2px solid var(--primary)' : '2px solid transparent';
-    btn.style.color = active ? 'var(--primary)' : 'var(--gray-500)';
-    btn.style.fontWeight = active ? '600' : '500';
+    btn.classList.toggle('active', active);
   });
   document.querySelectorAll('#bg-p-tab-channels button').forEach(btn => {
     const active = (btn.dataset.chTab === tab);
-    btn.style.borderBottom = active ? '2px solid var(--primary)' : '2px solid transparent';
-    btn.style.color = active ? 'var(--primary)' : 'var(--gray-500)';
-    btn.style.fontWeight = active ? '600' : '500';
+    btn.classList.toggle('active', active);
   });
   renderBgProducts();
 }
@@ -14994,9 +14983,8 @@ function _bgRenderChannelTabs() {
   wrap.innerHTML = order.map(ch => {
     const tab = 'ch:' + ch;
     const active = _bgProductTab === tab;
-    return `<button class="btn" data-ch-tab="${tab}" onclick="setBgProductTab('${tab}')"
-      style="border:0;border-bottom:2px solid ${active ? 'var(--primary)' : 'transparent'};border-radius:0;color:${active ? 'var(--primary)' : 'var(--gray-500)'};font-weight:${active ? '600' : '500'};padding:8px 14px;background:transparent">
-      ${PRODUCT_CHANNEL_ICON[ch]} ${PRODUCT_CHANNEL_LABEL[ch]} <span style="font-size:11px;color:var(--gray-400);font-weight:400">(${counts.get(ch)})</span>
+    return `<button class="tab${active ? ' active' : ''}" data-ch-tab="${tab}" onclick="setBgProductTab('${tab}')">
+    ${PRODUCT_CHANNEL_ICON[ch]} ${PRODUCT_CHANNEL_LABEL[ch]} <span class="cnt">(${counts.get(ch)})</span>
     </button>`;
   }).join('');
 }
@@ -16173,9 +16161,7 @@ function setBgsTypeTab(tab) {
     const btn = document.getElementById('bgs-tab-' + t);
     if (!btn) return;
     const active = (t === tab);
-    btn.style.borderBottom = active ? '2px solid var(--primary)' : '2px solid transparent';
-    btn.style.color = active ? 'var(--primary)' : 'var(--gray-500)';
-    btn.style.fontWeight = active ? '600' : '500';
+    btn.classList.toggle('active', active);
   });
   renderBgsSummary();
   renderBgsTable();
@@ -16688,14 +16674,12 @@ function renderBgShGroupTabs() {
     const isActive = g.id === curId;
     const nameHtml = (g.name || '그룹').replace(/</g, '&lt;');
     const defaultBadge = g.is_default ? '<span style="font-size:10px;color:var(--primary);margin-left:4px">(기본)</span>' : '';
-    const deleteBtn = g.is_default ? '' :
-      '<button onclick="event.stopPropagation();deleteBgShippingGroup(\'' + g.id + '\', \'' + nameHtml + '\')" title="삭제" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:14px;margin-left:4px;padding:0;line-height:1">&times;</button>';
-    const activeStyle = isActive
-      ? 'border-bottom:3px solid var(--primary);color:var(--primary);font-weight:600'
-      : 'border-bottom:3px solid transparent;color:var(--gray-500);font-weight:500';
-    return '<button class="bg-sh-group-tab" onclick="switchBgShippingGroup(\'' + g.id + '\')" style="padding:10px 16px;background:none;border:none;' + activeStyle + ';font-size:13px;cursor:pointer;margin-bottom:-2px;display:inline-flex;align-items:center">'
-      + nameHtml + defaultBadge + deleteBtn
-      + '</button>';
+    // 삭제 × 는 지금 보고 있는(활성) 그룹에만 붙인다 — 탭을 옮기다 실수로 지우는 사고 방지
+    const deleteBtn = (g.is_default || !isActive) ? '' :
+    '<button class="tab-x" onclick="event.stopPropagation();deleteBgShippingGroup(\'' + g.id + '\', \'' + nameHtml + '\')" title="이 그룹 삭제">&times;</button>';
+    return '<button class="tab bg-sh-group-tab' + (isActive ? ' active' : '') + '" onclick="switchBgShippingGroup(\'' + g.id + '\')">'
+    + nameHtml + defaultBadge + deleteBtn
+    + '</button>';
   }).join('');
   wrap.innerHTML = tabs || '<div style="color:var(--gray-400);font-size:12px;padding:10px">그룹 없음</div>';
 }
@@ -19122,9 +19106,7 @@ function setArtistTab(tab) {
     const $sec = document.getElementById(`art-section-${t}`);
     if ($btn && $sec) {
       const isActive = t === tab;
-      $btn.style.borderBottom = isActive ? '2px solid var(--primary)' : '2px solid transparent';
-      $btn.style.color = isActive ? 'var(--primary)' : 'var(--gray-500)';
-      $btn.style.fontWeight = isActive ? '600' : '500';
+      $btn.classList.toggle('active', isActive);
       $sec.style.display = isActive ? '' : 'none';
     }
   });
@@ -20049,7 +20031,7 @@ const CIQ_CHANNEL = {
 function setInquiryTab(ch) {
   _ciqTab = ch;
   document.querySelectorAll('[data-ciq-tab]').forEach(b => {
-    b.classList.toggle('btn-primary', (b.dataset.ciqTab || '') === ch);
+    b.classList.toggle('active', (b.dataset.ciqTab || '') === ch);
   });
   renderInquiries();
 }
@@ -20885,9 +20867,7 @@ function showRgTab(name) {
   _rgTab = name === 'price' ? 'price' : 'sales';
   const on = (el, active, color) => {
     if (!el) return;
-    el.style.fontWeight = active ? '700' : '600';
-    el.style.borderBottom = `2px solid ${active ? color : 'transparent'}`;
-    el.style.color = active ? color : 'var(--gray-500)';
+    el.classList.toggle('active', active);   // 브랜드색 밑줄 대신 표준 탭 (color 인자는 호환용으로 남긴다)
   };
   const sales = document.getElementById('rgtab-sales');
   const price = document.getElementById('rgtab-price');
@@ -22595,9 +22575,7 @@ function switchUniTab(tab) {
   document.getElementById('uni-active-tab').value = tab;
   document.querySelectorAll('#uni-tab-strip .uni-tab').forEach(btn => {
     const isActive = btn.dataset.uniTab === tab;
-    btn.style.borderBottomColor = isActive ? 'var(--primary)' : 'transparent';
-    btn.style.color = isActive ? 'var(--primary)' : 'var(--gray-500)';
-    btn.style.fontWeight = isActive ? '600' : '500';
+    btn.classList.toggle('active', isActive);
   });
   // 기타출고(사고건) 탭은 주문 표가 아니라 사고건 원장을 보여준다 — 컬럼 체계가 다르다.
   const incWrap = document.getElementById('uni-incident-wrap');
