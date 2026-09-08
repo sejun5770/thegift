@@ -333,6 +333,17 @@ nav.nav-loading a[href^="#"] {
 .seg-btn:last-child{border-right:0}
 .seg-btn:hover{background:var(--gray-50)}
 .seg-btn.active{background:var(--primary);color:#fff}
+
+/* ── 배지 · 상태 (2단계-B/C) ────────────────────────────────────
+   배지 색은 의미로만 고른다: info(안내·그룹) / success(활성·완료) / warn(미처리·주의) / danger(취소·오류) / neutral(태그·기본).
+   상태 문구: 로딩 "불러오는 중…" · 빈 "데이터가 없습니다" · 조회 전 "기간을 정하고 조회를 누르세요". */
+.badge-info{background:var(--info-bg);color:var(--info)}
+.badge-success{background:var(--success-bg);color:var(--success)}
+.badge-warn{background:var(--warn-bg);color:var(--warn)}
+.badge-danger{background:var(--danger-bg);color:var(--danger)}
+.badge-neutral{background:var(--gray-100);color:var(--gray-700)}
+.badge-sm{padding:1px 6px;font-size:10px;font-weight:700;border-radius:4px}
+.state{text-align:center;color:var(--gray-500);font-size:13px;padding:20px}
 </style>
 </head>
 <body>
@@ -538,7 +549,7 @@ nav.nav-loading a[href^="#"] {
       </div>
     </div>
     <div class="card" id="ltc-body" style="padding:16px;font-size:13px">
-      <div style="color:var(--gray-400);text-align:center;padding:20px">비교 버튼을 눌러주세요</div>
+      <div style="color:var(--gray-400);text-align:center;padding:20px">두 기간을 정하고 비교를 누르세요</div>
     </div>
   </div>
 
@@ -651,7 +662,7 @@ nav.nav-loading a[href^="#"] {
   <div class="section" data-dash-only="daeryepum">
     <div class="section-title">📅 3-way 리드타임 분석 <span style="font-size:12px;color:var(--gray-500);font-weight:400">(주문일 → 희망출고일 → 예식일 · 정보입력 이후 모든 stage 포함)</span></div>
     <div class="card">
-      <div id="lt3-summary" style="font-size:12px;color:var(--gray-500);margin-bottom:12px">로딩 중...</div>
+      <div id="lt3-summary" style="font-size:12px;color:var(--gray-500);margin-bottom:12px">불러오는 중…</div>
       <div id="lt3-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px"></div>
       <div class="feedback" id="lt3-feedback" style="margin-top:12px"></div>
     </div>
@@ -827,7 +838,7 @@ nav.nav-loading a[href^="#"] {
         <span style="color:var(--gray-300);margin:0 2px">|</span>
         <!-- 매출 그룹 — 여러 행을 체크해 하나의 그룹으로 묶어 합산 표시 -->
         <button class="btn btn-sm btn-primary" id="pr-group-btn" onclick="_prOpenGroupModal()" style="display:none;padding:5px 10px">그룹으로 묶기 (<span id="pr-sel-count">0</span>)</button>
-        <button class="btn btn-sm" id="pr-excl-btn" onclick="_prExcludeSelected()" style="display:none;padding:5px 10px;color:#dc2626;border-color:#fecaca" title="선택한 품목을 답례품 매출 집계에서 제외 (자개카드·탈취제 등 비-답례품)">답례품 아님</button>
+        <button class="btn btn-sm btn-danger" id="pr-excl-btn" onclick="_prExcludeSelected()" style="display:none;padding:5px 10px" title="선택한 품목을 답례품 매출 집계에서 제외 (자개카드·탈취제 등 비-답례품)">답례품 아님</button>
         <button class="btn btn-sm" onclick="copyPrRankingTsv()" style="padding:5px 10px" title="주간 리포트 시트에 붙여넣는 형식(순위·변동·상품명·수량·매출액·비중, 채널 섹션별)으로 복사합니다">📋 주간보고 복사</button>
         <button class="btn btn-sm" onclick="openSalesGroupManager()" style="padding:5px 10px" title="매출 그룹 · 제외 품목 관리">그룹</button>
       </div>
@@ -885,7 +896,7 @@ nav.nav-loading a[href^="#"] {
     <div class="card" style="padding:16px">
       <div id="ga-summary" style="display:none;gap:10px;flex-wrap:wrap;margin-bottom:12px"></div>
       <div id="ga-body" style="overflow-x:auto">
-        <div id="ga-status" style="padding:36px 20px;text-align:center;color:var(--gray-400);font-size:13px">조회를 누르면 표시됩니다</div>
+        <div id="ga-status" style="padding:36px 20px;text-align:center;color:var(--gray-400);font-size:13px">기간을 정하고 조회를 누르세요</div>
         <table id="ga-table" style="width:100%;border-collapse:collapse;font-size:13px;display:none">
           <thead id="ga-thead"></thead>
           <tbody id="ga-tbody"></tbody>
@@ -1245,7 +1256,7 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- 헤더 KPI -->
-  <div id="mr-loading" style="text-align:center;padding:60px;color:var(--gray-500)">기간을 선택하고 조회 버튼을 눌러주세요.</div>
+  <div id="mr-loading" style="text-align:center;padding:60px;color:var(--gray-500)">기간을 정하고 조회를 누르세요</div>
 
   <div id="mr-content" style="display:none">
     <!-- 1) 핵심 KPI -->
@@ -1729,7 +1740,7 @@ nav.nav-loading a[href^="#"] {
         <button class="btn" id="ord-btn-csv-upload" onclick="openBgCsvUpload()" style="padding:5px 12px;font-size:12px;background:#dbeafe;border-color:#93c5fd;color:#1e40af;display:none" title="바른손더기프트 퍼스트몰 원본 Excel(.xlsx) 또는 CSV 를 업로드하여 여러 주문을 한 번에 등록합니다">📤 CSV/Excel 업로드</button>
         <button class="btn" id="ord-btn-bhg-backfill" onclick="backfillBhgStubs()" style="padding:5px 12px;font-size:12px;background:#eef2ff;border-color:#c7d2fe;color:#4338ca;display:none" title="이전에 등록된 바른손더기프트 주문 중 정보입력현황 stub 이 없는 것을 일괄 생성 (스티커/희망출고일 정보 backfill)">🔧 stub 재생성</button>
         <button class="btn" id="ord-btn-bhg-bulk-cancel" onclick="bulkCancelBhg()" style="padding:5px 12px;font-size:12px;background:#fef3c7;border-color:#fbbf24;color:#92400e;display:none" title="선택된 바른손더기프트 주문을 취소 상태 (status_seq=3) 로 변경">🚫 선택 취소</button>
-        <button class="btn" id="ord-btn-bhg-bulk-delete" onclick="bulkDeleteBhg()" style="padding:5px 12px;font-size:12px;background:#fef2f2;border-color:#fca5a5;color:#dc2626;display:none" title="선택된 바른손더기프트 주문을 완전 삭제 (정보입력현황 stub 도 함께 사라짐)">🗑️ 선택 삭제</button>
+        <button class="btn btn-danger" id="ord-btn-bhg-bulk-delete" onclick="bulkDeleteBhg()" style="padding:5px 12px;font-size:12px;display:none" title="선택된 바른손더기프트 주문을 완전 삭제 (정보입력현황 stub 도 함께 사라짐)">🗑️ 선택 삭제</button>
         <button class="btn" id="ord-btn-dispatch" onclick="openDispatchModal()" style="padding:5px 12px;font-size:12px;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8" title="우리가 등록한 송장을 쿠팡·네이버에 올려 주문을 배송중으로 넘깁니다. 보내기 전에 대상을 확인합니다.">🚚 출고상태 전송</button>
         <!-- 채널 동기화·스티커 백필 — 외부 크론이 15분마다 자동으로 가져온다. 지금 당장 가져올 때만 쓰므로 한 단계 더 접는다.
              버튼 id 는 그대로라 카테고리별 표시/숨김·마지막 동기화 시각 표시가 그대로 동작한다. -->
@@ -1816,7 +1827,7 @@ nav.nav-loading a[href^="#"] {
       <div style="flex:1"></div>
       <button class="btn" onclick="copySmsTemplate()" style="padding:5px 12px;font-size:12px" title="문자 시스템에 붙여넣을 메시지 본문을 복사합니다 (출고일={#A}, 송장번호={#B})">💬 메시지 본문 복사</button>
       <button class="btn btn-primary" onclick="downloadSmsExcel()" style="padding:5px 14px;font-size:12px" title="선택된 행(없으면 표시된 전체)을 문자발송 엑셀 업로드 양식으로 다운로드">📥 문자발송 엑셀 다운로드</button>
-      <button class="btn" id="sms-send-btn" onclick="sendSmsDirect()" style="padding:5px 14px;font-size:12px;background:#fef2f2;border-color:#fca5a5;color:#dc2626" title="선택된 행에 출고완료 안내 문자를 바로 발송합니다 (문자 API 직접 호출 — 체크박스로 선택한 행만)">📨 문자 바로 발송</button>
+      <button class="btn btn-danger" id="sms-send-btn" onclick="sendSmsDirect()" style="padding:5px 14px;font-size:12px" title="선택된 행에 출고완료 안내 문자를 바로 발송합니다 (문자 API 직접 호출 — 체크박스로 선택한 행만)">📨 문자 바로 발송</button>
     </div>
 
     <div class="card" style="padding:0;overflow-x:auto">
@@ -2145,7 +2156,7 @@ nav.nav-loading a[href^="#"] {
         </tr>
       </thead>
       <tbody id="vendors-tbody">
-        <tr><td colspan="10" style="text-align:center;color:var(--gray-400);padding:20px">로딩 중…</td></tr>
+        <tr><td colspan="10" style="text-align:center;color:var(--gray-400);padding:20px">불러오는 중…</td></tr>
       </tbody>
     </table>
   </div>
@@ -2250,7 +2261,7 @@ nav.nav-loading a[href^="#"] {
             <th>메모</th>
             <th style="width:160px">관리</th>
           </tr></thead>
-          <tbody id="bg-portal-tokens-tbody"><tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">로딩 중…</td></tr></tbody>
+          <tbody id="bg-portal-tokens-tbody"><tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">불러오는 중…</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -2367,7 +2378,7 @@ nav.nav-loading a[href^="#"] {
           <th style="width:80px">관리</th>
         </tr>
       </thead>
-      <tbody id="bgs-tbody"><tr><td colspan="16" style="text-align:center;color:var(--gray-400);padding:20px">조회 버튼을 눌러주세요.</td></tr></tbody>
+      <tbody id="bgs-tbody"><tr><td colspan="16" style="text-align:center;color:var(--gray-400);padding:20px">기간을 정하고 조회를 누르세요</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -2424,7 +2435,7 @@ nav.nav-loading a[href^="#"] {
       <div style="overflow-x:auto">
         <table class="data-table" id="bvd-top-products">
           <thead><tr><th style="width:32px">#</th><th>상품코드</th><th>상품명</th><th>거래처</th><th style="text-align:center">건수</th><th style="text-align:right">매출</th><th style="text-align:right">정산금액</th></tr></thead>
-          <tbody id="bvd-top-products-tbody"><tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">데이터 없음</td></tr></tbody>
+          <tbody id="bvd-top-products-tbody"><tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">데이터가 없습니다</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -2448,7 +2459,7 @@ nav.nav-loading a[href^="#"] {
           <th style="text-align:right">미정산</th>
           <th style="text-align:right">정산완료</th>
         </tr></thead>
-        <tbody id="bvd-vendor-tbody"><tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:16px">데이터 없음</td></tr></tbody>
+        <tbody id="bvd-vendor-tbody"><tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:16px">데이터가 없습니다</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -2518,7 +2529,7 @@ nav.nav-loading a[href^="#"] {
           <div>
             <span style="color:var(--gray-500);font-size:11px">기간</span>
             <strong id="art-stl-period" style="margin-left:6px"></strong>
-            <span id="art-stl-confirmed-badge" style="display:none;margin-left:10px;padding:2px 8px;background:#16a34a;color:#fff;border-radius:10px;font-size:10px;font-weight:600">✓ 마감</span>
+            <span id="art-stl-confirmed-badge" class="badge badge-success" style="display:none;margin-left:10px">✓ 마감</span>
           </div>
           <div style="display:flex;gap:24px;align-items:center">
             <div><span style="color:var(--gray-500);font-size:11px">총 수량</span> <strong id="art-stl-total-qty" style="margin-left:6px"></strong></div>
@@ -3139,7 +3150,7 @@ nav.nav-loading a[href^="#"] {
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;padding:12px 20px;border-top:1px solid var(--gray-200);background:#fafafa">
-      <button class="btn" onclick="deleteBhgOrder()" style="color:#dc2626;border-color:#fca5a5;background:#fef2f2" title="이 주문을 완전히 삭제합니다">🗑️ 삭제</button>
+      <button class="btn btn-danger" onclick="deleteBhgOrder()" title="이 주문을 완전히 삭제합니다">🗑️ 삭제</button>
       <div style="flex:1"></div>
       <button class="btn" onclick="closeBhgEdit()">취소</button>
       <button class="btn btn-primary" onclick="saveBhgEdit()">💾 저장</button>
@@ -3169,7 +3180,7 @@ nav.nav-loading a[href^="#"] {
   <div style="display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start">
     <!-- 캘린더 표 -->
     <div class="card" style="overflow-x:auto">
-      <div id="wc-loading" style="padding:20px;color:var(--gray-500)">로딩 중...</div>
+      <div id="wc-loading" style="padding:20px;color:var(--gray-500)">불러오는 중…</div>
       <table id="wc-table" style="display:none;width:100%;border-collapse:collapse;font-size:12px;min-width:780px">
         <thead id="wc-thead"></thead>
         <tbody id="wc-tbody"></tbody>
@@ -5707,7 +5718,7 @@ function renderOrderTable() {
     // MANUAL 주문 편집 버튼
     const actionCell = showActionCol
       ? (r.order_type === 'MANUAL'
-        ? `<td style="text-align:center"><button class="btn" style="padding:3px 8px;font-size:11px" onclick="event.stopPropagation();openBhgEditByOrderId('${esc(r.order_seq)}')">수정</button></td>`
+        ? `<td style="text-align:center"><button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openBhgEditByOrderId('${esc(r.order_seq)}')">수정</button></td>`
         : `<td></td>`)
       : '';
     return `<tr class="${cls}" style="cursor:pointer" onclick="_onOrderRowClick(${i}, event)">` +
@@ -6885,7 +6896,7 @@ function _gaRender(j) {
       ? `<span style="display:inline-block;width:10px;color:var(--gray-400);font-size:10px">${open ? '▾' : '▸'}</span> `
       : '<span style="display:inline-block;width:10px"></span> ';
     const badge = r.grouped
-      ? '<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:#eef2ff;color:#4338ca;margin-left:6px" title="매출 데이터 그룹으로 묶인 행입니다 (매출 화면과 같은 기준)">그룹</span>'
+      ? '<span class="badge badge-sm badge-info" style="margin-left:6px" title="매출 데이터 그룹으로 묶인 행입니다 (매출 화면과 같은 기준)">그룹</span>'
       : '';
     const vcount = expandable
       ? `<span style="color:var(--gray-400);font-size:11px;margin-left:6px">변형 ${r.variants.length}</span>` : '';
@@ -7030,7 +7041,7 @@ function _ptRender(j) {
         <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px;flex-wrap:wrap">
           <b style="font-size:14px">${esc(p.name)}</b>
           <span style="font-family:monospace;font-size:11px;color:var(--gray-400)">${esc(p.code)}</span>
-          <span style="font-size:11px;padding:1px 6px;border-radius:4px;background:#eef2ff;color:#4338ca">옵션 ${p.options.length}개</span>
+          <span class="badge badge-sm badge-info">옵션 ${p.options.length}개</span>
           <span style="font-size:11px;color:var(--gray-500)">가격 변경 있는 옵션 ${optChanged}개</span>
         </div>
         <div style="font-size:12px;color:var(--gray-600);margin-bottom:8px">
@@ -7043,7 +7054,7 @@ function _ptRender(j) {
             <div style="display:flex;align-items:baseline;gap:8px;font-size:12px;margin-bottom:4px;flex-wrap:wrap">
               <b>${esc(o.name)}</b>
               <span style="color:var(--gray-500)">주문 ${Number(o.orders).toLocaleString()}건 · 비중 ${o.share_pct != null ? o.share_pct + '%' : '-'}</span>
-              ${o.changed ? '<span style="font-size:10px;padding:1px 5px;border-radius:3px;background:#fef3c7;color:#92400e">가격 변경</span>' : ''}
+              ${o.changed ? '<span class="badge badge-sm badge-warn">가격 변경</span>' : ''}
             </div>
             <div style="display:flex;border-radius:5px;overflow:hidden;max-width:640px">${barOf(o.segments, false)}</div>
             ${o.changed ? `<div style="font-size:11px;color:var(--gray-500);margin-top:3px">
@@ -7529,7 +7540,7 @@ function _prPrevAnchorMs() {
 // 순위 변동 뱃지 HTML (현재순위 rank, 직전순위 prevRank[없으면 null]).
 function _prChangeBadge(rank, prevRank) {
   if (prevRank == null) {
-    return `<span style="display:inline-block;font-size:10px;font-weight:700;color:#2563eb;background:#dbeafe;border-radius:4px;padding:1px 5px">NEW</span>`;
+    return `<span class="badge badge-sm badge-info">NEW</span>`;
   }
   const diff = prevRank - rank; // 양수 = 순위 상승
   if (diff > 0) return `<span style="color:#16a34a;font-weight:600">▲${diff}</span>`;
@@ -8239,7 +8250,7 @@ async function loadMonthlyReport() {
   if (!month) { showToast('월을 선택해주세요'); return; }
   document.getElementById('mr-content').style.display = 'none';
   document.getElementById('mr-loading').style.display = 'block';
-  document.getElementById('mr-loading').textContent = '데이터 조회 중... (대상월/전월/작년동월/대상월 주문리스트/분기 3개월)';
+  document.getElementById('mr-loading').textContent = '불러오는 중…';
   try {
     const { months: qMonths } = quarterMonthsOf(month);
     // 1) 핵심 fetch — target/prev/yoy summary + target month orders (per-order)
@@ -8755,7 +8766,7 @@ function renderQuarterCumulative() {
   // 분기 합계
   let qSumAmount = 0, qSumOrders = 0, qSumQty = 0;
   const rowsHtml = _mrData.quarter.map(({ month, agg }) => {
-    if (!agg) return `<tr><td>${month}</td><td colspan="4" style="color:var(--gray-400)">데이터 없음</td></tr>`;
+    if (!agg) return `<tr><td>${month}</td><td colspan="4" style="color:var(--gray-400)">데이터가 없습니다</td></tr>`;
     qSumAmount += agg.totalAmount;
     qSumOrders += agg.totalOrders;
     qSumQty += agg.totalQty;
@@ -9356,7 +9367,7 @@ async function loadLeadtimeAnalysis() {
 function renderLeadtimeAnalysis(j) {
   const body = document.getElementById('lta-body');
   if (!j || j.error) {
-    body.innerHTML = `<div style="color:#dc2626;padding:20px">${j?.error || '데이터 없음'}</div>`;
+    body.innerHTML = `<div style="color:#dc2626;padding:20px">${j?.error || '데이터가 없습니다'}</div>`;
     return;
   }
   const s = j.summary || {};
@@ -9462,7 +9473,7 @@ function renderLeadtimeAnalysis(j) {
               <th style="padding:6px 8px;text-align:left;font-size:11px;border-bottom:1px solid var(--gray-200)">사이트별</th>
             </tr>
           </thead>
-          <tbody>${shipRows || '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--gray-400)">데이터 없음</td></tr>'}</tbody>
+          <tbody>${shipRows || '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--gray-400)">데이터가 없습니다</td></tr>'}</tbody>
         </table>
       </div>
     </div>
@@ -10023,7 +10034,7 @@ function renderExpressAnalysis(data) {
   document.getElementById('exp-adoption-rate').textContent = (typeof adoption === 'number') ? (adoption + '%') : '-';
   document.getElementById('exp-adoption-detail').textContent = total > 0
     ? `${fmtNum(expressN)}건 / ${fmtNum(total)}건`
-    : '데이터 없음';
+    : '데이터가 없습니다';
 
   // 누적/평균 추가비용
   document.getElementById('exp-total-fee').textContent = (safe.total_express_fee >= 0) ? fmtKRW(safe.total_express_fee) : '-';
@@ -10048,7 +10059,7 @@ function renderExpressAnalysis(data) {
       </div>`;
     }).join('');
   } else {
-    dowEl.innerHTML = '<div style="color:var(--gray-400);font-size:11px;margin:auto">데이터 없음</div>';
+    dowEl.innerHTML = '<div style="color:var(--gray-400);font-size:11px;margin:auto">데이터가 없습니다</div>';
   }
 
   // 시간대별 막대 (24시간)
@@ -10072,7 +10083,7 @@ function renderExpressAnalysis(data) {
       document.getElementById('exp-hour-peak').textContent = '시간대별 분석 데이터가 부족합니다 (최소 3건 필요)';
     }
   } else {
-    hourEl.innerHTML = '<div style="color:var(--gray-400);font-size:11px;margin:auto">데이터 없음</div>';
+    hourEl.innerHTML = '<div style="color:var(--gray-400);font-size:11px;margin:auto">데이터가 없습니다</div>';
     document.getElementById('exp-hour-peak').textContent = '';
   }
 }
@@ -12810,7 +12821,7 @@ async function openSalesGroupManager() {
         <input type="text" value="${esc(g.name)}" id="sg-nm-${esc(g.id)}"
           style="flex:1;padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;font-weight:600">
         <button class="btn btn-sm" onclick="_sgRename('${esc(g.id)}')">이름변경</button>
-        <button class="btn btn-sm" style="color:#dc2626;border-color:#fecaca" onclick="_sgDelete('${esc(g.id)}')">삭제</button>
+        <button class="btn btn-sm btn-danger" onclick="_sgDelete('${esc(g.id)}')">삭제</button>
       </div>
       ${(g.members || []).length ? (g.members || []).map(m => `
         <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--gray-600);padding:3px 0;border-top:1px solid var(--gray-100)">
@@ -13022,7 +13033,7 @@ function fmtShortDate(d) {
 
 function renderDashTable() {
   const data = dashboardSummaryData;
-  if (!data || data.length === 0) { document.getElementById('sales-table').innerHTML = '<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--gray-500)">데이터 없음</td></tr>'; return; }
+  if (!data || data.length === 0) { document.getElementById('sales-table').innerHTML = '<tr><td colspan="10" style="text-align:center;padding:20px;color:var(--gray-500)">데이터가 없습니다</td></tr>'; return; }
   const topProducts = getTopProducts(data);
   if (tableTabMode === 'daily') renderDailyTable(data, topProducts);
   else renderWeeklyTable(data, topProducts);
@@ -13810,7 +13821,7 @@ async function showOrderFiles(orderSeq) {
   const body = document.getElementById('file-modal-body');
   const title = document.getElementById('file-modal-title');
   title.textContent = `주문 ${orderSeq} 첨부파일`;
-  body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--gray-500)">로딩 중...</div>';
+  body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--gray-500)">불러오는 중…</div>';
   modal.style.display = 'flex';
   try {
     const res = await fetch(`${API}/api/order-files?order_seq=${orderSeq}`);
@@ -14505,8 +14516,8 @@ function renderBgStickers() {
     <td style="padding:6px 10px;text-align:center"><span class="badge ${s.is_active ? 'badge-up' : 'badge-neutral'}">${s.is_active ? '활성' : '비활성'}</span></td>
     <td style="padding:6px 10px;text-align:center;white-space:nowrap">
       <!-- 아이콘 정리 때 이모지만 있던 라벨이 비어버렸다 — 텍스트로 복원 -->
-      <button class="btn btn-sm" onclick="editBgSticker('${s.id}')" title="수정">수정</button>
-      <button class="btn btn-sm" onclick="deleteBgSticker('${s.id}', '${(s.name || '').replace(/'/g, '\\\'')}', '${s.sticker_code || ''}')" title="삭제 (영구)" style="color:var(--red)">삭제</button>
+      <button class="btn btn-sm btn-ghost" onclick="editBgSticker('${s.id}')" title="수정">수정</button>
+      <button class="btn btn-sm btn-danger" onclick="deleteBgSticker('${s.id}', '${(s.name || '').replace(/'/g, '\\\'')}', '${s.sticker_code || ''}')" title="삭제 (영구)">삭제</button>
     </td>
   </tr>`;
 
@@ -14658,7 +14669,7 @@ function addBgStickerFieldRow(field) {
   div.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
       <span style="font-size:11px;color:var(--gray-500)">필드</span>
-      <button class="btn btn-sm" onclick="document.getElementById('${id}').remove()" style="color:var(--red);font-size:11px">삭제</button>
+      <button class="btn btn-sm btn-danger" onclick="document.getElementById('${id}').remove()">삭제</button>
     </div>
     <div style="display:grid;grid-template-columns:1fr 100px 80px;gap:8px;margin-bottom:8px">
       <input type="text" class="bgf-label" value="${esc(field ? field.field_label : '')}" placeholder="라벨 (예: 보내는 분)" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
@@ -15049,15 +15060,15 @@ function renderBgProducts() {
     const groupName = matched?.name || '기본 그룹';
     const isDefault = !s.shipping_group_id || (defaultGroup && s.shipping_group_id === defaultGroup.id);
     const groupBadge = isDefault
-      ? `<span style="display:inline-block;padding:2px 8px;background:var(--gray-100);color:var(--gray-700);border-radius:10px;font-size:11px">${escapeHtml(groupName)} <span style="color:var(--gray-400)">(기본)</span></span>`
-      : `<span style="display:inline-block;padding:2px 8px;background:#dbeafe;color:#1e40af;border-radius:10px;font-size:11px;font-weight:500">${escapeHtml(groupName)}</span>`;
+      ? `<span class="badge badge-neutral">${escapeHtml(groupName)} <span style="color:var(--gray-400)">(기본)</span></span>`
+      : `<span class="badge badge-info">${escapeHtml(groupName)}</span>`;
     // 위탁 정보 셀 (showVendorCols 일 때만 렌더)
     let vendorCells = '';
     if (showVendorCols) {
       if (s.vendor_id) {
         const v = vendorById.get(s.vendor_id);
         const vendorBadge = v
-          ? `<span style="display:inline-block;padding:2px 8px;background:#fef3c7;color:#92400e;border-radius:10px;font-size:11px;font-weight:600">🤝 ${escapeHtml(v.name)}</span>`
+          ? `<span class="badge badge-neutral">🤝 ${escapeHtml(v.name)}</span>`
           : `<span style="color:#dc2626;font-size:11px" title="삭제된 거래처">⚠️ 미연결</span>`;
         // 적용 수수료율: product override 우선, 없으면 vendor default
         const cr = (s.commission_rate !== null && s.commission_rate !== undefined) ? Number(s.commission_rate) : (v ? Number(v.default_commission_rate || 0) : 0);
@@ -15082,8 +15093,8 @@ function renderBgProducts() {
       ${vendorCells}
       <td>
         <!-- 아이콘 정리 때 이모지만 있던 라벨이 비어버렸다 — 텍스트로 복원 -->
-        <button class="btn btn-sm" onclick="openBgProductForm('${s.product_id}')" title="편집">편집</button>
-        <button class="btn btn-sm" onclick="deleteBgProduct('${s.product_id}')" title="삭제" style="color:var(--red)">삭제</button>
+        <button class="btn btn-sm btn-ghost" onclick="openBgProductForm('${s.product_id}')" title="편집">편집</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteBgProduct('${s.product_id}')" title="삭제">삭제</button>
       </td>
     </tr>`;
   }).join('');
@@ -15907,7 +15918,7 @@ let _bgVendorsList = [];
 async function loadBgVendors() {
   const tbody = document.getElementById('vendors-tbody');
   if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--gray-400);padding:20px">로딩 중…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--gray-400);padding:20px">불러오는 중…</td></tr>';
   try {
     // 거래처 목록 + 상품설정 (매핑 상품 수 계산용) 병렬 로드
     const [vRes, pRes] = await Promise.all([
@@ -15945,8 +15956,8 @@ async function loadBgVendors() {
         <td style="text-align:center">${cnt > 0 ? '<b style="color:var(--primary)">' + cnt + '</b>개' : '<span style="color:var(--gray-400)">0개</span>'}</td>
         <td style="font-size:12px;color:var(--gray-600)" title="${esc(v.memo || '')}">${memo}</td>
         <td style="white-space:nowrap">
-          <button class="btn" style="padding:4px 10px;font-size:12px" onclick="openBgVendorForm('${esc(v.id)}')">수정</button>
-          <button class="btn" style="padding:4px 10px;font-size:12px;margin-left:4px;background:#fff7ed;border-color:#fb923c;color:#c2410c" onclick="openBgVendorPortalTokens('${esc(v.id)}', '${esc(v.name)}')" title="거래처 외부 포털 접속 링크 발급/관리">🔗 포털</button>
+          <button class="btn btn-sm btn-ghost" onclick="openBgVendorForm('${esc(v.id)}')">수정</button>
+          <button class="btn btn-sm btn-secondary" style="margin-left:4px" onclick="openBgVendorPortalTokens('${esc(v.id)}', '${esc(v.name)}')" title="거래처 외부 포털 접속 링크 발급/관리">🔗 포털</button>
         </td>
       </tr>`;
     }).join('');
@@ -16050,7 +16061,7 @@ async function loadBgVendorPortalTokens() {
   const vendorId = document.getElementById('bg-portal-vendor-id').value;
   if (!vendorId) return;
   const tbody = document.getElementById('bg-portal-tokens-tbody');
-  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">로딩 중…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">불러오는 중…</td></tr>';
   try {
     const r = await fetch(`${API}/api/bg/vendors/${encodeURIComponent(vendorId)}/portal-tokens`);
     _bgPortalTokens = (await r.json()).tokens || [];
@@ -16488,8 +16499,8 @@ async function loadBgVendorDashboard() {
     end_date: document.getElementById('bvd-end')?.value || '',
   });
   // 로딩 표시
-  document.getElementById('bvd-vendor-tbody').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">로딩 중…</td></tr>';
-  document.getElementById('bvd-top-products-tbody').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">로딩 중…</td></tr>';
+  document.getElementById('bvd-vendor-tbody').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">불러오는 중…</td></tr>';
+  document.getElementById('bvd-top-products-tbody').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">불러오는 중…</td></tr>';
   document.getElementById('bvd-by-day-bars').innerHTML = '';
   document.getElementById('bvd-by-day-labels').innerHTML = '';
   try {
@@ -16525,7 +16536,7 @@ function renderBvdTypeMix(byType, kpi) {
   const stPct = 100 - coPct;
   const el = document.getElementById('bvd-type-mix');
   if (!total) {
-    el.innerHTML = '<div style="color:var(--gray-400);text-align:center;padding:20px">데이터 없음</div>';
+    el.innerHTML = '<div style="color:var(--gray-400);text-align:center;padding:20px">데이터가 없습니다</div>';
     return;
   }
   el.innerHTML = `
@@ -16550,7 +16561,7 @@ let _lastBvdVendorRows = [];
 function renderBvdVendorTable(rows) {
   _lastBvdVendorRows = Array.isArray(rows) ? rows : [];
   const tbody = document.getElementById('bvd-vendor-tbody');
-  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:16px">데이터 없음</td></tr>'; return; }
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--gray-400);padding:16px">데이터가 없습니다</td></tr>'; return; }
   // 매출처 → 거래처 순 정렬 (같은 매출처끼리 묶여 보이도록)
   const sorted = [...rows].sort((a, b) =>
     String(a.site_name || '').localeCompare(String(b.site_name || '')) || (b.net_total - a.net_total));
@@ -16599,7 +16610,7 @@ function downloadBvdVendorExcel() {
 
 function renderBvdTopProducts(rows) {
   const tbody = document.getElementById('bvd-top-products-tbody');
-  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">데이터 없음</td></tr>'; return; }
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);padding:16px">데이터가 없습니다</td></tr>'; return; }
   tbody.innerHTML = rows.map((r, i) => `<tr>
     <td style="text-align:center;color:var(--gray-500);font-size:11px">${i+1}</td>
     <td style="font-family:monospace;font-size:11px">${esc(r.product_code||'')}</td>
@@ -16614,7 +16625,7 @@ function renderBvdTopProducts(rows) {
 function renderBvdByDay(rows) {
   const wrapBars = document.getElementById('bvd-by-day-bars');
   const wrapLabels = document.getElementById('bvd-by-day-labels');
-  if (!rows.length) { wrapBars.innerHTML = '<div style="color:var(--gray-400);text-align:center;padding:40px;width:100%">데이터 없음</div>'; wrapLabels.innerHTML = ''; return; }
+  if (!rows.length) { wrapBars.innerHTML = '<div style="color:var(--gray-400);text-align:center;padding:40px;width:100%">데이터가 없습니다</div>'; wrapLabels.innerHTML = ''; return; }
   const maxNet = Math.max(...rows.map(r => r.net || 0), 1);
   wrapBars.innerHTML = rows.map(r => {
     const pct = Math.max(2, Math.round((r.net || 0) / maxNet * 100));
@@ -16890,7 +16901,7 @@ function renderBgShClosedDates() {
     return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--gray-100);' + (past ? 'opacity:0.4' : '') + '">' +
       '<span style="font-size:12px;font-family:monospace;min-width:90px">' + d.date + '</span>' +
       '<span style="font-size:11px;color:var(--gray-500);flex:1">' + (d.reason || '-') + '</span>' +
-      '<button class="btn btn-sm" onclick="bgShRemoveClosedDate(\'' + d.date + '\')" style="color:var(--red);font-size:10px;padding:2px 6px">삭제</button>' +
+      '<button class="btn btn-sm btn-danger" onclick="bgShRemoveClosedDate(\'' + d.date + '\')">삭제</button>' +
     '</div>';
   }).join('');
 }
@@ -18987,7 +18998,7 @@ function renderHistoryChart() {
     const colors = ['#7c3aed','#0ea5e9','#10b981','#f59e0b','#ef4444'];
     series = sums.map((s, i) => ({ name: s.name, values: s.vals, color: colors[i % colors.length] }));
   }
-  if (!series.length) { $svg.innerHTML = '<text x="400" y="140" text-anchor="middle" fill="#9ca3af">데이터 없음</text>'; return; }
+  if (!series.length) { $svg.innerHTML = '<text x="400" y="140" text-anchor="middle" fill="#9ca3af">데이터가 없습니다</text>'; return; }
   const maxV = Math.max(1, ...series.flatMap(s => s.values));
   const yScale = v => padT + innerH - (v / maxV) * innerH;
   const xScale = i => padL + (n > 1 ? (i / (n - 1)) * innerW : innerW / 2);
@@ -19167,10 +19178,10 @@ function renderArtistsTable() {
       </td>
       <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);color:var(--gray-500);font-size:11px">${esc(a.memo || '')}</td>
       <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">
-        <button class="btn" style="padding:3px 8px;font-size:11px" onclick="openArtistModal('${esc(a.id)}')">수정</button>
+        <button class="btn btn-sm btn-ghost" onclick="openArtistModal('${esc(a.id)}')">수정</button>
         ${a.is_active
-          ? `<button class="btn" style="padding:3px 8px;font-size:11px;color:#dc2626;border-color:#fecaca" onclick="toggleArtistActive('${esc(a.id)}',false)">비활성화</button>`
-          : `<button class="btn" style="padding:3px 8px;font-size:11px;color:#16a34a;border-color:#bbf7d0" onclick="toggleArtistActive('${esc(a.id)}',true)">활성화</button>`}
+          ? `<button class="btn btn-sm btn-danger" onclick="toggleArtistActive('${esc(a.id)}',false)">비활성화</button>`
+          : `<button class="btn btn-sm btn-secondary" onclick="toggleArtistActive('${esc(a.id)}',true)">활성화</button>`}
       </td>
     </tr>
   `).join('');
@@ -19271,10 +19282,10 @@ function renderProductsTable() {
         ${p.is_active ? '<span style="color:#16a34a;font-weight:600">활성</span>' : '<span style="color:#dc2626">비활성</span>'}
       </td>
       <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">
-        <button class="btn" style="padding:3px 8px;font-size:11px" onclick="openProductModal('${esc(p.id)}')">수정</button>
+        <button class="btn btn-sm btn-ghost" onclick="openProductModal('${esc(p.id)}')">수정</button>
         ${p.is_active
-          ? `<button class="btn" style="padding:3px 8px;font-size:11px;color:#dc2626;border-color:#fecaca" onclick="toggleProductActive('${esc(p.id)}',false)">비활성화</button>`
-          : `<button class="btn" style="padding:3px 8px;font-size:11px;color:#16a34a;border-color:#bbf7d0" onclick="toggleProductActive('${esc(p.id)}',true)">활성화</button>`}
+          ? `<button class="btn btn-sm btn-danger" onclick="toggleProductActive('${esc(p.id)}',false)">비활성화</button>`
+          : `<button class="btn btn-sm btn-secondary" onclick="toggleProductActive('${esc(p.id)}',true)">활성화</button>`}
       </td>
     </tr>
   `).join('');
@@ -19415,7 +19426,7 @@ async function loadWeddingCalendar() {
   const $loading = document.getElementById('wc-loading');
   const $table = document.getElementById('wc-table');
   $loading.style.display = '';
-  $loading.textContent = '로딩 중...';
+  $loading.textContent = '불러오는 중…';
   $table.style.display = 'none';
   try {
     const r = await fetch(`${API}/api/dashboard/wedding-calendar?year=${y}&month=${m}`);
@@ -19673,7 +19684,7 @@ async function loadWcTrend() {
   const m = document.getElementById('wc-month')?.value;
   const months = document.getElementById('wc-trend-months')?.value || 12;
   const $loading = document.getElementById('wc-trend-loading');
-  if ($loading) $loading.textContent = '로딩 중...';
+  if ($loading) $loading.textContent = '불러오는 중…';
   try {
     const r = await fetch(`${API}/api/dashboard/wedding-calendar/trend?end_year=${y}&end_month=${m}&months=${months}`);
     const data = await r.json();
@@ -20164,7 +20175,7 @@ function renderInquiries() {
         <td style="white-space:normal;line-height:1.55;padding:8px 10px">
           <!-- 문의 -->
           <div style="display:flex;gap:6px;align-items:baseline">
-            <span style="flex-shrink:0;font-size:10px;font-weight:700;color:#1d4ed8;background:#eff6ff;border-radius:3px;padding:1px 5px">문의</span>
+            <span class="badge badge-sm badge-info" style="flex-shrink:0">문의</span>
             <span style="flex-shrink:0;font-size:11px;color:var(--gray-500)">${fmtWhen(r.inquired_at)}</span>
             ${title && !sameish ? `<b style="color:var(--gray-800)">${esc(title)}</b>` : ''}
           </div>
@@ -20173,7 +20184,7 @@ function renderInquiries() {
           <!-- 답변 -->
           <div style="margin-top:8px;padding:7px 9px;background:var(--gray-50);border-left:3px solid #16a34a;border-radius:0 4px 4px 0">
             <div style="display:flex;gap:6px;align-items:baseline;margin-bottom:2px">
-              <span style="flex-shrink:0;font-size:10px;font-weight:700;color:#047857;background:#dcfce7;border-radius:3px;padding:1px 5px">답변</span>
+              <span class="badge badge-sm badge-success" style="flex-shrink:0">답변</span>
               <span style="flex-shrink:0;font-size:11px;color:var(--gray-500)">${fmtWhen(r.answered_at)}</span>
               ${gap ? `<span style="font-size:11px;color:#b45309">${esc(gap)}</span>` : ''}
             </div>
@@ -20185,7 +20196,7 @@ function renderInquiries() {
           : '<span style="color:#dc2626;font-weight:600">미답변</span>'}</td>
         <td style="vertical-align:top;text-align:center">${r.checked_at
           ? `<span style="font-size:11px;color:var(--gray-500)" title="${esc(r.checked_by || '')}">✔ 확인</span>`
-          : `<button class="btn" style="padding:2px 8px;font-size:11px" onclick="markInquiryChecked('${esc(r.id)}')">확인</button>`}</td>
+          : `<button class="btn btn-sm btn-ghost" onclick="markInquiryChecked('${esc(r.id)}')">확인</button>`}</td>
       </tr>`;
     }).join('') + '</tbody></table>';
 }
@@ -23361,10 +23372,10 @@ function renderBgUnified() {
     //  · ci 없고 취소 아님 → '추가' (관리자가 고객 대신 수동 입력)
     //  · 취소 → 버튼 없음
     const editBtn = ci
-      ? `<button class="btn" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">수정</button>`
+      ? `<button class="btn btn-sm btn-ghost" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">수정</button>`
       : (isCancelled(order) || orderIsMarketplace
         ? ''
-        : `<button class="btn btn-primary" style="padding:4px 10px;font-size:12px" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">+ 추가</button>`);
+        : `<button class="btn btn-sm btn-primary" data-edit-idx="${rowIdx}" onclick="openBgOrderEditByIdx(this.dataset.editIdx)">+ 추가</button>`);
 
     // 주문수집 셀 — 입력완료 탭에서만 렌더 (미입력엔 의미 없음)
     const showProcessedCol = (activeTab === 'submitted');
@@ -23498,7 +23509,7 @@ function _renderWorkflowCell(rowIdx, order, ci, sel, stickerIdx) {
   }
   // 로켓그로스 — 쿠팡이 포장·출고까지 한다. 우리가 누를 버튼이 없다.
   if (order?.is_rocket_growth && stage !== 'shipped') {
-    return '<span style="color:#0369a1;font-size:11px;padding:4px 10px;background:#e0f2fe;border-radius:4px">쿠팡 물류센터 보관중</span>';
+    return '<span class="badge badge-info">쿠팡 물류센터 보관중</span>';
   }
 
   const items = [];
@@ -23511,7 +23522,7 @@ function _renderWorkflowCell(rowIdx, order, ci, sel, stickerIdx) {
       items.push(`<button class="btn" style="padding:4px 10px;font-size:11px;background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8" onclick="openStickerManageModal('${esc(orderId)}', ${stickerIdx})">이미지 ${imgCnt}장 관리</button>`);
     } else if (isNoSticker && stage !== 'shipped') {
       // 스티커 선택안함 — 업로드 불필요, 텍스트만
-      items.push(`<span style="color:var(--gray-600);font-size:11px;padding:4px 10px;background:var(--gray-100);border-radius:4px">스티커 불필요</span>`);
+      items.push(`<span class="badge badge-neutral">스티커 불필요</span>`);
     } else if (stage !== 'shipped') {
       items.push(`<button class="btn btn-primary" style="padding:4px 10px;font-size:11px" onclick="openStickerManageModal('${esc(orderId)}', ${stickerIdx})">스티커 업로드</button>`);
     }
@@ -23521,7 +23532,7 @@ function _renderWorkflowCell(rowIdx, order, ci, sel, stickerIdx) {
   if (stage === 'shipped' && sel?.shipped_at) {
     const shippedDate = new Date(sel.shipped_at).toISOString().slice(0, 10);
     items.push(`<span style="color:#16a34a;font-size:11px;padding:4px 0;font-weight:600">출고완료 (${shippedDate})</span>`);
-    items.push(`<button class="btn" style="padding:3px 8px;font-size:11px" onclick="openInvoiceModal('${esc(orderId)}', ${stickerIdx})">송장 정보</button>`);
+    items.push(`<button class="btn btn-sm btn-ghost" onclick="openInvoiceModal('${esc(orderId)}', ${stickerIdx})">송장 정보</button>`);
   }
 
   return items.length ? `<div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">${items.join('')}</div>` : '<span style="color:var(--gray-300)">-</span>';
@@ -24283,7 +24294,7 @@ async function loadStickerImageList(orderId, stickerIndex) {
         <div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap">
           ${img.url ? `<a class="btn" href="${esc(img.url)}" target="_blank" download="${esc(downloadName)}" style="padding:3px 10px;font-size:11px;text-decoration:none">다운로드</a>` : ''}
           ${!img.is_main ? `<button class="btn" style="padding:3px 10px;font-size:11px" onclick="setStickerMain('${esc(orderId)}', ${stickerIndex}, '${esc(img.filename)}')" title="여러 이미지 중 대표(최종) 이미지로 지정">대표로 지정</button>` : ''}
-          <button class="btn" style="padding:3px 10px;font-size:11px;color:#dc2626;border-color:#fca5a5" onclick="deleteStickerImage('${esc(orderId)}', ${stickerIndex}, '${esc(img.filename)}')">삭제</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteStickerImage('${esc(orderId)}', ${stickerIndex}, '${esc(img.filename)}')">삭제</button>
         </div>
       </div>`;
     }).join('');
@@ -24370,7 +24381,7 @@ async function openInvoiceModal(orderId, stickerIndex) {
             <span style="font-family:monospace">${esc(inv.invoice_number)}</span>
             <span style="color:var(--gray-500)">${esc(inv.delivery_company)}</span>
             <span style="color:var(--gray-400);font-size:11px">스티커 #${(inv.sticker_indices || []).join(',') || '-'}</span>
-            <button class="btn" style="padding:2px 6px;font-size:10px;color:#dc2626;margin-left:auto" onclick="deleteInvoice('${esc(orderId)}', '${esc(inv.id)}')">삭제</button>
+            <button class="btn btn-sm btn-danger" style="margin-left:auto" onclick="deleteInvoice('${esc(orderId)}', '${esc(inv.id)}')">삭제</button>
           </div>`).join('')}
       </div>`
     : '';
@@ -26148,7 +26159,7 @@ function renderSmsList() {
   tbody.innerHTML = rows.map((r, i) => {
     const marks = [];
     if (!r.phone_ok) marks.push('<span style="background:#fef2f2;color:#dc2626;font-size:10px;padding:1px 5px;border-radius:3px">연락처 확인</span>');
-    if (!r.ship_date) marks.push('<span style="background:#fef3c7;color:#92400e;font-size:10px;padding:1px 5px;border-radius:3px">출고일 없음</span>');
+    if (!r.ship_date) marks.push('<span class="badge badge-sm badge-warn">출고일 없음</span>');
     if (!r.invoice_ok) marks.push(`<span style="background:#f3f4f6;color:var(--gray-500);font-size:10px;padding:1px 5px;border-radius:3px">${esc((r.invoice || '송장 없음').slice(0, 12))}</span>`);
     if (!r.order_id) marks.push('<span style="background:#ede9fe;color:#5b21b6;font-size:10px;padding:1px 5px;border-radius:3px" title="시트에 주문번호가 없는 행 (이벤트·단독주문) — 연락처 기준으로 발송 이력을 관리합니다">주문번호 없음</span>');
     return `<tr>
@@ -27229,7 +27240,7 @@ function renderBhgOrders() {
       <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(productSummary)}</td>
       <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:right">${fmtNum(o.settle_price || 0)}원</td>
       <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center"><span style="padding:2px 8px;background:${st.bg};color:${st.fg};border-radius:3px;font-size:10.5px;font-weight:600">${esc(statusLabel)}</span></td>
-      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center"><button class="btn" style="padding:3px 10px;font-size:11px" onclick="openBhgEdit('${esc(o.order_id)}')">편집</button></td>
+      <td style="padding:6px 12px;border-bottom:1px solid var(--gray-100);text-align:center"><button class="btn btn-sm btn-ghost" onclick="openBhgEdit('${esc(o.order_id)}')">편집</button></td>
     </tr>`;
   }).join('');
   $loading.style.display = 'none';
