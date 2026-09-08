@@ -429,7 +429,8 @@ async function reconcileCancelled({ daysBack = 14, maxChecks = 300, delayMs = 12
  * 매출인식일 = "'배송완료 + 7day' 또는 '구매확정'" 중 빠른 시점 (쿠팡 문서) — 정산이
  * 걸리는 기준이라 화면의 '구매확정일'이 뜻하는 바와 같다.
  *
- * 제약: 한 호출 최대 31일 → 31일씩 잘라 돈다. 전일까지만 조회된다. 페이지 50건.
+ * 제약: 한 호출 기간은 '1개월 미만' — 6/30~7/30(31일)도 400 으로 거절된다 (2026-09-08 실측).
+ *   달 길이에 안 걸리게 28일씩 잘라 돈다. 전일까지만 조회된다. 페이지 50건.
  * 매칭 키 = (orderId, vendorItemId). REFUND 행은 무시(취소는 동기화가 status 로 잡는다).
  * 로켓그로스는 매출내역에 잡히면 같이 채워지고, 아니면 NULL 로 남는다 (따로 걸러내지 않는다).
  *
@@ -449,9 +450,10 @@ async function backfillConfirmedAt({ daysBack = 45, endDate = null } = {}) {
   const result = { window: { from, to }, segments: 0, pages: 0, sales_rows: 0, keys: 0, candidates: 0, updated: 0, unmatched: 0, failed: 0 };
   // (orderId|vendorItemId) → 가장 이른 매출인식일
   const byKey = new Map();
-  const MAX_PAGES_PER_SEG = 400;   // 31일 × 50건/페이지 — 2만 행 상한 (실제는 수백 건)
-  for (let segFrom = from; segFrom <= to; segFrom = addDays(segFrom, 31)) {
-    const segTo = addDays(segFrom, 30) < to ? addDays(segFrom, 30) : to;
+  const SEG_DAYS = 28;             // 쿠팡 'less than 1 months' — 2월 포함 어느 달에도 안 걸리는 길이
+  const MAX_PAGES_PER_SEG = 400;   // 28일 × 50건/페이지 — 2만 행 상한 (실제는 수백 건)
+  for (let segFrom = from; segFrom <= to; segFrom = addDays(segFrom, SEG_DAYS)) {
+    const segTo = addDays(segFrom, SEG_DAYS - 1) < to ? addDays(segFrom, SEG_DAYS - 1) : to;
     result.segments += 1;
     let token = '';
     for (let page = 0; page < MAX_PAGES_PER_SEG; page++) {

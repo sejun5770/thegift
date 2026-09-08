@@ -225,7 +225,7 @@ async function getOrderSheet(orderId) {
 
 /**
  * 매출내역 조회 (정산현황) — GET /v2/providers/openapi/apis/api/v1/revenue-history
- *   recognitionDateFrom/To: yyyy-MM-dd, 한 번에 최대 31일, 전일까지만 조회 가능.
+ *   recognitionDateFrom/To: yyyy-MM-dd, 한 번에 '1개월 미만'(31일 구간도 400), 전일까지만 조회 가능.
  *   token: 첫 페이지는 빈 문자열. maxPerPage 1~50.
  *   응답: { code, message, hasNext, nextToken,
  *           data: [{ orderId, saleType: 'SALE'|'REFUND', recognitionDate, settlementDate,
