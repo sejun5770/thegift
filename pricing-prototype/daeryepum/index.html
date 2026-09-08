@@ -179,6 +179,8 @@ nav a:hover{color:var(--gray-900)}
 /* FEEDBACK */
 .feedback{padding:16px 20px;background:#fff;border:1px solid var(--gray-200);border-left:3px solid var(--primary);border-radius:var(--radius);font-size:13px;line-height:1.7;margin-top:12px}
 .feedback strong{color:var(--primary)}
+/* 데이터가 없어 비어 있으면 띠만 남아 빈 카드처럼 보인다 — 아예 숨긴다 (3단계-C) */
+.feedback:empty{display:none}
 /* TOAST */
 .toast{position:fixed;bottom:24px;right:24px;background:var(--gray-900);color:#fff;padding:12px 20px;border-radius:var(--radius);font-size:13px;opacity:0;transition:opacity .3s;z-index:1000;pointer-events:none}
 .toast.show{opacity:1}
@@ -272,7 +274,7 @@ nav a:hover{color:var(--gray-900)}
 }
 /* 월간 보고서 인쇄용 — nav/툴바 숨기고 컬러/폰트 최적화 */
 @media print {
-  nav, .user-area, #mr-loading, .toolbar { display: none !important; }
+  nav, .user-area, #mr-loading, .toolbar, .page-actions { display: none !important; }
   body { background: #fff }
   .container { max-width: 100%; padding: 0 }
   .card { box-shadow: none; border: 1px solid #ccc; page-break-inside: avoid }
@@ -320,6 +322,19 @@ nav.nav-loading a[href^="#"] {
 .btn-danger:hover{background:var(--danger-bg)}
 .btn-warn{background:var(--warn-bg);border-color:#fcd34d;color:#92400e}
 .btn-warn:hover{background:#fde68a}
+/* 필터 칩 (3단계-C) — 체크박스를 알약 토글로 보여 접지 않고도 조건이 읽히게 한다.
+상태 칩은 켜짐이 '조건 걸림'이라 파랑, 사이트 칩은 켜짐이 기본이라 꺼진 쪽을 흐리게 한다. */
+.chipbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.chipbar-label{font-size:12px;color:var(--gray-500);font-weight:500;white-space:nowrap;margin-right:2px}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border:1px solid var(--gray-300);border-radius:999px;background:#fff;font-size:12px;color:var(--gray-700);cursor:pointer;white-space:nowrap;user-select:none}
+.chip:hover{background:var(--gray-50)}
+.chip input{margin:0;width:13px;height:13px;cursor:pointer}
+.chip:has(input:checked){background:var(--info-bg);border-color:#bfdbfe;color:var(--info);font-weight:600}
+.chip.chip-site:has(input:checked){background:#fff;border-color:var(--gray-300);color:var(--gray-700);font-weight:500}
+.chip.chip-site:not(:has(input:checked)){background:var(--gray-100);border-color:var(--gray-200);color:var(--gray-500)}
+/* 컴팩트 KPI 카드 — 값 24px, 한 줄 4장 (표 위에 얹히는 요약용) */
+.card-kpi{padding:14px 16px}
+.card-kpi .value{font-size:24px}
 /* 대시보드 위탁 탭 — 이동해 온 페이지 헤더는 섹션 제목 크기로 */
 #dash-sec-vendor .page-title{font-size:16px}
 #dash-sec-vendor .page-header{margin-bottom:8px}
@@ -377,7 +392,14 @@ nav.nav-loading a[href^="#"] {
 <div class="container">
 <!-- ========== DASHBOARD ========== -->
 <div id="page-dashboard" class="page active">
-  <!-- 카테고리 탭 -->
+<div class="page-header">
+<div>
+<h2 class="page-title">📊 대시보드</h2>
+<div class="page-subtitle">기간별 매출·수량·주문 건수와 채널·상품 지표를 함께 봅니다.</div>
+</div>
+</div>
+
+<!-- 카테고리 탭 -->
   <div class="tabs tabs-lg">
     <button class="tab active" id="dash-tab-daeryepum" onclick="setDashCategory('daeryepum')">
       답례품
@@ -1251,8 +1273,13 @@ nav.nav-loading a[href^="#"] {
 
 <!-- ========== MONTHLY REPORT ========== -->
 <div id="page-monthly-report" class="page">
-  <div class="toolbar" style="margin-bottom:20px;align-items:center;flex-wrap:wrap">
-    <label style="font-weight:600">📊 월간 보고서 — </label>
+<div class="page-header">
+<div>
+<h2 class="page-title">🗓️ 월간 보고서</h2>
+<div class="page-subtitle">대상월을 전월·전년 동월과 함께 계산해 보고용으로 정리합니다.</div>
+</div>
+</div>
+<div class="toolbar" style="margin-bottom:20px;align-items:center;flex-wrap:wrap">
     <input type="month" id="mr-month" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:14px" />
     <button class="btn btn-primary" onclick="loadMonthlyReport()">조회</button>
     <span style="margin-left:auto;display:inline-flex;gap:6px;flex-wrap:wrap">
@@ -1606,7 +1633,14 @@ nav.nav-loading a[href^="#"] {
 
 <!-- ========== ORDERS ========== -->
 <div id="page-orders" class="page">
-  <!-- 카테고리 탭 -->
+<div class="page-header">
+<div>
+<h2 class="page-title">📋 주문조회</h2>
+<div class="page-subtitle">카테고리·기간별 주문을 조회하고 수집 처리·복사·엑셀 내보내기를 합니다.</div>
+</div>
+</div>
+
+<!-- 카테고리 탭 -->
   <div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid var(--gray-200)">
     <button class="cat-tab active" data-cat="daeryepum" onclick="switchCategory('daeryepum')">답례품</button>
     <button class="cat-tab" data-cat="deco" onclick="switchCategory('deco')">데코소품</button>
@@ -1641,64 +1675,33 @@ nav.nav-loading a[href^="#"] {
     </div>
   </div>
 
-  <!-- 필터 — 기본 접힘. 걸린 조건 수를 배지로 보여 접어 둬도 놓치지 않게 한다. -->
-  <!-- 주문상태 필터 — 무엇을 빼고 볼지 (주문 자체의 상태) -->
-  <details class="ord-sec" id="ord-sec-filter">
-    <summary>주문상태 필터 <span class="ord-badge" id="ord-filter-badge" style="display:none"></span></summary>
-    <div class="ord-sec-body">
-      <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
-        <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
-          <input type="checkbox" id="exclude-cancel" onchange="renderOrderTable()"> 취소주문 제외
-        </label>
-        <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
-          <input type="checkbox" id="exclude-pending" onchange="renderOrderTable()"> 결제대기 제외
-        </label>
-        <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px">
-          <input type="checkbox" id="hide-collected" onchange="renderOrderTable()"> 수집완료 숨기기
-        </label>
-      </div>
+  <!-- 필터 (3단계-C) — 접이식 3구역을 한 줄 칩으로. 조회 버튼과 표 사이에서 시선이 끊기지 않게
+       상태·사이트는 펼친 채로 두고, 거의 안 바꾸는 표시 컬럼만 접어 둔다. -->
+  <div class="card" style="padding:10px 12px;margin-bottom:10px;display:flex;flex-direction:column;gap:8px">
+    <div class="chipbar" id="ord-sec-filter">
+      <span class="chipbar-label">상태</span>
+      <label class="chip"><input type="checkbox" id="exclude-cancel" onchange="renderOrderTable()"> 취소주문 제외</label>
+      <label class="chip"><input type="checkbox" id="exclude-pending" onchange="renderOrderTable()"> 결제대기 제외</label>
+      <label class="chip"><input type="checkbox" id="hide-collected" onchange="renderOrderTable()"> 수집완료 숨기기</label>
     </div>
-  </details>
 
-  <!-- 주문사이트 필터 — 어느 채널을 볼지. 답례품 카테고리 전용이라 구역 자체를 카테고리에 따라 감춘다
-       (switchCategory 가 #ord-sec-site 의 display 를 조정). -->
-  <details class="ord-sec" id="ord-sec-site">
-    <summary>주문사이트 필터 <span class="ord-badge" id="ord-site-badge" style="display:none"></span></summary>
-    <div class="ord-sec-body">
-  <div id="ord-site-filter" style="display:flex;gap:14px;align-items:center;font-size:13px;flex-wrap:wrap">
-    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
-      <input type="checkbox" data-ord-site="card" checked onchange="renderOrderTable()"> 바른손카드
-    </label>
-    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="모든 제휴사 통합">
-      <input type="checkbox" data-ord-site="etc" checked onchange="renderOrderTable()"> 바른손몰
-    </label>
-    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
-      <input type="checkbox" data-ord-site="nv_card" checked onchange="renderOrderTable()"> 네이버_바른손카드
-    </label>
-    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
-      <input type="checkbox" data-ord-site="nv_tnt" checked onchange="renderOrderTable()"> 네이버_테넷텐
-    </label>
-    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
-      <input type="checkbox" data-ord-site="coupang" checked onchange="renderOrderTable()"> 쿠팡
-    </label>
-    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="쿠팡 물류센터가 보관·출고하는 주문">
-      <input type="checkbox" data-ord-site="coupang_rg" checked onchange="renderOrderTable()"> 🏬 쿠팡 로켓그로스
-    </label>
-    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
-      <input type="checkbox" data-ord-site="cafe24" checked onchange="renderOrderTable()"> 정수당
-    </label>
-    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
-      <input type="checkbox" data-ord-site="manual" checked onchange="renderOrderTable()"> 바른손더기프트
-    </label>
-    <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="API 연동이 없어 주문수집 시트에서 가져온 제휴 채널 (웅진 등)">
-      <input type="checkbox" data-ord-site="partner" checked onchange="renderOrderTable()"> 제휴
-    </label>
-    <div style="flex:1"></div>
-    <button class="btn" onclick="document.querySelectorAll('#ord-site-filter input').forEach(c=>c.checked=true);renderOrderTable()" style="padding:3px 8px;font-size:12px" title="모든 사이트 체크">전체선택</button>
-    <button class="btn" onclick="document.querySelectorAll('#ord-site-filter input').forEach(c=>c.checked=false);renderOrderTable()" style="padding:3px 8px;font-size:12px" title="모두 해제">해제</button>
+    <div class="chipbar" id="ord-sec-site">
+      <span class="chipbar-label">사이트</span>
+      <div id="ord-site-filter" style="display:contents">
+      <label class="chip chip-site"><input type="checkbox" data-ord-site="card" checked onchange="renderOrderTable()"> 바른손카드</label>
+      <label class="chip chip-site" title="모든 제휴사 통합"><input type="checkbox" data-ord-site="etc" checked onchange="renderOrderTable()"> 바른손몰</label>
+      <label class="chip chip-site"><input type="checkbox" data-ord-site="nv_card" checked onchange="renderOrderTable()"> 네이버_바른손카드</label>
+      <label class="chip chip-site"><input type="checkbox" data-ord-site="nv_tnt" checked onchange="renderOrderTable()"> 네이버_테넷텐</label>
+      <label class="chip chip-site"><input type="checkbox" data-ord-site="coupang" checked onchange="renderOrderTable()"> 쿠팡</label>
+      <label class="chip chip-site" title="쿠팡 물류센터가 보관·출고하는 주문"><input type="checkbox" data-ord-site="coupang_rg" checked onchange="renderOrderTable()"> 쿠팡 로켓그로스</label>
+      <label class="chip chip-site"><input type="checkbox" data-ord-site="cafe24" checked onchange="renderOrderTable()"> 정수당</label>
+      <label class="chip chip-site"><input type="checkbox" data-ord-site="manual" checked onchange="renderOrderTable()"> 바른손더기프트</label>
+      <label class="chip chip-site" title="API 연동이 없어 주문수집 시트에서 가져온 제휴 채널 (웅진 등)"><input type="checkbox" data-ord-site="partner" checked onchange="renderOrderTable()"> 제휴</label>
       </div>
+      <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="document.querySelectorAll('#ord-site-filter input').forEach(c=>c.checked=true);renderOrderTable()" title="모든 사이트 체크">전체</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.querySelectorAll('#ord-site-filter input').forEach(c=>c.checked=false);renderOrderTable()" title="모두 해제">해제</button>
     </div>
-  </details>
+  </div>
 
   <!-- 표시 컬럼 — 한 번 정해두고 거의 안 바꾸는 영역이라 접어 둔다 -->
   <details class="ord-sec" id="ord-sec-cols">
@@ -2772,10 +2775,8 @@ nav.nav-loading a[href^="#"] {
   </div>
   </div>
 
-  <!-- 요약 배지 -->
-  <div class="card" style="padding:12px;margin-bottom:12px">
-    <div id="stock-summary" style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px">불러오는 중…</div>
-  </div>
+  <!-- 요약 KPI (3단계-C) — 알약 9개를 등록/재고/소진임박/자산 네 카드로 -->
+  <div id="stock-summary" class="card-grid card-grid-4" style="margin-bottom:12px">불러오는 중…</div>
 
   <!-- 필터 툴바 -->
   <div class="card" style="padding:12px;margin-bottom:12px">
@@ -5239,7 +5240,7 @@ function switchCategory(cat) {
   if (showCsvUpload) setBgVendorTab('all');
   // 주문사이트 필터 — 답례품 카테고리 (여러 채널 UNION) 에서만 노출.
   //   데코/꽃다발은 채널 단일이라 불필요, 더기프트는 MANUAL 만이라 불필요.
-  //   구역(details) 째로 감춘다. 안쪽 #ord-site-filter 는 display 를 건드리지 않는다 —
+  //   칩 줄(#ord-sec-site) 째로 감춘다. 안쪽 #ord-site-filter 는 display 를 건드리지 않는다 —
   //   getFilteredOrders 가 그 값으로 '필터가 살아 있는가' 를 판정하기 때문.
   const siteSec = document.getElementById('ord-sec-site');
   if (siteSec) siteSec.style.display = showMarketplaceSync ? '' : 'none';
@@ -5254,10 +5255,10 @@ const ORD_SEC_KEY = 'ord-sections-open';
 function _ordSecRestore() {
   let open = {};
   try { open = JSON.parse(localStorage.getItem(ORD_SEC_KEY) || '{}'); } catch {}
-  ['ord-sec-filter', 'ord-sec-site', 'ord-sec-cols'].forEach(id => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.open = !!open[id];
+  ['ord-sec-cols'].forEach(id => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.open = !!open[id];
     el.addEventListener('toggle', () => {
       let cur = {};
       try { cur = JSON.parse(localStorage.getItem(ORD_SEC_KEY) || '{}'); } catch {}
@@ -5272,31 +5273,15 @@ function _ordSecRestore() {
   });
 }
 
-/** 접어 둬도 무엇이 걸려 있는지 보이도록 요약 배지를 갱신한다 */
+/** 표시 컬럼은 접어 두므로 몇 개가 켜져 있는지 요약 배지로 보여 준다.
+ *  상태·사이트는 칩으로 펼쳐 두어 배지가 필요 없다 (3단계-C). */
 function _ordUpdateFilterBadge() {
-  const badge = document.getElementById('ord-filter-badge');
-  if (badge) {
-    const excl = ['exclude-cancel', 'exclude-pending', 'hide-collected']
-      .filter(id => document.getElementById(id)?.checked).length;
-    badge.textContent = excl ? `제외 ${excl}` : '';
-    badge.style.display = excl ? '' : 'none';
-  }
-  const sb = document.getElementById('ord-site-badge');
-  if (sb) {
-    const sites = [...document.querySelectorAll('#ord-site-filter input[data-ord-site]')];
-    const on = sites.filter(cb => cb.checked).length;
-    // 전부 켠 상태가 기본이라 그때는 배지를 숨긴다 — 좁혀 봤을 때만 눈에 띄면 된다
-    const narrowed = sites.length && on < sites.length;
-    sb.textContent = narrowed ? `${on}/${sites.length}` : '';
-    sb.style.display = narrowed ? '' : 'none';
-  }
   const cb = document.getElementById('ord-cols-badge');
-  if (cb) {
-    const all = [...document.querySelectorAll('#col-selector input[data-key]')];
-    const on = all.filter(x => x.checked).length;
-    cb.textContent = all.length ? `${on}/${all.length}` : '';
-    cb.style.display = all.length ? '' : 'none';
-  }
+  if (!cb) return;
+  const all = [...document.querySelectorAll('#col-selector input[data-key]')];
+  const on = all.filter(x => x.checked).length;
+  cb.textContent = all.length ? `${on}/${all.length}` : '';
+  cb.style.display = all.length ? '' : 'none';
 }
 
 // --- Column Selector ---
@@ -16885,7 +16870,7 @@ function renderBgShClosedCal() {
     const isSelected = selected.includes(ds);
     let style = 'height:26px;line-height:26px;border-radius:4px;font-size:12px;cursor:pointer;';
     if (isPast) style += 'color:var(--gray-300);cursor:default;';
-    else if (isSelected) style += 'background:var(--red);color:#fff;font-weight:600;';
+    else if (isSelected) style += 'background:var(--danger-bg);color:var(--danger);border:1px solid #fca5a5;font-weight:600;';
     else style += 'color:var(--gray-700);';
     const click = isPast ? '' : ' onclick="bgShToggleClosedDate(\'' + ds + '\')"';
     html += '<div style="' + style + '"' + click + '>' + d + '</div>';
@@ -17197,18 +17182,36 @@ async function loadDaeryepumStock() {
     } catch { _stockBomParents = []; }
     // 요약 배지
     const s = d.summary || {};
+    // 부가 수치(ERP 조회·못 찾음·발주·소진)는 각 카드의 보조 줄로 접어 넣는다.
+    const notFound = s.not_found
+      ? ` · <span style="color:var(--danger)" title="등록한 코드로 ERP 재고를 찾지 못했습니다 — 재고코드를 확인하세요">재고 못 찾음 ${s.not_found}개</span>` : '';
+    const xerpSub = s.from_xerp !== undefined
+      ? `ERP 조회 ${s.from_xerp}개 · 창고 ${esc(d.stock_warehouse || 'MF01')}` : '관리 대상으로 등록한 품목';
+    const poParts = [];
+    if (s.po_qty_live) poParts.push(`입고예정 ${fmtNum(s.po_qty_live)}개 · ${s.po_items || 0}품목`);
+    if (s.po_qty_stale) poParts.push(`<span style="color:var(--warn)" title="납기가 ${d.po_stale_days || 90}일 넘게 지났는데 입고 기록이 없는 발주입니다 (${s.po_stale_items || 0}개 품목). 가용+발주 합계에서 뺐습니다.">미마감 발주 ${fmtNum(s.po_qty_stale)}개</span>`);
+    if (!poParts.length) poParts.push(d.po_error ? '<span style="color:var(--danger)">발주를 불러오지 못했습니다 · 재고만 표시</span>' : '들어올 발주 없음');
     $summary.innerHTML = `
-      <span style="padding:4px 10px;background:#e0e7ff;color:#4338ca;border-radius:4px;font-weight:600" title="bg_stock_items 에 등록된 관리 품목">등록 품목 ${s.total || 0}개</span>
-      ${s.from_xerp !== undefined ? `<span style="padding:4px 10px;background:#eef2ff;color:#4338ca;border-radius:4px" title="XERP 원본에서 조회한 품목 수 — 아래 창고들의 재고를 합산합니다. 창고이동은 XERP 가 출고/입고 짝으로 기록하므로 다른 창고로 나간 물량은 MF01 에서 이미 빠져 있습니다 (다시 빼지 않습니다)">XERP 재고 ${s.from_xerp}개 <span style="opacity:.75;font-size:12px">· 창고 ${esc(d.stock_warehouse || 'MF01')}</span></span>` : ''}
-      ${s.not_found ? `<span style="padding:4px 10px;background:#fee2e2;color:#991b1b;border-radius:4px;font-weight:600" title="등록한 코드로 ERP 재고를 찾지 못했습니다 — 재고코드를 바꿔보세요">❓ 재고 못 찾음 ${s.not_found}개</span>` : ''}
-      <span style="padding:4px 10px;background:#dcfce7;color:#166534;border-radius:4px;font-weight:600">재고 있음 ${s.with_stock || 0}개</span>
-      <span style="padding:4px 10px;background:#fef3c7;color:#92400e;border-radius:4px;font-weight:600">⚠️ 30일 내 소진 ${s.urgent_30d || 0}개</span>
-      <span style="padding:4px 10px;background:#fee2e2;color:#991b1b;border-radius:4px;font-weight:600">❌ 소진 ${s.soldout || 0}개</span>
-      ${s.po_qty_live ? `<span style="padding:4px 10px;background:#ccfbf1;color:#0f766e;border-radius:4px;font-weight:600" title="아직 입고되지 않은 발주 수량의 합계입니다 (${s.po_items || 0}개 품목). 재고와 같은 창고로 들어올 발주만 셉니다.">📦 입고예정 ${fmtNum(s.po_qty_live)}개 <span style="opacity:.75;font-size:12px">· ${s.po_items || 0}품목</span></span>` : ''}
-      ${s.po_qty_stale ? `<span style="padding:4px 10px;background:#fef3c7;color:#b45309;border-radius:4px;font-weight:600" title="납기가 ${d.po_stale_days || 90}일 넘게 지났는데 입고 기록이 없는 발주입니다 (${s.po_stale_items || 0}개 품목). 실제로 들어오지 않을 가능성이 커 '가용+발주' 합계에서 뺐습니다 — ERP에서 마감 여부를 확인해 주세요.">⚠️ 미마감 발주 ${fmtNum(s.po_qty_stale)}개 <span style="opacity:.75;font-size:12px">· ${s.po_stale_items || 0}품목</span></span>` : ''}
-      ${d.po_error ? `<span style="padding:4px 10px;background:#fee2e2;color:#991b1b;border-radius:4px" title="${esc(d.po_error)}">발주 조회 실패 — 재고만 표시</span>` : ''}
-      <span style="padding:4px 10px;background:#f1f5f9;color:#0f172a;border-radius:4px;font-weight:600" title="가용 재고 × 단가 합계">💰 재고 자산 ${fmtNum(s.total_stock_value || 0)}원</span>
-      <span style="padding:4px 10px;background:#f1f5f9;color:#0f172a;border-radius:4px;font-weight:600" title="TOTAL_SALE_PRICE_30_DAY 합계">📈 30일 매출 ${fmtNum(s.total_sales_30d || 0)}원</span>
+      <div class="card card-kpi">
+        <h3>등록 품목</h3>
+        <div class="value">${s.total || 0}개</div>
+        <div class="sub">${xerpSub}${notFound}</div>
+      </div>
+      <div class="card card-kpi">
+        <h3>재고 있음</h3>
+        <div class="value">${s.with_stock || 0}개</div>
+        <div class="sub">소진 ${s.soldout || 0}개</div>
+      </div>
+      <div class="card card-kpi">
+        <h3>30일 내 소진</h3>
+        <div class="value" style="color:${(s.urgent_30d || 0) > 0 ? 'var(--warn)' : ''}">${s.urgent_30d || 0}개</div>
+        <div class="sub">${poParts.join(' · ')}</div>
+      </div>
+      <div class="card card-kpi">
+        <h3>재고 자산</h3>
+        <div class="value">${fmtNum(s.total_stock_value || 0)}원</div>
+        <div class="sub" title="가용 재고 × 단가 합계 / 최근 30일 매출액">30일 매출 ${fmtNum(s.total_sales_30d || 0)}원</div>
+      </div>
     `;
     _renderCoupangStockInfo(d.summary || {});
     renderStockTable();
