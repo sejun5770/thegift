@@ -1567,15 +1567,10 @@ nav.nav-loading a[href^="#"] {
 
 <!-- ========== ADMIN: GNB 설정 ========== -->
 <div id="page-admin-nav-settings" class="page">
-  <div class="card" style="margin-bottom:16px">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-      <h2 class="page-title">⚙️ GNB 메뉴 설정</h2>
-      <span id="ans-permission-tag" style="font-size:12px;padding:2px 8px;border-radius:10px;background:var(--gray-100);color:var(--gray-500)">권한 확인 중...</span>
-    </div>
-    <div style="font-size:13px;color:var(--gray-500)">
-      상단 네비게이션 메뉴의 <b>표시/숨김</b> 과 <b>순서</b> 를 변경합니다.
-      변경 사항은 모든 사용자에게 즉시 적용됩니다 (페이지 새로고침 시).
-      권한은 <code>sejun.song@barunn.net</code> 계정만 보유.
+  <div class="page-header">
+    <div>
+      <h2 class="page-title">⚙️ GNB 메뉴 설정 <span id="ans-permission-tag" class="badge badge-neutral" title="변경 권한은 지정된 관리자 계정만 가집니다">권한 확인 중...</span></h2>
+      <div class="page-subtitle">상단 네비게이션 메뉴의 <b>표시/숨김</b> 과 <b>순서</b> 를 변경합니다. 변경 사항은 모든 사용자에게 즉시 적용됩니다 (페이지 새로고침 시).</div>
     </div>
   </div>
 
@@ -2778,8 +2773,8 @@ nav.nav-loading a[href^="#"] {
   <!-- 요약 KPI (3단계-C) — 알약 9개를 등록/재고/소진임박/자산 네 카드로 -->
   <div id="stock-summary" class="card-grid card-grid-4" style="margin-bottom:12px">불러오는 중…</div>
 
-  <!-- 필터 툴바 -->
-  <div class="card" style="padding:12px;margin-bottom:12px">
+  <!-- 필터 툴바 — 다른 페이지 툴바처럼 흰 카드 없이 페이지 배경 위에 둔다 -->
+  <div style="margin-bottom:12px">
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <input type="text" id="stock-search" placeholder="🔍 품목코드/상품명 검색"
              oninput="renderStockTable()"
@@ -8945,13 +8940,13 @@ async function loadAdminNavSettings() {
     document.getElementById('ans-allowed-emails').textContent = (j.super_admin_emails || []).join(', ');
     if (!_navIsSuperAdmin) {
       tag.textContent = '권한 없음';
-      tag.style.background = '#fee2e2'; tag.style.color = '#dc2626';
+      tag.className = 'badge badge-danger';
       notAllowed.style.display = 'block';
       editor.style.display = 'none';
       return;
     }
-    tag.textContent = '✅ Super Admin';
-    tag.style.background = '#dcfce7'; tag.style.color = '#16a34a';
+    tag.textContent = '변경 권한 있음';
+    tag.className = 'badge badge-success';
     notAllowed.style.display = 'none';
     editor.style.display = 'block';
     // editing draft 생성 (DOM merge)
@@ -8962,6 +8957,7 @@ async function loadAdminNavSettings() {
     loadSiteGuideSettings().catch(e => console.warn('site-guide 로드 실패:', e.message));
   } catch (e) {
     tag.textContent = '조회 실패';
+    tag.className = 'badge badge-warn';
     document.getElementById('ans-status').textContent = '에러: ' + e.message;
   }
 }
@@ -23272,13 +23268,19 @@ function renderBgUnified() {
       ? 'border-top:2px solid var(--gray-200)'
       : (isFirstOfDelivery ? 'border-top:1px dashed var(--gray-300)' : '');
     // 결제대기 우선 표시 (취소가 더 강한 상태이긴 하지만 둘 다 발생할 일 거의 없음).
-    //   기타출고 처리된 주문은 취소/결제대기 아니면 노란색 강조 (사고 케이스 시각적 flag).
+    //   환불(부분취소) 은 취소/결제대기가 아니면 연보라 강조 — 취소(분홍)·기타출고(노랑) 와 구분한다.
+    //   이 표에서 보라는 다른 뜻으로 쓰지 않는다 (주문조회의 보라 행 '결제대기+수집완료' 는 그 화면 전용).
+    //   기타출고 처리된 주문은 위 셋 다 아니면 노란색 강조 (사고 케이스 시각적 flag).
     const isSpecialShipping = !!ci?.is_special_shipping;
+    const hasRefund = Number(order.refund_price) > 0;
     let rowClass = isCancelled(order)
       ? 'row-cancelled'
       : (isPaymentPending(order) ? 'row-pending' : '');
     let rowInlineStyle = '';
-    if (!rowClass && isSpecialShipping) {
+    if (!rowClass && hasRefund) {
+      // 만들면 안 되는 주문이라 사고 flag 보다 앞세운다 (기타출고는 🚨 prefix 로 여전히 보인다).
+      rowInlineStyle = 'background:#f3e8ff';
+    } else if (!rowClass && isSpecialShipping) {
       rowInlineStyle = 'background:#fef9c3';
     }
 
