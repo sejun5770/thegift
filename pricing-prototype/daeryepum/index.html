@@ -12,7 +12,7 @@
 /* 색·모서리 토큰 — 무채색·주 버튼은 barunsoncard.com 실측값(2026-09-09), 상태색은 대시보드 자체 정의 유지 */
 :root{--primary:#1BAED4;--primary-light:#E3F6FA;--green:#16a34a;--green-bg:#dcfce7;--red:#dc2626;--red-bg:#fee2e2;--orange:#ea580c;--yellow:#fbbf24;--gray-50:#F4F4F5;--gray-100:#ECECEE;--gray-200:#E2E2E4;--gray-300:#CFCFCF;--gray-500:#888888;--gray-700:#333333;--gray-900:#111111;--radius:8px;--radius-btn:4px}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Pretendard Variable',Pretendard,-apple-system,'Noto Sans KR',sans-serif;background:var(--gray-50);color:var(--gray-900);font-size:14px;background-attachment:fixed}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,'Noto Sans KR',sans-serif;background:#fff;color:var(--gray-900);font-size:14px;background-attachment:fixed}  /* 페이지 배경은 흰색 (몰과 동일) — gray-50 은 표 헤더·접힘 영역 등 안쪽 면에만 */
 /* ============================================
    배경 패턴 — body 의 data-bg-pattern attribute 로 적용.
    localStorage 'bg-pattern' 에 저장 / 복원. SVG/gradient CSS-only (네트워크 fetch 없음).
