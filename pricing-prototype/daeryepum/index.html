@@ -56,20 +56,44 @@ body[data-bg-pattern] .container > .page.active {
 }
 /* 패턴이 페이지 주변 (container margin / nav 아래) 에는 그대로 보이게 — 시각적 분리 효과. */
 /* NAV */
-nav{background:#fff;border-bottom:1px solid var(--gray-200);padding:0 24px;display:flex;align-items:center;height:52px;gap:32px;position:sticky;top:0;z-index:100}
-.user-area{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--gray-500)}
+/* ── 레이아웃 셸 (2026-09-09) — 좌측 사이드바 + 상단바 + 풀폭 콘텐츠.
+   nav 는 사이드바 안의 <nav class="menu"> 로 옮겼다. showPage·GNB 설정은 'nav a' 셀렉터를 그대로 쓴다. */
+.app{display:grid;grid-template-columns:232px minmax(0,1fr);grid-template-rows:52px 1fr;min-height:100vh}
+.app.min{grid-template-columns:64px minmax(0,1fr)}
+.side{grid-row:1/3;background:var(--gray-50);border-right:1px solid var(--gray-200);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow:hidden;z-index:100}
+.brand{height:52px;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--gray-200);flex:0 0 auto}
+.brand .mark{width:26px;height:26px;border-radius:6px;background:var(--primary);color:#fff;font-weight:800;font-size:13px;display:grid;place-items:center;flex:0 0 auto}
+.brand .logo{font-weight:700;font-size:15px;color:var(--gray-900);white-space:nowrap}
+nav.menu{padding:10px 8px 12px;overflow-y:auto;flex:1}
+nav.menu .grp{font-size:10.5px;letter-spacing:.08em;color:var(--gray-500);font-weight:600;padding:12px 10px 5px;white-space:nowrap}
+nav.menu .grp:first-child{padding-top:4px}
+nav.menu a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--radius-btn);color:var(--gray-700);font-size:13.5px;font-weight:500;text-decoration:none;white-space:nowrap;position:relative}
+nav.menu a:hover{background:rgba(0,0,0,.04);color:var(--gray-900)}
+nav.menu a.active{background:#fff;color:#1596B8;font-weight:600;box-shadow:inset 0 0 0 1px var(--gray-200)}
+nav.menu a.active::before{content:"";position:absolute;left:-8px;top:8px;bottom:8px;width:3px;background:var(--primary);border-radius:0 2px 2px 0}
+nav.menu a .ic{width:18px;height:18px;flex:0 0 auto;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;opacity:.8}
+.app.min .brand .logo,.app.min nav.menu .grp,.app.min nav.menu a span{display:none}
+.app.min .brand{justify-content:center;padding:0}
+.app.min nav.menu a{justify-content:center;padding:9px 0}
+.top{grid-column:2;background:#fff;border-bottom:1px solid var(--gray-200);display:flex;align-items:center;gap:12px;padding:0 20px;position:sticky;top:0;z-index:90;min-width:0}
+.top .tg{width:32px;height:32px;border:1px solid var(--gray-300);border-radius:var(--radius-btn);background:#fff;display:grid;place-items:center;color:var(--gray-700);cursor:pointer;flex:0 0 auto}
+.top .crumb{font-size:13px;color:var(--gray-500);display:flex;align-items:center;gap:7px;white-space:nowrap}
+.top .crumb b{color:var(--gray-900);font-weight:600}
+.top .search{margin-left:auto;display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border:1px solid var(--gray-300);border-radius:var(--radius-btn);background:var(--gray-50);color:var(--gray-500);font-size:13px;width:300px;flex:0 1 auto;min-width:0}
+.top .search input{border:0;background:transparent;font:inherit;color:var(--gray-900);width:100%;min-width:0;outline:none}
+.top .search input::placeholder{color:var(--gray-500)}
+.main{grid-column:2;min-width:0}
+.user-area{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--gray-500);flex:0 0 auto}
 .user-area img{width:28px;height:28px;border-radius:50%;border:1px solid var(--gray-200)}
 .user-area button{padding:4px 10px;font-size:12px;border:1px solid var(--gray-300);border-radius:var(--radius-btn);background:#fff;cursor:pointer;color:var(--gray-500)}
 .user-area button:hover{background:var(--gray-50);color:var(--gray-700)}
 /* 매뉴얼 — GNB 링크가 아니라 로그아웃 오른쪽 버튼 (운영 요청 2026-08-13) */
 .user-area .manual-btn{padding:4px 10px;font-size:12px;border:1px solid var(--gray-300);border-radius:var(--radius-btn);background:#fff;color:var(--gray-500);text-decoration:none;white-space:nowrap}
 .user-area .manual-btn:hover{background:var(--gray-50);color:var(--gray-700)}
-nav .logo{font-weight:700;font-size:16px;color:var(--primary)}
-nav a{text-decoration:none;color:var(--gray-500);font-weight:500;padding:14px 0;border-bottom:2px solid transparent;font-size:14px}
-nav a.active{color:var(--primary);border-bottom-color:var(--primary)}
-nav a:hover{color:var(--gray-900)}
 /* LAYOUT */
-.container{max-width:1400px;margin:0 auto;padding:20px 24px}
+.container{max-width:none;margin:0;padding:20px 24px}
+.card-grid{max-width:1600px}
+.page-subtitle{max-width:72ch}
 .page{display:none}.page.active{display:block}
 /* CARDS */
 .card{background:#fff;border:1px solid var(--gray-200);border-radius:var(--radius);padding:20px}
@@ -222,6 +246,10 @@ nav a:hover{color:var(--gray-900)}
 .forecast-table tr.history-row td{color:var(--gray-500);font-size:12px}
 /* === RESPONSIVE === */
 @media(max-width:900px){
+  .app,.app.min{grid-template-columns:64px minmax(0,1fr)}
+  .brand .logo,nav.menu .grp,nav.menu a span{display:none}
+  nav.menu a{justify-content:center;padding:9px 0}
+  .top .search{display:none}
   .card-grid-4{grid-template-columns:repeat(2,1fr)}
   .card-grid-3{grid-template-columns:repeat(2,1fr)}
   .compare-grid{grid-template-columns:1fr}
@@ -230,10 +258,6 @@ nav a:hover{color:var(--gray-900)}
 @media(max-width:768px){
   .resp-grid-2{grid-template-columns:1fr!important}
   .resp-grid-3{grid-template-columns:1fr!important}
-  nav{gap:8px;padding:0 12px;height:auto;min-height:48px;flex-wrap:wrap;justify-content:center;padding-top:8px;padding-bottom:8px}
-  nav .logo{font-size:14px}
-  nav a{font-size:12px;padding:8px 0}
-  .user-area{width:100%;justify-content:center;border-top:1px solid var(--gray-200);padding-top:6px;margin-top:2px}
   .container{padding:12px 10px}
   .card{padding:14px}
   .card .value{font-size:22px}
@@ -259,8 +283,6 @@ nav a:hover{color:var(--gray-900)}
   .toast{bottom:12px;right:12px;left:12px;text-align:center}
 }
 @media(max-width:480px){
-  nav{gap:4px}
-  nav a{font-size:11px}
   .card-grid-4{grid-template-columns:1fr 1fr}
   .card-grid-3{grid-template-columns:1fr}
   .card .value{font-size:18px}
@@ -276,7 +298,8 @@ nav a:hover{color:var(--gray-900)}
 }
 /* 월간 보고서 인쇄용 — nav/툴바 숨기고 컬러/폰트 최적화 */
 @media print {
-  nav, .user-area, #mr-loading, .toolbar, .page-actions { display: none !important; }
+  .side, .top, nav, .user-area, #mr-loading, .toolbar, .page-actions { display: none !important; }
+  .app, .main { display: block }
   body { background: #fff }
   .container { max-width: 100%; padding: 0 }
   .card { box-shadow: none; border: 1px solid #ccc; page-break-inside: avoid }
@@ -371,25 +394,40 @@ nav.nav-loading a[href^="#"] {
 </style>
 </head>
 <body>
-<nav class="nav-loading">
-  <span class="logo">답례품 관리</span>
-  <a href="#dashboard" class="active" onclick="showPage('dashboard')">대시보드</a>
-  <a href="#monthly-report" onclick="showPage('monthly-report')">월간 보고서</a>
-  <a href="#orders" onclick="showPage('orders')">주문조회</a>
-  <a href="#bg-unified" onclick="showPage('bg-unified')">정보입력현황</a>
-  <a href="#sns" onclick="showPage('sns')">SNS 인사이트</a>
-  <a href="#worklog" onclick="showPage('worklog')">일지</a>
-  <a href="#bg-stickers" onclick="showPage('bg-stickers')">부가옵션설정</a>
-  <a href="#bg-products" onclick="showPage('bg-products')">상품설정</a>
-  <a href="#bg-shipping" onclick="showPage('bg-shipping')">출고일설정</a>
-  <a href="#coupang-rfm" onclick="showPage('coupang-rfm')">로켓그로스</a>
-  <a href="#channel-inquiries" onclick="showPage('channel-inquiries')">상품문의</a>
-  <a href="#bg-vendors" onclick="showPage('bg-vendors')">위탁업체</a>
-  <a href="#bg-artists" onclick="showPage('bg-artists')">작가 정산</a>
-  <a href="#daeryepum-stock" onclick="showPage('daeryepum-stock')">답례품 재고</a>
-  <a href="#admin-nav-settings" onclick="showPage('admin-nav-settings')" id="nav-link-admin-nav-settings" style="display:none">GNB 설정</a>
+<div class="app" id="app">
+<aside class="side">
+  <div class="brand"><div class="mark">답</div><span class="logo">답례품 관리</span></div>
+  <!-- GNB — 저장된 표시/순서는 _applyNavConfigToDom 이 적용하고 묶음 제목(.grp)을 다시 끼운다 -->
+  <nav class="nav-loading menu" id="gnb">
+    <div class="grp" data-grp="운영">운영</div>
+    <a href="#dashboard" class="active" data-grp="운영" onclick="showPage('dashboard')"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg><span>대시보드</span></a>
+    <a href="#orders" data-grp="운영" onclick="showPage('orders')"><svg class="ic" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>주문조회</span></a>
+    <a href="#bg-unified" data-grp="운영" onclick="showPage('bg-unified')"><svg class="ic" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg><span>정보입력현황</span></a>
+    <a href="#monthly-report" data-grp="운영" onclick="showPage('monthly-report')"><svg class="ic" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg><span>월간 보고서</span></a>
+    <div class="grp" data-grp="상품 · 설정">상품 · 설정</div>
+    <a href="#bg-products" data-grp="상품 · 설정" onclick="showPage('bg-products')"><svg class="ic" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><path d="M3.3 7L12 12l8.7-5M12 22V12"/></svg><span>상품설정</span></a>
+    <a href="#bg-stickers" data-grp="상품 · 설정" onclick="showPage('bg-stickers')"><svg class="ic" viewBox="0 0 24 24"><path d="M20.6 13.4L13.4 20.6a2 2 0 01-2.8 0L2 12V2h10l8.6 8.6a2 2 0 010 2.8z"/><circle cx="7" cy="7" r="1.5"/></svg><span>부가옵션설정</span></a>
+    <a href="#bg-shipping" data-grp="상품 · 설정" onclick="showPage('bg-shipping')"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span>출고일설정</span></a>
+    <a href="#channel-inquiries" data-grp="상품 · 설정" onclick="showPage('channel-inquiries')"><svg class="ic" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg><span>상품문의</span></a>
+    <div class="grp" data-grp="정산 · 재고">정산 · 재고</div>
+    <a href="#daeryepum-stock" data-grp="정산 · 재고" onclick="showPage('daeryepum-stock')"><svg class="ic" viewBox="0 0 24 24"><path d="M20 7l-8-4-8 4v10l8 4 8-4z"/><path d="M4 7l8 4 8-4M12 11v10"/></svg><span>답례품 재고</span></a>
+    <a href="#coupang-rfm" data-grp="정산 · 재고" onclick="showPage('coupang-rfm')"><svg class="ic" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-6"/></svg><span>로켓그로스</span></a>
+    <a href="#bg-vendors" data-grp="정산 · 재고" onclick="showPage('bg-vendors')"><svg class="ic" viewBox="0 0 24 24"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"/></svg><span>위탁업체</span></a>
+    <a href="#bg-artists" data-grp="정산 · 재고" onclick="showPage('bg-artists')"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/></svg><span>작가 정산</span></a>
+    <div class="grp" data-grp="기록">기록</div>
+    <a href="#sns" data-grp="기록" onclick="showPage('sns')"><svg class="ic" viewBox="0 0 24 24"><path d="M23 3a10.9 10.9 0 01-3.1 1.5A4.5 4.5 0 0012 8v1A10.7 10.7 0 013 4s-4 9 5 13a11.6 11.6 0 01-7 2c9 5 20 0 20-11.5a4.5 4.5 0 00-.1-.8A7.7 7.7 0 0023 3z"/></svg><span>SNS 인사이트</span></a>
+    <a href="#worklog" data-grp="기록" onclick="showPage('worklog')"><svg class="ic" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg><span>일지</span></a>
+    <div class="grp" data-grp="관리">관리</div>
+    <a href="#admin-nav-settings" data-grp="관리" onclick="showPage('admin-nav-settings')" id="nav-link-admin-nav-settings" style="display:none"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 01-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 01-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 010-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 012.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 012.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg><span>GNB 설정</span></a>
+  </nav>
+</aside>
+<header class="top">
+  <button type="button" class="tg" onclick="toggleSidebar()" title="메뉴 접기/펼치기" aria-label="메뉴 접기/펼치기"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+  <div class="crumb" id="crumb"></div>
+  <form class="search" onsubmit="return globalSearch()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="gsearch" placeholder="상품코드·상품명으로 주문조회" autocomplete="off"></form>
   <div class="user-area" id="user-area"></div>
-</nav>
+</header>
+<main class="main">
 
 <div class="container">
 <!-- ========== DASHBOARD ========== -->
@@ -4140,6 +4178,8 @@ nav.nav-loading a[href^="#"] {
   </div>
 </div>
 </div><!-- end .container -->
+</main>
+</div><!-- end .app -->
 
 <!-- 고객입력 수정 모달 -->
 <!-- 수동 주문 등록 모달 (MSSQL 누락 사고 케이스) -->
@@ -4483,6 +4523,34 @@ nav.nav-loading a[href^="#"] {
 <script>
 // basePath 자동 감지: /c/barungift/ → '/c/barungift', localhost:3457/ → ''
 const API = window.location.pathname.replace(/\/+$/, '') || '';
+
+// ── 레이아웃 셸 ──────────────────────────────────────────
+//   접힘 상태는 브라우저에 기억한다. 접고 펼 때 콘텐츠 폭이 바뀌므로 Chart.js 가 다시 그리도록 resize 를 쏜다.
+try { if (localStorage.getItem('shell-min') === '1') document.getElementById('app').classList.add('min'); } catch {}
+function toggleSidebar() {
+  const app = document.getElementById('app');
+  if (!app) return;
+  app.classList.toggle('min');
+  try { localStorage.setItem('shell-min', app.classList.contains('min') ? '1' : '0'); } catch {}
+  setTimeout(() => window.dispatchEvent(new Event('resize')), 220);
+}
+/** 상단바 경로 — 묶음 › 페이지. 메뉴 <a> 의 data-grp 와 라벨에서 읽는다. */
+function _updateCrumb(a) {
+  const c = document.getElementById('crumb');
+  if (!c || !a) return;
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  const g = a.dataset.grp || '';
+  const t = (a.querySelector('span') || a).textContent.trim();
+  c.innerHTML = (g ? esc(g) + ' <span>›</span> ' : '') + '<b>' + esc(t) + '</b>';
+}
+/** 상단 검색 — 주문조회로 이동해 상품코드/명 검색창에 넣는다 (새 API 없이 기존 필터 재사용). */
+function globalSearch() {
+  const q = (document.getElementById('gsearch')?.value || '').trim();
+  showPage('orders');
+  const inp = document.getElementById('ord-code-search');
+  if (inp && q) { inp.value = q; if (typeof renderOrderTable === 'function') renderOrderTable(); }
+  return false;
+}
 
 /**
  * XSS 방지용 HTML escape. innerHTML/템플릿 리터럴 에 사용자 입력을 삽입할 때 사용.
@@ -5167,7 +5235,9 @@ function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
-  document.querySelector(`nav a[href="#${name}"]`).classList.add('active');
+  const _navLink = document.querySelector(`nav a[href="#${name}"]`);
+  _navLink.classList.add('active');
+  _updateCrumb(_navLink);
   // 탭 전환 시마다 해당 탭 데이터 리로드 (딥링크/왕복 일관성 보장)
   if (name === 'dashboard') loadDashboard();
   if (name === 'monthly-report') initMonthlyReport();
@@ -8885,15 +8955,16 @@ function _applyNavConfigToDom(config) {
   // 순서별 정렬
   merged.sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
   // 적용 — display + DOM 순서 재정렬
-  const nav = document.querySelector('nav');
+  const nav = document.querySelector('nav.menu') || document.querySelector('nav');
   if (!nav) return;
   const links = {};
   nav.querySelectorAll('a[href^="#"]').forEach(a => {
     links[a.getAttribute('href').replace('#', '')] = a;
   });
-  // user-area 직전 위치 기준
-  const userArea = nav.querySelector('.user-area');
-  // visibility
+  // 사이드바는 묶음 제목(.grp)이 사이에 있다 — 저장된 순서대로 다시 꽂되 묶음이 바뀌는 자리마다 제목을 새로 끼운다.
+  //   (옛 상단 nav 처럼 user-area 앞에 append 하면 링크가 전부 마지막 묶음 아래로 몰린다)
+  nav.querySelectorAll('.grp').forEach(g => g.remove());
+  let lastGrp = null;
   merged.forEach(item => {
     const a = links[item.id];
     if (!a) return;
@@ -8903,10 +8974,23 @@ function _applyNavConfigToDom(config) {
     } else {
       a.style.display = item.visible === false ? 'none' : '';
     }
-    // 순서 재배치 (userArea 직전)
-    if (userArea) nav.insertBefore(a, userArea);
-    else nav.appendChild(a);
+    const grp = a.dataset.grp || '기타';
+    if (grp !== lastGrp) {
+      const h = document.createElement('div');
+      h.className = 'grp'; h.dataset.grp = grp; h.textContent = grp;
+      nav.appendChild(h);
+      lastGrp = grp;
+    }
+    nav.appendChild(a);
   });
+  // 보이는 메뉴가 하나도 없는 묶음은 제목도 숨긴다
+  nav.querySelectorAll('.grp').forEach(h => {
+    let el = h.nextElementSibling, any = false;
+    while (el && !el.classList.contains('grp')) { if (el.style.display !== 'none') any = true; el = el.nextElementSibling; }
+    h.style.display = any ? '' : 'none';
+  });
+  const cur = nav.querySelector('a.active');
+  if (cur) _updateCrumb(cur);
 }
 
 async function fetchAndApplyNavConfig() {
