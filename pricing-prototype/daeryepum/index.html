@@ -4,13 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>답례품 주문 관리</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <!-- SheetJS (xlsx 파일 지원) — 바른손더기프트 CSV/Excel 업로드용. -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
-:root{--primary:#2563eb;--primary-light:#dbeafe;--green:#16a34a;--green-bg:#dcfce7;--red:#dc2626;--red-bg:#fee2e2;--orange:#ea580c;--yellow:#fbbf24;--gray-50:#f9fafb;--gray-100:#f3f4f6;--gray-200:#e5e7eb;--gray-300:#d1d5db;--gray-500:#6b7280;--gray-700:#374151;--gray-900:#111827;--radius:8px}
+/* 색·모서리 토큰 — 무채색·주 버튼은 barunsoncard.com 실측값(2026-09-09), 상태색은 대시보드 자체 정의 유지 */
+:root{--primary:#1BAED4;--primary-light:#E3F6FA;--green:#16a34a;--green-bg:#dcfce7;--red:#dc2626;--red-bg:#fee2e2;--orange:#ea580c;--yellow:#fbbf24;--gray-50:#F4F4F5;--gray-100:#ECECEE;--gray-200:#E2E2E4;--gray-300:#CFCFCF;--gray-500:#888888;--gray-700:#333333;--gray-900:#111111;--radius:8px;--radius-btn:4px}
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,'Pretendard','Noto Sans KR',sans-serif;background:var(--gray-50);color:var(--gray-900);font-size:14px;background-attachment:fixed}
+body{font-family:'Pretendard Variable',Pretendard,-apple-system,'Noto Sans KR',sans-serif;background:var(--gray-50);color:var(--gray-900);font-size:14px;background-attachment:fixed}
 /* ============================================
    배경 패턴 — body 의 data-bg-pattern attribute 로 적용.
    localStorage 'bg-pattern' 에 저장 / 복원. SVG/gradient CSS-only (네트워크 fetch 없음).
@@ -57,10 +59,10 @@ body[data-bg-pattern] .container > .page.active {
 nav{background:#fff;border-bottom:1px solid var(--gray-200);padding:0 24px;display:flex;align-items:center;height:52px;gap:32px;position:sticky;top:0;z-index:100}
 .user-area{margin-left:auto;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--gray-500)}
 .user-area img{width:28px;height:28px;border-radius:50%;border:1px solid var(--gray-200)}
-.user-area button{padding:4px 10px;font-size:12px;border:1px solid var(--gray-300);border-radius:var(--radius);background:#fff;cursor:pointer;color:var(--gray-500)}
+.user-area button{padding:4px 10px;font-size:12px;border:1px solid var(--gray-300);border-radius:var(--radius-btn);background:#fff;cursor:pointer;color:var(--gray-500)}
 .user-area button:hover{background:var(--gray-50);color:var(--gray-700)}
 /* 매뉴얼 — GNB 링크가 아니라 로그아웃 오른쪽 버튼 (운영 요청 2026-08-13) */
-.user-area .manual-btn{padding:4px 10px;font-size:12px;border:1px solid var(--gray-300);border-radius:var(--radius);background:#fff;color:var(--gray-500);text-decoration:none;white-space:nowrap}
+.user-area .manual-btn{padding:4px 10px;font-size:12px;border:1px solid var(--gray-300);border-radius:var(--radius-btn);background:#fff;color:var(--gray-500);text-decoration:none;white-space:nowrap}
 .user-area .manual-btn:hover{background:var(--gray-50);color:var(--gray-700)}
 nav .logo{font-weight:700;font-size:16px;color:var(--primary)}
 nav a{text-decoration:none;color:var(--gray-500);font-weight:500;padding:14px 0;border-bottom:2px solid transparent;font-size:14px}
@@ -119,12 +121,12 @@ nav a:hover{color:var(--gray-900)}
 .chart-container{position:relative;height:300px;margin-top:12px}
 /* TABS & FILTERS */
 .toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
-.toolbar input,.toolbar select{padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:13px}
+.toolbar input,.toolbar select{padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius-btn);font-size:13px}
 .toolbar input[type=date]{width:140px}
-.btn{padding:8px 16px;border:1px solid var(--gray-300);border-radius:var(--radius);background:#fff;cursor:pointer;font-size:13px;font-weight:500;transition:all .15s}
+.btn{padding:8px 16px;border:1px solid var(--gray-300);border-radius:var(--radius-btn);background:#fff;cursor:pointer;font-size:13px;font-weight:500;transition:all .15s}
 .btn:hover{background:var(--gray-50)}
 .btn-primary{background:var(--primary);color:#fff;border-color:var(--primary)}
-.btn-primary:hover{background:#1d4ed8}
+.btn-primary:hover{background:#1596B8}
 .btn-sm{padding:4px 10px;font-size:12px}
 /* TABLE */
 .data-table{width:100%;border-collapse:collapse;font-size:13px}
