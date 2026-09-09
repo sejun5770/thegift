@@ -22951,6 +22951,49 @@ function _bgNewProductEntry(r) {
   };
 }
 
+/**
+ * 미니카드(무료 사은품) 수량 안분 — 한 배송지의 품목 행들에 대해.
+ * 몰 상품 페이지엔 미니카드 수량 입력이 없다 (맛 선택 + 카드 드롭다운 + 주문개수). 즉 카드 수 = 그 줄의 주문개수.
+ *   같은 카드를 고른 줄이 한 주문에 여러 개면 몰이 합쳐서 한 줄에만 붙인다 (2026-09-09 몰 화면·DB 확인):
+ *   3250354 메이플 4 + 다크초코 4 → 메이플에 달토끼 8 / 3250412 다크초코 20 + 메이플 20 → 다크초코에 달토끼 40.
+ * 붙은 줄엔 자기 수량만 남기고, 초과분은 카드 없는 형제 줄 중 수량 합이 초과분과 정확히 같은 조합에 준다.
+ *   맞는 조합이 없으면 줄 순서대로 채우고, 그래도 남으면 붙은 줄에 둔다 — 합계는 어떤 경우에도 옵션 수량 그대로.
+ * 옵션 객체는 서버 _options 와 공유되므로 바꾸지 않고 복제해 행의 product_options 만 새로 만든다.
+ */
+function _bgSpreadAddonQty(rows) {
+  if (!Array.isArray(rows) || rows.length < 2) return;
+  const qtyOf = r => Number(r.product_qty) || 0;
+  const optsOf = r => (Array.isArray(r.product_options) ? r.product_options : []);
+  const addonOf = r => optsOf(r).find(o => o && o.addon);
+  const bare = rows.filter(r => !addonOf(r) && qtyOf(r) > 0);
+  if (!bare.length) return;
+  const taken = new Set();
+  rows.forEach(row => {
+    const a = addonOf(row);
+    if (!a) return;
+    const own = qtyOf(row), total = Number(a.qty) || 0;
+    if (!own || total <= own) return;
+    let rest = total - own;
+    const cands = bare.filter(r => !taken.has(r));
+    let pick = null;
+    if (cands.length && cands.length <= 12) {   // 행이 적으니 전수 탐색 — 초과분과 정확히 맞는 첫 조합
+      for (let mask = 1; mask < (1 << cands.length); mask++) {
+        let s = 0;
+        for (let i = 0; i < cands.length; i++) if (mask & (1 << i)) s += qtyOf(cands[i]);
+        if (s === rest) { pick = cands.filter((_, i) => mask & (1 << i)); break; }
+      }
+    }
+    const give = (r, q) => {
+      taken.add(r);
+      r.product_options = [...optsOf(r), { ...a, qty: q, _spread: true }];
+      rest -= q;
+    };
+    if (pick) pick.forEach(r => give(r, qtyOf(r)));
+    else cands.forEach(r => { if (rest > 0) give(r, Math.min(rest, qtyOf(r))); });
+    row.product_options = optsOf(row).map(o => (o === a ? { ...a, qty: own + rest } : o));
+  });
+}
+
 /** 입력 내역 접기/펼치기 — 기본은 접힘 */
 function toggleRfmList() {
   const t = document.getElementById('rfm-list-table');
@@ -23079,6 +23122,7 @@ function renderBgUnified() {
       const usedSelIdx = new Set();
       const splitSelPos = new Map(); // 분할담기 형제 행이 같은 고객입력을 함께 보도록 기억
       let fallbackIter = 0;
+      const _orderRowStart = bgUnifiedRows.length;   // 이 배송지의 품목 행 시작 (미니카드 안분용)
       for (const [productKey, productInfo] of pm) {
         // 분할담기로 나뉜 행은 키에만 수건코드가 붙어 있다 — 매칭·표시는 원래 상품코드로.
         const productCode = productInfo.base_code || productKey;
@@ -23111,6 +23155,8 @@ function renderBgUnified() {
           product_options: productInfo.options || [],   // 이 품목에 붙은 옵션만 (미니카드·구성품)
         });
       }
+      // 몰이 한 줄에 합쳐 붙인 미니카드 수량을 형제 품목 행에 나눈다 (3250354 · 3250412)
+      _bgSpreadAddonQty(bgUnifiedRows.slice(_orderRowStart));
       // 상품코드가 없는 sticker_selection이 있으면 별도 행 추가 (비정상 데이터지만 누락 방지)
       //   이미 위 루프에서 소비된 sel 은 제외 — 안 그러면 코드가 파생코드라 pm.has() 가 false 인
       //   MANUAL 주문에서 같은 상품이 두 번 나온다.
