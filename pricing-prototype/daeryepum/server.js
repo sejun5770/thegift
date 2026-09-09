@@ -5329,6 +5329,18 @@ async function attachCardSetOptions(p, rows) {
       WHERE Card_Seq IN (${inl})`);
     for (const c of cr.recordset) cardBySeq.set(Number(c.Card_Seq), c);
   }
+  // 사은품(추석 미니카드) 은 CARD 경로에서 두 번 온다 — ETCSET 선택값으로 한 번, 그리고 같은 주문의
+  //   0원 아이템 행(custom_order_item, TS22_2607 ×30 등)으로 또 한 번. 아이템 행을 그대로 두면
+  //   주문조회·정보입력현황에 '달항아리 ×30' 이 품목처럼 한 줄 더 생기고(4종→4박스), 수집복사도 4행이 된다.
+  //   ETCSET 이 가리키는 카드가 0원 아이템 행으로도 있으면 사은품으로 보고 부모에 흡수, 그 행은 뺀다.
+  //   (수건 세트의 ETCSET 구성품은 아이템 행이 따로 없어 그대로 구성품 addon:false — 주문 4787524, 2026-09-09)
+  const giftRowByKey = new Map(); // `${order_seq}::${item_card_seq}` → 0원 아이템 행
+  for (const r of rows) {
+    if (r.order_type === 'CARD' && r.item_card_seq != null && (Number(r.item_amount) || 0) === 0) {
+      giftRowByKey.set(`${r.order_seq}::${r.item_card_seq}`, r);
+    }
+  }
+  const absorbed = new Set();
   for (const o of usable) {
     if (Array.isArray(o.parent._options) && o.parent._options.length) continue; // 기존 병합분 보존
     // 순서 = 고객이 고른 CSV 순서 그대로 → 수집복사 K=1번째, L=2번째
@@ -5336,15 +5348,20 @@ async function attachCardSetOptions(p, rows) {
     const opts = o.seqs.map((sq, idx) => {
       const c = cardBySeq.get(sq);
       if (!c) return null;
+      const gift = giftRowByKey.get(`${o.parent.order_seq}::${sq}`);
+      if (gift && gift !== o.parent) absorbed.add(gift);
       return {
         code: c.Card_Code || '',
         name: cleanName(c.Card_Name) || c.Card_Code || '',
         // 금액은 세트가에 포함돼 개별 값이 없다 — 0 이라고 사은품이 아니므로 addon 을 명시한다.
-        amount: 0, qty: o.parent.item_count, seq: idx, addon: false,
+        //   단, 같은 카드가 0원 아이템 행으로도 온 것은 사은품 → addon, 수량은 그 행의 수량(고객이 받는 카드 수).
+        amount: 0, qty: gift ? (gift.item_count || o.parent.item_count) : o.parent.item_count, seq: idx,
+        addon: !!gift,
       };
     }).filter(Boolean);
     if (opts.length) o.parent._options = opts;
   }
+  if (absorbed.size) rows.splice(0, rows.length, ...rows.filter(r => !absorbed.has(r)));
 }
 
 /** ERP 변형 코드(예: TGJSD0104_A) → BASE 코드(TGJSD0104). 클라이언트 resolveBgMappedProductCode 와 동일. */
