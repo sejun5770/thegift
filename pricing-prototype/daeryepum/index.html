@@ -22555,6 +22555,7 @@ async function loadBgUnified() {
           pm.set(pkey, _bgNewProductEntry(r));
         }
         pm.get(pkey).item_count += (r.item_count || 0);
+        if (Array.isArray(r._options) && r._options.length) pm.get(pkey).options.push(...r._options);
         _bgRegisterCodeAlias(r);
       }
     });
@@ -22633,6 +22634,7 @@ async function loadBgUnified() {
                 pm.set(pkey, _bgNewProductEntry(r));
               }
               pm.get(pkey).item_count += (r.item_count || 0);
+              if (Array.isArray(r._options) && r._options.length) pm.get(pkey).options.push(...r._options);
               _bgRegisterCodeAlias(r);
             }
           });
@@ -22943,6 +22945,9 @@ function _bgNewProductEntry(r) {
     card_name: r.card_name, item_count: 0, base_code: r.card_code,
     split_name: r._split_name || null,
     split_src: r._split_code ? r : null,
+    // 서버는 옵션(구성품·미니카드 사은품)을 품목별 부모 행에 붙여 준다. 렌더는 주문당 첫 행만 order 로 쓰므로
+    //   품목 행마다 자기 옵션을 따로 들고 있어야 한다 — 안 그러면 2번째+ 품목이 1번째 품목의 미니카드·수량을 본다.
+    options: [],
   };
 }
 
@@ -23103,6 +23108,7 @@ function renderBgUnified() {
             ? `${productInfo.card_name} · ${productInfo.split_name}`
             : productInfo.card_name,
           product_qty: productInfo.item_count,
+          product_options: productInfo.options || [],   // 이 품목에 붙은 옵션만 (미니카드·구성품)
         });
       }
       // 상품코드가 없는 sticker_selection이 있으면 별도 행 추가 (비정상 데이터지만 누락 방지)
@@ -23119,6 +23125,7 @@ function renderBgUnified() {
             product_code: s.product_code,
             product_name: s.product_name || s.product_code,
             product_qty: s.quantity || 0,
+            product_options: Array.isArray(order._options) ? order._options : [],
           });
         }
       });
@@ -23129,6 +23136,7 @@ function renderBgUnified() {
         product_code: null,
         product_name: order.card_name || '-',
         product_qty: order.item_count || 1,
+        product_options: Array.isArray(order._options) ? order._options : [],
       });
     }
   });
@@ -23340,7 +23348,7 @@ function renderBgUnified() {
     processedHeaderInserted = true;
   }
 
-  bgUnifiedRows.forEach(({ order, ci, sel, sticker_index, product_code, product_name, product_qty }, rowIdx) => {
+  bgUnifiedRows.forEach(({ order, ci, sel, sticker_index, product_code, product_name, product_qty, product_options }, rowIdx) => {
     // 처음 processed row 만나면 '수집처리 완료' 헤더 삽입 (1회).
     if (isSubmittedTab && !processedHeaderInserted && ci?.processed_at) {
       html += _sectionHeader('✅ 수집처리 완료', processedCount, '#dcfce7', '#15803d', '#86efac');
@@ -23417,7 +23425,8 @@ function renderBgUnified() {
     const customOptsCell = (() => {
       // (1) 프론트 신규 옵션 — 비용변동 옵션(수건/주방세제 등). 백엔드가 부모 row 에 첨부한
       //   _options = 실제 주문된 옵션 상품 (config 기본값 아님). 세트/부모 행에 표시.
-      const frontOpts = Array.isArray(order?._options) ? order._options : [];
+      // 품목 행 자기 옵션 우선 — 주문 첫 행의 _options 를 쓰면 2번째+ 품목에 1번째 품목 옵션이 찍힌다
+      const frontOpts = Array.isArray(product_options) ? product_options : (Array.isArray(order?._options) ? order._options : []);
       //   수집복사 매핑 힌트 — 구성품은 품목 그 자체라 K/L(품목코드1·2), 3번째+ 는 P열.
       const _hint = (bg, fg, label, tip) =>
         `<span style="background:${bg};color:${fg};font-size:12px;font-weight:600;padding:1px 4px;border-radius:3px;margin-right:4px" title="${tip}">${label}</span>`;
@@ -25236,7 +25245,7 @@ function copyBgUnified() {
   //     주방세제 그룹 존재 → TGJBK09D2
   //     그 외 (수건+수건 조합) → TGJBK09D3
   //   - 그 외 상품: sel.box_code (박스 컬러 선택된 상품)
-  const buildCells = ({ order, ci, sel, product_code, product_name, product_qty }) => {
+  const buildCells = ({ order, ci, sel, product_code, product_name, product_qty, product_options }) => {
     const cells = Array(23).fill('');
     // A열(index 0) = 외부 채널명. 자사 주문은 빈칸 (운영 메모 칸을 침범하지 않는다).
     cells[0] = _SHEET_CHANNEL_LABEL[order.order_type] || '';
@@ -25261,7 +25270,8 @@ function copyBgUnified() {
     const customOpts = (sel?.custom_options && typeof sel.custom_options === 'object') ? sel.custom_options : {};
     const rawCodeForLookup = sel?.product_code || product_code || '';
     const baseCode = resolveBgMappedProductCode(rawCodeForLookup);
-    const _frontOpts = Array.isArray(order?._options) ? order._options : [];
+    // 품목 행 자기 옵션 (loadBgUnified 가 품목별로 모아 둔 것). 없으면 주문 첫 행 폴백(단일 품목·옛 경로).
+    const _frontOpts = Array.isArray(product_options) ? product_options : (Array.isArray(order?._options) ? order._options : []);
     // 몰 구성품(_options) 과 자유 옵션(custom_options)은 성격이 다르므로 칸을 나눈다.
     //   · 구성품 = 세트를 이루는 품목 그 자체       → K/L(품목코드1·2), 3번째+ 는 P열
     //   · 자유 옵션 = 상품에 딸린 선택 옵션(미니카드) → O열(스티커타입2), 2번째+ 는 P열
@@ -25343,6 +25353,9 @@ function copyBgUnified() {
     //   K열(품목코드1)은 답례품 상품코드를 그대로 유지한다.
     const oPick = addonList[0] || customList[0];
     if (oPick && oPick.code) {
+      // 수량은 옵션 행이 가진 값(고객이 실제 고른 미니카드 수)을 우선, 없으면 행 수량.
+      //   품목 행 옵션으로 바꾸면서 '첫 품목 수량 복제'는 사라졌다. 스티커처럼 행 수량을 우선하면
+      //   미니카드 40개가 첫 품목에 붙은 주문(3250412: 20+20)에서 20개가 사라진다 — 2026-09-09 실측.
       const oQty = oPick.qty || product_qty || sel?.quantity;
       cells[14] = `${oPick.code}${oQty ? `(${oQty}개)` : ''}`;
     }
