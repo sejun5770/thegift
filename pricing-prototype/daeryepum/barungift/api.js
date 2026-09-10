@@ -843,7 +843,11 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     const buf = Buffer.concat(chunks);
 
     const SUPABASE_URL = process.env.SUPABASE_URL || '';
-    const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || '';
+    // 업로드는 서버가 한다 — 브라우저에 키가 나가지 않으므로 service role 로 RLS 를 타지 않는다.
+    //   anon 키는 storage.objects 의 버킷 정책(027 anon_insert)에 기대는데, 2026-08-14 Security Advisor
+    //   정리 뒤 정책이 없어져 Storage 가 400(RLS) 을 돌려줬다 (2026-09-10 고객 제보, 성공 기록은 7/21 1건뿐).
+    //   버킷 자체 제한(8MB · png/jpeg)은 그대로 적용된다.
+    const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
     if (!SUPABASE_URL || !SUPABASE_KEY) {
       return json(res, { error: 'Storage 미설정 — 운영자에게 문의' }, 503);
     }
@@ -869,7 +873,10 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       if (!r.ok) {
         const t = await r.text();
         console.error('[sticker-logo upload] Storage 실패:', r.status, t);
-        return json(res, { error: 'Storage 업로드 실패: ' + r.status }, 502);
+        // Storage 가 준 사유(RLS·키 형식·MIME 등)를 그대로 실어 고객 화면에서도 원인이 보이게 한다.
+        let why = '';
+        try { why = JSON.parse(t).message || JSON.parse(t).error || ''; } catch (_) { why = String(t || '').slice(0, 120); }
+        return json(res, { error: 'Storage 업로드 실패: ' + r.status + (why ? ' — ' + why : '') }, 502);
       }
     } catch (err) {
       console.error('[sticker-logo upload] fetch error:', err.message);
@@ -892,7 +899,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       return json(res, { error: 'path 필수 (안전한 경로만)' }, 400);
     }
     const SUPABASE_URL = process.env.SUPABASE_URL || '';
-    const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || '';
+    const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';  // 업로드와 같은 이유
     if (!SUPABASE_URL || !SUPABASE_KEY) return json(res, { error: 'Storage 미설정' }, 503);
     const BUCKET = 'bg-customer-logos';
     try {
