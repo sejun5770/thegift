@@ -12,18 +12,18 @@
        Design Tokens — 바른손더기프트 프리미엄 gift UI
        ================================================== */
     :root {
-      --brand-50:  #EEF9FC;
-      --brand-100: #DDF3F9;
-      --brand-500: #1BAED4;  /* [#1BAED4] */
-      --brand-600: #1596B8;  /* [#1596B8] */
-      --brand-700: #12809E;
+      --brand-50:  #EEF2FF;
+      --brand-100: #E0E7FF;
+      --brand-500: #6366F1;  /* indigo-500 */
+      --brand-600: #4F46E5;  /* indigo-600 */
+      --brand-700: #4338CA;
       --accent:    #F59E0B;  /* amber-500 — celebratory touch */
       --surface:   #FFFFFF;
-      --bg:        #F4F4F5;
+      --bg:        #FAFAFC;
       --ink-900:   #0F172A;
       --ink-500:   #64748B;
       --ink-300:   #CBD5E1;
-      --line:      #E8E8EA;
+      --line:      #EEF0F4;
     }
 
     html, body { background: var(--bg); }
@@ -41,17 +41,20 @@
        ================================================== */
     .shadow-soft { box-shadow: 0 1px 2px rgba(15,23,42,0.04), 0 2px 6px rgba(15,23,42,0.04); }
     .shadow-card { box-shadow: 0 2px 8px rgba(15,23,42,0.05), 0 1px 2px rgba(15,23,42,0.04); }
-    .shadow-lifted { box-shadow: 0 4px 12px rgba(27,174,212,0.16), 0 1px 2px rgba(15,23,42,0.05); }
+    .shadow-lifted { box-shadow: 0 10px 30px rgba(99,102,241,0.18), 0 2px 6px rgba(15,23,42,0.05); }
 
     /* ==================================================
        Gradients
        ================================================== */
-    .gradient-brand { background: linear-gradient(135deg, #1BAED4 0%, #1BAED4 100%); }
-    .gradient-brand-soft { background: linear-gradient(135deg, rgba(27,174,212,0.08) 0%, rgba(27,174,212,0.08) 100%); }
+    .gradient-brand { background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%); }
+    .gradient-brand-soft { background: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(139,92,246,0.08) 100%); }
     .gradient-celebrate { background: linear-gradient(135deg, #FDE68A 0%, #F59E0B 100%); }
     .gradient-success { background: linear-gradient(135deg, #6EE7B7 0%, #10B981 100%); }
     .gradient-error { background: linear-gradient(135deg, #FCA5A5 0%, #EF4444 100%); }
-    .text-gradient-brand { color: var(--brand-600); }
+    .text-gradient-brand {
+      background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
 
     /* ==================================================
        Animations
@@ -71,17 +74,28 @@
     /* 주의 환기용 CTA 하이라이트 — 부드러운 pulse + subtle scale */
     @keyframes attentionPulse {
       0%, 100% {
-        box-shadow: 0 6px 18px rgba(27,174,212,0.28), 0 0 0 0 rgba(27,174,212,0.45);
+        box-shadow: 0 6px 18px rgba(99,102,241,0.28), 0 0 0 0 rgba(99,102,241,0.45);
         transform: scale(1);
       }
       50% {
-        box-shadow: 0 10px 28px rgba(27,174,212,0.42), 0 0 0 14px rgba(27,174,212,0);
+        box-shadow: 0 10px 28px rgba(99,102,241,0.42), 0 0 0 14px rgba(99,102,241,0);
         transform: scale(1.015);
       }
     }
-    .attention-cta { position: relative; }   /* 1차 톤 정리: 반복 깜빡임 제거 — 강조는 색·크기로 */
+    .attention-cta {
+      animation: attentionPulse 1.8s ease-in-out infinite;
+      position: relative;
+    }
     /* 외곽 반짝임 링 (선택적) */
-    .attention-cta::after { content: none; }
+    .attention-cta::after {
+      content: '';
+      position: absolute; inset: -4px;
+      border-radius: inherit;
+      border: 2px solid rgba(99,102,241,0.4);
+      opacity: 0;
+      animation: attentionRing 1.8s ease-in-out infinite;
+      pointer-events: none;
+    }
     @keyframes attentionRing {
       0%, 100% { opacity: 0; transform: scale(1); }
       50% { opacity: 0.6; transform: scale(1.04); }
@@ -90,7 +104,7 @@
     /* Conic spinner */
     .spinner {
       width: 42px; height: 42px; border-radius: 50%;
-      background: conic-gradient(from 0deg, transparent 0%, #1BAED4 100%);
+      background: conic-gradient(from 0deg, transparent 0%, #6366F1 100%);
       -webkit-mask: radial-gradient(circle, transparent 55%, black 56%);
               mask: radial-gradient(circle, transparent 55%, black 56%);
       animation: spin 0.9s linear infinite;
@@ -111,13 +125,14 @@
       border-radius: 16px;
     }
     .card-select:hover {
-      border-color: #B9E6F1;
-      box-shadow: 0 6px 16px rgba(27,174,212,0.1);
+      border-color: #C7D2FE;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px rgba(99,102,241,0.1);
     }
     .card-select.selected {
-      border-color: #1BAED4;
-      background: linear-gradient(135deg, rgba(27,174,212,0.06) 0%, rgba(27,174,212,0.06) 100%);
-      box-shadow: 0 0 0 3px rgba(27,174,212,0.15), 0 8px 20px rgba(27,174,212,0.15);
+      border-color: #6366F1;
+      background: linear-gradient(135deg, rgba(99,102,241,0.06) 0%, rgba(139,92,246,0.06) 100%);
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.15), 0 8px 20px rgba(99,102,241,0.15);
     }
     .card-select.disabled { opacity: 0.45; pointer-events: none; }
 
@@ -125,26 +140,28 @@
        Buttons
        ================================================== */
     .btn-primary {
-      background: linear-gradient(135deg, #1BAED4 0%, #1BAED4 100%);
+      background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%);
       color: white; font-weight: 600;
-      box-shadow: 0 4px 14px rgba(27,174,212,0.35);
+      box-shadow: 0 4px 14px rgba(99,102,241,0.35);
       transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
     }
     .btn-primary:hover:not(:disabled) {
-      box-shadow: 0 8px 20px rgba(27,174,212,0.45);
+      box-shadow: 0 8px 20px rgba(99,102,241,0.45);
+      transform: translateY(-1px);
     }
     .btn-primary:active:not(:disabled) { transform: translateY(0) scale(0.98); }
     .btn-primary:disabled {
       background: #E2E8F0; color: #94A3B8; box-shadow: none; cursor: not-allowed;
     }
     .btn-submit {
-      background: #2C9A6A;
+      background: linear-gradient(135deg, #10B981 0%, #059669 100%);
       color: white; font-weight: 600;
       box-shadow: 0 4px 14px rgba(16,185,129,0.35);
       transition: all 0.2s cubic-bezier(0.16,1,0.3,1);
     }
     .btn-submit:hover:not(:disabled) {
       box-shadow: 0 8px 20px rgba(16,185,129,0.45);
+      transform: translateY(-1px);
     }
     .btn-submit:active:not(:disabled) { transform: translateY(0) scale(0.98); }
     .btn-submit:disabled {
@@ -161,12 +178,12 @@
        Step progress — modern gauge bar
        ================================================== */
     .step-track {
-      position: relative; height: 4px; background: #EEF0F4;
+      position: relative; height: 6px; background: #EEF0F4;
       border-radius: 999px; overflow: hidden;
     }
     .step-fill {
       position: absolute; inset: 0 auto 0 0;
-      background: linear-gradient(90deg, #1BAED4 0%, #1BAED4 100%);
+      background: linear-gradient(90deg, #6366F1 0%, #8B5CF6 100%);
       border-radius: 999px;
       transition: width 0.5s cubic-bezier(0.16,1,0.3,1);
     }
@@ -176,13 +193,13 @@
        ================================================== */
     .surface {
       background: var(--surface);
-      border-radius: 16px;
+      border-radius: 20px;
       box-shadow: 0 2px 8px rgba(15,23,42,0.04), 0 1px 2px rgba(15,23,42,0.03);
     }
     .surface-flat {
       background: var(--surface);
       border: 1px solid var(--line);
-      border-radius: 16px;
+      border-radius: 20px;
     }
 
     /* ==================================================
@@ -195,19 +212,9 @@
       width: 100%;
     }
     .input-mod:focus {
-      outline: none; border-color: #1BAED4;
-      box-shadow: 0 0 0 4px rgba(27,174,212,0.12);
+      outline: none; border-color: #6366F1;
+      box-shadow: 0 0 0 4px rgba(99,102,241,0.12);
     }
-
-    /* ==================================================
-       안내(FAQ) 바텀시트 — 1차 톤 정리
-       ================================================== */
-    .guide-dim { position: fixed; inset: 0; background: rgba(0,0,0,0.38); opacity: 0; pointer-events: none; transition: opacity 0.25s; z-index: 60; }
-    .guide-dim.show { opacity: 1; pointer-events: auto; }
-    .guide-sheet { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-radius: 20px 20px 0 0; padding: 12px 0 max(20px, env(safe-area-inset-bottom)); transform: translateY(105%); visibility: hidden; transition: transform 0.3s cubic-bezier(0.2,0.8,0.2,1), visibility 0s 0.3s; z-index: 61; max-height: 78vh; overflow-y: auto; box-shadow: 0 -8px 30px rgba(15,23,42,0.12); }
-    .guide-sheet.show { transform: none; visibility: visible; transition: transform 0.3s cubic-bezier(0.2,0.8,0.2,1), visibility 0s; }
-    .guide-grab { width: 38px; height: 4px; border-radius: 2px; background: #E2E2E4; margin: 0 auto 12px; }
-    @media (prefers-reduced-motion: reduce) { .guide-sheet, .guide-dim, .fade-in, .pop-in, .pressable { transition: none !important; animation: none !important; } }
 
     /* Legacy step line (for backward compat) */
     .step-line { height: 2px; }
@@ -228,8 +235,11 @@
     <!-- Header -->
     <header class="bg-white/80 backdrop-blur-md border-b border-[var(--line)] sticky top-0 z-30">
       <div class="flex items-center gap-3 px-5 py-4">
+        <div class="w-10 h-10 gradient-brand rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lifted">
+          <span class="text-white font-bold text-base">🎁</span>
+        </div>
         <div>
-          <h1 class="text-base font-extrabold text-slate-900 leading-tight tracking-tight">바른손더기프트</h1>
+          <h1 class="text-base font-bold text-slate-900 leading-tight">바른손더기프트</h1>
           <p class="text-[11px] text-slate-400 font-medium tracking-wide">PREMIUM GIFT SERVICE</p>
         </div>
       </div>
@@ -237,7 +247,7 @@
 
     <div class="px-5 pt-8">
       <h2 class="text-2xl font-bold text-slate-900 mb-1.5 tracking-tight">주문 내역 조회</h2>
-      <p class="text-sm text-slate-500 mb-6">로그인하시면 주문 내역을 확인할 수 있어요</p>
+      <p class="text-sm text-slate-500 mb-6">로그인하시면 주문 내역을 확인할 수 있어요 ✨</p>
 
       <!-- 탭 -->
       <div id="searchTabStrip" class="flex gap-1 p-1 bg-slate-100 rounded-2xl mb-5">
@@ -308,11 +318,14 @@
 
     <div class="px-5 pt-5">
       <!-- 상단 안내 배너 — 입력 대기 주문에 대한 명시적 CTA -->
-      <div id="orderListBanner" class="rounded-2xl p-4 mb-4 gradient-brand-soft border border-[#DDF3F9] flex items-start gap-3">
-                <div class="flex-1">
+      <div id="orderListBanner" class="rounded-2xl p-4 mb-4 gradient-brand-soft border border-indigo-100 flex items-start gap-3">
+        <div class="w-9 h-9 gradient-brand rounded-xl flex items-center justify-center flex-shrink-0 shadow-lifted">
+          <span class="text-white text-base">👇</span>
+        </div>
+        <div class="flex-1">
           <p class="text-[13px] font-bold text-slate-900 leading-tight">입력할 주문을 선택해주세요</p>
           <p class="text-[11.5px] text-slate-600 mt-1 leading-relaxed" id="orderListBannerSubtitle">
-            <b>입력대기</b> 상태의 주문을 눌러 정보를 입력해주세요.
+            ⏳ <b>입력대기</b> 상태의 주문을 눌러 정보를 입력해주세요.
           </p>
         </div>
       </div>
@@ -335,7 +348,7 @@
 <div id="searchEmptyScreen" class="hidden flex items-center justify-center min-h-screen px-5">
   <div class="surface p-8 max-w-sm w-full text-center">
     <div class="w-20 h-20 gradient-brand-soft rounded-full flex items-center justify-center mx-auto mb-5 pop-in">
-      <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="#1596B8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <span class="text-4xl">🔍</span>
     </div>
     <h3 class="text-lg font-bold text-slate-900 mb-2">주문하신 상품이 없습니다</h3>
     <p class="text-sm text-slate-500 mb-1">입력하신 정보로 조회된 주문이 없어요.</p>
@@ -361,7 +374,7 @@
 <div id="errorScreen" class="hidden flex items-center justify-center min-h-screen px-5">
   <div class="surface p-8 max-w-sm w-full text-center">
     <div class="w-16 h-16 gradient-error rounded-full flex items-center justify-center mx-auto mb-5 pop-in shadow-lifted" style="box-shadow:0 10px 30px rgba(239,68,68,0.25)">
-      <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
+      <span class="text-3xl">⚠️</span>
     </div>
     <h2 class="text-xl font-bold text-slate-900 mb-2 tracking-tight">오류가 발생했습니다</h2>
     <p id="errorMessage" class="text-sm text-slate-500 mb-6 leading-relaxed"></p>
@@ -376,24 +389,24 @@
 <div id="completedScreen" class="hidden flex items-center justify-center min-h-screen px-5">
   <div class="surface p-8 max-w-sm w-full text-center">
     <div class="w-16 h-16 gradient-success rounded-full flex items-center justify-center mx-auto mb-5 pop-in" style="box-shadow:0 10px 30px rgba(16,185,129,0.25)">
-      <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>
+      <span class="text-3xl">✓</span>
     </div>
     <h2 class="text-xl font-bold text-slate-900 mb-2 tracking-tight">입력이 완료됐어요</h2>
     <p class="text-sm text-slate-500 mb-6 leading-relaxed">해당 주문의 정보 입력이 이미 완료됐습니다.<br>수정이 필요하시면 고객센터로 연락해주세요.</p>
 
     <!-- 입력 내용 확인 버튼 — 고객/관리자가 저장한 요약 보기 -->
     <button onclick="viewSubmittedInfo()" class="btn pressable w-full py-3 rounded-2xl text-sm font-semibold mb-2" style="border:1px solid var(--brand-600);color:var(--brand-600);background:#fff">
-      입력한 정보 확인하기
+      📋 입력한 정보 확인하기
     </button>
 
     <!-- 주문 선택 화면으로 (로드된 주문 목록이 있을 때만 표시) -->
     <button id="completedGoListBtn" onclick="goBackToOrderList()" class="hidden btn pressable w-full py-3 rounded-2xl text-sm font-semibold mb-3" style="border:1px solid var(--gray-300);color:var(--gray-700);background:#fff">
-      주문 선택 화면으로
+      📋 주문 선택 화면으로
     </button>
 
     <!-- 다른 답례품 주문(입력 대기중) 있을 때만 노출 — 주의 환기용 CTA -->
     <button id="completedBackToListBtn" onclick="goBackToOrderList()" class="hidden btn-primary pressable w-full py-3.5 rounded-2xl text-sm font-bold mb-4 attention-cta">
-      다른 답례품 주문건도 입력하기
+      🎁 다른 답례품 주문건도 입력하기
     </button>
 
     <div class="bg-slate-50 rounded-2xl p-4 text-sm text-slate-600">
@@ -425,7 +438,7 @@
 <div id="paymentPendingScreen" class="hidden flex items-center justify-center min-h-screen px-5">
   <div class="surface p-8 max-w-sm w-full text-center">
     <div class="w-16 h-16 gradient-celebrate rounded-full flex items-center justify-center mx-auto mb-5 pop-in" style="box-shadow:0 10px 30px rgba(245,158,11,0.25)">
-      <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+      <span class="text-3xl">💳</span>
     </div>
     <h2 class="text-xl font-bold text-slate-900 mb-2 tracking-tight">입금을 기다리고 있어요</h2>
     <p class="text-sm text-slate-500 mb-5 leading-relaxed">결제가 완료된 후 스티커·출고일 정보를<br>입력하실 수 있습니다.</p>
@@ -456,12 +469,12 @@
     <p class="text-[12px] text-slate-500 mb-3">입금 확인 후 별도 안내를 드립니다.</p>
 
     <button onclick="window.location.reload()" class="btn-primary pressable w-full py-3 rounded-2xl text-sm mb-2">
-      결제 상태 새로고침
+      🔄 결제 상태 새로고침
     </button>
 
     <!-- 주문 선택 화면으로 (로드된 주문 목록이 있을 때만) -->
     <button id="paymentPendingGoListBtn" onclick="goBackToOrderList()" class="hidden btn pressable w-full py-3 rounded-2xl text-sm font-semibold mb-3" style="border:1px solid var(--gray-300);color:var(--gray-700);background:#fff">
-      주문 선택 화면으로
+      📋 주문 선택 화면으로
     </button>
 
     <div class="text-[11px] text-slate-400 space-y-0.5">
@@ -474,7 +487,7 @@
 <div id="successScreen" class="hidden flex items-center justify-center min-h-screen px-5">
   <div class="surface p-8 max-w-sm w-full text-center">
     <div class="w-20 h-20 gradient-brand rounded-full flex items-center justify-center mx-auto mb-5 pop-in shadow-lifted">
-      <svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>
+      <span class="text-4xl">🎉</span>
     </div>
     <h2 class="text-xl font-bold text-slate-900 mb-2 tracking-tight">제출이 완료됐어요!</h2>
     <p class="text-sm text-slate-500 mb-5 leading-relaxed">주문 정보가 정상적으로 접수됐습니다.</p>
@@ -485,17 +498,17 @@
 
     <!-- 입력 내용 확인 버튼 — 방금 제출한 요약 보기 (completedScreen 과 동일) -->
     <button onclick="viewSubmittedInfo()" class="btn pressable w-full py-3 rounded-2xl text-sm font-semibold mb-2" style="border:1px solid var(--brand-600);color:var(--brand-600);background:#fff">
-      입력한 정보 확인하기
+      📋 입력한 정보 확인하기
     </button>
 
     <!-- 주문 선택 화면으로 (로드된 주문 목록이 있을 때만) -->
     <button id="successGoListBtn" onclick="goBackToOrderList()" class="hidden btn pressable w-full py-3 rounded-2xl text-sm font-semibold mb-2" style="border:1px solid var(--gray-300);color:var(--gray-700);background:#fff">
-      주문 선택 화면으로
+      📋 주문 선택 화면으로
     </button>
 
     <!-- 다른 답례품 주문(입력 대기중) 있을 때만 — 주의 환기용 CTA -->
     <button id="successBackToListBtn" onclick="goBackToOrderList()" class="hidden btn-primary pressable w-full py-3.5 rounded-2xl text-sm font-bold mb-5 attention-cta">
-      다른 답례품 주문건도 입력하기
+      🎁 다른 답례품 주문건도 입력하기
     </button>
 
     <p class="text-sm text-slate-500 mb-1">기타 문의가 있을 시 고객센터로 문의해주세요.</p>
@@ -507,19 +520,20 @@
 <div id="mainApp" class="hidden max-w-lg mx-auto pb-32">
 
   <!-- Header -->
-  <header class="bg-white/90 backdrop-blur-md border-b border-[var(--line)] sticky top-0 z-30">
-    <div class="flex items-center gap-3 px-5 pt-3 pb-1">
+  <header class="bg-white/80 backdrop-blur-md border-b border-[var(--line)] sticky top-0 z-30">
+    <div class="flex items-center gap-3 px-5 py-3.5">
+      <div class="w-10 h-10 gradient-brand rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lifted">
+        <span class="text-white font-bold text-base">🎁</span>
+      </div>
       <div class="flex-1 min-w-0">
-        <h1 class="text-[15px] font-extrabold text-slate-900 leading-tight tracking-tight">바른손더기프트</h1>
+        <h1 class="text-[15px] font-bold text-slate-900 leading-tight">바른손더기프트</h1>
         <p class="text-[11px] text-slate-400 font-medium truncate" id="headerOrderNumber"></p>
       </div>
-      <!-- 안내(FAQ) — 1차 톤 정리: 첫 화면을 덮던 안내 박스를 바텀시트로 -->
-      <button type="button" id="guideBtn" onclick="openGuideSheet()" class="pressable w-9 h-9 rounded-full border border-[var(--line)] bg-white text-slate-500 font-bold text-[14px] flex items-center justify-center" aria-label="안내 보기" title="안내 보기">?</button>
     </div>
 
     <!-- Step Indicator (gauge bar + label) -->
-    <div class="px-5 pb-3">
-      <div class="flex items-center justify-between mb-1.5">
+    <div class="px-5 pb-4">
+      <div class="flex items-center justify-between mb-2">
         <span class="text-[11px] font-semibold tracking-wide text-slate-400" id="stepCounter"></span>
         <span class="text-[13px] font-bold text-gradient-brand" id="stepCurrentLabel"></span>
       </div>
@@ -602,7 +616,7 @@
 
         <!-- 입력안함 토글 -->
         <label class="flex items-center justify-center gap-2 cursor-pointer select-none mb-3 text-[12px] text-white/85">
-          <input type="checkbox" id="stickerModalNoInput" class="w-4 h-4 accent-[#1BAED4] cursor-pointer">
+          <input type="checkbox" id="stickerModalNoInput" class="w-4 h-4 accent-indigo-500 cursor-pointer">
           <span>입력안함 (샘플 문구로 출력, 이름 미표시)</span>
         </label>
 
@@ -619,27 +633,14 @@
   </div>
 </div>
 
-<!-- 안내(FAQ) 바텀시트 — 1차 톤 정리 -->
-<div id="guideDim" class="guide-dim" onclick="closeGuideSheet()"></div>
-<div id="guideSheet" class="guide-sheet" role="dialog" aria-modal="true" aria-labelledby="guideSheetTitle">
-  <div class="max-w-lg mx-auto">
-    <div class="guide-grab"></div>
-    <div class="flex items-center justify-between px-4 pb-2">
-      <h3 id="guideSheetTitle" class="text-[16px] font-extrabold text-slate-900">안내</h3>
-      <button type="button" onclick="closeGuideSheet()" class="pressable w-8 h-8 rounded-full flex items-center justify-center text-slate-500 text-xl" aria-label="닫기">×</button>
-    </div>
-    <div id="guideSheetBody"></div>
-  </div>
-</div>
-
 <!-- 고객센터 플로팅 버튼 (모든 화면에서 접근 가능) -->
 <div id="helpFab" style="position:fixed;bottom:calc(env(safe-area-inset-bottom, 0px) + 92px);right:16px;z-index:40">
   <!-- 펼쳐진 카드 (클릭 시 토글) -->
   <div id="helpPanel" class="surface hidden" style="position:absolute;bottom:58px;right:0;width:240px;padding:14px;box-shadow:0 10px 30px rgba(15,23,42,0.18)">
-    <p class="text-[13px] font-bold text-slate-900 mb-2">고객센터</p>
+    <p class="text-[13px] font-bold text-slate-900 mb-2">📞 고객센터</p>
     <p class="text-[11px] text-slate-500 mb-3 leading-relaxed">궁금하신 점이 있으시면<br>편하게 연락 주세요.</p>
-    <a href="tel:1644-0708" class="pressable flex items-center gap-2.5 p-2.5 rounded-xl" style="background:linear-gradient(135deg,rgba(27,174,212,0.08),rgba(27,174,212,0.08));text-decoration:none">
-      <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="#1596B8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 01-2.2 2 19.8 19.8 0 01-8.6-3.1 19.5 19.5 0 01-6-6A19.8 19.8 0 012.1 4.2 2 2 0 014.1 2h3a2 2 0 012 1.7c.1.9.4 1.8.7 2.6a2 2 0 01-.5 2.1L8.1 9.7a16 16 0 006 6l1.3-1.3a2 2 0 012.1-.4c.8.3 1.7.6 2.6.7a2 2 0 011.7 2z"/></svg>
+    <a href="tel:1644-0708" class="pressable flex items-center gap-2.5 p-2.5 rounded-xl" style="background:linear-gradient(135deg,rgba(99,102,241,0.08),rgba(139,92,246,0.08));text-decoration:none">
+      <span class="text-lg">📞</span>
       <div class="flex-1 min-w-0">
         <div class="text-[11px] text-slate-500">전화</div>
         <div class="text-[13px] font-bold" style="color:var(--brand-700)">1644-0708</div>
@@ -647,9 +648,9 @@
     </a>
   </div>
   <!-- FAB 버튼 -->
-  <button id="helpFabBtn" type="button" class="pressable"
-    style="width:48px;height:48px;border-radius:50%;border:0;background:var(--brand-500);box-shadow:0 6px 16px rgba(27,174,212,0.3);cursor:pointer;display:flex;align-items:center;justify-content:center;color:white"
-    aria-label="고객센터"><svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 01-2.2 2 19.8 19.8 0 01-8.6-3.1 19.5 19.5 0 01-6-6A19.8 19.8 0 012.1 4.2 2 2 0 014.1 2h3a2 2 0 012 1.7c.1.9.4 1.8.7 2.6a2 2 0 01-.5 2.1L8.1 9.7a16 16 0 006 6l1.3-1.3a2 2 0 012.1-.4c.8.3 1.7.6 2.6.7a2 2 0 011.7 2z"/></svg></button>
+  <button id="helpFabBtn" type="button" class="pressable gradient-brand"
+    style="width:52px;height:52px;border-radius:50%;border:0;box-shadow:0 8px 20px rgba(99,102,241,0.35);cursor:pointer;display:flex;align-items:center;justify-content:center;color:white;font-size:22px"
+    aria-label="고객센터">💬</button>
 </div>
 
 <script>
@@ -690,9 +691,6 @@
   // ============================================
   let orderData = null;
   let currentStep = 0;
-  // 안내(FAQ) 바텀시트 내용 — renderStep0 이 채우고 openGuideSheet 가 읽는다 (1차 톤 정리)
-  let _guideTitle = '안내';
-  let _guideBody = '';
   let calendarViewMonth = null;  // 'YYYY-MM' — 캘린더에 표시 중인 달
   let formState = {
     shipping_type: null,        // 'normal' | 'express'
@@ -1236,7 +1234,7 @@
     const $progress = document.getElementById('logo-progress-' + idx);
     if ($progress) {
       $progress.classList.remove('hidden');
-      $progress.textContent = '이미지 업로드 중... (' + Math.round(file.size / 1024) + 'KB)';
+      $progress.textContent = '📷 이미지 업로드 중... (' + Math.round(file.size / 1024) + 'KB)';
     }
 
     try {
@@ -1514,7 +1512,7 @@
     const isFirst = visIdx === 0;
     const isLast = visIdx === visible.length - 1;
     $btnBack.classList.toggle('hidden', isFirst);
-    $btnNext.textContent = isLast ? '제출하기' : '다음';
+    $btnNext.textContent = isLast ? '제출하기 🎉' : '다음';
     $btnNext.disabled = !isStepValid(currentStep);
     if (isLast) {
       $btnNext.classList.remove('btn-primary');
@@ -1805,14 +1803,14 @@
 
       const isPicked = !!slot.ship_date;
       const statusBadge = isPicked
-        ? `<span class="inline-flex items-center gap-1 text-[11px] font-bold bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">✓ ${esc(slot.ship_date)} ${slot.ship_type === 'express' ? '· 빠른출고' : '· 일반'}</span>`
+        ? `<span class="inline-flex items-center gap-1 text-[11px] font-bold bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">✓ ${esc(slot.ship_date)} ${slot.ship_type === 'express' ? '· ⚡빠른출고' : '· 📦일반'}</span>`
         : `<span class="inline-flex items-center gap-1 text-[11px] font-bold bg-rose-50 text-rose-600 px-2 py-1 rounded-full">출고일 선택 필요</span>`;
 
       return `
         <div class="surface mb-4 overflow-hidden" style="border-left:3px solid var(--brand-500, #6366f1)">
           <div class="px-4 py-3 border-b border-slate-100 bg-slate-50/50">
             <div class="flex items-center justify-between gap-2 flex-wrap mb-2">
-              <h3 class="text-[14px] font-bold text-slate-900">${esc(groupLabel)}</h3>
+              <h3 class="text-[14px] font-bold text-slate-900">📅 ${esc(groupLabel)}</h3>
               ${statusBadge}
             </div>
             <div class="flex flex-wrap">${productLines}</div>
@@ -1830,7 +1828,7 @@
         <!-- 사전 안내 -->
         <div class="rounded-2xl mb-4 p-4" style="background:linear-gradient(135deg,rgba(245,158,11,0.10),rgba(217,119,6,0.05));border:1px solid rgba(245,158,11,0.25)">
           <div class="flex items-start gap-2.5">
-            <span class="text-lg flex-shrink-0" style="line-height:1.3"></span>
+            <span class="text-lg flex-shrink-0" style="line-height:1.3">⚠️</span>
             <div class="flex-1">
               <p class="text-[13px] font-bold text-amber-800 mb-1">서로 다른 출고일 정책의 상품이 포함되어 있습니다</p>
               <p class="text-[12px] text-amber-700 leading-relaxed">아래 ${groups.length}개 그룹에 대해 <b>각각</b> 희망 출고일을 선택해 주세요. 그룹마다 출고 정책 (리드타임 · 휴무일 · 빠른출고 가능 여부 등) 이 다를 수 있습니다.</p>
@@ -1937,8 +1935,8 @@
           var cardCls = isSoldOut
             ? 'ring-1 ring-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
             : (isSel
-                ? 'ring-2 ring-[#1BAED4] gradient-brand-soft'
-                : 'ring-1 ring-slate-200 bg-white hover:ring-[#8ED6E8]');
+                ? 'ring-2 ring-indigo-500 gradient-brand-soft'
+                : 'ring-1 ring-slate-200 bg-white hover:ring-indigo-300');
           var safeName = esc(opt.name || opt.code || '박스');
           var safeCode = esc(opt.code || '');
           var safeImgUrl = esc(opt.preview_image_url || '');
@@ -1951,7 +1949,7 @@
           var actionAttrs = isSoldOut ? '' : ' data-action="productBoxSelect" data-idx="' + idx + '" data-value="' + safeCode + '"';
           var soldOutOverlay = isSoldOut
             ? '<div class="absolute inset-0 flex items-center justify-center pointer-events-none">'
-              + '<span class="bg-rose-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-lifted" style="letter-spacing:0.5px">품절</span>'
+              + '<span class="bg-rose-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-lifted" style="letter-spacing:0.5px">🚫 품절</span>'
               + '</div>'
             : '';
           return ''
@@ -1968,7 +1966,7 @@
         }).join('');
         boxHtml = ''
           + '<div class="mt-4">'
-          +   '<label class="block text-[12px] font-semibold text-slate-700 mb-2">박스 패키지 선택 <span class="text-rose-500">*</span></label>'
+          +   '<label class="block text-[12px] font-semibold text-slate-700 mb-2">📦 박스 패키지 선택 <span class="text-rose-500">*</span></label>'
           +   '<div class="grid grid-cols-3 sm:grid-cols-4 gap-2">' + boxCards + '</div>'
           + '</div>';
       }
@@ -1991,8 +1989,8 @@
             var cardCls = isSoldOut
               ? 'ring-1 ring-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
               : (isSel
-                  ? 'ring-2 ring-[#1BAED4] gradient-brand-soft'
-                  : 'ring-1 ring-slate-200 bg-white hover:ring-[#8ED6E8]');
+                  ? 'ring-2 ring-indigo-500 gradient-brand-soft'
+                  : 'ring-1 ring-slate-200 bg-white hover:ring-indigo-300');
             var safeOptName = esc(opt.name || opt.code || '');
             var safeOptCode = esc(opt.code || '');
             var safeColor = esc(opt.color || '#F3F4F6');
@@ -2011,7 +2009,7 @@
               + ' data-value="' + safeOptCode + '"';
             var soldOutOverlay = isSoldOut
               ? '<div class="absolute inset-0 flex items-center justify-center pointer-events-none">'
-                + '<span class="bg-rose-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-lifted" style="letter-spacing:0.5px">품절</span>'
+                + '<span class="bg-rose-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-lifted" style="letter-spacing:0.5px">🚫 품절</span>'
                 + '</div>'
               : '';
             // 이미지 미사용 시 카드 높이를 텍스트 중심으로 자연스럽게 (aspect-square 미사용)
@@ -2047,8 +2045,8 @@
         // "선택안함" 카드 (즉시 선택, 모달 없이)
         var noneSelected = !selStickerId;
         var noneCardCls = noneSelected
-          ? 'ring-2 ring-[#1BAED4] gradient-brand-soft'
-          : 'ring-1 ring-slate-200 bg-white hover:ring-[#8ED6E8]';
+          ? 'ring-2 ring-indigo-500 gradient-brand-soft'
+          : 'ring-1 ring-slate-200 bg-white hover:ring-indigo-300';
         var noneCard = ''
           + '<button type="button" data-action="productStickerType" data-idx="' + idx + '" data-value="" '
           +   'class="sticker-card pressable ' + noneCardCls + ' rounded-xl overflow-hidden text-left w-full transition touch-manipulation">'
@@ -2062,8 +2060,8 @@
         var cards = matching.map(function(st) {
           var isSelected = selStickerId === st.id;
           var cardCls = isSelected
-            ? 'ring-2 ring-[#1BAED4] gradient-brand-soft'
-            : 'ring-1 ring-slate-200 bg-white hover:ring-[#8ED6E8]';
+            ? 'ring-2 ring-indigo-500 gradient-brand-soft'
+            : 'ring-1 ring-slate-200 bg-white hover:ring-indigo-300';
           var safeName = esc(st.name || '스티커');
           var thumb = st.preview_image_url
             ? '<img src="' + esc(st.preview_image_url) + '" alt="' + safeName + '" class="w-full aspect-square object-contain bg-white pointer-events-none" loading="lazy" />'
@@ -2160,9 +2158,9 @@
         + '</li>'
       )).join('');
       splitNoticeHtml = ''
-        + '<div class="rounded-2xl mb-4 p-4" style="background:linear-gradient(135deg,rgba(27,174,212,0.08),rgba(27,174,212,0.05));border:1px solid rgba(27,174,212,0.2)">'
+        + '<div class="rounded-2xl mb-4 p-4" style="background:linear-gradient(135deg,rgba(99,102,241,0.08),rgba(139,92,246,0.05));border:1px solid rgba(99,102,241,0.2)">'
         +   '<div class="flex items-center gap-2 mb-2">'
-        +     '<span class="text-base"></span>'
+        +     '<span class="text-base">📦</span>'
         +     '<p class="text-[13px] font-bold text-slate-800">나눔배송 안내 — 총 ' + totalQty.toLocaleString() + '개가 ' + deliveries.length + '개 배송지로 분리됩니다</p>'
         +   '</div>'
         +   '<ul class="space-y-1 text-[12.5px] mb-2">' + itemRows + '</ul>'
@@ -2217,15 +2215,15 @@
           } else {
             bodyHtml = defaultFaqBody;
           }
-          // 1차 톤 정리: 안내는 첫 화면을 덮지 않는다 — 한 줄 링크 + 헤더 ? 버튼으로 바텀시트를 연다
-          _guideTitle = title;
-          _guideBody = bodyHtml;
           return `
-            <button type="button" onclick="openGuideSheet()" class="pressable w-full flex items-center gap-2.5 px-4 py-3 mb-4 rounded-xl text-left" style="background:var(--brand-50);border:1px solid rgba(27,174,212,0.25)">
-              <span class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[12px] font-bold" style="background:var(--brand-500);color:#fff">?</span>
-              <span class="text-[13px] font-semibold text-slate-800 flex-1">${esc(title)}</span>
-              <span class="text-[12px] font-semibold" style="color:var(--brand-600)">보기</span>
-            </button>`;
+            <details class="rounded-2xl mb-4 overflow-hidden" style="background:linear-gradient(135deg,rgba(99,102,241,0.06),rgba(139,92,246,0.06));border:1px solid rgba(99,102,241,0.15)" open>
+              <summary class="flex items-center gap-2.5 p-4 cursor-pointer select-none list-none" style="list-style:none">
+                <span class="text-lg flex-shrink-0" style="line-height:1.3">💡</span>
+                <p class="text-[13px] font-bold text-slate-800 leading-tight flex-1">${esc(title)}</p>
+                <svg class="w-4 h-4 text-slate-500 transition-transform flex-shrink-0" style="transform:rotate(180deg)" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+              </summary>
+              ${bodyHtml}
+            </details>`;
         })() : ''}
         ${cardsHtml || '<p class="text-sm text-slate-400">상품 정보가 없습니다.</p>'}
       </div>
@@ -2257,7 +2255,7 @@
         <div class="surface p-5 mb-3">
           <div class="flex items-center gap-2.5 mb-3.5">
             <div class="w-9 h-9 gradient-celebrate rounded-xl flex items-center justify-center">
-              <span class="text-lg"></span>
+              <span class="text-lg">💳</span>
             </div>
             <h3 class="text-[14px] font-bold text-slate-900">입금 계좌 안내</h3>
           </div>
@@ -2314,7 +2312,7 @@
             <h3 class="text-[14px] font-bold text-slate-900">현금영수증 신청</h3>
             <label class="relative inline-flex items-center cursor-pointer">
               <input type="checkbox" class="sr-only peer" ${formState.cash_receipt_yn ? 'checked' : ''} data-action="toggleReceipt" />
-              <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all after:shadow-sm peer-checked:bg-gradient-to-r peer-checked:from-[#1BAED4] peer-checked:to-violet-500"></div>
+              <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all after:shadow-sm peer-checked:bg-gradient-to-r peer-checked:from-indigo-500 peer-checked:to-violet-500"></div>
             </label>
           </div>
           <p class="text-[11px] text-slate-400 mb-2">빠른출고 추가비용(${formatMoney(total)})에 대한 현금영수증 발급 신청입니다.</p>
@@ -2433,7 +2431,7 @@
       if (ps.logo_url) {
         var logoFn = esc(ps.logo_filename || '로고');
         var logoThumb = '<img src="' + esc(ps.logo_url) + '" alt="logo" class="inline-block w-10 h-10 object-contain rounded-lg border border-amber-200 mr-2 align-middle bg-white" />';
-        logoRowHtml = '<div class="flex justify-between items-center"><span class="text-amber-700">이미지</span><span class="text-amber-900 font-medium flex items-center">' + logoThumb + logoFn + '</span></div>';
+        logoRowHtml = '<div class="flex justify-between items-center"><span class="text-amber-700">📷 이미지</span><span class="text-amber-900 font-medium flex items-center">' + logoThumb + logoFn + '</span></div>';
       }
 
       return (
@@ -2480,10 +2478,10 @@
               ${_editBtn(1)}
             </div>
             <p class="text-[14px] font-semibold text-slate-900">
-              ${formState.desired_ship_date ? '' + formatDate(formState.desired_ship_date) : '<span class="text-slate-400 font-normal">미선택 (가장 빠른 출고일 자동 적용)</span>'}
+              ${formState.desired_ship_date ? '📅 ' + formatDate(formState.desired_ship_date) : '<span class="text-slate-400 font-normal">미선택 (가장 빠른 출고일 자동 적용)</span>'}
             </p>
             <p class="text-[12px] mt-1 ${formState.shipping_type === 'express' ? 'text-amber-700 font-semibold' : 'text-slate-500'}">
-              ${formState.shipping_type === 'express' ? '빠른출고' : '일반출고'}
+              ${formState.shipping_type === 'express' ? '⚡ 빠른출고' : '📦 일반출고'}
               ${expressFee > 0 ? ' · <span class="text-amber-700 font-bold">+' + formatMoney(expressFee) + '</span>' : ' · <span class="text-emerald-600 font-semibold">무료</span>'}
             </p>
           </div>
@@ -2586,7 +2584,7 @@
           // 빠른출고 존: 앰버(amber) 배경 + 짙은 글자
           cls += 'bg-amber-100 text-amber-800 hover:bg-amber-200 cursor-pointer font-semibold' + (isToday ? ' ring-1 ring-amber-400' : '');
         } else if (isSun) cls += 'text-rose-500 hover:bg-rose-50 cursor-pointer font-medium' + (isToday ? ' ring-1 ring-rose-200' : '');
-        else if (isSat) cls += 'cursor-pointer font-medium hover:bg-[#EEF9FC] text-[#1BAED4]' + (isToday ? ' ring-1 ring-[#B9E6F1]' : '');
+        else if (isSat) cls += 'cursor-pointer font-medium hover:bg-indigo-50 text-indigo-500' + (isToday ? ' ring-1 ring-indigo-200' : '');
         else cls += 'text-slate-700 hover:bg-slate-100 cursor-pointer' + (isToday ? ' ring-1 ring-slate-300' : '');
         if (isClosed) {
           row += '<td class="py-1 text-center"><span class="' + cls + '">' + dayNum + '</span></td>';
@@ -2601,8 +2599,8 @@
     var legend = '';
     if (expr) {
       legend = '<div class="flex items-center justify-center gap-3 mt-1 mb-2 text-[10px]">'
-        + '<span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-amber-100 border border-amber-400"></span><span class="text-amber-800 font-semibold">빠른출고</span>' + (expressFee > 0 ? ' <span class="text-amber-700">(+' + formatMoney(expressFee) + ')</span>' : '') + '</span>'
-        + '<span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-slate-100 border border-slate-300"></span><span class="text-slate-700 font-semibold">일반출고 <span class="text-emerald-600">(무료)</span></span></span>'
+        + '<span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-amber-100 border border-amber-400"></span><span class="text-amber-800 font-semibold">⚡ 빠른출고</span>' + (expressFee > 0 ? ' <span class="text-amber-700">(+' + formatMoney(expressFee) + ')</span>' : '') + '</span>'
+        + '<span class="inline-flex items-center gap-1.5"><span class="inline-block w-3 h-3 rounded-sm bg-slate-100 border border-slate-300"></span><span class="text-slate-700 font-semibold">📦 일반출고 <span class="text-emerald-600">(무료)</span></span></span>'
         + '</div>';
     }
 
@@ -2615,13 +2613,13 @@
       if (selectedZone === 'express') {
         var feeLabel = expressFee > 0 ? '<span class="text-amber-700 font-bold">+' + formatMoney(expressFee) + '</span>' : '<span class="text-emerald-600 font-bold">무료</span>';
         selectedInfo = '<div class="mt-3 pt-3 border-t border-slate-100">'
-          + '<p class="text-center text-sm font-bold"><span class="text-amber-600"></span> ' + dateLabel + ' · <span class="text-amber-600">빠른출고</span></p>'
+          + '<p class="text-center text-sm font-bold"><span class="text-amber-600">⚡</span> ' + dateLabel + ' · <span class="text-amber-600">빠른출고</span></p>'
           + '<p class="text-center text-[11px] text-slate-600 mt-1.5">추가비용 ' + feeLabel + (expressFee > 0 ? ' <span class="text-slate-400">(다음 결제정보 스텝에서 안내)</span>' : '') + '</p>'
           + '<p class="text-center text-[10.5px] text-slate-400 mt-2 leading-relaxed">선택하신 출고일을 기준으로 1~2 영업일 내에 배송됩니다.</p>'
           + '</div>';
       } else {
         selectedInfo = '<div class="mt-3 pt-3 border-t border-slate-100">'
-          + '<p class="text-center text-sm font-bold text-slate-800"><span></span> ' + dateLabel + ' · <span class="text-[#1596B8]">일반출고</span></p>'
+          + '<p class="text-center text-sm font-bold text-slate-800"><span>📦</span> ' + dateLabel + ' · <span class="text-indigo-600">일반출고</span></p>'
           + '<p class="text-center text-[11px] text-emerald-600 font-semibold mt-1.5">추가비용 없음 (무료)</p>'
           + '<p class="text-center text-[10.5px] text-slate-400 mt-2 leading-relaxed">선택하신 출고일을 기준으로 1~2 영업일 내에 배송됩니다.</p>'
           + '</div>';
@@ -2652,7 +2650,7 @@
       + '<th class="text-[11px] font-semibold text-slate-400 pb-2">수</th>'
       + '<th class="text-[11px] font-semibold text-slate-400 pb-2">목</th>'
       + '<th class="text-[11px] font-semibold text-slate-400 pb-2">금</th>'
-      + '<th class="text-[11px] font-semibold text-[#5FC6DF] pb-2">토</th>'
+      + '<th class="text-[11px] font-semibold text-indigo-400 pb-2">토</th>'
       + '</tr></thead><tbody>' + rows + '</tbody></table>'
       + '</div>'
       + '<div class="px-4 pb-3">' + selectedInfo + '</div>'
@@ -2697,12 +2695,12 @@
     // 문구 입력 헤더 — 이미지 첨부는 이 밖 (buildLogoAttachSection) 으로 분리.
     //   사용자 UX 개선: 이미지 첨부는 (미니카드/스티커) 타입 선택 아래 별도 섹션 → 문구와 레벨 구분.
     var headerHtml = '<div class="mt-4">'
-      + (isNone ? '<p class="text-[12px] text-amber-800 rounded-xl px-3.5 py-2.5 mb-3 font-medium" style="background:linear-gradient(135deg,rgba(253,230,138,0.4),rgba(245,158,11,0.12));border:1px solid rgba(245,158,11,0.2)">문구는 샘플이미지로 출력되며 이름은 출력되지 않습니다.</p>' : '')
+      + (isNone ? '<p class="text-[12px] text-amber-800 rounded-xl px-3.5 py-2.5 mb-3 font-medium" style="background:linear-gradient(135deg,rgba(253,230,138,0.4),rgba(245,158,11,0.12));border:1px solid rgba(245,158,11,0.2)">⚠️ 문구는 샘플이미지로 출력되며 이름은 출력되지 않습니다.</p>' : '')
       + '<div class="flex items-center justify-between mb-2 flex-wrap gap-y-1">'
       + '<label class="text-[12px] font-semibold text-slate-700">' + esc(stProductDecoLabel) + ' 문구 입력</label>'
       + '<div class="flex items-center gap-2">'
       + '<label class="flex items-center gap-1.5 cursor-pointer">'
-      + '<input type="checkbox" class="w-4 h-4 accent-[#1BAED4]" ' + (isNone ? 'checked' : '') + ' data-action="productStickerInputNone" data-idx="' + idx + '" />'
+      + '<input type="checkbox" class="w-4 h-4 accent-indigo-500" ' + (isNone ? 'checked' : '') + ' data-action="productStickerInputNone" data-idx="' + idx + '" />'
       + '<span class="text-[12px] text-slate-600 font-medium">입력안함</span>'
       + '</label>'
       + '</div>'
@@ -2741,7 +2739,7 @@
   /**
    * 이미지 첨부 섹션 — (스티커 타입 선택) 아래, (문구 입력) 위 배치.
    *   canAttachLogo=false (admin 이 꺼둔 상품) → 빈 문자열.
-   *   hasLogo=false 이면 '이미지 첨부' 버튼, true 이면 미리보기 카드 (변경/삭제).
+   *   hasLogo=false 이면 '📷 이미지 첨부' 버튼, true 이면 미리보기 카드 (변경/삭제).
    *   업로드 진행 표시 영역은 항상 렌더 (uploadStickerLogo 가 hidden 해제).
    */
   function buildLogoAttachSection(idx) {
@@ -2757,7 +2755,7 @@
       innerHtml = '<div class="p-3 rounded-xl border border-amber-200 bg-amber-50 flex items-center gap-3">'
         + '<img src="' + esc(ps.logo_url) + '" alt="로고 미리보기" class="w-14 h-14 rounded-lg object-contain bg-white border border-amber-100" />'
         + '<div class="flex-1 min-w-0">'
-        + '<div class="text-[12px] font-semibold text-amber-900 truncate">' + fnSafe + '</div>'
+        + '<div class="text-[12px] font-semibold text-amber-900 truncate">📷 ' + fnSafe + '</div>'
         + '<div class="text-[11px] text-amber-700">' + sizeKb + ' · 업로드 완료</div>'
         + '</div>'
         + '<label class="text-[11px] font-medium text-amber-700 hover:text-amber-900 px-2 py-1 rounded-lg cursor-pointer" title="다른 파일로 교체">'
@@ -2769,7 +2767,7 @@
     } else {
       // 대형 버튼 (미니카드/스티커 타입 아래에 놓이므로 눈에 잘 띄게)
       innerHtml = '<label class="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-amber-100 hover:bg-amber-200 border border-amber-300 text-amber-800 text-[13px] font-semibold cursor-pointer pressable transition-colors" title="이미지 (PNG/JPG, ≤5MB) 첨부">'
-        + '<span>이미지 첨부</span>'
+        + '<span>📷 이미지 첨부</span>'
         + '<span class="text-[11px] text-amber-700 font-normal">· PNG/JPG, 5MB 이하</span>'
         + '<input type="file" accept="image/png,image/jpeg" class="hidden" data-action="productStickerLogoUpload" data-idx="' + idx + '" />'
         + '</label>';
@@ -3172,7 +3170,7 @@
         break;
       }
       // 로고 첨부 (migration 026)
-      //   업로드: 헤더 '이미지 첨부' 버튼 또는 미리보기 카드의 '변경' 버튼 → file input change
+      //   업로드: 헤더 '📷 이미지 첨부' 버튼 또는 미리보기 카드의 '변경' 버튼 → file input change
       //   교체 케이스 (logo_url 이 이미 있는 상태에서 새 파일 선택) 는 uploadStickerLogo 가
       //   기존 파일을 자동으로 Storage 정리한 뒤 새 파일 업로드.
       case 'productStickerLogoUpload': {
@@ -3674,9 +3672,9 @@
     const banner = document.getElementById('orderListBannerSubtitle');
     if (banner) {
       if (pendingCnt > 0) {
-        banner.innerHTML = '아직 <b class="text-[#12809E]">' + pendingCnt + '건</b>이 <b>입력대기</b> 상태예요. 눌러서 정보를 입력해주세요.';
+        banner.innerHTML = '⏳ 아직 <b class="text-indigo-700">' + pendingCnt + '건</b>이 <b>입력대기</b> 상태예요. 눌러서 정보를 입력해주세요.';
       } else {
-        banner.innerHTML = '모든 주문의 입력이 완료됐습니다.';
+        banner.innerHTML = '✅ 모든 주문의 입력이 완료됐습니다.';
       }
     }
     // 카운트 헤더 — 제목이 있으면 제목 + 총 건수, 없으면 총 건수만
@@ -3700,16 +3698,16 @@
       if (isCancelled) {
         badges.push('<span class="' + cls + ' bg-rose-50 text-rose-600">취소</span>');
       } else if (isPending) {
-        badges.push('<span class="' + cls + ' bg-orange-50 text-orange-700">결제대기</span>');
+        badges.push('<span class="' + cls + ' bg-orange-50 text-orange-700">💳 결제대기</span>');
       } else {
         // 결제완료(or unknown 포함) → 결제완료 뱃지 + 입력 상태 뱃지
         if (isPaid) {
-          badges.push('<span class="' + cls + ' bg-[#EEF9FC] text-[#12809E]">💰 결제완료</span>');
+          badges.push('<span class="' + cls + ' bg-indigo-50 text-indigo-700">💰 결제완료</span>');
         }
         if (isDone) {
           badges.push('<span class="' + cls + ' bg-emerald-50 text-emerald-700">✓ 입력완료</span>');
         } else {
-          badges.push('<span class="' + cls + ' bg-amber-50 text-amber-700">입력대기</span>');
+          badges.push('<span class="' + cls + ' bg-amber-50 text-amber-700">⏳ 입력대기</span>');
         }
       }
       const statusBadge = badges.join(' ');
@@ -3728,7 +3726,7 @@
       const needsInput = isPaid && !isDone && !isCancelled;
       const cardSurface = isCancelled
         ? 'surface'
-        : (needsInput ? 'surface ring-2 ring-[#1BAED4] bg-[#EEF9FC]/40 shadow-lifted' : 'surface');
+        : (needsInput ? 'surface ring-2 ring-indigo-500 bg-indigo-50/40 shadow-lifted' : 'surface');
 
       // XSS: o.customer_name, phone_last4 도 escape. order_id 는 selectOrder 로 넘기니 quote-safe 하게 escape.
       return '<button onclick="selectOrder(\'' + esc(o.order_id).replace(/\\/g, '\\\\').replace(/\'/g, "\\'") + '\')" ' + (isCancelled ? 'disabled' : '') +
@@ -3764,13 +3762,13 @@
         const st = d.statuses?.[el.getAttribute('data-ship-slot')];
         if (!st) return;
         if (st.delivered) {
-          el.textContent = '배송완료';
+          el.textContent = '📦 배송완료';
           el.className = el.className.replace('hidden', '') + ' bg-emerald-100 text-emerald-800';
         } else if (st.registered) {
-          el.textContent = '배송중';
+          el.textContent = '🚚 배송중';
           el.className = el.className.replace('hidden', '') + ' bg-sky-50 text-sky-700';
         } else {
-          el.textContent = '출고 준비';
+          el.textContent = '📦 출고 준비';
           el.className = el.className.replace('hidden', '') + ' bg-slate-100 text-slate-600';
         }
       });
@@ -3836,22 +3834,6 @@
   // ============================================
   /** completedScreen / successScreen 공용 '입력한 정보 확인하기' 핸들러 */
   let _prevScreenBeforeSummary = 'completedScreen';
-  // ============================================
-  // 안내(FAQ) 바텀시트 — 1차 톤 정리
-  // ============================================
-  window.openGuideSheet = function() {
-    const sheet = document.getElementById('guideSheet'), dim = document.getElementById('guideDim');
-    if (!sheet || !dim) return;
-    document.getElementById('guideSheetTitle').textContent = _guideTitle || '안내';
-    document.getElementById('guideSheetBody').innerHTML = _guideBody || '<p class="text-sm text-slate-500 px-4 pb-4">안내 내용이 없습니다.</p>';
-    dim.classList.add('show'); sheet.classList.add('show');
-  };
-  window.closeGuideSheet = function() {
-    const sheet = document.getElementById('guideSheet'), dim = document.getElementById('guideDim');
-    if (sheet) sheet.classList.remove('show'); if (dim) dim.classList.remove('show');
-  };
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.closeGuideSheet(); });
-
   window.viewSubmittedInfo = function() {
     // 돌아갈 화면 기억 (success vs completed 분기)
     _prevScreenBeforeSummary = !document.getElementById('successScreen').classList.contains('hidden')
@@ -3941,8 +3923,8 @@
     const shipDate = info.desired_ship_date;
     const shipDateLabel = shipDate ? formatDate(shipDate) : '<span class="text-slate-400 font-normal">미입력</span>';
     const shipTypeLabel = isExpress
-      ? '<span class="text-amber-700 font-semibold">빠른출고</span>' + (expressFee > 0 ? ' <span class="text-amber-700">(+' + formatMoney(expressFee) + ')</span>' : '')
-      : '<span class="text-slate-700 font-semibold">일반출고</span> <span class="text-emerald-600">(무료)</span>';
+      ? '<span class="text-amber-700 font-semibold">⚡ 빠른출고</span>' + (expressFee > 0 ? ' <span class="text-amber-700">(+' + formatMoney(expressFee) + ')</span>' : '')
+      : '<span class="text-slate-700 font-semibold">📦 일반출고</span> <span class="text-emerald-600">(무료)</span>';
 
     // 상품별 요약 (sticker_selections 에서 product_code 매칭)
     const selsByCode = {};
@@ -4021,7 +4003,7 @@
       if (s.logo_url) {
         var summaryLogoFn = esc(s.logo_filename || '로고');
         var summaryLogoThumb = '<img src="' + esc(s.logo_url) + '" alt="logo" class="inline-block w-8 h-8 object-contain rounded-md border border-amber-200 mr-1.5 align-middle bg-white" />';
-        summaryLogoLine = '<div class="flex justify-between items-center text-sm"><span class="text-amber-700">이미지</span><span class="text-amber-900 font-medium flex items-center">' + summaryLogoThumb + summaryLogoFn + '</span></div>';
+        summaryLogoLine = '<div class="flex justify-between items-center text-sm"><span class="text-amber-700">📷 이미지</span><span class="text-amber-900 font-medium flex items-center">' + summaryLogoThumb + summaryLogoFn + '</span></div>';
       }
 
       return '<div class="surface p-4 mb-2">'
@@ -4074,7 +4056,7 @@
       + '<div id="deliveryTrackWrap"></div>'
       + '<div class="surface p-4 mb-2">'
       +   '<h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">희망 출고일</h3>'
-      +   '<p class="text-[14px] font-semibold text-slate-900">' + shipDateLabel + '</p>'
+      +   '<p class="text-[14px] font-semibold text-slate-900">📅 ' + shipDateLabel + '</p>'
       +   '<p class="text-[12px] mt-1">' + shipTypeLabel + '</p>'
       + '</div>'
       + (productBlocks ? '<div class="mt-3"><h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">상품별 정보</h3>' + productBlocks + '</div>' : '')
@@ -4083,7 +4065,7 @@
       + '<div class="mt-6 p-4 bg-slate-50 rounded-2xl text-xs text-slate-500 leading-relaxed">'
       +   '<p class="font-semibold text-slate-600 mb-1">수정이 필요하신가요?</p>'
       +   '<p>고객센터로 연락주시면 도와드리겠습니다.</p>'
-      +   '<p class="mt-2"><a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>'
+      +   '<p class="mt-2">📞 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>'
       + '</div>'
       + '</div>';
   }
@@ -4136,7 +4118,7 @@
     }
     const showAttention = pendingOthers.length > 0;
     const attentionLabel = showAttention
-      ? '남은 답례품 주문 <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/90 text-[#1596B8] font-black text-[11px] mx-1 align-middle">' + pendingOthers.length + '</span>건도 입력하기 →'
+      ? '🎁 남은 답례품 주문 <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/90 text-indigo-600 font-black text-[11px] mx-1 align-middle">' + pendingOthers.length + '</span>건도 입력하기 →'
       : '';
     // 주의 환기용 CTA (남은 입력대기 주문 있을 때만)
     ['completedBackToListBtn', 'successBackToListBtn'].forEach(function(id) {
