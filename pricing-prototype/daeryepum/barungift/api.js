@@ -675,6 +675,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         status: row.status_seq >= 1 ? 'collected' : 'cancelled',
         payment_status: paymentStatus, // 'paid' | 'pending' | 'cancelled' | 'unknown'
         info_status: existingInfo?.submitted_at ? 'completed' : 'pending',
+        // 수집완료 전이면 고객이 직접 수정할 수 있다 (저장 시점에 서버가 다시 검사한다)
+        info_editable: !!(existingInfo?.submitted_at && !existingInfo?.processed_at),
         products,
         product_settings: productSettings,
         // 첫번째 상품의 shipping_group_id 기반으로 출고일 config 결정.
@@ -782,6 +784,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       logAccess(req, 'submit', orderId, {
         status_code: 201,
         metadata: {
+          customer_edit: !!(saved && (Array.isArray(saved) ? saved[0] : saved)?.customer_edited_at),
           is_express: !!body.is_express,
           sticker_count: (body.sticker_selections || []).length,
           has_customer_request: !!body.customer_request,
@@ -789,6 +792,11 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       });
       return json(res, saved, 201);
     } catch (err) {
+      if (err.message === 'ALREADY_PROCESSED') {
+        // 수집완료 뒤의 수정 — 고객 화면은 이 code 로 안내 시트를 띄운다 (alert 아님)
+        logAccess(req, 'submit', orderId, { status_code: 409, metadata: { reason: 'already_processed' } });
+        return json(res, { error: '상품 준비가 시작되어 수정할 수 없어요. 변경이 필요하면 고객센터로 문의해 주세요.', code: 'ALREADY_PROCESSED' }, 409);
+      }
       if (err.message === 'ALREADY_SUBMITTED') {
         logAccess(req, 'submit', orderId, { status_code: 409, metadata: { reason: 'already_submitted' } });
         return json(res, { error: '이미 정보 입력이 완료된 주문입니다.' }, 409);

@@ -427,9 +427,12 @@ async function getCustomerInfoBatch(orderIds) {
 }
 
 async function saveCustomerInfo(orderId, data) {
-  // 중복 체크
   const existing = await getCustomerInfo(orderId);
-  if (existing) throw new Error('ALREADY_SUBMITTED');
+  // 수집완료 전 고객 수정 (2026-09-11): 수집완료(processed_at) 전이면 덮어쓰고, 후면 거부한다.
+  //   검사는 '저장 시점' 에 한다 — 고객이 수정 화면을 열어 둔 사이 운영이 수집완료를 눌러도 여기서 막힌다.
+  //   운영 쪽 안전장치: customer_edited_at 으로 정보입력현황에 '고객 수정' 배지 (migration 081).
+  if (existing && existing.processed_at) throw new Error('ALREADY_PROCESSED');
+  const isEdit = !!existing;
 
   // L7: express_fee 음수/NaN 가드 — 입력 검증으로 잘못된 데이터 저장 방지
   const sanitizedExpressFee = Math.max(0, parseInt(data.express_fee, 10) || 0);
@@ -453,6 +456,37 @@ async function saveCustomerInfo(orderId, data) {
     special_shipping_memo: data.special_shipping_memo || null,
     submitted_at: now(),
   };
+
+  if (isEdit) {
+    // 덮어쓰기 — 최초 제출 시각(submitted_at)은 남기고, 수정 시각·횟수를 기록한다.
+    const { order_id: _oid, submitted_at: _sub, ...fields } = info;
+    const patch = {
+      ...fields,
+      updated_at: now(),
+      customer_edited_at: now(),
+      customer_edit_count: (Number(existing.customer_edit_count) || 0) + 1,
+    };
+    if (USE_SUPABASE) {
+      const filter = `order_id=eq.${encodeURIComponent(orderId)}`;
+      try {
+        return await sbUpdate('bg_order_customer_info', filter, patch);
+      } catch (err) {
+        // migration 081 미적용 환경: 없는 컬럼을 빼고 재시도 (수정 자체는 성공, 배지만 못 띄운다)
+        const m = err.message && err.message.match(/Could not find the '(\w+)' column/);
+        if (m) {
+          console.warn(`[saveCustomerInfo] 스키마에 '${m[1]}' 컬럼 없음 - 제거 후 재시도. migration 081 적용 필요.`);
+          delete patch[m[1]];
+          return sbUpdate('bg_order_customer_info', filter, patch);
+        }
+        throw err;
+      }
+    }
+    const infos = readJson(FILES.customerInfo, []);
+    const idx = infos.findIndex(i => i.order_id === orderId);
+    infos[idx] = { ...infos[idx], ...patch };
+    writeJson(FILES.customerInfo, infos);
+    return infos[idx];
+  }
 
   if (USE_SUPABASE) {
     // migration 미적용 환경 대응: 스키마에 없는 컬럼 오류(PGRST204) 발생 시
