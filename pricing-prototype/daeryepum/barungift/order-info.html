@@ -267,6 +267,11 @@
     .btn-submit.busy::before { animation: none !important; }
     }
 
+    /* 로그인 방법을 고르면 입력 폼이 위에서 살짝 내려오며 나타난다 */
+    .form-in { animation: formIn 0.3s cubic-bezier(0.2,0.8,0.2,1) both; }
+    @keyframes formIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .form-in { animation: none !important; } }
+
     /* Legacy step line (for backward compat) */
     .step-line { height: 2px; }
 
@@ -295,16 +300,16 @@
 
     <div class="px-5 pt-8">
       <h2 class="text-2xl font-bold text-slate-900 mb-1.5 tracking-tight">주문 내역 조회</h2>
-      <p class="text-sm text-slate-500 mb-6">로그인하시면 주문 내역을 확인할 수 있어요</p>
+      <p class="text-[15px] font-semibold text-slate-700 mb-4">어떤 방법으로 로그인하시겠어요?</p>
 
       <!-- 탭 -->
       <div id="searchTabStrip" class="flex gap-1 p-1 bg-slate-100 rounded-2xl mb-5">
-        <button id="tabLogin" onclick="switchSearchTab('login')" class="pressable flex-1 py-2.5 text-[13px] font-semibold bg-white rounded-xl shadow-soft transition-all" style="color: var(--brand-600);line-height:1.25">바른손카드/바른손몰<br>아이디/비밀번호</button>
-        <button id="tabSearch" onclick="switchSearchTab('search')" class="pressable flex-1 py-2.5 text-[13px] font-medium text-slate-500 rounded-xl transition-all" style="line-height:1.25">주문자명<br>/전화번호</button>
+        <button id="tabLogin" onclick="switchSearchTab('login')" class="pressable flex-1 py-3 text-[14px] font-medium text-slate-500 rounded-xl transition-all">아이디 · 비밀번호</button>
+        <button id="tabSearch" onclick="switchSearchTab('search')" class="pressable flex-1 py-3 text-[14px] font-medium text-slate-500 rounded-xl transition-all">주문자명 · 연락처</button>
       </div>
 
       <!-- 로그인 폼 -->
-      <div id="loginForm" class="surface p-5 mb-4">
+      <div id="loginForm" class="hidden surface p-5 mb-4">
         <p class="text-[12px] text-slate-400 mb-4 leading-relaxed">바른손카드·바른손몰 통합 회원 계정으로 로그인합니다.</p>
         <div class="space-y-3">
           <div>
@@ -680,6 +685,21 @@
   </div>
 </div>
 
+<!-- 주문 없음 안내 바텀시트 — 검색 화면을 떠나지 않고 알린다 (입력값 유지) -->
+<div id="emptyDim" class="guide-dim" onclick="closeEmptyResultSheet()"></div>
+<div id="emptySheet" class="guide-sheet" role="dialog" aria-modal="true" aria-labelledby="emptySheetTitle">
+  <div class="max-w-lg mx-auto px-5 pb-2">
+    <div class="guide-grab"></div>
+    <div class="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3" style="background:var(--brand-50)">
+      <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="#1596B8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+    </div>
+    <h3 id="emptySheetTitle" class="text-[17px] font-extrabold text-slate-900 text-center">조회된 주문이 없어요</h3>
+    <p id="emptySheetBody" class="text-[13.5px] text-slate-500 text-center mt-1.5 leading-relaxed">입력하신 정보로 찾은 주문이 없습니다.<br>주문자명과 전화번호를 다시 확인해 주세요.</p>
+    <button type="button" onclick="closeEmptyResultSheet()" class="btn-primary pressable w-full mt-5 py-3.5 rounded-2xl text-sm">다시 입력하기</button>
+    <p class="text-[12px] text-slate-400 text-center mt-3">주문한 지 얼마 안 됐다면 잠시 뒤 다시 조회해 주세요</p>
+  </div>
+</div>
+
 <!-- 안내(FAQ) 바텀시트 — 1차 톤 정리 -->
 <div id="guideDim" class="guide-dim" onclick="closeGuideSheet()"></div>
 <div id="guideSheet" class="guide-sheet" role="dialog" aria-modal="true" aria-labelledby="guideSheetTitle">
@@ -710,7 +730,7 @@
   <!-- FAB 버튼 -->
   <button id="helpFabBtn" type="button" class="pressable"
     style="width:48px;height:48px;border-radius:50%;border:0;background:var(--brand-500);box-shadow:0 6px 16px rgba(27,174,212,0.3);cursor:pointer;display:flex;align-items:center;justify-content:center;color:white"
-    aria-label="고객센터"><svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 01-2.2 2 19.8 19.8 0 01-8.6-3.1 19.5 19.5 0 01-6-6A19.8 19.8 0 012.1 4.2 2 2 0 014.1 2h3a2 2 0 012 1.7c.1.9.4 1.8.7 2.6a2 2 0 01-.5 2.1L8.1 9.7a16 16 0 006 6l1.3-1.3a2 2 0 012.1-.4c.8.3 1.7.6 2.6.7a2 2 0 011.7 2z"/></svg></button>
+    aria-label="고객센터"><svg class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14v-3a8 8 0 0116 0v3"/><rect x="3" y="13" width="4" height="6" rx="1.5"/><rect x="17" y="13" width="4" height="6" rx="1.5"/><path d="M20 19a3 3 0 01-3 3h-3"/></svg></button>
 </div>
 
 <script>
@@ -3638,27 +3658,59 @@
   // ============================================
   // Search tab switching
   // ============================================
+  // 로그인 방법 선택 — tab 이 null 이면 둘 다 숨김(처음 상태). 고르면 그 폼이 슬라이드로 나타나고 첫 칸에 포커스.
+  let _lastSearchTab = null;
   window.switchSearchTab = function(tab) {
     const isLogin = tab === 'login';
-    document.getElementById('loginForm').classList.toggle('hidden', !isLogin);
-    document.getElementById('searchForm').classList.toggle('hidden', isLogin);
-    const activeCls = 'pressable flex-1 py-2.5 text-[13px] font-semibold bg-white rounded-xl shadow-soft transition-all';
-    const inactiveCls = 'pressable flex-1 py-2.5 text-[13px] font-medium text-slate-500 rounded-xl transition-all';
+    const isSearch = tab === 'search';
+    const loginForm = document.getElementById('loginForm');
+    const searchForm = document.getElementById('searchForm');
+    const changed = tab !== _lastSearchTab;
+    loginForm.classList.toggle('hidden', !isLogin);
+    searchForm.classList.toggle('hidden', !isSearch);
+    const shown = isLogin ? loginForm : (isSearch ? searchForm : null);
+    if (shown && changed) {
+      shown.classList.remove('form-in'); void shown.offsetWidth; shown.classList.add('form-in');
+      const first = shown.querySelector('input');
+      if (first) setTimeout(() => { try { first.focus({ preventScroll: true }); } catch (_) {} }, 320);
+    }
+    _lastSearchTab = tab || null;
+    const activeCls = 'pressable flex-1 py-3 text-[14px] font-semibold bg-white rounded-xl shadow-soft transition-all';
+    const inactiveCls = 'pressable flex-1 py-3 text-[14px] font-medium text-slate-500 rounded-xl transition-all';
     const tabLoginEl = document.getElementById('tabLogin');
     const tabSearchEl = document.getElementById('tabSearch');
     tabLoginEl.className = isLogin ? activeCls : inactiveCls;
-    tabSearchEl.className = !isLogin ? activeCls : inactiveCls;
+    tabSearchEl.className = isSearch ? activeCls : inactiveCls;
     tabLoginEl.style.color = isLogin ? 'var(--brand-600)' : '';
-    tabSearchEl.style.color = !isLogin ? 'var(--brand-600)' : '';
+    tabSearchEl.style.color = isSearch ? 'var(--brand-600)' : '';
     // 로그인 에러 메시지만 초기화 (결과는 별도 화면이라 건드릴 필요 없음)
     const loginErr = document.getElementById('loginError');
     if (loginErr) loginErr.classList.add('hidden');
   };
 
+  // 주문 없음 안내 — 검색 화면 위 바텀시트. 닫으면 마지막에 쓰던 폼의 첫 칸에 포커스.
+  window.showEmptyResultSheet = function(msg) {
+    const sheet = document.getElementById('emptySheet'), dim = document.getElementById('emptyDim');
+    if (!sheet || !dim) { showScreen('searchEmptyScreen'); return; }   // 시트가 없으면 예전 화면으로
+    const body = document.getElementById('emptySheetBody');
+    if (body && msg) body.innerHTML = msg;
+    dim.classList.add('show'); sheet.classList.add('show');
+  };
+  window.closeEmptyResultSheet = function() {
+    const sheet = document.getElementById('emptySheet'), dim = document.getElementById('emptyDim');
+    if (sheet) sheet.classList.remove('show'); if (dim) dim.classList.remove('show');
+    const form = _lastSearchTab === 'search' ? document.getElementById('searchForm') : document.getElementById('loginForm');
+    const first = form && form.querySelector('input');
+    if (first) setTimeout(() => { try { first.focus({ preventScroll: true }); } catch (_) {} }, 320);
+  };
+
   /** 로그인/검색 후 결과에 따라 적절한 화면으로 전환 */
   function handleOrdersResult(orders, { titleOverride } = {}) {
     if (!orders || !orders.length) {
-      showScreen('searchEmptyScreen');
+      // 화면을 바꾸지 않고 시트로 알린다 — 입력값이 그대로 남아 바로 고칠 수 있다
+      showEmptyResultSheet(_lastSearchTab === 'login'
+        ? '이 계정으로 주문한 답례품이 없습니다.<br>주문자명·연락처로도 찾아보세요.'
+        : '입력하신 정보로 찾은 주문이 없습니다.<br>주문자명과 전화번호를 다시 확인해 주세요.');
       return;
     }
     renderOrderList(orders, titleOverride);
@@ -3921,7 +3973,7 @@
     document.getElementById('loginForm').classList.remove('hidden');
     document.getElementById('searchForm').classList.remove('hidden');
     document.querySelectorAll('#searchTabStrip').forEach(el => el.classList.remove('hidden'));
-    switchSearchTab('login');
+    switchSearchTab(_lastSearchTab);
   };
 
   /** 주문선택 화면으로 돌아가기 (로드된 주문 리스트가 있을 때만 사용 가능) */
@@ -3963,7 +4015,7 @@
     const sheet = document.getElementById('guideSheet'), dim = document.getElementById('guideDim');
     if (sheet) sheet.classList.remove('show'); if (dim) dim.classList.remove('show');
   };
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.closeGuideSheet(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { window.closeGuideSheet(); if (window.closeEmptyResultSheet) window.closeEmptyResultSheet(); } });
 
   window.viewSubmittedInfo = function() {
     // 돌아갈 화면 기억 (success vs completed 분기)
@@ -4193,11 +4245,7 @@
       + (productBlocks ? '<div class="mt-3"><h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">상품별 정보</h3>' + productBlocks + '</div>' : '')
       + (paymentHtml ? '<div class="mt-3">' + paymentHtml + '</div>' : '')
       + (requestHtml ? '<div class="mt-3">' + requestHtml + '</div>' : '')
-      + '<div class="mt-6 p-4 bg-slate-50 rounded-2xl text-xs text-slate-500 leading-relaxed">'
-      +   '<p class="font-semibold text-slate-600 mb-1">수정이 필요하신가요?</p>'
-      +   '<p>고객센터로 연락주시면 도와드리겠습니다.</p>'
-      +   '<p class="mt-2"><a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>'
-      + '</div>'
+      // 고객센터 안내 상자는 뺐다 — 플로팅 버튼이 모든 화면에 있다 (2026-09-11)
       + '</div>';
   }
 
