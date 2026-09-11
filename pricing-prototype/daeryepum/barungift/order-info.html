@@ -238,6 +238,35 @@
       .step-fill, .btn-primary, .btn-submit { transition: none !important; }
     }
 
+    /* ==================================================
+       3차 — 제출 피드백 · 완료 화면
+       ================================================== */
+    /* 보내는 동안엔 비활성 회색이 아니라 초록을 유지해 '진행 중' 으로 읽히게 */
+    .btn-submit.busy:disabled { background: #2C9A6A; color: #fff; box-shadow: none; cursor: progress; }
+    .btn-submit.busy::before {
+      content: ''; display: inline-block; width: 15px; height: 15px; margin-right: 8px; vertical-align: -3px;
+      border-radius: 50%; border: 2.5px solid rgba(255,255,255,0.35); border-top-color: #fff;
+      animation: spin 0.8s linear infinite;
+    }
+    /* 완료 화면: 체크가 그려진 뒤 제목 → 안내 → 주문번호 → 버튼 순으로 올라온다 (아이콘 원은 기존 pop-in) */
+    @keyframes riseIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+    @keyframes drawCheck { to { stroke-dashoffset: 0; } }
+    #successScreen .surface > :not(:first-child), #completedScreen .surface > :not(:first-child) { animation: riseIn 0.5s cubic-bezier(0.2,0.8,0.2,1) both; }
+    #successScreen .surface > :nth-child(2), #completedScreen .surface > :nth-child(2) { animation-delay: 0.45s; }
+    #successScreen .surface > :nth-child(3), #completedScreen .surface > :nth-child(3) { animation-delay: 0.55s; }
+    #successScreen .surface > :nth-child(4), #completedScreen .surface > :nth-child(4) { animation-delay: 0.65s; }
+    #successScreen .surface > :nth-child(5), #completedScreen .surface > :nth-child(5) { animation-delay: 0.75s; }
+    #successScreen .surface > :nth-child(n+6), #completedScreen .surface > :nth-child(n+6) { animation-delay: 0.85s; }
+    #successScreen .surface > :first-child svg path, #completedScreen .surface > :first-child svg path {
+      stroke-dasharray: 30; stroke-dashoffset: 30; animation: drawCheck 0.45s 0.3s cubic-bezier(0.2,0.8,0.2,1) forwards;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #successScreen .surface > *, #completedScreen .surface > *, #successScreen .surface svg path, #completedScreen .surface svg path { animation: none !important; stroke-dashoffset: 0; }
+      /* 보내는 동안엔 비활성 회색이 아니라 초록을 유지해 '진행 중' 으로 읽히게 */
+    .btn-submit.busy:disabled { background: #2C9A6A; color: #fff; box-shadow: none; cursor: progress; }
+    .btn-submit.busy::before { animation: none !important; }
+    }
+
     /* Legacy step line (for backward compat) */
     .step-line { height: 2px; }
 
@@ -3445,6 +3474,7 @@
   async function submitForm() {
     $btnNext.disabled = true;
     $btnNext.textContent = '제출 중...';
+    $btnNext.classList.add('busy');   // 3차: 보내는 동안 스피너
 
     const products = orderData?.products || [];
     const fallbackDate = getMinDate();
@@ -3585,6 +3615,7 @@
         orderData.existing_info = { ...payload, submitted_at: new Date().toISOString() };
       }
 
+      $btnNext.classList.remove('busy');
       // Show success
       $successOrderNum.textContent = orderData.order_number || '';
       // 다른 답례품 주문이 있으면 "다른 주문으로" 버튼 노출 (lastLoadedOrders 기준)
@@ -3594,6 +3625,7 @@
       alert(err.message || '제출 중 오류가 발생했습니다. 다시 시도해주세요.');
       $btnNext.disabled = false;
       $btnNext.textContent = '제출하기';
+      $btnNext.classList.remove('busy');
     }
   }
 
