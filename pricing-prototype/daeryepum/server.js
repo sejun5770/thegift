@@ -5325,7 +5325,7 @@ async function attachCardSetOptions(p, rows) {
     const inl = needSeqs.slice(i, i + 700).join(',');
     if (!inl) continue;
     const cr = await p.request().query(`
-      SELECT Card_Seq, Card_Code, Card_Name FROM S2_Card WITH (NOLOCK)
+      SELECT Card_Seq, Card_Code, Card_Name, Card_Price, CardSet_Price FROM S2_Card WITH (NOLOCK)
       WHERE Card_Seq IN (${inl})`);
     for (const c of cr.recordset) cardBySeq.set(Number(c.Card_Seq), c);
   }
@@ -5350,13 +5350,18 @@ async function attachCardSetOptions(p, rows) {
       if (!c) return null;
       const gift = giftRowByKey.get(`${o.parent.order_seq}::${sq}`);
       if (gift && gift !== o.parent) absorbed.add(gift);
+      // 사은품 판정 두 갈래 (2026-09-11 주문 4787787: 미니카드가 0원 아이템 행 없이 ETCSET 으로만 왔다):
+      //   ① 같은 카드가 같은 주문의 0원 아이템 행으로도 있다 (4787524)
+      //   ② 상품 마스터(S2_Card) 판매가·세트가가 모두 0 — 추석 미니카드(TS*_2607)가 이렇고,
+      //      수건·핸드워시 같은 구성품은 값이 있다 (2026-09-11 실측)
+      const freeInMaster = (Number(c.Card_Price) || 0) === 0 && (Number(c.CardSet_Price) || 0) === 0;
       return {
         code: c.Card_Code || '',
         name: cleanName(c.Card_Name) || c.Card_Code || '',
         // 금액은 세트가에 포함돼 개별 값이 없다 — 0 이라고 사은품이 아니므로 addon 을 명시한다.
-        //   단, 같은 카드가 0원 아이템 행으로도 온 것은 사은품 → addon, 수량은 그 행의 수량(고객이 받는 카드 수).
+        //   사은품이면 O열(스티커타입2), 구성품이면 K/L열(품목코드) 로 간다.
         amount: 0, qty: gift ? (gift.item_count || o.parent.item_count) : o.parent.item_count, seq: idx,
-        addon: !!gift,
+        addon: !!gift || freeInMaster,
       };
     }).filter(Boolean);
     if (opts.length) o.parent._options = opts;
