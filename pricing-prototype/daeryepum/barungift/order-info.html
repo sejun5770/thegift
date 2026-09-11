@@ -272,6 +272,20 @@
     @keyframes formIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
     @media (prefers-reduced-motion: reduce) { .form-in { animation: none !important; } }
 
+    /* 로그인 방법 선택 카드 — 버튼임이 보이게: 흰 바탕·테두리·아이콘·설명. 고르면 청록 테두리 + 체크 */
+    .login-opt { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left;
+      background: #fff; border: 1.5px solid #DADDE2; border-radius: 14px; padding: 14px 12px 12px; cursor: pointer;
+      box-shadow: 0 1px 2px rgba(15,23,42,0.05); transition: border-color 0.18s, background 0.18s, box-shadow 0.18s; font-family: inherit; }
+    .login-opt:hover { border-color: #B9E6F1; }
+    .login-opt-ic { width: 34px; height: 34px; border-radius: 10px; background: #F4F4F5; color: #555; display: flex; align-items: center; justify-content: center; margin-bottom: 4px; transition: background 0.18s, color 0.18s; }
+    .login-opt-t { font-size: 14px; font-weight: 700; color: #111; letter-spacing: -0.01em; }
+    .login-opt-d { font-size: 11.5px; color: #888; line-height: 1.35; }
+    .login-opt-chk { position: absolute; top: 10px; right: 10px; width: 20px; height: 20px; border-radius: 50%; background: var(--brand-500); display: none; align-items: center; justify-content: center; }
+    .login-opt.sel { border-color: var(--brand-500); background: var(--brand-50); box-shadow: 0 0 0 3px rgba(27,174,212,0.14); }
+    .login-opt.sel .login-opt-ic { background: var(--brand-500); color: #fff; }
+    .login-opt.sel .login-opt-chk { display: flex; animation: selPop 0.34s cubic-bezier(0.34,1.56,0.64,1) both; }
+    @media (prefers-reduced-motion: reduce) { .login-opt.sel .login-opt-chk { animation: none !important; } }
+
     /* Legacy step line (for backward compat) */
     .step-line { height: 2px; }
 
@@ -303,9 +317,19 @@
       <p class="text-[15px] font-semibold text-slate-700 mb-4">어떤 방법으로 로그인하시겠어요?</p>
 
       <!-- 탭 -->
-      <div id="searchTabStrip" class="flex gap-1 p-1 bg-slate-100 rounded-2xl mb-5">
-        <button id="tabLogin" onclick="switchSearchTab('login')" class="pressable flex-1 py-3 text-[14px] font-medium text-slate-500 rounded-xl transition-all">아이디 · 비밀번호</button>
-        <button id="tabSearch" onclick="switchSearchTab('search')" class="pressable flex-1 py-3 text-[14px] font-medium text-slate-500 rounded-xl transition-all">주문자명 · 연락처</button>
+      <div id="searchTabStrip" class="grid grid-cols-2 gap-2.5 mb-5">
+        <button type="button" id="tabLogin" onclick="switchSearchTab('login')" class="pressable login-opt">
+          <span class="login-opt-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><circle cx="8" cy="15" r="4"/><path d="M10.9 12.1L21 2M15 8l3 3M18 5l3 3"/></svg></span>
+          <span class="login-opt-t">아이디 · 비밀번호</span>
+          <span class="login-opt-d">바른손카드·바른손몰 회원</span>
+          <span class="login-opt-chk"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M5 12l5 5L20 7"/></svg></span>
+        </button>
+        <button type="button" id="tabSearch" onclick="switchSearchTab('search')" class="pressable login-opt">
+          <span class="login-opt-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="20" height="20"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/></svg></span>
+          <span class="login-opt-t">주문자명 · 연락처</span>
+          <span class="login-opt-d">주문할 때 적은 이름·번호</span>
+          <span class="login-opt-chk"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M5 12l5 5L20 7"/></svg></span>
+        </button>
       </div>
 
       <!-- 로그인 폼 -->
@@ -3675,14 +3699,9 @@
       if (first) setTimeout(() => { try { first.focus({ preventScroll: true }); } catch (_) {} }, 320);
     }
     _lastSearchTab = tab || null;
-    const activeCls = 'pressable flex-1 py-3 text-[14px] font-semibold bg-white rounded-xl shadow-soft transition-all';
-    const inactiveCls = 'pressable flex-1 py-3 text-[14px] font-medium text-slate-500 rounded-xl transition-all';
-    const tabLoginEl = document.getElementById('tabLogin');
-    const tabSearchEl = document.getElementById('tabSearch');
-    tabLoginEl.className = isLogin ? activeCls : inactiveCls;
-    tabSearchEl.className = isSearch ? activeCls : inactiveCls;
-    tabLoginEl.style.color = isLogin ? 'var(--brand-600)' : '';
-    tabSearchEl.style.color = isSearch ? 'var(--brand-600)' : '';
+    // 선택 카드: sel 클래스만 토글 (모양은 CSS .login-opt 에)
+    document.getElementById('tabLogin').classList.toggle('sel', isLogin);
+    document.getElementById('tabSearch').classList.toggle('sel', isSearch);
     // 로그인 에러 메시지만 초기화 (결과는 별도 화면이라 건드릴 필요 없음)
     const loginErr = document.getElementById('loginError');
     if (loginErr) loginErr.classList.add('hidden');
