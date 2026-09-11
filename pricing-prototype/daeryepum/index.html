@@ -3830,6 +3830,9 @@ nav.nav-loading a[href^="#"] {
         <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px" title="환불(부분취소)이 있는 주문만 봅니다 — 예식 취소로 답례품만 취소된 건은 주문 상태·수량에 반영되지 않습니다">
         <input type="checkbox" id="uni-only-refund" onchange="renderBgUnified()"> 환불건만
         </label>
+        <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px" title="정보입력이 끝나 수집 대기·수집완료 큐에 들어온 뒤 취소된 주문만 봅니다 (미입력 상태에서 취소된 건은 제외) — 작업 큐에서 빼야 하는 건입니다. 켜면 '취소 제외'는 무시됩니다">
+        <input type="checkbox" id="uni-only-collected-cancel" onchange="renderBgUnified()"> 수집후취소만
+        </label>
       </div>
     </div>
   </details>
@@ -4125,6 +4128,7 @@ nav.nav-loading a[href^="#"] {
       <span id="uni-selected-count" style="font-size:13px;color:var(--gray-500);flex-shrink:0">0건 선택</span>
       <span id="uni-row-count" style="font-size:13px;color:var(--gray-500);flex-shrink:0"></span>
       <span id="uni-refund-count" style="font-size:13px;color:var(--danger);font-weight:600;flex-shrink:0;display:none;cursor:pointer" title="환불(부분취소)이 있는 주문 — 눌러서 그 주문만 봅니다" onclick="_uniToggleOnlyRefund()"></span>
+      <span id="uni-collected-cancel-count" style="font-size:13px;color:var(--danger);font-weight:600;flex-shrink:0;display:none;cursor:pointer" title="정보입력 완료 후 취소된 주문 — 수집 대기·수집완료 큐에 들어와 있어 작업에서 빼야 합니다. 눌러서 그 주문만 봅니다" onclick="_uniToggleOnlyCollectedCancel()"></span>
       <div style="flex:1"></div>
       <!-- 액션 버튼들 — 선택 상태에 따라 지능적으로 show/hide -->
       <button class="btn btn-warn" id="uni-btn-manual-order" onclick="openBgManualOrderForm()" style="padding:6px 12px;font-size:12px" title="MSSQL 동기화 사고 등으로 시스템에 안 잡힌 주문을 수동 등록합니다 (정보입력현황 + 워크플로우 통합)">수동 주문 등록</button>
@@ -22697,7 +22701,8 @@ function _uniUpdateBadges() {
       return !wrap || wrap.style.display !== 'none';
     }).length;
   const onlyRefundOn = document.getElementById('uni-only-refund')?.checked;
-  set('uni-status-badge', [excl ? `제외 ${excl}` : '', onlyRefundOn ? '환불건만' : ''].filter(Boolean).join(' · '));
+  const onlyCollectedCancelOn = document.getElementById('uni-only-collected-cancel')?.checked;
+  set('uni-status-badge', [excl ? `제외 ${excl}` : '', onlyRefundOn ? '환불건만' : '', onlyCollectedCancelOn ? '수집후취소만' : ''].filter(Boolean).join(' · '));
 
   // 조건 — 희망출고일 / 기타출고 중 '전체' 가 아닌 것
   const radio = (name) => document.querySelector(`input[name="${name}"]:checked`)?.value || 'all';
@@ -23014,6 +23019,9 @@ function renderBgUnified() {
   const hidePending = document.getElementById('uni-hide-pending')?.checked;
   const hideTest = document.getElementById('uni-hide-test')?.checked;
   const onlyRefund = document.getElementById('uni-only-refund')?.checked;
+  // 수집후취소만 — 수집처리(processed_at) 가 끝난 뒤 취소된 주문. 이미 작업 큐에 들어간 건이라 놓치면 취소된 주문을 만든다.
+  //   켜면 '취소 제외' 는 무시한다 (취소 건을 보려는 필터이므로).
+  const onlyCollectedCancel = document.getElementById('uni-only-collected-cancel')?.checked;
   // 테스트 주문 — 수령인/주문자가 '시스템테스트' (운영 검수용 주문). 기본 숨김, 체크 해제로 볼 수 있다.
   const isTestOrder = o => /시스템테스트/.test(String(o.display_name || '') + '|' + String(o.order_name || ''));
   // 탭 상태 = 필터 소스 (submitted / unsubmitted). 기존 '전체' 옵션은 제거됨.
@@ -23057,13 +23065,30 @@ function renderBgUnified() {
     || o.status === 'C00' || o.status === 'C10' || o.status === 'C11'
     || o.status === 'R00' || o.status === 'R10' || o.status === 'E00' || o.status === 'E10'
   );
+  // 수집후취소 판정 — 고객정보(ci)가 있는 주문 = 정보입력이 끝나 수집 대기·수집완료 큐에 들어온 주문.
+  //   그 뒤 취소된 건을 잡는다. processed_at(수집처리) 만으로 가르면 0건이다 — 취소되면 운영이 수집처리를
+  //   되돌려 흔적이 사라진다 (2026-09-11 실측: 2개월 취소 114건 중 processed_at 보유 0, ci 보유 88).
+  //   행 평탄화 전이라 r.ci 가 없어 주문 단위로 ci 를 찾는다.
+  const isCollectedCancel = o => isCancelled(o) && !!bgFindCi(bgUnifiedCiMap, o);
   const visibleBase = bgUnifiedOrders.filter(o =>
-  (!hideCancel  || !isCancelled(o)) &&
+  (!hideCancel  || onlyCollectedCancel || !isCancelled(o)) &&
   (!hidePending || !isPaymentPending(o)) &&
   (!hideTest    || !isTestOrder(o)) &&
   (!onlyRefund  || Number(o.refund_price) > 0) &&
+  (!onlyCollectedCancel || isCollectedCancel(o)) &&
     passSite(o)
   );
+  // 수집후취소 건수 배지 — '취소 제외' 와 무관하게 센다 (제외돼 있어도 있다는 사실은 보여야 한다).
+  const collectedCancelSeqs = new Set(
+    bgUnifiedOrders.filter(o => isCollectedCancel(o) && (!hideTest || !isTestOrder(o)) && passSite(o)).map(o => o.order_seq)
+  );
+  {
+    const $cc = document.getElementById('uni-collected-cancel-count');
+    if ($cc) {
+      $cc.textContent = collectedCancelSeqs.size ? `수집후취소 ${collectedCancelSeqs.size}건` : '';
+      $cc.style.display = collectedCancelSeqs.size ? '' : 'none';
+    }
+  }
   // 마켓플레이스 주문(쿠팡/네이버)은 고객 정보입력 불필요 → 자동 '입력완료' 처리.
   //   미입력 탭에 안 나오고, 입력완료 탭에 ci 없어도 노출됨.
   const isMarketplace = o => o.order_type === 'COUPANG' || o.order_type === 'NAVER' || o.order_type === 'MANUAL';
@@ -23763,6 +23788,16 @@ cb.checked = !cb.checked;
 const sec = document.getElementById('uni-sec-status');
 if (sec && cb.checked) sec.open = true;
 renderBgUnified();
+}
+
+/** 수집후취소 건수 배지 클릭 — '수집후취소만' 필터를 켜고 끈다 (필터가 접혀 있으면 펼쳐 보여 준다). */
+function _uniToggleOnlyCollectedCancel() {
+  const cb = document.getElementById('uni-only-collected-cancel');
+  if (!cb) return;
+  cb.checked = !cb.checked;
+  const sec = document.getElementById('uni-sec-status');
+  if (sec && cb.checked) sec.open = true;
+  renderBgUnified();
 }
 
 function _onUniRowClick(rowIdx, e) {
