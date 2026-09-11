@@ -23643,8 +23643,12 @@ function renderBgUnified() {
     // 환불(부분취소) 배지 — 주문 상태·수량엔 반영되지 않아 여기 말고는 흔적이 없다 (주문조회와 같은 원천).
     //   주문번호 옆에 붙이면 번호가 잘려서(셀 max-width 250px) 아랫줄에 따로 놓는다.
     const refundBadge = _ordRefundBadge(order, true);
+    // 고객이 수집완료 전에 수정한 주문 (migration 081) — 시트에 이미 옮겼다면 다시 복사해야 한다.
+    const editedBadge = ci?.customer_edited_at
+      ? `<span class="badge badge-warn" style="margin-left:4px" title="고객이 ${esc(new Date(ci.customer_edited_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false }))} 에 수정했습니다 (${Number(ci.customer_edit_count) || 1}회) — 시트에 옮긴 뒤라면 다시 복사하세요">고객 수정</span>`
+      : '';
     const orderSeqContent = specialPrefix + expressPrefix + logoPrefix
-      + _combineBadge(_uniCombine, order.order_seq) + orderSeqInner
+      + _combineBadge(_uniCombine, order.order_seq) + orderSeqInner + editedBadge
       + (refundBadge ? `<div style="margin-top:3px">${refundBadge}</div>` : '');
     html += `<tr class="${rowClass}" style="${borderStyle}${rowInlineStyle ? ';' + rowInlineStyle : ''};cursor:pointer" onclick="_onUniRowClick(${rowIdx}, event)">
       <td><input type="checkbox" class="uni-row-check" data-idx="${rowIdx}" onchange="updateBgUnifiedSelectedCount()" onclick="event.stopPropagation()"></td>
