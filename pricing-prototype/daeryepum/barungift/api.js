@@ -795,7 +795,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       if (err.message === 'ALREADY_PROCESSED') {
         // 수집완료 뒤의 수정 — 고객 화면은 이 code 로 안내 시트를 띄운다 (alert 아님)
         logAccess(req, 'submit', orderId, { status_code: 409, metadata: { reason: 'already_processed' } });
-        return json(res, { error: '상품 준비가 시작되어 수정할 수 없어요. 변경이 필요하면 고객센터로 문의해 주세요.', code: 'ALREADY_PROCESSED' }, 409);
+        return json(res, { error: '상품 준비가 시작되어 수정할 수 없어요. 변경이 필요하시면 화면 아래 아이콘을 눌러 고객센터로 문의해 주세요!', code: 'ALREADY_PROCESSED' }, 409);
       }
       if (err.message === 'ALREADY_SUBMITTED') {
         logAccess(req, 'submit', orderId, { status_code: 409, metadata: { reason: 'already_submitted' } });
