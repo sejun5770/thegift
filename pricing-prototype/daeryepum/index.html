@@ -13469,6 +13469,8 @@ function renderDailyTable(data, topProducts) {
         if (g.startsWith('네이버(바른손')) return 6;   // 네이버(바른손카드) 등
         if (g.startsWith('네이버(테넷')) return 7;      // 네이버(테넷텐) 등
         if (g.startsWith('네이버')) return 8;           // 기타 네이버 스토어
+        if (g === '정수당') return 9;
+        if (g === '웅진' || g === '프리드라이프') return 10;   // 제휴 채널 — 정수당 뒤
         if (g === '기타') return 99;
         return 50;   // 신규 그룹은 뒤쪽
       };
@@ -13841,6 +13843,8 @@ function renderWeeklyTable(data, topProducts) {
         if (g.startsWith('네이버(바른손')) return 6;   // 네이버(바른손카드) 등
         if (g.startsWith('네이버(테넷')) return 7;      // 네이버(테넷텐) 등
         if (g.startsWith('네이버')) return 8;           // 기타 네이버 스토어
+        if (g === '정수당') return 9;
+        if (g === '웅진' || g === '프리드라이프') return 10;   // 제휴 채널 — 정수당 뒤
         if (g === '기타') return 99;
         return 50;   // 신규 그룹은 뒤쪽
       };
