@@ -209,6 +209,35 @@
     .guide-grab { width: 38px; height: 4px; border-radius: 2px; background: #E2E2E4; margin: 0 auto 12px; }
     @media (prefers-reduced-motion: reduce) { .guide-sheet, .guide-dim, .fade-in, .pop-in, .pressable { transition: none !important; animation: none !important; } }
 
+    /* ==================================================
+       2차 모션 — 상태가 바뀔 때만, 300ms 이하
+       ================================================== */
+    /* 단계 전환: 새 내용이 진행 방향에서 24px 밀려 들어온다 (다음 → 오른쪽에서, 이전 → 왼쪽에서).
+       이전 내용은 남기지 않는다 — 두 화면이 겹치는 순간이 없어 클릭·입력이 두 번 잡힐 일이 없다. */
+    #stepContent.step-in-r { animation: stepInR 0.28s cubic-bezier(0.2,0.8,0.2,1) both; }
+    #stepContent.step-in-l { animation: stepInL 0.28s cubic-bezier(0.2,0.8,0.2,1) both; }
+    @keyframes stepInR { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+    @keyframes stepInL { from { opacity: 0; transform: translateX(-24px); } to { opacity: 1; transform: none; } }
+    /* 같은 단계 안에서 선택 때문에 다시 그릴 때는 깜빡이지 않는다 (전환은 위 컨테이너가 맡는다) */
+    #stepContent .fade-in { animation: none; }
+    /* 선택 체크 배지·선택한 날짜: 튀어나오며 자리 잡는다 */
+    .sel-pop { animation: selPop 0.34s cubic-bezier(0.34,1.56,0.64,1) both; }
+    .day-pop { animation: selPop 0.34s cubic-bezier(0.34,1.56,0.64,1) both; }
+    @keyframes selPop { 0% { transform: scale(0.4); opacity: 0; } 70% { transform: scale(1.12); opacity: 1; } 100% { transform: scale(1); } }
+    /* 스티커 라이트박스: 딤은 스르륵, 내용은 아래에서 18px */
+    #stickerModal > .absolute { animation: dimIn 0.2s ease both; }
+    #stickerModal > .relative { animation: modalIn 0.26s cubic-bezier(0.2,0.8,0.2,1) both; }
+    @keyframes dimIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes modalIn { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+    /* 진행선·버튼 상태 전환 */
+    .step-fill { transition: width 0.55s cubic-bezier(0.2,0.8,0.2,1); }
+    .btn-primary, .btn-submit { transition: background-color 0.25s, box-shadow 0.25s, color 0.25s, transform 0.12s; }
+    #navHint { transition: opacity 0.2s; }
+    @media (prefers-reduced-motion: reduce) {
+      #stepContent.step-in-r, #stepContent.step-in-l, .sel-pop, .day-pop, #stickerModal > .absolute, #stickerModal > .relative { animation: none !important; }
+      .step-fill, .btn-primary, .btn-submit { transition: none !important; }
+    }
+
     /* Legacy step line (for backward compat) */
     .step-line { height: 2px; }
 
@@ -536,6 +565,8 @@
 
   <!-- Navigation Buttons -->
   <div class="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t border-[var(--line)] p-4 z-30">
+    <!-- 2차 모션: 버튼이 비활성일 때 무엇을 채워야 하는지 한 줄 -->
+    <p id="navHint" class="hidden max-w-lg mx-auto text-[12px] text-slate-500 text-center -mt-1 mb-2.5"></p>
     <div class="max-w-lg mx-auto flex gap-3">
       <button id="btnBack" class="hidden pressable flex-1 py-3.5 rounded-2xl btn-ghost text-sm">
         이전
@@ -690,6 +721,9 @@
   // ============================================
   let orderData = null;
   let currentStep = 0;
+  // 2차 모션: 단계 전환 방향 (+1 다음 / -1 이전). renderCurrentStep 이 읽고 0 으로 되돌린다. 같은 단계 재렌더는 0.
+  let _stepDir = 0;
+  let _stepRenderedOnce = false;
   // 안내(FAQ) 바텀시트 내용 — renderStep0 이 채우고 openGuideSheet 가 읽는다 (1차 톤 정리)
   let _guideTitle = '안내';
   let _guideBody = '';
@@ -1507,6 +1541,16 @@
     }
   }
 
+  /** 단계별 '다음' 비활성 사유 — 검증(isStepValid)과 같은 기준을 말로 옮긴 것. 판단은 하지 않는다. */
+  function stepBlockHint(step) {
+    switch (step) {
+      case 0: return '각 상품의 선택과 문구를 채우면 다음으로 갈 수 있어요';
+      case 1: return '출고일을 고르면 다음으로 갈 수 있어요';
+      case 2: return '현금영수증 정보를 채우면 제출할 수 있어요';
+      default: return '';
+    }
+  }
+
   function updateNavButtons() {
     // visibleSteps 배열 기준으로 현재 위치 / last 판단
     const visible = getVisibleSteps();
@@ -1516,6 +1560,13 @@
     $btnBack.classList.toggle('hidden', isFirst);
     $btnNext.textContent = isLast ? '제출하기' : '다음';
     $btnNext.disabled = !isStepValid(currentStep);
+    // 2차 모션: 비활성 사유 안내 (문구만 바꾼다 — 검증 로직은 isStepValid 그대로)
+    const navHint = document.getElementById('navHint');
+    if (navHint) {
+      const msg = $btnNext.disabled ? stepBlockHint(currentStep) : '';
+      navHint.textContent = msg;
+      navHint.classList.toggle('hidden', !msg);
+    }
     if (isLast) {
       $btnNext.classList.remove('btn-primary');
       $btnNext.classList.add('btn-submit');
@@ -1530,6 +1581,7 @@
     const visible = getVisibleSteps();
     const visIdx = getVisibleIndex();
     if (visIdx < visible.length - 1) {
+      _stepDir = 1;
       currentStep = visible[visIdx + 1];
       renderCurrentStep();
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1539,6 +1591,7 @@
     const visible = getVisibleSteps();
     const visIdx = getVisibleIndex();
     if (visIdx > 0) {
+      _stepDir = -1;
       currentStep = visible[visIdx - 1];
       renderCurrentStep();
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1958,7 +2011,7 @@
             + '<' + tag + ' type="button"' + actionAttrs
             +   (isSoldOut ? '' : ' type="button"')
             +   ' class="' + (isSoldOut ? '' : 'pressable ') + cardCls + ' rounded-xl overflow-hidden text-left w-full transition touch-manipulation relative">'
-            +   (isSel && !isSoldOut ? '<span class="absolute top-1.5 right-1.5 z-10 gradient-brand text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-lifted">✓</span>' : '')
+            +   (isSel && !isSoldOut ? '<span class="absolute top-1.5 right-1.5 z-10 gradient-brand text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-lifted sel-pop">✓</span>' : '')
             +   thumb
             +   soldOutOverlay
             +   '<div class="px-2 py-1.5 text-xs">'
@@ -2018,7 +2071,7 @@
             return ''
               + '<' + tag + ' type="button"' + actionAttrs
               +   ' class="' + (isSoldOut ? '' : 'pressable ') + cardCls + ' rounded-xl overflow-hidden text-left w-full transition touch-manipulation relative' + (useImages ? '' : ' py-3 px-3') + '">'
-              +   (isSel && !isSoldOut ? '<span class="absolute top-1.5 right-1.5 z-10 gradient-brand text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-lifted">✓</span>' : '')
+              +   (isSel && !isSoldOut ? '<span class="absolute top-1.5 right-1.5 z-10 gradient-brand text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-lifted sel-pop">✓</span>' : '')
               +   thumbHtml
               +   soldOutOverlay
               +   (useImages
@@ -2071,7 +2124,7 @@
           return ''
             + '<button type="button" data-action="openStickerModal" data-idx="' + idx + '" data-value="' + esc(st.id) + '" '
             +   'class="sticker-card pressable ' + cardCls + ' rounded-xl overflow-hidden text-left w-full transition touch-manipulation relative">'
-            +   (isSelected ? '<span class="absolute top-1.5 right-1.5 z-10 gradient-brand text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-lifted">✓</span>' : '')
+            +   (isSelected ? '<span class="absolute top-1.5 right-1.5 z-10 gradient-brand text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-lifted sel-pop">✓</span>' : '')
             +   thumb
             +   '<div class="px-2 py-1.5 text-xs">'
             +     '<div class="font-semibold text-slate-800 truncate">' + esc(st.name || '스티커') + '</div>'
@@ -2579,8 +2632,8 @@
         var cls = 'w-9 h-9 rounded-full mx-auto flex items-center justify-center text-[13px] leading-none select-none transition-all ';
         if (isSel) {
           // 선택된 날짜: 존에 따라 시각 스타일 구분
-          if (isExpressDay) cls += 'bg-amber-500 text-white font-bold shadow-lifted';
-          else cls += 'gradient-brand text-white font-bold shadow-lifted';
+          if (isExpressDay) cls += 'bg-amber-500 text-white font-bold shadow-lifted day-pop';
+          else cls += 'gradient-brand text-white font-bold shadow-lifted day-pop';
         } else if (isClosed) cls += 'text-slate-300';
         else if (isExpressDay) {
           // 빠른출고 존: 앰버(amber) 배경 + 짙은 글자
@@ -3043,6 +3096,13 @@
     // 스크롤 위치 보존하여 터치 시 화면 점프/깜빡임 방지
     const scrollY = window.pageYOffset || document.documentElement.scrollTop;
     $stepContent.innerHTML = STEP_RENDERERS[currentStep]();
+    // 2차 모션: 단계가 바뀔 때(또는 첫 렌더)만 컨테이너를 진행 방향에서 밀어 넣는다. 재렌더는 그대로.
+    if (_stepDir !== 0 || !_stepRenderedOnce) {
+      $stepContent.classList.remove('step-in-r', 'step-in-l');
+      void $stepContent.offsetWidth;   // 애니메이션 재시작
+      $stepContent.classList.add(_stepDir < 0 ? 'step-in-l' : 'step-in-r');
+      _stepDir = 0; _stepRenderedOnce = true;
+    }
     renderStepIndicator();
     updateNavButtons();
     saveFormState();
@@ -3302,6 +3362,7 @@
       case 'goToStep': {
         const step = parseInt(target.closest('[data-step]')?.dataset?.step);
         if (!isNaN(step) && step >= 0 && step < STEP_LABELS.length) {
+          _stepDir = -1;
           currentStep = step;
           renderCurrentStep();
           window.scrollTo({ top: 0, behavior: 'smooth' });
