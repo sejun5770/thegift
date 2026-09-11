@@ -2,8 +2,8 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>바른손더기프트 - 주문정보 입력</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>바른손 답례품 - 주문정보 입력</title>
   <script src="https://cdn.tailwindcss.com/3.4.1"></script>
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
@@ -252,14 +252,14 @@
 <body class="min-h-screen">
 
 <!-- Order Search Screen (oid 없을 때) -->
-<div id="searchScreen" class="hidden min-h-screen pb-8">
+<div id="searchScreen" class="hidden min-h-screen pb-48">
   <div class="max-w-lg mx-auto">
     <!-- Header -->
     <header class="bg-white/80 backdrop-blur-md border-b border-[var(--line)] sticky top-0 z-30">
       <div class="flex items-center gap-3 px-5 py-4">
         <div>
-          <h1 class="text-base font-extrabold text-slate-900 leading-tight tracking-tight">바른손더기프트</h1>
-          <p class="text-[11px] text-slate-400 font-medium tracking-wide">PREMIUM GIFT SERVICE</p>
+          <h1 class="text-base font-extrabold text-slate-900 leading-tight tracking-tight">바른손 답례품</h1>
+          <p class="text-[12px] text-slate-500 font-medium mt-0.5">희망출고일과 커스텀 스티커 정보를 입력하는 화면입니다</p>
         </div>
       </div>
     </header>
@@ -270,17 +270,17 @@
 
       <!-- 탭 -->
       <div id="searchTabStrip" class="flex gap-1 p-1 bg-slate-100 rounded-2xl mb-5">
-        <button id="tabLogin" onclick="switchSearchTab('login')" class="pressable flex-1 py-2.5 text-[13px] font-semibold bg-white rounded-xl shadow-soft transition-all" style="color: var(--brand-600)">바른손카드 로그인</button>
-        <button id="tabSearch" onclick="switchSearchTab('search')" class="pressable flex-1 py-2.5 text-[13px] font-medium text-slate-500 rounded-xl transition-all">전화번호/이름 검색</button>
+        <button id="tabLogin" onclick="switchSearchTab('login')" class="pressable flex-1 py-2.5 text-[13px] font-semibold bg-white rounded-xl shadow-soft transition-all" style="color: var(--brand-600);line-height:1.25">바른손카드/바른손몰<br>아이디/비밀번호</button>
+        <button id="tabSearch" onclick="switchSearchTab('search')" class="pressable flex-1 py-2.5 text-[13px] font-medium text-slate-500 rounded-xl transition-all" style="line-height:1.25">주문자명<br>/전화번호</button>
       </div>
 
       <!-- 로그인 폼 -->
       <div id="loginForm" class="surface p-5 mb-4">
-        <p class="text-[12px] text-slate-400 mb-4 leading-relaxed">바른손카드 통합 회원 계정으로 로그인합니다.</p>
+        <p class="text-[12px] text-slate-400 mb-4 leading-relaxed">바른손카드·바른손몰 통합 회원 계정으로 로그인합니다.</p>
         <div class="space-y-3">
           <div>
             <label class="block text-[12px] font-semibold text-slate-700 mb-1.5">아이디</label>
-            <input type="text" id="loginUid" placeholder="바른손카드 아이디" autocomplete="username" class="input-mod">
+            <input type="text" id="loginUid" placeholder="바른손카드/바른손몰 아이디" autocomplete="username" class="input-mod">
           </div>
           <div>
             <label class="block text-[12px] font-semibold text-slate-700 mb-1.5">비밀번호</label>
@@ -409,6 +409,10 @@
     </div>
     <h2 class="text-xl font-bold text-slate-900 mb-2 tracking-tight">입력이 완료됐어요</h2>
     <p class="text-sm text-slate-500 mb-6 leading-relaxed">해당 주문의 정보 입력이 이미 완료됐습니다.<br>수정이 필요하시면 고객센터로 연락해주세요.</p>
+    <div class="rounded-xl px-4 py-3 mb-5 text-left" style="background:var(--brand-50);border:1px solid rgba(27,174,212,0.25)">
+      <p class="text-[13px] font-semibold text-slate-800">출고되면 배송 상태도 여기서 볼 수 있어요</p>
+      <p class="text-[12px] text-slate-500 mt-0.5 leading-relaxed">같은 링크로 다시 들어와 <b>입력한 정보 확인하기</b>를 누르면 택배 송장과 배송 상태가 표시됩니다.</p>
+    </div>
 
     <!-- 입력 내용 확인 버튼 — 고객/관리자가 저장한 요약 보기 -->
     <button onclick="viewSubmittedInfo()" class="btn pressable w-full py-3 rounded-2xl text-sm font-semibold mb-2" style="border:1px solid var(--brand-600);color:var(--brand-600);background:#fff">
@@ -424,11 +428,6 @@
     <button id="completedBackToListBtn" onclick="goBackToOrderList()" class="hidden btn-primary pressable w-full py-3.5 rounded-2xl text-sm font-bold mb-4 attention-cta">
       다른 답례품 주문건도 입력하기
     </button>
-
-    <div class="bg-slate-50 rounded-2xl p-4 text-sm text-slate-600">
-      <p class="font-semibold mb-2 text-slate-700">고객센터 문의</p>
-      <p class="text-xs">전화 <a href="tel:1644-0708" class="font-semibold" style="color: var(--brand-600)">1644-0708</a></p>
-    </div>
   </div>
 </div>
 
@@ -507,6 +506,10 @@
     </div>
     <h2 class="text-xl font-bold text-slate-900 mb-2 tracking-tight">제출이 완료됐어요!</h2>
     <p class="text-sm text-slate-500 mb-5 leading-relaxed">주문 정보가 정상적으로 접수됐습니다.</p>
+    <div class="rounded-xl px-4 py-3 mb-5 text-left" style="background:var(--brand-50);border:1px solid rgba(27,174,212,0.25)">
+      <p class="text-[13px] font-semibold text-slate-800">출고되면 배송 상태도 여기서 볼 수 있어요</p>
+      <p class="text-[12px] text-slate-500 mt-0.5 leading-relaxed">같은 링크로 다시 들어와 <b>입력한 정보 확인하기</b>를 누르면 택배 송장과 배송 상태가 표시됩니다.</p>
+    </div>
     <div class="gradient-brand-soft rounded-2xl p-5 text-sm mb-5">
       <p class="text-[12px] font-semibold" style="color: var(--brand-600)">주문번호</p>
       <p id="successOrderNumber" class="text-xl font-bold text-gradient-brand mt-1"></p>
@@ -527,8 +530,6 @@
       다른 답례품 주문건도 입력하기
     </button>
 
-    <p class="text-sm text-slate-500 mb-1">기타 문의가 있을 시 고객센터로 문의해주세요.</p>
-    <p class="text-sm font-bold text-slate-700">고객센터 <a href="tel:1644-0708" style="color:inherit">1644-0708</a></p>
   </div>
 </div>
 
@@ -539,7 +540,7 @@
   <header class="bg-white/90 backdrop-blur-md border-b border-[var(--line)] sticky top-0 z-30">
     <div class="flex items-center gap-3 px-5 pt-3 pb-1">
       <div class="flex-1 min-w-0">
-        <h1 class="text-[15px] font-extrabold text-slate-900 leading-tight tracking-tight">바른손더기프트</h1>
+        <h1 class="text-[15px] font-extrabold text-slate-900 leading-tight tracking-tight">바른손 답례품</h1>
         <p class="text-[11px] text-slate-400 font-medium truncate" id="headerOrderNumber"></p>
       </div>
       <!-- 안내(FAQ) — 1차 톤 정리: 첫 화면을 덮던 안내 박스를 바텀시트로 -->
@@ -3678,6 +3679,25 @@
   // Enter 키로 로그인
   document.getElementById('loginPwd')?.addEventListener('keydown', e => { if (e.key === 'Enter') loginBarunson(); });
   document.getElementById('loginUid')?.addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('loginPwd').focus(); });
+
+  // 안드로이드 키패드가 입력칸을 가리는 문제 (2026-09-11 카카오톡 인앱 브라우저 제보)
+  //   포커스가 들어오면 키패드가 올라온 뒤(약 300ms) 입력칸을 화면 가운데로 올린다.
+  //   키패드 높이만큼 뷰포트가 바뀌는 브라우저는 visualViewport resize 에서도 한 번 더 맞춘다.
+  (function setupKeyboardScroll() {
+    const isTextField = (el) => el instanceof HTMLElement
+      && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)
+      && !/^(checkbox|radio|file|button|submit)$/.test(el.type || '');
+    const bring = (el) => { try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_) {} };
+    document.addEventListener('focusin', (e) => { if (isTextField(e.target)) setTimeout(() => bring(e.target), 300); });
+    if (window.visualViewport) {
+      let last = window.visualViewport.height;
+      window.visualViewport.addEventListener('resize', () => {
+        const h = window.visualViewport.height;
+        if (h < last - 100 && isTextField(document.activeElement)) bring(document.activeElement);   // 키패드가 올라온 순간
+        last = h;
+      });
+    }
+  })();
 
   // 고객센터 플로팅 버튼 토글 + 외부 클릭 시 닫기
   (function setupHelpFab() {
