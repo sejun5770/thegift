@@ -4069,7 +4069,8 @@
     const info = orderData?.existing_info || {};
     if (!info.submitted_at) return '';
     if (info.processed_at) {
-      return '<div class="mt-6 p-4 rounded-2xl text-[13px] leading-relaxed" style="background:#F4F4F5;color:#555">'
+      // 출고된 뒤(배송조회 카드가 붙으면)에는 고객센터도 못 바꾸므로 이 문구 자체를 숨긴다 — loadDeliveryStatus 가 토글
+      return '<div id="summaryLockNote" class="mt-6 p-4 rounded-2xl text-[13px] leading-relaxed" style="background:#F4F4F5;color:#555">'
         + '상품 준비가 시작되어 입력 내용을 수정할 수 없어요.<br>변경이 필요하시면 고객센터로 문의해 주세요!</div>';
     }
     return '<div class="mt-6">'
@@ -4196,11 +4197,16 @@
   //   '조회 불가' 카드는 출고 전 고객에게 불안만 준다.
   let _deliveryLoadedFor = null;
   let _deliveryHtml = '';
+  /** 송장이 있어 배송조회 카드가 붙었으면 '수정 불가 · 고객센터' 문구를 숨긴다 — 출고 뒤엔 고객센터도 못 바꾼다 (2026-09-11) */
+  function _syncLockNote() {
+    const n = document.getElementById('summaryLockNote');
+    if (n) n.classList.toggle('hidden', !!_deliveryHtml);
+  }
   async function loadDeliveryStatus() {
     const wrap = document.getElementById('deliveryTrackWrap');
     if (!wrap || !orderData?.order_id) return;
     // 재진입: 요약 화면이 컨테이너를 새로 그리므로, 받아둔 카드를 다시 붙이기만 한다
-    if (_deliveryLoadedFor === orderData.order_id) { wrap.innerHTML = _deliveryHtml; return; }
+    if (_deliveryLoadedFor === orderData.order_id) { wrap.innerHTML = _deliveryHtml; _syncLockNote(); return; }
     try {
       const url = withSignature(API_BASE + '/api/bg/orders/' + encodeURIComponent(orderData.order_id) + '/delivery');
       const resp = await fetch(url);
@@ -4209,6 +4215,7 @@
       _deliveryLoadedFor = orderData.order_id;
       _deliveryHtml = (d.found && d.invoices?.length) ? d.invoices.map(renderDeliveryCard).join('') : '';
       wrap.innerHTML = _deliveryHtml;
+      _syncLockNote();
     } catch (e) { /* 배송조회 실패는 요약 화면을 막지 않는다 */ }
   }
 
