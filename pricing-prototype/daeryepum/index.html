@@ -3830,7 +3830,7 @@ nav.nav-loading a[href^="#"] {
         <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px" title="환불(부분취소)이 있는 주문만 봅니다 — 예식 취소로 답례품만 취소된 건은 주문 상태·수량에 반영되지 않습니다">
         <input type="checkbox" id="uni-only-refund" onchange="renderBgUnified()"> 환불건만
         </label>
-        <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px" title="정보입력이 끝나 수집 대기·수집완료 큐에 들어온 뒤 취소된 주문만 봅니다 (미입력 상태에서 취소된 건은 제외) — 작업 큐에서 빼야 하는 건입니다. 켜면 '취소 제외'는 무시됩니다">
+        <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px" title="수집처리가 된 상태에서 취소된 주문만 봅니다 — 작업 큐에 남아 있는 취소 건이라 '되돌리기'로 빼야 합니다. 되돌리면 목록과 건수에서 빠집니다. 켜면 '취소 제외'는 무시됩니다">
         <input type="checkbox" id="uni-only-collected-cancel" onchange="renderBgUnified()"> 수집후취소만
         </label>
       </div>
@@ -4128,7 +4128,7 @@ nav.nav-loading a[href^="#"] {
       <span id="uni-selected-count" style="font-size:13px;color:var(--gray-500);flex-shrink:0">0건 선택</span>
       <span id="uni-row-count" style="font-size:13px;color:var(--gray-500);flex-shrink:0"></span>
       <span id="uni-refund-count" style="font-size:13px;color:var(--danger);font-weight:600;flex-shrink:0;display:none;cursor:pointer" title="환불(부분취소)이 있는 주문 — 눌러서 그 주문만 봅니다" onclick="_uniToggleOnlyRefund()"></span>
-      <span id="uni-collected-cancel-count" style="font-size:13px;color:var(--danger);font-weight:600;flex-shrink:0;display:none;cursor:pointer" title="정보입력 완료 후 취소된 주문 — 수집 대기·수집완료 큐에 들어와 있어 작업에서 빼야 합니다. 눌러서 그 주문만 봅니다" onclick="_uniToggleOnlyCollectedCancel()"></span>
+      <span id="uni-collected-cancel-count" style="font-size:13px;color:var(--danger);font-weight:600;flex-shrink:0;display:none;cursor:pointer" title="수집처리된 상태로 남아 있는 취소 주문 — '되돌리기'로 작업 큐에서 빼면 건수가 줄어듭니다. 눌러서 그 주문만 봅니다" onclick="_uniToggleOnlyCollectedCancel()"></span>
       <div style="flex:1"></div>
       <!-- 액션 버튼들 — 선택 상태에 따라 지능적으로 show/hide -->
       <button class="btn btn-warn" id="uni-btn-manual-order" onclick="openBgManualOrderForm()" style="padding:6px 12px;font-size:12px" title="MSSQL 동기화 사고 등으로 시스템에 안 잡힌 주문을 수동 등록합니다 (정보입력현황 + 워크플로우 통합)">수동 주문 등록</button>
@@ -23065,11 +23065,11 @@ function renderBgUnified() {
     || o.status === 'C00' || o.status === 'C10' || o.status === 'C11'
     || o.status === 'R00' || o.status === 'R10' || o.status === 'E00' || o.status === 'E10'
   );
-  // 수집후취소 판정 — 고객정보(ci)가 있는 주문 = 정보입력이 끝나 수집 대기·수집완료 큐에 들어온 주문.
-  //   그 뒤 취소된 건을 잡는다. processed_at(수집처리) 만으로 가르면 0건이다 — 취소되면 운영이 수집처리를
-  //   되돌려 흔적이 사라진다 (2026-09-11 실측: 2개월 취소 114건 중 processed_at 보유 0, ci 보유 88).
+  // 수집후취소 판정 — 수집처리(processed_at)가 된 상태에서 취소된 주문 = 아직 작업 큐에 남아 있는 취소 건.
+  //   운영이 '되돌리기' 로 수집처리를 풀면 processed_at 이 지워져 카운트에서 빠진다 (2026-09-14 운영 요청:
+  //   되돌리면 건수가 줄어야 한다). 그래서 ci 존재만으로 잡으면 안 된다 — 되돌려도 ci 는 남아 건수가 안 줄기 때문.
   //   행 평탄화 전이라 r.ci 가 없어 주문 단위로 ci 를 찾는다.
-  const isCollectedCancel = o => isCancelled(o) && !!bgFindCi(bgUnifiedCiMap, o);
+  const isCollectedCancel = o => isCancelled(o) && !!bgFindCi(bgUnifiedCiMap, o)?.processed_at;
   const visibleBase = bgUnifiedOrders.filter(o =>
   (!hideCancel  || onlyCollectedCancel || !isCancelled(o)) &&
   (!hidePending || !isPaymentPending(o)) &&
