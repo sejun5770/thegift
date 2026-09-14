@@ -119,6 +119,28 @@ async function lookupEtcSetProducts(pool, seqs) {
   return map;
 }
 
+/**
+ * 주문일 다음 영업일 (082) — 출고 그룹 설정의 휴무 요일·휴무일을 건너뛴다.
+ *   order_date 는 앞 10자리(YYYY-MM-DD)만 쓴다 — 정보입력현황이 주문일을 보여주는 방식과 같아 시간대 흔들림이 없다.
+ */
+function nextBusinessDay(orderDate, cfg) {
+  const closedWd = new Set(Array.isArray(cfg?.closed_weekdays) ? cfg.closed_weekdays.map(Number) : [0, 6]);
+  const closedDates = new Set([
+    ...(Array.isArray(cfg?.closed_dates) ? cfg.closed_dates.map(d => (typeof d === 'string' ? d : d?.date)) : []),
+    ...(Array.isArray(cfg?.blackout_dates) ? cfg.blackout_dates : []),
+  ].filter(Boolean).map(d => String(d).slice(0, 10)));
+  const ymd0 = String(orderDate || '').slice(0, 10);
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(ymd0)
+    ? new Date(ymd0 + 'T00:00:00Z')
+    : new Date(new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10) + 'T00:00:00Z');  // 오늘(KST)
+  for (let i = 0; i < 30; i++) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    const ymd = d.toISOString().slice(0, 10);
+    if (!closedWd.has(d.getUTCDay()) && !closedDates.has(ymd)) return ymd;
+  }
+  return d.toISOString().slice(0, 10);
+}
+
 async function lookupProductSettings(code) {
   if (!code) return null;
   let ps = await store.getProductSettings(code);
@@ -536,6 +558,9 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         shippingGroupByProduct[p.product_code] = ps?.shipping_group_id || null;
         // 로고 첨부 허용 (migration 026) — admin 이 명시적으로 켠 상품만 고객 화면에 옵션 노출
         allowLogoUploadByProduct[p.product_code] = !!ps?.allow_logo_upload;
+        // 고객 정보입력 불필요 상품 (082) — 샘플세트처럼 희망출고일·스티커 없이 일반 부가상품처럼 주문되는 상품.
+        //   고객 화면은 이 상품을 입력 대상에서 빼고, 이런 상품만 있는 주문은 입력 화면 대신 안내만 보여준다.
+        p.input_required = ps?.customer_input_required !== false;
         // 커스텀 안내 텍스트 (migration 034) — 관리자 입력. 빈 문자열은 null 로 정규화.
         const guideText = (ps?.custom_guide_text || '').trim();
         customGuideByProduct[p.product_code] = guideText || null;
@@ -678,6 +703,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         // 수집완료 전이면 고객이 직접 수정할 수 있다 (저장 시점에 서버가 다시 검사한다)
         info_editable: !!(existingInfo?.submitted_at && !existingInfo?.processed_at),
         products,
+        // 입력이 필요한 상품이 하나도 없는 주문 (082) — 고객 화면은 안내만 보여주고, 정보입력현황이 자동 입력완료 처리한다.
+        customer_input_required: products.length === 0 || products.some(p => p.input_required !== false),
         product_settings: productSettings,
         // 첫번째 상품의 shipping_group_id 기반으로 출고일 config 결정.
         // 단일 그룹 주문은 기존 동작 그대로 — backward compat.
@@ -2019,6 +2046,48 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   }
 
   // GET /api/bg/customer-infos - 전체 고객 입력 목록 (관리자)
+  // POST /api/bg/customer-infos/auto-stubs — 고객 정보입력이 필요 없는 상품만 있는 주문의 고객정보 스텁 자동 생성 (082)
+  //   정보입력현황이 로드 때 후보(고객정보 없는 CARD/ETC 주문 중 상품설정 customer_input_required=false 만 있는 것)를
+  //   보내면, 서버가 상품설정을 다시 판정하고 스티커 없음·희망출고일=주문일 다음 영업일로 '입력완료' 행을 만든다.
+  //   쿠팡/네이버 '자동 입력완료' 와 같은 취지 — 채널이 아니라 상품 단위 예외 (샘플세트 TGSAMPLE 등).
+  //   body: { orders: [{ order_id, order_date, products: [{ product_code, product_name, quantity }] }] }
+  if (pathname === '/api/bg/customer-infos/auto-stubs' && method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const orders = Array.isArray(body.orders) ? body.orders.slice(0, 200) : [];
+      const created = [], skipped = [];
+      for (const o of orders) {
+        const orderId = String(o?.order_id || '').trim();
+        const products = Array.isArray(o?.products) ? o.products.filter(p => p && p.product_code) : [];
+        if (!orderId || !products.length) { skipped.push({ order_id: orderId, reason: 'invalid' }); continue; }
+        if (await store.getCustomerInfo(orderId)) { skipped.push({ order_id: orderId, reason: 'exists' }); continue; }
+        // 서버가 다시 판정한다 — 클라이언트의 상품설정 캐시가 낡았을 수 있다. 하나라도 입력이 필요하면 만들지 않는다.
+        let firstPs = null, allNoInput = true;
+        for (const p of products) {
+          const ps = await lookupProductSettings(p.product_code);
+          if (!ps || ps.customer_input_required !== false) { allNoInput = false; break; }
+          if (!firstPs) firstPs = ps;
+        }
+        if (!allNoInput) { skipped.push({ order_id: orderId, reason: 'input_required' }); continue; }
+        const cfg = await store.getShippingConfig(firstPs.shipping_group_id || null).catch(() => null);
+        const shipDate = nextBusinessDay(o.order_date, cfg);
+        const info = await store.saveCustomerInfo(orderId, {
+          is_express: false, express_fee: 0, desired_ship_date: shipDate,
+          sticker_selections: products.map(p => ({
+            product_code: String(p.product_code), product_name: String(p.product_name || ''), quantity: Number(p.quantity) || 0,
+            desired_ship_date: shipDate, shipping_type: 'normal', is_express: false, shipping_group_id: null,
+            sticker_id: null, sticker_name: null, sticker_input: 'none', custom_values: {},
+            box_code: null, box_name: null, custom_options: {},
+            input_mode: 'not_required',   // 정보입력현황 '입력 불필요' 배지의 근거
+          })),
+          cash_receipt_yn: false, receipt_type: null, receipt_number: null, customer_request: null,
+        });
+        created.push(info);
+      }
+      return json(res, { created, skipped });
+    } catch (err) { return json(res, { error: err.message }, 400); }
+  }
+
   if (pathname === '/api/bg/customer-infos' && method === 'GET') {
     const infos = await store.getAllCustomerInfos();
     // sticker_id → sticker_code / sticker_name join
