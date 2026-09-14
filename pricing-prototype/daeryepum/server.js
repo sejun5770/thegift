@@ -1484,6 +1484,20 @@ function addDays(d, n) { const r = new Date(d); r.setDate(r.getDate() + n); retu
 //   다른 축이라 접두만 보고 자르면 안 된다 — 여기서는 옵션 라인에만 쓰므로 세트와 섞이지 않는다.
 const TOWEL_OPTION_CODE = /^TGJBK09O\d+/i;
 
+/**
+ * 답례품 옵션 분류 — 수집복사 칸 배정의 근거. 값(0원 여부)만으로 가르면 안 된다.
+ *   component(구성품): 세트를 이루는 원물 O코드 (수건 TGJBK09O*, 핸드워시 TGJBK01O2, 주방세제 TGJBK03O1) → K/L열
+ *   gift(사은품):      무료 (추석 미니카드 TS*_2607 등) → O열(스티커타입2)
+ *   accessory(부가옵션): 유료지만 원물이 아닌 것 (트레싱지 미니봉투 1212TR_TG·1107TE_TG, 쇼핑백 2026pb_bag_01_TG) → P열
+ *   2026-09-14: 미니봉투가 유료라 구성품으로 잡혀 K열(품목코드1)을 덮어 답례품 코드가 사라졌다 (주문 3250679).
+ *   365일 실측: 구성품 코드는 전부 ^TG…O\d+ 이고, 그 밖의 유료 옵션은 봉투·쇼핑백뿐.
+ */
+const COMPONENT_OPTION_CODE = /^TG[A-Z]+\d+O\d+/i;
+function classifyDaeryepumOption({ code, free }) {
+  if (COMPONENT_OPTION_CODE.test(String(code || '').trim())) return 'component';
+  return free ? 'gift' : 'accessory';
+}
+
 // total 을 weights 비율로 정수 배분 (마지막 항목이 잔여를 흡수해 합계가 정확히 total).
 function allocateInt(total, weights) {
   const sum = weights.reduce((a, b) => a + b, 0) || 1;
@@ -1662,11 +1676,11 @@ function mergeEtcOptionRows(rows, setBySeq = new Map()) {
           code: r.card_code, name: r.card_name,
           amount: Number(r.item_amount) || 0, qty: r.item_count,
           seq: Number(r.item_seq) || 0, // 옵션 순서(옵션1/2 = 아이템 seq) — 수집복사 K/L 매핑용
-          // 무료 옵션 = 사은품(추석 미니엽서 등). 세트를 이루는 구성품(수건·핸드워시)은 값이 붙는다.
-          //   수집복사에서 구성품은 K/L(품목코드), 사은품은 O열(스티커타입2)로 갈린다.
-          //   답례품 옵션 365일 실측: 무료는 미니엽서 코드뿐, 구성품은 전부 유료로 갈림이 명확.
-          addon: (Number(r.item_amount) || 0) === 0,
+          // 분류는 코드 계열 기준 (classifyDaeryepumOption). 값만 보면 유료 미니봉투가 구성품이 돼
+          //   K열을 덮는다. addon = 구성품이 아님 (K/L 에 안 감), kind 로 사은품/부가옵션을 가른다.
+          kind: classifyDaeryepumOption({ code: r.card_code, free: (Number(r.item_amount) || 0) === 0 }),
         });
+        { const o = parent._options[parent._options.length - 1]; o.addon = o.kind !== 'component'; }
         continue; // 옵션 행 제거
       }
       // 부모 못 찾은 옵션은 (비정상) 누락 방지 위해 유지
@@ -5355,13 +5369,15 @@ async function attachCardSetOptions(p, rows) {
       //   ② 상품 마스터(S2_Card) 판매가·세트가가 모두 0 — 추석 미니카드(TS*_2607)가 이렇고,
       //      수건·핸드워시 같은 구성품은 값이 있다 (2026-09-11 실측)
       const freeInMaster = (Number(c.Card_Price) || 0) === 0 && (Number(c.CardSet_Price) || 0) === 0;
+      // 분류는 코드 계열 기준 (classifyDaeryepumOption) — 유료 미니봉투를 구성품으로 보면 K열을 덮는다.
+      const kind = classifyDaeryepumOption({ code: c.Card_Code, free: !!gift || freeInMaster });
       return {
         code: c.Card_Code || '',
         name: cleanName(c.Card_Name) || c.Card_Code || '',
-        // 금액은 세트가에 포함돼 개별 값이 없다 — 0 이라고 사은품이 아니므로 addon 을 명시한다.
-        //   사은품이면 O열(스티커타입2), 구성품이면 K/L열(품목코드) 로 간다.
+        // 금액은 세트가에 포함돼 개별 값이 없다 — 0 이라고 사은품이 아니므로 kind/addon 을 명시한다.
+        //   사은품이면 O열(스티커타입2), 부가옵션(봉투)이면 P열, 구성품이면 K/L열(품목코드) 로 간다.
         amount: 0, qty: gift ? (gift.item_count || o.parent.item_count) : o.parent.item_count, seq: idx,
-        addon: !!gift || freeInMaster,
+        kind, addon: kind !== 'component',
       };
     }).filter(Boolean);
     if (opts.length) o.parent._options = opts;
