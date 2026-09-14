@@ -1431,7 +1431,8 @@
     const product = (orderData?.products || [])[i];
     const productCode = product?.product_code || '';
     // 입력 불필요 상품 (082) — 스티커·박스·옵션 모두 비운다 (화면에도 안 나온다)
-    if (product?.input_required === false) return { sticker_type: null, sticker_input: 'none', sticker_fields: {}, box_code: null, custom_options: {} };
+    //   스티커는 정해진 것(fixed_sticker)을 그대로 — 입력안함 모드라 문구는 받지 않는다.
+    if (product?.input_required === false) return { sticker_type: product.fixed_sticker?.id || null, sticker_input: 'none', sticker_fields: {}, box_code: null, custom_options: {} };
     const matching = getStickersForProduct(productCode);
     const firstStickerId = (matching && matching.length > 0) ? matching[0].id : null;
     const boxOptions = getBoxOptionsForProduct(productCode);
@@ -1487,6 +1488,7 @@
       +   '<h4 class="text-[14px] font-bold text-slate-900">' + esc(p.product_name || '상품') + ' <span class="text-[11px] font-medium text-slate-400">(수량 ' + (Number(p.quantity) || 1) + ')</span></h4>'
       +   '<span class="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">입력 불필요</span>'
       + '</div>'
+      + (p.fixed_sticker ? '<div class="flex justify-between items-center text-sm mt-2"><span class="text-slate-500">' + esc(getDecorationLabelForProduct(p.product_code || '')) + '</span><span class="text-slate-900 font-medium">' + esc(p.fixed_sticker.name || '') + ' <span class="text-slate-400 text-[11px]">고정</span></span></div>' : '')
       + '</div>';
   }
 
@@ -1495,7 +1497,9 @@
     const products = orderData?.products || [];
     const list = document.getElementById('noInputProducts');
     if (list) list.innerHTML = products.map(function(p) {
-      return '<div class="flex justify-between gap-3"><span class="text-slate-700 font-medium">' + esc(p.product_name || '상품') + '</span><span class="text-slate-500 shrink-0">' + (Number(p.quantity) || 1) + '개</span></div>';
+      return '<div class="flex justify-between gap-3"><span class="text-slate-700 font-medium">' + esc(p.product_name || '상품')
+        + (p.fixed_sticker ? '<span class="block text-[11px] text-slate-400 font-normal">' + esc(getDecorationLabelForProduct(p.product_code || '')) + ' ' + esc(p.fixed_sticker.name || '') + ' (고정)</span>' : '')
+        + '</span><span class="text-slate-500 shrink-0">' + (Number(p.quantity) || 1) + '개</span></div>';
     }).join('');
     const num = document.getElementById('noInputOrderNum');
     if (num) num.textContent = orderData?.order_number || '';
