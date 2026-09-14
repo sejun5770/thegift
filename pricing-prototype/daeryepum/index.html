@@ -3429,6 +3429,13 @@ nav.nav-loading a[href^="#"] {
           📷 <b>고객 이미지 첨부 허용</b> — 스티커 입력 모드에 '이미지 첨부' 옵션 노출 (PNG/JPG, 최대 5MB)
         </label>
       </div>
+      <!-- 고객 정보입력 불필요 — 082 (샘플세트 등 일반 부가상품처럼 주문되는 상품) -->
+      <div style="display:flex;align-items:center;gap:8px;background:#f1f5f9;padding:9px 12px;border-radius:8px;border:1px dashed #94a3b8;margin-top:8px">
+        <input type="checkbox" id="bg-p-meta-no-input" style="margin:0;width:16px;height:16px;cursor:pointer">
+        <label for="bg-p-meta-no-input" style="font-size:12px;color:#334155;cursor:pointer;line-height:1.4" title="이 상품만 있는 주문은 고객 정보입력 없이 자동 입력완료됩니다 (희망출고일 = 주문일 다음 영업일). 다른 답례품과 섞인 주문에서는 이 상품만 입력 대상에서 빠집니다.">
+          🧾 <b>고객 정보입력 불필요</b> — 희망출고일·스티커 입력 없이 자동 입력완료 (샘플세트 등 부가상품)
+        </label>
+      </div>
 
       <!-- 상품별 안내 override (migration 034/035) — 이 상품만 다른 안내를 노출하고 싶을 때만 사용 -->
       <details style="background:#fef9c3;padding:10px;border-radius:8px;border:1px dashed #facc15">
@@ -15290,6 +15297,9 @@ async function openBgProductForm(productId) {
     // 고객 로고 첨부 허용 게이트 (migration 026)
     const allowLogoCb = document.getElementById('bg-p-meta-allow-logo');
     if (allowLogoCb) allowLogoCb.checked = !!s?.allow_logo_upload;
+    // 고객 정보입력 불필요 (082)
+    const noInputCb = document.getElementById('bg-p-meta-no-input');
+    if (noInputCb) noInputCb.checked = s?.customer_input_required === false;
     // canonical 그룹 (migration 033) — 대시보드 상품별 매출 통합 집계용
     const canonKeyInput = document.getElementById('bg-p-meta-canon-key');
     if (canonKeyInput) canonKeyInput.value = s?.canonical_group_key || '';
@@ -15993,6 +16003,7 @@ async function saveBgProduct() {
     supply_price: _costOf('bg-p-meta-supply-price'),   // 제휴 공급단가 (079)
     shipping_group_id: shippingGroupId,
     allow_logo_upload: allowLogoUpload,
+    customer_input_required: !document.getElementById('bg-p-meta-no-input')?.checked,  // 082
     canonical_group_key: canonKey,
     canonical_display_name: canonDisplayName,
     custom_guide_text: customGuide,
@@ -22581,6 +22592,11 @@ async function loadBgUnified() {
       ciMap.set(key, ci);
     });
     bgUnifiedCiMap = ciMap;
+    // 고객 정보입력 불필요 상품만 있는 주문 (082) — 고객정보 없이 미입력에 쌓이지 않게 서버에 스텁을 만들어 달라고 한다.
+    //   후보만 고른다 (취소·미결제 제외, 상품설정 customer_input_required=false 만). 최종 판정은 서버가 다시 한다.
+    try { await _bgAutoStubNoInputOrders(bgUnifiedOrders, productMap, ciMap, signal); }
+    catch (e) { if (!signal.aborted) console.warn('[loadBgUnified] 입력 불필요 주문 스텁 생성 실패 (미입력으로 표시):', e.message); }
+    if (signal.aborted) return;
 
     // CI 가 있는데 orderMap 에 없는 주문 ID 추출 — 옛날 주문 (date range 밖) 또는 다른 채널.
     //   채널 prefix 별 분리 — backend 가 채널별 별도 fetch 처리.
@@ -22884,6 +22900,63 @@ async function _uniLoadAlimHistory(keys) {
     console.warn('[alimtalk] 이력 조회 실패 (표시 생략):', e.message);
     return false;
   }
+}
+
+/** 상품설정 lookup — 서버 lookupProductSettings 와 같은 변형 접미사 폴백 ('A_B' → 'A', 최대 3단계). */
+function _bgPsLookup(code) {
+  let cur = String(code || '');
+  for (let i = 0; i < 4 && cur; i++) {
+    const ps = bgProductSettings.find(p => p.product_id === cur);
+    if (ps) return ps;
+    const m = cur.match(/^(.+)_[A-Za-z0-9]+$/);
+    if (!m) break;
+    cur = m[1];
+  }
+  return null;
+}
+
+/** 고객정보가 '입력 불필요' 자동 스텁인지 — 모든 품목이 input_mode='not_required' (082). */
+function _bgCiIsNoInput(ci) {
+  const sels = ci?.sticker_selections;
+  return Array.isArray(sels) && sels.length > 0 && sels.every(s => s && s.input_mode === 'not_required');
+}
+
+/**
+ * 고객 정보입력 불필요 상품만 있는 주문의 고객정보 스텁 자동 생성 (082, 샘플세트 등).
+ *   CARD/ETC 주문 중 고객정보가 없고, 배송지 전체의 품목이 모두 customer_input_required=false 인 것만 서버에 보낸다.
+ *   서버가 만든 행을 ciMap 에 바로 넣어 이번 렌더부터 입력완료로 보인다.
+ */
+async function _bgAutoStubNoInputOrders(orders, productMap, ciMap, signal) {
+  if (!bgProductSettings.some(p => p.customer_input_required === false)) return;  // 그런 상품이 없으면 조용히 끝
+  const byOrder = new Map();   // order_seq → { order, products: Map(code → {product_code, product_name, quantity}) }
+  for (const o of orders) {
+    if (o.order_type !== 'CARD' && o.order_type !== 'ETC') continue;
+    if (isCancelled(o) || isPaymentPending(o)) continue;
+    if (bgFindCi(ciMap, o)) continue;
+    const pm = productMap.get(o._composite_key || `${o.order_seq}::${o.delivery_seq || 1}`);
+    if (!pm || !pm.size) continue;
+    const slot = byOrder.get(String(o.order_seq)) || { order: o, products: new Map() };
+    for (const p of pm.values()) {
+      const code = String(p.base_code || '');
+      if (!code) continue;
+      const e = slot.products.get(code) || { product_code: code, product_name: p.card_name || '', quantity: 0 };
+      e.quantity += Number(p.item_count) || 0;
+      slot.products.set(code, e);
+    }
+    byOrder.set(String(o.order_seq), slot);
+  }
+  const candidates = [];
+  for (const { order, products } of byOrder.values()) {
+    const list = [...products.values()];
+    if (!list.length || !list.every(p => _bgPsLookup(p.product_code)?.customer_input_required === false)) continue;
+    candidates.push({ order_id: bgCiKey(order), order_date: order.order_date || '', products: list });
+  }
+  if (!candidates.length) return;
+  const r = await fetch(`${API}/api/bg/customer-infos/auto-stubs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orders: candidates }), signal });
+  if (!r.ok) throw new Error(`auto-stubs API ${r.status}`);
+  const v = await r.json();
+  (v.created || []).forEach(ci => { if (ci && ci.order_id) ciMap.set(String(ci.order_id), ci); });
+  if ((v.created || []).length) console.info(`[loadBgUnified] 입력 불필요 주문 ${v.created.length}건 자동 입력완료 처리`);
 }
 
 function bgCiKey(order) {
@@ -23484,7 +23557,10 @@ function renderBgUnified() {
       : (orderIsNaver
         ? '<span style="color:#03c75a;font-size:12px;font-weight:600;white-space:nowrap" title="네이버 스마트스토어 주문은 고객 정보입력 불필요 — 동기화 시 자동 입력완료 처리">네이버 자동</span>'
         : (hasInput
-          ? '<span style="color:#16a34a;font-size:12px;font-weight:600;white-space:nowrap">' + (fmtSubmittedAt || '✅ 완료') + '</span>'
+          ? (_bgCiIsNoInput(ci)
+            // 상품설정 '고객 정보입력 불필요' 상품만 있는 주문 — 로드 때 자동 생성한 스텁 (082)
+            ? '<span style="color:#475569;font-size:12px;font-weight:600;white-space:nowrap" title="고객 정보입력 불필요 상품만 있는 주문 — 자동 입력완료, 희망출고일은 주문일 다음 영업일">입력 불필요</span>'
+            : '<span style="color:#16a34a;font-size:12px;font-weight:600;white-space:nowrap">' + (fmtSubmittedAt || '✅ 완료') + '</span>')
           : '<span style="color:var(--gray-300);font-size:12px">미입력</span>'));
 
     // 박스선택 — 아이콘/수량 제거, 코드만 표시 (스티커코드 컬럼과 일관)

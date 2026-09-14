@@ -349,6 +349,8 @@ async function upsertProductSettings(productId, data) {
     closed_weekdays: data.closed_weekdays ?? [0, 6],
     closed_dates: data.closed_dates ?? [],
     date_required: data.date_required ?? true,
+    // 고객 정보입력 불필요 상품 (082) — false 면 샘플세트처럼 희망출고일·스티커 입력 없이 자동 입력완료.
+    customer_input_required: data.customer_input_required ?? true,
     notice_enabled: data.notice_enabled ?? false,
     notice_text: data.notice_text ?? '',
     available_sticker_ids: data.available_sticker_ids ?? [],

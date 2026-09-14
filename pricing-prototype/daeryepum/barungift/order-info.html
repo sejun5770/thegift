@@ -493,6 +493,20 @@
   </div>
 </div>
 
+<!-- No-Input Screen — 고객 정보입력이 필요 없는 상품만 있는 주문 (082, 샘플세트 등) -->
+<div id="noInputScreen" class="hidden flex items-center justify-center min-h-screen px-5">
+  <div class="surface p-8 max-w-sm w-full text-center">
+    <div class="w-16 h-16 gradient-success rounded-full flex items-center justify-center mx-auto mb-5 pop-in" style="box-shadow:0 10px 30px rgba(16,185,129,0.25)">
+      <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>
+    </div>
+    <h2 class="text-xl font-bold text-slate-900 mb-2 tracking-tight">입력할 정보가 없어요</h2>
+    <p class="text-sm text-slate-500 mb-5 leading-relaxed">이 주문의 상품은 희망출고일과 스티커 입력 없이<br>바로 준비돼요.</p>
+    <div id="noInputProducts" class="bg-slate-50 rounded-2xl p-4 text-left mb-4 space-y-1.5 text-sm"></div>
+    <p class="text-[12px] text-slate-500 mb-5 leading-relaxed">주문번호 <span id="noInputOrderNum" class="font-mono font-semibold text-slate-700"></span></p>
+    <button id="noInputGoListBtn" onclick="goBackToOrderList()" class="hidden btn pressable w-full py-3 rounded-2xl text-sm font-semibold" style="border:1px solid var(--gray-300);color:var(--gray-700);background:#fff">주문 선택 화면으로</button>
+  </div>
+</div>
+
 <!-- Submitted Summary Screen — 이미 제출된 주문의 입력 내용 요약 -->
 <div id="submittedSummaryScreen" class="hidden min-h-screen pb-8">
   <div class="max-w-lg mx-auto">
@@ -1416,6 +1430,8 @@
     const i = Number(idx);
     const product = (orderData?.products || [])[i];
     const productCode = product?.product_code || '';
+    // 입력 불필요 상품 (082) — 스티커·박스·옵션 모두 비운다 (화면에도 안 나온다)
+    if (product?.input_required === false) return { sticker_type: null, sticker_input: 'none', sticker_fields: {}, box_code: null, custom_options: {} };
     const matching = getStickersForProduct(productCode);
     const firstStickerId = (matching && matching.length > 0) ? matching[0].id : null;
     const boxOptions = getBoxOptionsForProduct(productCode);
@@ -1453,7 +1469,7 @@
     'loadingScreen', 'errorScreen', 'completedScreen', 'paymentPendingScreen',
     'successScreen', 'mainApp',
     'searchScreen', 'orderListScreen', 'searchEmptyScreen',
-    'submittedSummaryScreen',
+    'submittedSummaryScreen', 'noInputScreen',
   ];
   function showScreen(id) {
     ALL_SCREEN_IDS.forEach(sid => {
@@ -1462,6 +1478,29 @@
     });
     const target = document.getElementById(id);
     if (target) target.classList.remove('hidden');
+  }
+
+  /** 입력 불필요 상품 카드 (082) — 확인 화면·요약 공통. 고를 것이 없으니 이름·수량과 배지만. */
+  function _noInputProductCard(p) {
+    return '<div class="surface p-4 mb-2">'
+      + '<div class="flex items-center justify-between gap-2">'
+      +   '<h4 class="text-[14px] font-bold text-slate-900">' + esc(p.product_name || '상품') + ' <span class="text-[11px] font-medium text-slate-400">(수량 ' + (Number(p.quantity) || 1) + ')</span></h4>'
+      +   '<span class="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">입력 불필요</span>'
+      + '</div>'
+      + '</div>';
+  }
+
+  /** 입력할 정보가 없는 주문 안내 화면 (082) — 상품 목록 + 주문번호, 목록이 있으면 돌아가기 버튼. */
+  function fillNoInputScreen() {
+    const products = orderData?.products || [];
+    const list = document.getElementById('noInputProducts');
+    if (list) list.innerHTML = products.map(function(p) {
+      return '<div class="flex justify-between gap-3"><span class="text-slate-700 font-medium">' + esc(p.product_name || '상품') + '</span><span class="text-slate-500 shrink-0">' + (Number(p.quantity) || 1) + '개</span></div>';
+    }).join('');
+    const num = document.getElementById('noInputOrderNum');
+    if (num) num.textContent = orderData?.order_number || '';
+    const goList = document.getElementById('noInputGoListBtn');
+    if (goList) goList.classList.toggle('hidden', !(lastLoadedOrders && lastLoadedOrders.length >= 1));
   }
 
   function showError(msg) {
@@ -1485,6 +1524,7 @@
   function _step0HasAnyContent() {
     const products = orderData?.products || [];
     return products.some(p => {
+      if (p.input_required === false) return false;   // 입력 불필요 상품 (082) — 고를 것이 없다
       const code = p.product_code;
       const stickers = getStickersForProduct(code);
       const boxes = getBoxOptionsForProduct(code);
@@ -1550,6 +1590,7 @@
         for (let i = 0; i < products.length; i++) {
           const ps = formState.products[String(i)] || {};
           const productCode = products[i].product_code;
+          if (products[i].input_required === false) continue;   // 입력 불필요 상품 (082)
 
           // 박스 옵션이 노출되는 상품은 박스 선택 필수 (품절 옵션은 invalid)
           const boxOptions = getBoxOptionsForProduct(productCode);
@@ -2055,6 +2096,7 @@
     const products = orderData?.products || [];
 
     var cardsHtml = products.map(function(p, i) {
+      if (p.input_required === false) return '';   // 입력 불필요 상품 (082) — 카드를 그리지 않는다
       var idx = String(i);
       var ps = formState.products[idx] || {};
       var productCode = p.product_code || '';
@@ -2498,6 +2540,7 @@
     const expressFee = formState.shipping_type === 'express' ? getExpressFee() : 0;
 
     var productsHtml = products.map(function(p, i) {
+      if (p.input_required === false) return _noInputProductCard(p);   // 입력 불필요 상품 (082)
       var idx = String(i);
       var ps = formState.products[idx] || {};
       var matching = getStickersForProduct(p.product_code);
@@ -3572,6 +3615,7 @@
         product_code: p.product_code,
         product_name: p.product_name,
         quantity: p.quantity,
+        input_mode: p.input_required === false ? 'not_required' : 'customer',   // 082 — 정보입력현황 '입력 불필요' 판정용
         desired_ship_date: productShipDate,
         shipping_type: productShipType,            // 'express' | 'normal'
         is_express: productShipType === 'express',
@@ -4280,6 +4324,7 @@
     });
 
     const productBlocks = products.map(function(p) {
+      if (p.input_required === false) return _noInputProductCard(p);   // 입력 불필요 상품 (082)
       const code = p.product_code || '';
       const s = selsByCode[code] || {};
       // 저장 데이터: sticker_id + sticker_name (sticker_code 는 없음).
@@ -4543,6 +4588,15 @@
           goListBtn.classList.toggle('hidden', !showBtn);
         }
         showScreen('paymentPendingScreen');
+        return;
+      }
+
+      // 고객 정보입력이 필요 없는 상품만 있는 주문 (082, 샘플세트 등) — 입력 화면 대신 안내만.
+      //   정보입력현황이 자동으로 입력완료 처리하므로 고객이 할 일이 없다. 이미 스텁이 있어도 요약 대신 이 화면.
+      if (orderData.customer_input_required === false) {
+        fillNoInputScreen();
+        showScreen('noInputScreen');
+        window.scrollTo({ top: 0 });
         return;
       }
 
