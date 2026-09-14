@@ -73,6 +73,9 @@ function autoAdvanceNoStickerSelections(selections, by = 'system:no-sticker') {
     if (!sel) return sel;
     // 스티커 ID 또는 코드 둘 다 빈 값일 때만 스티커 없음으로 간주
     if (!isEmptyStickerValue(sel.sticker_code) || !isEmptyStickerValue(sel.sticker_id)) return sel;
+    // 고객 정보입력 불필요 상품(샘플세트, 082)은 스티커 매핑이 없어도 고정 스티커가 붙어 제본이 필요하다 —
+    //   세트 하나에 여러 상품 스티커가 들어가 코드 하나로 못 적는다 (쿠팡 호두정과·비타민과 같은 형태, 2026-09-14).
+    if (sel.input_mode === 'not_required') return sel;
     return {
       ...sel,
       sticker_completed_at: sel.sticker_completed_at || now,
