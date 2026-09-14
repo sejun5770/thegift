@@ -561,12 +561,6 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         // 고객 정보입력 불필요 상품 (082) — 샘플세트처럼 희망출고일·스티커 없이 일반 부가상품처럼 주문되는 상품.
         //   고객 화면은 이 상품을 입력 대상에서 빼고, 이런 상품만 있는 주문은 입력 화면 대신 안내만 보여준다.
         p.input_required = ps?.customer_input_required !== false;
-        if (!p.input_required) {
-          // 고정 스티커 — 스티커가 없는 게 아니라 정해진 스티커를 붙여 나간다 (2026-09-14 운영 확인).
-          //   상품에 매핑한 스티커 목록의 첫 번째. 매핑이 없으면 스티커 없음.
-          const fixed = stickersByProduct[p.product_code][0] || null;
-          p.fixed_sticker = fixed ? { id: fixed.id, name: fixed.name, sticker_code: fixed.sticker_code || null } : null;
-        }
         // 커스텀 안내 텍스트 (migration 034) — 관리자 입력. 빈 문자열은 null 로 정규화.
         const guideText = (ps?.custom_guide_text || '').trim();
         customGuideByProduct[p.product_code] = guideText || null;
@@ -2062,7 +2056,6 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const body = await parseBody(req);
       const orders = Array.isArray(body.orders) ? body.orders.slice(0, 200) : [];
       const created = [], skipped = [];
-      let stickerById = null;   // 고정 스티커 조회용 — 필요할 때 한 번만
       for (const o of orders) {
         const orderId = String(o?.order_id || '').trim();
         const products = Array.isArray(o?.products) ? o.products.filter(p => p && p.product_code) : [];
@@ -2070,29 +2063,25 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         if (await store.getCustomerInfo(orderId)) { skipped.push({ order_id: orderId, reason: 'exists' }); continue; }
         // 서버가 다시 판정한다 — 클라이언트의 상품설정 캐시가 낡았을 수 있다. 하나라도 입력이 필요하면 만들지 않는다.
         let firstPs = null, allNoInput = true;
-        const psByCode = {};
         for (const p of products) {
           const ps = await lookupProductSettings(p.product_code);
           if (!ps || ps.customer_input_required !== false) { allNoInput = false; break; }
           if (!firstPs) firstPs = ps;
-          psByCode[p.product_code] = ps;
         }
         if (!allNoInput) { skipped.push({ order_id: orderId, reason: 'input_required' }); continue; }
         const cfg = await store.getShippingConfig(firstPs.shipping_group_id || null).catch(() => null);
         const shipDate = nextBusinessDay(o.order_date, cfg);
-        // 고정 스티커 — 매핑한 스티커 목록의 첫 번째 (고객 화면 products[].fixed_sticker 와 같은 규칙). 없으면 스티커 없음.
-        if (!stickerById) stickerById = new Map((await store.getAllStickers(true)).map(s => [s.id, s]));
-        const fixedFor = p => ((psByCode[p.product_code]?.available_sticker_ids) || []).map(id => stickerById.get(id)).find(Boolean) || null;
         const info = await store.saveCustomerInfo(orderId, {
           is_express: false, express_fee: 0, desired_ship_date: shipDate,
-          sticker_selections: products.map(p => { const st = fixedFor(p); return {
+          sticker_selections: products.map(p => ({
             product_code: String(p.product_code), product_name: String(p.product_name || ''), quantity: Number(p.quantity) || 0,
             desired_ship_date: shipDate, shipping_type: 'normal', is_express: false, shipping_group_id: null,
-            // sticker_input 'none' + 스티커 = 입력안함(정해진 문구) — 고객 화면 규칙과 같다
-            sticker_id: st ? st.id : null, sticker_name: st ? st.name : null, sticker_code: st ? (st.sticker_code || null) : null, sticker_input: 'none', custom_values: {},
+            // 스티커 매핑 없음 — 세트 하나에 여러 상품 스티커가 들어가 코드 하나로 못 적는다. 고정 스티커가 붙어 제본은
+            //   필요하므로 autoAdvanceNoStickerSelections 가 input_mode 를 보고 자동 제본완료에서 뺀다.
+            sticker_id: null, sticker_name: null, sticker_input: 'none', custom_values: {},
             box_code: null, box_name: null, custom_options: {},
-            input_mode: 'not_required',   // 정보입력현황 '입력 불필요' 배지의 근거
-          }; }),
+            input_mode: 'not_required',   // 정보입력현황 '입력 불필요' 배지 + 자동 제본완료 제외의 근거
+          })),
           cash_receipt_yn: false, receipt_type: null, receipt_number: null, customer_request: null,
         });
         created.push(info);

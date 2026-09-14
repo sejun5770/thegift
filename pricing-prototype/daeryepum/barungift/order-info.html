@@ -1431,8 +1431,7 @@
     const product = (orderData?.products || [])[i];
     const productCode = product?.product_code || '';
     // 입력 불필요 상품 (082) — 스티커·박스·옵션 모두 비운다 (화면에도 안 나온다)
-    //   스티커는 정해진 것(fixed_sticker)을 그대로 — 입력안함 모드라 문구는 받지 않는다.
-    if (product?.input_required === false) return { sticker_type: product.fixed_sticker?.id || null, sticker_input: 'none', sticker_fields: {}, box_code: null, custom_options: {} };
+    if (product?.input_required === false) return { sticker_type: null, sticker_input: 'none', sticker_fields: {}, box_code: null, custom_options: {} };
     const matching = getStickersForProduct(productCode);
     const firstStickerId = (matching && matching.length > 0) ? matching[0].id : null;
     const boxOptions = getBoxOptionsForProduct(productCode);
@@ -1488,7 +1487,6 @@
       +   '<h4 class="text-[14px] font-bold text-slate-900">' + esc(p.product_name || '상품') + ' <span class="text-[11px] font-medium text-slate-400">(수량 ' + (Number(p.quantity) || 1) + ')</span></h4>'
       +   '<span class="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">입력 불필요</span>'
       + '</div>'
-      + (p.fixed_sticker ? '<div class="flex justify-between items-center text-sm mt-2"><span class="text-slate-500">' + esc(getDecorationLabelForProduct(p.product_code || '')) + '</span><span class="text-slate-900 font-medium">' + esc(p.fixed_sticker.name || '') + ' <span class="text-slate-400 text-[11px]">고정</span></span></div>' : '')
       + '</div>';
   }
 
@@ -1497,9 +1495,7 @@
     const products = orderData?.products || [];
     const list = document.getElementById('noInputProducts');
     if (list) list.innerHTML = products.map(function(p) {
-      return '<div class="flex justify-between gap-3"><span class="text-slate-700 font-medium">' + esc(p.product_name || '상품')
-        + (p.fixed_sticker ? '<span class="block text-[11px] text-slate-400 font-normal">' + esc(getDecorationLabelForProduct(p.product_code || '')) + ' ' + esc(p.fixed_sticker.name || '') + ' (고정)</span>' : '')
-        + '</span><span class="text-slate-500 shrink-0">' + (Number(p.quantity) || 1) + '개</span></div>';
+      return '<div class="flex justify-between gap-3"><span class="text-slate-700 font-medium">' + esc(p.product_name || '상품') + '</span><span class="text-slate-500 shrink-0">' + (Number(p.quantity) || 1) + '개</span></div>';
     }).join('');
     const num = document.getElementById('noInputOrderNum');
     if (num) num.textContent = orderData?.order_number || '';
@@ -3662,12 +3658,15 @@
       shipping_by_group: isMultiShipping ? (formState.shipping_by_group || {}) : null, // 멀티 그룹 메타데이터 (감사/표시용)
       products: productInputs,
       sticker_selections: productInputs
-        // 스티커 OR 박스 OR 자유옵션 OR 로고 어느 하나라도 있으면 선택 row 로 남김
-        .filter(function(pi){ return pi.sticker_id || pi.box_code || pi.logo_url || (pi.custom_options && Object.keys(pi.custom_options).length > 0); })
+        // 스티커 OR 박스 OR 자유옵션 OR 로고 어느 하나라도 있으면 선택 row 로 남김.
+        //   입력 불필요 상품(082)도 남긴다 — 고정 스티커가 붙어 제본이 필요해 자기 행이 있어야 하고, 수집완료 때
+        //   자동 제본완료에서 빠지려면 input_mode 가 저장돼야 한다.
+        .filter(function(pi){ return pi.input_mode === 'not_required' || pi.sticker_id || pi.box_code || pi.logo_url || (pi.custom_options && Object.keys(pi.custom_options).length > 0); })
         .map(function(pi){ return {
           product_code: pi.product_code,
           product_name: pi.product_name,
           quantity: pi.quantity,
+          input_mode: pi.input_mode,                    // 'not_required' | 'customer' (082)
           desired_ship_date: pi.desired_ship_date,      // 상품별 출고일 (멀티 그룹 시 그룹마다 다를 수 있음)
           is_express: pi.is_express,                    // 상품별 빠른출고 여부
           shipping_group_id: pi.shipping_group_id,      // 상품의 출고일 그룹 (멀티 그룹 식별용, single=null)
