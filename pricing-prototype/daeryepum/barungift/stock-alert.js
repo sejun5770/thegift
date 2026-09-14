@@ -472,6 +472,7 @@ function scheduleDailyStockAlert(baseUrl) {
 
 module.exports = {
   slackConfigured,
+  postToSlack,
   loadAlertConfig,
   invalidateAlertConfig,
   canThread,

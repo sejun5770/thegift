@@ -841,6 +841,7 @@ async function giftResolveSites(orderIds) {
       for (const r of rs.recordset) {
         put(r.oid, {
           site: formatSiteName(r.site) || '',
+          source: 'mall',   // 사내 DB(custom_order·CUSTOM_ETC_ORDER) = 바른손카드·바른손몰(제휴 B2B 포함)
           orderer_name: (r.order_name || '').trim(),
           orderer_phone: (r.order_hphone || '').trim(),
           recv_name: (r.recv_name || '').trim(),
@@ -880,6 +881,7 @@ async function giftResolveSites(orderIds) {
       const v = String(row.vendor_name || '').trim();
       return {
         site: (!v || v === '혼합') ? BG_SITE_OWN : BG_SITE_VENDOR,
+        source: 'thegift',
         orderer_name: (row.order_name || '').trim(),
         orderer_phone: (row.order_hphone || '').trim(),
         recv_name: (row.recv_name || '').trim(),
@@ -891,13 +893,13 @@ async function giftResolveSites(orderIds) {
     ids => `${REST}/coupang_orders?select=coupang_order_id,is_rocket_growth&coupang_order_id=in.(${ids.join(',')})&limit=20000`,
     row => row.coupang_order_id,
     // 오픈마켓은 주문자 연락처가 마스킹돼 우리 DB 에 없다 → 시트(수령인) 번호를 그대로 쓴다.
-    row => ({ site: row.is_rocket_growth ? '쿠팡 로켓그로스' : '쿠팡', orderer_name: '', orderer_phone: '', recv_name: '' }));
+    row => ({ site: row.is_rocket_growth ? '쿠팡 로켓그로스' : '쿠팡', source: 'coupang', orderer_name: '', orderer_phone: '', recv_name: '' }));
 
   // 네이버 — 시트에 적히는 값은 상품주문번호(product_order_id).
   await fill('네이버', remaining(), 200,
     ids => `${REST}/naver_orders?select=product_order_id,store_id&product_order_id=in.(${encodeURIComponent(ids.map(x => `"${x.replace(/"/g, '')}"`).join(','))})&limit=20000`,
     row => row.product_order_id,
-    row => ({ site: naverSiteLabel(row.store_id), orderer_name: '', orderer_phone: '', recv_name: '' }));
+    row => ({ site: naverSiteLabel(row.store_id), source: 'naver', orderer_name: '', orderer_phone: '', recv_name: '' }));
 
   return map;
 }
@@ -1130,6 +1132,7 @@ async function giftSmsRows(gid) {
   for (const r of rows) {
     const meta = metaMap.get(r.order_id) || null;
     r.site_name = meta ? meta.site : '';
+    r.source = meta ? (meta.source || '') : '';   // mall | thegift | coupang | naver | '' (미확인)
     r.orderer_name = meta ? meta.orderer_name : '';
     r.recv_name = meta ? meta.recv_name : '';
     const op = meta ? _giftNormPhone(meta.orderer_phone) : null;
@@ -16219,6 +16222,50 @@ const server = http.createServer(async (req, res) => {
           res.end(JSON.stringify({ error: e.message }));
           return;
         }
+      } else if (pathname === '/api/sms-auto/config' && (req.method === 'GET' || req.method === 'PUT')) {
+        // 출고안내문자 자동 발송 설정 (083) — 사용/시각/시트/슬랙 채널. 마지막 실행 결과도 함께 준다.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          if (req.method === 'PUT') {
+            const body = await _smsAutoReadBody(req);
+            const patch = {};
+            if ('enabled' in body) patch.sms_auto_enabled = body.enabled == null ? null : !!body.enabled;
+            if ('time' in body) {
+              const t = String(body.time || '').trim();
+              if (t && !/^([01]?\d|2[0-3]):[0-5]\d$/.test(t)) throw new Error('발송 시각은 HH:MM 형식이어야 합니다 (예: 19:00)');
+              patch.sms_auto_time = t || null;
+            }
+            if ('sheet' in body) patch.sms_auto_sheet = String(body.sheet || '').trim() || null;
+            if ('channel' in body) patch.sms_auto_slack_channel = String(body.channel || '').trim() || null;
+            const saved = await _bgStore.updateSiteSettings(patch, session?.email || null);
+            smsAuto.invalidateConfig();
+            if (saved && saved._skipped_column) throw new Error(saved._warning);
+          }
+          const cfg = await smsAuto.loadConfig();
+          let sheets = [];
+          try { sheets = (await giftSheetTabs()).sheets || []; } catch (e) { console.warn('[sms-auto] 시트 목록 조회 실패:', e.message); }
+          const { wanted, tab } = smsAuto.resolveSheet(sheets, cfg.sheet, smsAuto.kstToday());
+          data = { config: cfg, resolved_sheet: { name: wanted, gid: tab ? tab.gid : null, found: !!tab }, sheets: sheets.map(s => s.name), last_run: smsAuto.getLastRun(), slack_configured: require('./barungift/stock-alert').slackConfigured() };
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/sms-auto/run' && req.method === 'POST') {
+        // 지금 실행 — dry_run 이면 대상만 고른다 (문자·슬랙 없음). 아니면 실발송 + 슬랙 리포트.
+        if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
+          return denyForbidden(res, 'admin/operator 필요');
+        }
+        try {
+          const body = await _smsAutoReadBody(req);
+          data = await smsAuto.run(smsAutoDeps(), { dryRun: !!body.dry_run });
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message, summary: e.summary || null }));
+          return;
+        }
       } else if (pathname === '/api/orders/missed-collect' && req.method === 'GET') {
         // 주문수집 누락 점검 — 수집완료 주문이 희망출고월 시트에 등록됐는지 대조.
         if (!isSuperAdmin(session) && !(await hasRole(session, ['admin', 'operator']))) {
@@ -17246,6 +17293,40 @@ const server = http.createServer(async (req, res) => {
  *
  * 외부 크론을 따로 걸었다면 COUPANG_AUTO_SYNC_DISABLED=1 로 끄면 된다.
  */
+// ── 출고안내문자 자동 발송 (083) — 시트 읽기는 이 파일의 함수, 발송은 기존 API 를 내부 토큰으로 호출 ──
+const smsAuto = require('./barungift/sms-auto');
+function _smsAutoReadBody(req) {
+  return new Promise((resolve, reject) => {
+    let raw = ''; req.on('data', c => raw += c);
+    req.on('end', () => { try { resolve(JSON.parse(raw || '{}')); } catch (e) { reject(e); } });
+    req.on('error', reject);
+  });
+}
+function smsAutoDeps() {
+  const base = `http://localhost:${PORT}${BASE_PATH || ''}`;
+  return {
+    giftSheetTabs,
+    giftSmsRows,
+    // [문자 바로 발송] 과 같은 경로 — 검증·중복 방지·이력이 같다. 50건씩 나눠 보낸다.
+    async sendRows(rows) {
+      const results = [];
+      for (let i = 0; i < rows.length; i += 50) {
+        const chunk = rows.slice(i, i + 50).map(r => ({ order_id: r.order_id, name: r.name, phone: r.phone, ship_date: r.ship_date, invoice: r.invoice }));
+        const res = await fetch(`${base}/api/bg/sms/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-internal-token': INTERNAL_TOKEN },
+          body: JSON.stringify({ rows: chunk, force: false }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok || d.error) throw new Error(d.error || `문자 발송 API HTTP ${res.status}`);
+        results.push(...(d.results || []));
+      }
+      return results;
+    },
+    postToSlack: (text, opt) => require('./barungift/stock-alert').postToSlack(text, opt),
+  };
+}
+
 function scheduleCoupangSync(baseUrl) {
   if (process.env.COUPANG_AUTO_SYNC_DISABLED === '1') {
     console.log('[coupang auto-sync] 비활성 (COUPANG_AUTO_SYNC_DISABLED=1)');
@@ -17468,6 +17549,8 @@ server.listen(PORT, '0.0.0.0', () => {
   // 재고 데일리 슬랙 알림 — BG_STOCK_ALERT_ENABLED=1 일 때만 등록
   require('./barungift/stock-alert')
     .scheduleDailyStockAlert(`http://localhost:${PORT}${BASE_PATH || ''}`);
+  // 출고안내문자 자동 발송 (083) — 매일 지정 시각, 설정은 문자발송 화면
+  smsAuto.scheduleDaily(smsAutoDeps());
   scheduleCoupangSync(`http://localhost:${PORT}${BASE_PATH || ''}`);
   scheduleNaverConfirmBackfill();
   scheduleCoupangConfirmBackfill();
