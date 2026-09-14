@@ -1914,12 +1914,16 @@ function normSharedOptionGroups(src) {
 async function updateSiteSettings(patch, updatedBy = null) {
   if (!USE_SUPABASE) throw new Error('Supabase 미설정 — 사이트 설정 저장 불가');
   const allowed = ['custom_guide_title', 'custom_guide_text', 'sms_ship_template',
-                   'stock_alert_channel', 'stock_alert_time'];   // migration 049
+                   'stock_alert_channel', 'stock_alert_time',    // migration 049
+                   'sms_auto_time', 'sms_auto_sheet', 'sms_auto_slack_channel'];   // migration 083 (문자 자동 발송)
   const clean = {};
   for (const k of allowed) if (k in patch) clean[k] = patch[k] == null ? null : String(patch[k]);
   // boolean 은 문자열 변환하면 안 됨
   if ('stock_alert_enabled' in patch) {
     clean.stock_alert_enabled = patch.stock_alert_enabled == null ? null : !!patch.stock_alert_enabled;
+  }
+  if ('sms_auto_enabled' in patch) {
+    clean.sms_auto_enabled = patch.sms_auto_enabled == null ? null : !!patch.sms_auto_enabled;
   }
   // 메시지 구성 (074) — 모르는 키·이상값은 버린다. 잘못 저장돼도 발송이 깨지면 안 된다.
   if ('stock_alert_format' in patch) {
@@ -1953,13 +1957,13 @@ async function updateSiteSettings(patch, updatedBy = null) {
     // 073/074 마이그레이션 전에는 새 컬럼이 없어 PGRST204 가 난다. 그 컬럼만 빼고
     // 다시 저장한다 — 새 기능 하나 때문에 채널·시각 저장까지 막히면 안 된다.
     const m = /Could not find the '([a-z_]+)' column/.exec(err.message || '');
-    if (m && ['stock_alert_format', 'stock_alert_warn_days', 'shared_option_groups'].includes(m[1]) && m[1] in clean) {
+    if (m && ['stock_alert_format', 'stock_alert_warn_days', 'shared_option_groups', 'sms_auto_enabled', 'sms_auto_time', 'sms_auto_sheet', 'sms_auto_slack_channel'].includes(m[1]) && m[1] in clean) {
       delete clean[m[1]];
       const retried = Object.keys(clean).some(k => !['updated_at', 'updated_by'].includes(k))
         ? ((await sbUpdate('bg_site_settings', 'id=eq.1', clean)) || (await sbInsert('bg_site_settings', { id: 1, ...clean })))
         : { id: 1 };
       return { ...retried, _skipped_column: m[1],
-        _warning: `${m[1]} 컬럼이 아직 없습니다 — 해당 설정은 저장되지 않았습니다. supabase/migrations/${({ stock_alert_format: '074', stock_alert_warn_days: '073', shared_option_groups: '078' })[m[1]] || '0??'}_*.sql 을 실행하세요.` };
+        _warning: `${m[1]} 컬럼이 아직 없습니다 — 해당 설정은 저장되지 않았습니다. supabase/migrations/${({ stock_alert_format: '074', stock_alert_warn_days: '073', shared_option_groups: '078', sms_auto_enabled: '083', sms_auto_time: '083', sms_auto_sheet: '083', sms_auto_slack_channel: '083' })[m[1]] || '0??'}_*.sql 을 실행하세요.` };
     }
     throw err;
   }

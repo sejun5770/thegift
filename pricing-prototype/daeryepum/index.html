@@ -1864,6 +1864,40 @@ nav.nav-loading a[href^="#"] {
       </div>
     </details>
 
+    <!-- 자동 발송 (083) — 매일 지정 시각에 오늘 출고 행 중 바른손카드·바른손몰 주문만 발송 + 슬랙 리포트 -->
+    <details class="ord-sec" id="sms-sec-auto" style="margin-top:10px">
+      <summary>자동 발송 (매일 지정 시각) <span id="sms-auto-badge" style="font-size:12px;color:var(--gray-500);font-weight:400"></span></summary>
+      <div class="ord-sec-body">
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;padding-bottom:6px;cursor:pointer">
+            <input type="checkbox" id="sms-auto-enabled"> <b>자동 발송 사용</b>
+          </label>
+          <label style="font-size:12px">
+            <span style="color:var(--gray-500);display:block;margin-bottom:3px">발송 시각 (KST)</span>
+            <input type="text" id="sms-auto-time" placeholder="19:00" style="width:80px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+          </label>
+          <label style="font-size:12px">
+            <span style="color:var(--gray-500);display:block;margin-bottom:3px">대상 시트</span>
+            <select id="sms-auto-sheet" style="padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;min-width:180px"></select>
+          </label>
+          <label style="font-size:12px">
+            <span style="color:var(--gray-500);display:block;margin-bottom:3px">리포트 슬랙 채널 (비우면 재고 알림 채널)</span>
+            <input type="text" id="sms-auto-channel" placeholder="예: C09D0T82XU4" style="width:170px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;font-family:monospace">
+          </label>
+          <button class="btn btn-primary" style="padding:5px 12px;font-size:12px;margin-bottom:1px" onclick="saveSmsAutoConfig()">저장</button>
+          <button class="btn" style="padding:5px 12px;font-size:12px;margin-bottom:1px" onclick="runSmsAuto(true)" title="오늘 출고 행 중 발송 대상만 골라 보여줍니다. 문자·슬랙 모두 나가지 않습니다">미리보기 (발송 없음)</button>
+          <button class="btn btn-danger" style="padding:5px 12px;font-size:12px;margin-bottom:1px" onclick="runSmsAuto(false)" title="지정 시각을 기다리지 않고 지금 실발송 + 슬랙 리포트">지금 실행 (실발송)</button>
+          <span id="sms-auto-msg" style="font-size:12px;padding-bottom:6px"></span>
+        </div>
+        <div style="margin-top:8px;font-size:12px;color:var(--gray-500);line-height:1.6">
+          매일 지정 시각에 대상 시트에서 <b>출고일이 오늘</b>인 행을 읽어 <b>바른손카드·바른손몰 주문(사내 DB 에서 찾은 주문)</b>에만 보냅니다 — 더기프트·쿠팡·네이버·미확인 주문은 제외.
+          발송은 [문자 바로 발송] 과 같은 경로라 이미 보낸 주문은 자동으로 건너뜁니다. 결과는 슬랙으로 보고됩니다.
+          '이달 시트 자동' 은 오늘이 속한 월 시트(예: 26년 9월)를 그때그때 고릅니다.
+        </div>
+        <pre id="sms-auto-last" style="margin-top:8px;white-space:pre-wrap;background:#f8fafc;border:1px solid var(--gray-200);border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.6;color:var(--gray-800);display:none"></pre>
+      </div>
+    </details>
+
     <div style="display:flex;align-items:center;gap:12px;margin:10px 0 8px;flex-wrap:wrap;font-size:12px;color:var(--gray-600)">
       <span>표시 <strong id="sms-count" style="color:var(--gray-800)">0</strong>건</span>
       <span>선택 <strong id="sms-selected-count" style="color:var(--gray-800)">0</strong>건</span>
@@ -26456,6 +26490,7 @@ async function initSmsList() {
       `<option value="${esc(sh.gid)}" ${sh.name === want ? 'selected' : ''}>${esc(sh.name)}</option>`).join('');
     if (!sel.value && _smsSheets.length) sel.value = _smsSheets[0].gid;
     loadSmsList();
+    loadSmsAutoConfig();   // 자동 발송 설정 (083)
   } catch (e) {
     sel.innerHTML = '<option value="">시트 목록 실패</option>';
     document.getElementById('sms-tbody').innerHTML =
@@ -26467,6 +26502,78 @@ function _smsDateModeChanged() {
   const mode = document.getElementById('sms-date-mode').value;
   document.getElementById('sms-date').style.display = mode === 'pick' ? '' : 'none';
   renderSmsList();
+}
+
+// ── 출고안내문자 자동 발송 설정 (083) ──
+function _smsAutoFillSheets(names, selected) {
+  const sel = document.getElementById('sms-auto-sheet');
+  const opts = ['<option value="__month__">이달 시트 자동</option>']
+    .concat((names || []).map(n => `<option value="${esc(n)}">${esc(n)}</option>`));
+  sel.innerHTML = opts.join('');
+  sel.value = selected || '__month__';
+  if (sel.value !== (selected || '__month__')) {   // 목록에 없는 이름이 저장돼 있으면 그대로 보여준다
+    sel.insertAdjacentHTML('beforeend', `<option value="${esc(selected)}">${esc(selected)} (목록에 없음)</option>`);
+    sel.value = selected;
+  }
+}
+function _smsAutoRenderLast(last) {
+  const pre = document.getElementById('sms-auto-last');
+  if (!last) { pre.style.display = 'none'; return; }
+  const when = new Date(last.at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour12: false });
+  pre.textContent = `[${last.dry_run ? '미리보기' : '실행'} ${when}]\n` + (last.summary?.text || last.error || '');
+  pre.style.display = 'block';
+}
+async function loadSmsAutoConfig() {
+  try {
+    const r = await fetch(`${API}/api/sms-auto/config`);
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    const c = d.config || {};
+    document.getElementById('sms-auto-enabled').checked = !!c.enabled;
+    document.getElementById('sms-auto-time').value = c.time || '19:00';
+    document.getElementById('sms-auto-channel').value = c.channel_from_db ? c.channel : '';
+    _smsAutoFillSheets(d.sheets, c.sheet);
+    const rs = d.resolved_sheet || {};
+    document.getElementById('sms-auto-badge').textContent = c.enabled
+      ? `매일 ${c.time} · 시트 ${rs.name}${rs.found ? '' : ' (없음!)'}${d.slack_configured ? '' : ' · 슬랙 미설정'}`
+      : '꺼짐';
+    _smsAutoRenderLast(d.last_run);
+  } catch (e) {
+    document.getElementById('sms-auto-badge').textContent = `설정 조회 실패: ${e.message}`;
+  }
+}
+async function saveSmsAutoConfig() {
+  const $m = document.getElementById('sms-auto-msg');
+  $m.textContent = '저장 중…'; $m.style.color = 'var(--gray-500)';
+  try {
+    const r = await fetch(`${API}/api/sms-auto/config`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled: document.getElementById('sms-auto-enabled').checked,
+        time: document.getElementById('sms-auto-time').value,
+        sheet: document.getElementById('sms-auto-sheet').value,
+        channel: document.getElementById('sms-auto-channel').value,
+      }),
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    $m.textContent = '저장됨'; $m.style.color = '#166534';
+    await loadSmsAutoConfig();
+  } catch (e) { $m.textContent = `실패: ${e.message}`; $m.style.color = '#dc2626'; }
+}
+async function runSmsAuto(dryRun) {
+  const $m = document.getElementById('sms-auto-msg');
+  if (!dryRun && !confirm('지금 바로 오늘 출고 행의 바른손카드·바른손몰 주문에 문자를 실발송하고 슬랙에 보고합니다. 이미 보낸 주문은 건너뜁니다. 진행할까요?')) return;
+  $m.textContent = dryRun ? '대상 확인 중…' : '발송 중…'; $m.style.color = 'var(--gray-500)';
+  try {
+    const r = await fetch(`${API}/api/sms-auto/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dry_run: !!dryRun }) });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    $m.textContent = dryRun ? `대상 ${d.targets}건 (오늘 행 ${d.today}건)` : `발송 ${d.send?.sent ?? 0} · 이미 발송 ${d.send?.already ?? 0} · 실패 ${d.send?.failed ?? 0}`;
+    $m.style.color = '#166534';
+    await loadSmsAutoConfig();
+    if (!dryRun) { await _smsLoadHistory(); renderSmsList(); }
+  } catch (e) { $m.textContent = `실패: ${e.message}`; $m.style.color = '#dc2626'; await loadSmsAutoConfig(); }
 }
 
 async function loadSmsList() {
