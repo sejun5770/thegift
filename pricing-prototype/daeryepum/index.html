@@ -1842,6 +1842,14 @@ nav.nav-loading a[href^="#"] {
       <div class="ord-sec-body">
         <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start">
           <div style="flex:1;min-width:280px">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;font-size:12px">
+              <span style="color:var(--gray-500)">본문 종류</span>
+              <select id="sms-tpl-kind" onchange="_smsTplKindChanged(this.value)" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
+                <option value="monthly">답례품 시트 (월별)</option>
+                <option value="custom">커스텀 상품 시트</option>
+              </select>
+              <span style="color:var(--gray-500)">시트마다 따로 저장됩니다 · 커스텀 본문을 비워 두면 답례품 본문을 그대로 씁니다</span>
+            </div>
             <textarea id="sms-tpl-text" rows="7" oninput="_smsTplPreview()"
               style="width:100%;padding:9px 11px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;line-height:1.55;font-family:inherit;resize:vertical"></textarea>
             <div style="margin-top:6px;font-size:12px;color:var(--gray-500);line-height:1.6">
@@ -1876,10 +1884,10 @@ nav.nav-loading a[href^="#"] {
             <span style="color:var(--gray-500);display:block;margin-bottom:3px">발송 시각 (KST)</span>
             <input type="text" id="sms-auto-time" placeholder="19:00" style="width:80px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">
           </label>
-          <label style="font-size:12px">
-            <span style="color:var(--gray-500);display:block;margin-bottom:3px">대상 시트</span>
-            <select id="sms-auto-sheet" style="padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;min-width:180px"></select>
-          </label>
+          <div style="font-size:12px;max-width:340px">
+            <span style="color:var(--gray-500);display:block;margin-bottom:3px">대상 (출고일 = 오늘)</span>
+            <span id="sms-auto-sources" style="color:var(--gray-800)">-</span>
+          </div>
           <label style="font-size:12px">
             <span style="color:var(--gray-500);display:block;margin-bottom:3px">리포트 슬랙 채널 (비우면 재고 알림 채널)</span>
             <input type="text" id="sms-auto-channel" placeholder="예: C09D0T82XU4" style="width:170px;padding:5px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;font-family:monospace">
@@ -1890,9 +1898,8 @@ nav.nav-loading a[href^="#"] {
           <span id="sms-auto-msg" style="font-size:12px;padding-bottom:6px"></span>
         </div>
         <div style="margin-top:8px;font-size:12px;color:var(--gray-500);line-height:1.6">
-          매일 지정 시각에 대상 시트에서 <b>출고일이 오늘</b>인 행을 읽어 <b>바른손카드·바른손몰 주문(사내 DB 에서 찾은 주문)</b>에만 보냅니다 — 더기프트·쿠팡·네이버·미확인 주문은 제외.
-          발송은 [문자 바로 발송] 과 같은 경로라 이미 보낸 주문은 자동으로 건너뜁니다. 결과는 슬랙으로 보고됩니다.
-          '이달 시트 자동' 은 오늘이 속한 월 시트(예: 26년 9월)를 그때그때 고릅니다.
+          매일 지정 시각에 <b>출고일이 오늘</b>인 행을 <b>커스텀 상품 주문시트</b>와 <b>월별 답례품 시트</b>(전월·당월·익월)에서 모두 읽어, <b>바른손카드·바른손몰 주문</b>에만 보냅니다 — 더기프트·쿠팡·네이버·미확인 주문은 제외.
+          본문은 시트 종류별 본문을 쓰고, 이미 발송 여부도 <b>시트 종류별</b>로 봅니다 (커스텀 안내 1번 · 답례품 안내 1번). 결과는 슬랙에 시트 종류별로 보고됩니다.
         </div>
         <pre id="sms-auto-last" style="margin-top:8px;white-space:pre-wrap;background:#f8fafc;border:1px solid var(--gray-200);border-radius:8px;padding:10px 12px;font-size:12px;line-height:1.6;color:var(--gray-800);display:none"></pre>
       </div>
@@ -26464,6 +26471,7 @@ async function saveBgOrderEdit() {
 //   문자 시스템 업로드 양식 매핑: {#이름}=성함 · {#A}=출고일 · {#B}=송장번호
 
 let _smsRows = [];        // 서버에서 받은 원본 행
+let _smsKind = 'monthly';  // 지금 보고 있는 시트 종류 — 'custom'(커스텀 상품 주문시트) | 'monthly'(월별 답례품). 본문·1회 규칙이 종류별이다
 let _smsSheets = [];      // {name, gid}
 let _smsInited = false;
 
@@ -26503,17 +26511,6 @@ function _smsDateModeChanged() {
 }
 
 // ── 출고안내문자 자동 발송 설정 (083) ──
-function _smsAutoFillSheets(names, selected) {
-  const sel = document.getElementById('sms-auto-sheet');
-  const opts = ['<option value="__month__">이달 시트 자동</option>']
-    .concat((names || []).map(n => `<option value="${esc(n)}">${esc(n)}</option>`));
-  sel.innerHTML = opts.join('');
-  sel.value = selected || '__month__';
-  if (sel.value !== (selected || '__month__')) {   // 목록에 없는 이름이 저장돼 있으면 그대로 보여준다
-    sel.insertAdjacentHTML('beforeend', `<option value="${esc(selected)}">${esc(selected)} (목록에 없음)</option>`);
-    sel.value = selected;
-  }
-}
 function _smsAutoRenderLast(last) {
   const pre = document.getElementById('sms-auto-last');
   if (!last) { pre.style.display = 'none'; return; }
@@ -26530,10 +26527,11 @@ async function loadSmsAutoConfig() {
     document.getElementById('sms-auto-enabled').checked = !!c.enabled;
     document.getElementById('sms-auto-time').value = c.time || '19:00';
     document.getElementById('sms-auto-channel').value = c.channel_from_db ? c.channel : '';
-    _smsAutoFillSheets(d.sheets, c.sheet);
-    const rs = d.resolved_sheet || {};
+    const src = d.sources || {};
+    const srcEl = document.getElementById('sms-auto-sources');
+    if (srcEl) srcEl.textContent = [src.custom ? `커스텀: ${src.custom}` : '커스텀 시트 없음', (src.monthly || []).length ? `답례품: ${src.monthly.join(', ')}` : '답례품 시트 없음'].join(' · ');
     document.getElementById('sms-auto-badge').textContent = c.enabled
-      ? `매일 ${c.time} · 시트 ${rs.name}${rs.found ? '' : ' (없음!)'}${d.slack_configured ? '' : ' · 슬랙 미설정'}`
+      ? `매일 ${c.time} · 출고일 기준${d.slack_configured ? '' : ' · 슬랙 미설정'}`
       : '꺼짐';
     _smsAutoRenderLast(d.last_run);
   } catch (e) {
@@ -26549,7 +26547,6 @@ async function saveSmsAutoConfig() {
       body: JSON.stringify({
         enabled: document.getElementById('sms-auto-enabled').checked,
         time: document.getElementById('sms-auto-time').value,
-        sheet: document.getElementById('sms-auto-sheet').value,
         channel: document.getElementById('sms-auto-channel').value,
       }),
     });
@@ -26584,6 +26581,9 @@ async function loadSmsList() {
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
     _smsRows = j.rows || [];
+    _smsKind = j.kind === 'custom' ? 'custom' : 'monthly';
+    // 본문 편집기는 보고 있는 시트 종류의 본문을 보여준다 (편집 중이면 건드리지 않는다)
+    if (document.activeElement !== document.getElementById('sms-tpl-text')) { _smsTplKind = _smsKind; _smsTplShow(true); }
     await _smsLoadHistory();
     renderSmsList();
   } catch (e) {
@@ -26676,22 +26676,44 @@ function _smsFillTemplate(tpl, r) {
     .replace(/\{송장번호\}/g, (r && r.invoice) || '{송장번호}');
 }
 
+let _smsTplKind = 'monthly';                              // 편집기에서 보고 있는 본문 종류
+const _smsTplByKind = { monthly: '', custom: '' };        // 시트 종류별 실제 발송 본문 (커스텀은 비었으면 답례품 본문)
+const _smsTplMeta = { monthly: {}, custom: {} };           // { is_default, inherited }
 async function _smsLoadTemplate() {
   try {
-    const r = await fetch(`${API}/api/bg/sms/template`);
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-    _smsTpl = j.template || '';
-    _smsTplDefault = j.default_template || '';
-    const ta = document.getElementById('sms-tpl-text');
-    if (ta && document.activeElement !== ta) ta.value = _smsTpl;
-    const badge = document.getElementById('sms-tpl-badge');
-    if (badge) badge.textContent = j.is_default ? '(기본 문구)' : '(수정됨)';
-    _smsTplPreview();
+    const [m, c] = await Promise.all(['monthly', 'custom'].map(async k => {
+      const r = await fetch(`${API}/api/bg/sms/template?kind=${k}`);
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      return j;
+    }));
+    _smsTplByKind.monthly = m.template || ''; _smsTplByKind.custom = c.template || '';
+    _smsTplMeta.monthly = { is_default: !!m.is_default, inherited: false };
+    _smsTplMeta.custom = { is_default: !!c.is_default, inherited: !!c.inherited };
+    _smsTplDefault = m.default_template || '';
+    _smsTplShow(true);
   } catch (e) {
     const st = document.getElementById('sms-tpl-status');
     if (st) { st.style.color = '#dc2626'; st.textContent = '본문 불러오기 실패: ' + e.message; }
   }
+}
+/** 편집기에 현재 종류의 본문을 채우고 배지를 갱신. force 가 아니면 입력 중인 내용은 두고 배지만 바꾼다. */
+function _smsTplShow(force) {
+  _smsTpl = _smsTplByKind[_smsTplKind] || '';
+  const sel = document.getElementById('sms-tpl-kind');
+  if (sel) sel.value = _smsTplKind;
+  const ta = document.getElementById('sms-tpl-text');
+  if (ta && (force || document.activeElement !== ta)) ta.value = _smsTpl;
+  const meta = _smsTplMeta[_smsTplKind] || {};
+  const badge = document.getElementById('sms-tpl-badge');
+  if (badge) badge.textContent = `${_smsTplKind === 'custom' ? '커스텀' : '답례품'} · ${meta.inherited ? '(답례품 본문 사용 중)' : meta.is_default ? '(기본 문구)' : '(수정됨)'}`;
+  _smsTplPreview();
+}
+function _smsTplKindChanged(v) {
+  _smsTplKind = v === 'custom' ? 'custom' : 'monthly';
+  const st = document.getElementById('sms-tpl-status');
+  if (st) st.textContent = '';
+  _smsTplShow(true);
 }
 
 function _smsTplPreview() {
@@ -26721,15 +26743,15 @@ async function saveSmsTemplate() {
   try {
     const r = await fetch(`${API}/api/bg/sms/template`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ template: val }),
+      body: JSON.stringify({ template: val, kind: _smsTplKind }),
     });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-    _smsTpl = j.template || '';
-    document.getElementById('sms-tpl-badge').textContent = j.is_default ? '(기본 문구)' : '(수정됨)';
-    st.style.color = '#16a34a'; st.textContent = '저장했습니다 — 이후 발송·엑셀에 적용됩니다';
-    ta.value = _smsTpl;
-    _smsTplPreview();
+    _smsTplByKind[_smsTplKind] = j.template || '';
+    _smsTplMeta[_smsTplKind] = { is_default: !!j.is_default, inherited: !!j.inherited };
+    if (_smsTplKind === 'monthly' && _smsTplMeta.custom.inherited) _smsTplByKind.custom = _smsTplByKind.monthly;   // 커스텀이 답례품 본문을 이어 쓰는 중이면 같이 바뀐다
+    st.style.color = '#16a34a'; st.textContent = `${_smsTplKind === 'custom' ? '커스텀 시트' : '답례품 시트'} 본문을 저장했습니다 — 이후 발송에 적용됩니다`;
+    _smsTplShow(true);
   } catch (e) {
     st.style.color = '#dc2626'; st.textContent = '저장 실패: ' + e.message;
   }
@@ -26758,7 +26780,8 @@ function _smsKey(r) {
 }
 /** 이력 조회 — 신규 키(주문+송장) 우선, 없으면 레거시 키(주문번호만)로 본다.
  *   송장별 기록 이전에 보낸 건은 주문번호로만 남아 있어, 그것도 '발송됨' 으로 인정한다. */
-function _smsHist(r) { return _smsHistoryByOrder[_smsBaseKey(r)] || _smsHistory[_smsKey(r)] || _smsHistory[_smsBaseKey(r)] || null; }
+// by_order = 이 시트 종류 안의 주문 단위 이력 · history[주문#송장] = 같은 출고(시트 종류 무관)
+function _smsHist(r) { return _smsHistoryByOrder[_smsBaseKey(r)] || _smsHistory[_smsKey(r)] || null; }
 /** 이미 1회 이상 발송된 주문 — 송장이 달라도 같은 주문이면 발송 대상에서 제외한다 (2026-09-15 운영 규칙). */
 function _smsAlreadySent(r) { return (_smsHist(r)?.successCount || 0) > 0; }
 
@@ -26780,7 +26803,7 @@ async function _smsLoadHistory() {
     if (!ids.length) { _smsHistory = {}; return; }
     const r = await fetch(`${API}/api/bg/sms/history`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_ids: ids, order_bases: [...new Set(_smsRows.map(_smsBaseKey))] }),
+      body: JSON.stringify({ order_ids: ids, order_bases: [...new Set(_smsRows.map(_smsBaseKey))], sheet_kind: _smsKind }),
     });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
@@ -26816,8 +26839,8 @@ async function sendSmsDirect() {
   const sameOrder = ready.length - already.length - sendable.length;
   if (!sendable.length) { showToast(already.length ? '선택한 주문이 모두 이미 발송된 주문입니다' : '발송 가능한 행이 없습니다'); return; }
   const sample = sendable[0];
-  const sampleMsg = _smsFillTemplate(_smsTpl || _smsTplDefault, sample);
-  const msg = `${sendable.length}건에 출고완료 안내 문자를 발송합니다.` +
+  const sampleMsg = _smsFillTemplate(_smsTplByKind[_smsKind] || _smsTplDefault, sample);
+  const msg = `[${_smsKind === 'custom' ? '커스텀 시트' : '답례품 시트'}] ${sendable.length}건에 출고완료 안내 문자를 발송합니다.` +
     (skipped ? `\n(선택 ${picked.length}건 중 ${skipped}건은 연락처/출고일/송장 미비로 제외)` : '') +
     (already.length ? `\n이미 발송된 주문 ${already.length}건은 제외합니다.` : '') +
     (sameOrder ? `\n같은 주문의 추가 행 ${sameOrder}건은 1건으로 합칩니다.` : '') +
@@ -26836,7 +26859,7 @@ async function sendSmsDirect() {
       btn.textContent = `📨 발송 중 ${Math.min(i + CHUNK, sendable.length)}/${sendable.length}…`;
       const resp = await fetch(`${API}/api/bg/sms/send`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows: chunk }),
+        body: JSON.stringify({ rows: chunk, sheet_kind: _smsKind }),
       });
       const j = await resp.json();
       if (!resp.ok) throw new Error(j.error || `HTTP ${resp.status}`);

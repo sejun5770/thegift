@@ -2352,7 +2352,11 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   //   본문이 80바이트를 넘으면(우리 안내문은 항상 넘는다) API 가 알아서 MMS/RCS 로 보낸다.
   //   비운영 환경은 서버측 allowlist 가드가 있어 고객 실발송이 차단된다.
   // ============================================
-  const SMS_TEMPLATE_CODE = 'SMS_출고완료안내';
+  const SMS_TEMPLATE_CODE = 'SMS_출고완료안내';            // 답례품(월별) 시트 발송 이력 코드
+  const SMS_TEMPLATE_CODE_CUSTOM = 'SMS_출고완료안내_커스텀';   // 커스텀 상품 주문시트 (084)
+  // 시트 종류별 1회 규칙 (2026-09-15): 한 주문은 커스텀 안내 1번, 답례품 안내 1번까지. 이력은 코드로 나눈다.
+  const SMS_KIND_CODE = { monthly: SMS_TEMPLATE_CODE, custom: SMS_TEMPLATE_CODE_CUSTOM };
+  const _smsKindOf = v => (String(v || '') === 'custom' ? 'custom' : 'monthly');
   // 기본 본문 — 운영 확정 문구. 화면에서 수정하면 bg_site_settings.sms_ship_template 에 저장된다.
   const SMS_DEFAULT_TEMPLATE = '안녕하세요,\n{이름}님, 주문 상품이 발송됩니다.\n{출고일}  \nCJ대한통운 {송장번호} \n\n감사합니다. ';
   /** 본문 렌더 — 변수만 치환한다 (임의 코드/HTML 실행 없음). */
@@ -2362,12 +2366,21 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       .replace(/\{출고일\}/g, vars.shipDate)
       .replace(/\{송장번호\}/g, vars.invoice);
   }
-  async function _smsTemplate() {
+  /** 시트 종류별 본문. 커스텀 본문이 비어 있으면 답례품 본문(없으면 기본 문구)을 쓴다. */
+  async function _smsTemplate(kind = 'monthly') {
     try {
       const st = await store.getSiteSettings();
-      const t = st && st.sms_ship_template ? String(st.sms_ship_template).trim() : '';
-      return t || SMS_DEFAULT_TEMPLATE;
+      const monthly = st && st.sms_ship_template ? String(st.sms_ship_template).trim() : '';
+      if (kind === 'custom') {
+        const c = st && st.sms_ship_template_custom ? String(st.sms_ship_template_custom).trim() : '';
+        return c || monthly || SMS_DEFAULT_TEMPLATE;
+      }
+      return monthly || SMS_DEFAULT_TEMPLATE;
     } catch { return SMS_DEFAULT_TEMPLATE; }
+  }
+  async function _smsTemplateInherited(kind) {
+    if (kind !== 'custom') return false;
+    try { const st = await store.getSiteSettings(); return !(st && String(st.sms_ship_template_custom || '').trim()); } catch { return true; }
   }
 
   function _smsConfig() {
@@ -2455,8 +2468,9 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   // GET /api/bg/sms/template — 현재 본문 + 기본 본문
   if (pathname === '/api/bg/sms/template' && method === 'GET') {
     try {
-      const tpl = await _smsTemplate();
-      return json(res, { template: tpl, is_default: tpl === SMS_DEFAULT_TEMPLATE, default_template: SMS_DEFAULT_TEMPLATE });
+      const kind = _smsKindOf(query && query.kind);
+      const tpl = await _smsTemplate(kind);
+      return json(res, { kind, template: tpl, is_default: tpl === SMS_DEFAULT_TEMPLATE, inherited: await _smsTemplateInherited(kind), default_template: SMS_DEFAULT_TEMPLATE });
     } catch (err) { return json(res, { error: err.message }, 500); }
   }
 
@@ -2467,13 +2481,17 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const raw = body.template == null ? '' : String(body.template);
       if (raw.length > 2000) return json(res, { error: '본문은 2000자를 넘을 수 없습니다 (문자 API 제한).' }, 400);
       const updatedBy = req._session?.user?.user_id || req._session?.user?.id || 'admin';
-      await store.updateSiteSettings({ sms_ship_template: raw.trim() || null }, updatedBy);
-      const tpl = await _smsTemplate();
-      logAccess(req, 'sms_template_update', null, { metadata: { length: tpl.length } });
-      return json(res, { template: tpl, is_default: tpl === SMS_DEFAULT_TEMPLATE });
+      const kind = _smsKindOf(body.kind);
+      // 커스텀 본문을 비우면 NULL → 답례품 본문을 이어 쓴다
+      await store.updateSiteSettings({ [kind === 'custom' ? 'sms_ship_template_custom' : 'sms_ship_template']: raw.trim() || null }, updatedBy);
+      const tpl = await _smsTemplate(kind);
+      logAccess(req, 'sms_template_update', null, { metadata: { kind, length: tpl.length } });
+      return json(res, { kind, template: tpl, is_default: tpl === SMS_DEFAULT_TEMPLATE, inherited: await _smsTemplateInherited(kind) });
     } catch (err) {
       // 컬럼 미적용(마이그레이션 077 전)이면 원인을 바로 알 수 있게 안내한다.
-      const msg = /sms_ship_template/.test(err.message || '')
+      const msg = /sms_ship_template_custom/.test(err.message || '')
+        ? '커스텀 본문 저장 컬럼이 아직 없습니다 — 마이그레이션 084 를 실행한 뒤 다시 저장해주세요.'
+        : /sms_ship_template/.test(err.message || '')
         ? '본문 저장 컬럼이 아직 없습니다 — 마이그레이션 077 을 실행한 뒤 다시 저장해주세요.'
         : err.message;
       return json(res, { error: msg }, 400);
@@ -2504,15 +2522,21 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       // 커스텀 시트 1,299행 × (신규 '주문#송장' 키 + 레거시 주문번호 키) 대응
       //   (store 가 150개씩 나눠 조회하므로 개수 자체는 부담이 아니다)
       const ids = Array.isArray(body.order_ids) ? body.order_ids.slice(0, 5000) : [];
-      const map = await store.getSmsSendHistory(ids, SMS_TEMPLATE_CODE);
+      const kind = _smsKindOf(body.sheet_kind);
+      // 같은 출고(주문#송장) 키는 시트 종류와 무관하게 '발송됨' — 두 코드 모두 본다
+      const map = await store.getSmsSendHistory(ids, [SMS_TEMPLATE_CODE, SMS_TEMPLATE_CODE_CUSTOM], { strict: true });
       const history = {};
       for (const [k, v] of map) history[k] = v;
-      // 주문 단위 이력 (송장 무관) — 화면이 '이미 발송된 주문' 을 선택·발송에서 뺀다
+      for (const id of ids) {   // 이력 기록이 실패했던 발송도 보이게
+        const at = _smsRecentSent.get('key:' + id);
+        if (at && !(history[id] && history[id].successCount > 0)) history[id] = { count: 1, successCount: 1, lastSentAt: at };
+      }
+      // 주문 단위 이력은 **그 시트 종류 안에서만** — 커스텀 안내를 받았어도 답례품 안내는 따로 1번 받는다
       const bases = Array.isArray(body.order_bases) ? body.order_bases.slice(0, 5000) : [];
       const byOrder = {};
-      if (bases.length) for (const [k, v] of await store.getSmsSentByOrder(bases, SMS_TEMPLATE_CODE)) byOrder[k] = v;
-      for (const b of bases) {   // 이력 기록이 실패했던 발송도 '발송됨' 으로 보이게
-        const at = _smsRecentSent.get(String(b));
+      if (bases.length) for (const [k, v] of await store.getSmsSentByOrderForKind(bases, SMS_KIND_CODE[kind], SMS_KIND_CODE[kind === 'custom' ? 'monthly' : 'custom'])) byOrder[k] = v;
+      for (const b of bases) {
+        const at = _smsRecentSent.get(kind + ':' + b);
         if (at && !(byOrder[b] && byOrder[b].successCount > 0)) byOrder[b] = { count: 1, successCount: 1, lastSentAt: at };
       }
       return json(res, { history, by_order: byOrder });
@@ -2521,7 +2545,9 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
   // POST /api/bg/sms/send — {rows:[{order_id,name,phone,ship_date,invoice}], force?}
   if (pathname === '/api/bg/sms/send' && method === 'POST') {
-    const rlSms = rlCheck(req, 'sms_send', RL_LIMITS.sms_send);
+    // 컨테이너 내부 자동 발송(시트 종류 × 50건 청크)은 호출 제한에서 뺀다 — 사람 요청만 제한
+    const _internalSms = !!process.env.BG_INTERNAL_TOKEN && req.headers['x-internal-token'] === process.env.BG_INTERNAL_TOKEN;
+    const rlSms = _internalSms ? { allowed: true } : rlCheck(req, 'sms_send', RL_LIMITS.sms_send);
     if (!rlSms.allowed) {
       logAccess(req, 'rate_limited', null, { status_code: 429, metadata: { action: 'sms_send', retry_after: rlSms.retryAfterSec } });
       return rateLimitResponse(res, rlSms);
@@ -2533,6 +2559,9 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       }
       const body = await parseBody(req);
       const rows = Array.isArray(body.rows) ? body.rows : [];
+      const kind = _smsKindOf(body.sheet_kind);   // 한 요청 = 한 시트 종류. 본문·이력 코드가 여기서 정해진다
+      const KIND_CODE = SMS_KIND_CODE[kind];
+      const OTHER_CODE = SMS_KIND_CODE[kind === 'custom' ? 'monthly' : 'custom'];   // 송장 없는 레거시 키 확인용
       if (!rows.length) return json(res, { error: '발송할 행이 없습니다.' }, 400);
       if (rows.length > 50) return json(res, { error: '한 번에 최대 50건까지 발송할 수 있습니다 (화면이 나눠 보냅니다).' }, 400);
 
@@ -2557,14 +2586,14 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         }
       }
 
-      const tpl = await _smsTemplate();
-      logAccess(req, 'sms_send_start', null, { metadata: { count: rows.length, unique: uniqueRows.length } });
+      const tpl = await _smsTemplate(kind);
+      logAccess(req, 'sms_send_start', null, { metadata: { kind, count: rows.length, unique: uniqueRows.length } });
       const results = [...collapsed];
       // 동시 요청 잠금 — 다른 요청이 발송 중인 주문은 건너뛴다. 끝나면 반드시 푼다.
       const claimed = [];
       const claimedRows = [];
       for (const r of uniqueRows) {
-        const b = baseKeyOf(r);
+        const b = kind + ':' + baseKeyOf(r);
         if (_smsInflight.has(b)) { results.push({ order_id: keyOf(r), success: false, duplicate: true, error: '같은 주문을 다른 요청이 발송 중입니다' }); continue; }
         _smsInflight.add(b); claimed.push(b); claimedRows.push(r);
       }
@@ -2572,7 +2601,9 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       // 이력은 **잠금을 잡은 뒤** 읽는다. 먼저 읽으면, 이력을 읽는 사이 앞선 요청이 발송·기록·잠금 해제까지 끝내
       //   이 요청이 옛 이력으로 판단해 다시 보낸다 (2026-09-15 재검증에서 재현). 잠금 후 읽으면 앞선 요청의 기록이 보인다.
       //   레거시 주문번호 키·송장별 키를 모두 본다 (주문 단위). 조회 실패면 예외 → 아무것도 보내지 않는다.
-      const history = claimedRows.length ? await store.getSmsSentByOrder(claimedRows.map(baseKeyOf), SMS_TEMPLATE_CODE) : new Map();
+      const history = claimedRows.length ? await store.getSmsSentByOrderForKind(claimedRows.map(baseKeyOf), KIND_CODE, OTHER_CODE) : new Map();
+      // 같은 출고(주문#송장)는 어느 시트 종류로 보냈든 이미 안내된 것 — 코드와 무관하게 막는다
+      const sameShipment = claimedRows.length ? await store.getSmsSendHistory(claimedRows.map(keyOf), [SMS_TEMPLATE_CODE, SMS_TEMPLATE_CODE_CUSTOM], { strict: true }) : new Map();
       for (const raw of claimedRows) {
         const name = String(raw.name || '').trim();
         const shipDate = String(raw.ship_date || '').trim();
@@ -2586,8 +2617,13 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         if (!/^01[016789]\d{7,8}$/.test(digits) && !isSafeNum) { results.push({ order_id: logKey, success: false, error: '휴대폰 번호 형식 오류' }); continue; }
         if (!/^\d{4}-\d{2}-\d{2}$/.test(shipDate)) { results.push({ order_id: logKey, success: false, error: '출고일 형식 오류 (YYYY-MM-DD)' }); continue; }
         if (!/^[\d-]{9,}$/.test(invoice)) { results.push({ order_id: logKey, success: false, error: '송장번호 형식 오류' }); continue; }
-        const recentAt = _smsRecentSent.get(legacyKey);
-        const dup = history.get(legacyKey) || (recentAt ? { successCount: 1, lastSentAt: recentAt } : null);   // 주문 단위 — 송장이 달라도 이미 보냈으면 제외
+        const recentAt = _smsRecentSent.get(kind + ':' + legacyKey) || _smsRecentSent.get('key:' + logKey);
+        const orderHist = history.get(legacyKey);
+        const shipHist = sameShipment.get(logKey);
+        // 같은 시트 종류에서 주문 단위(송장 달라도) · 또는 같은 출고 · 또는 이 프로세스에서 방금 보낸 건
+        const dup = (orderHist && orderHist.successCount > 0 ? orderHist : null)
+          || (shipHist && shipHist.successCount > 0 ? shipHist : null)
+          || (recentAt ? { successCount: 1, lastSentAt: recentAt } : null);
         if (dup && dup.successCount > 0) {
           results.push({ order_id: logKey, success: false, duplicate: true, error: `이미 발송됨 (${(d => Number.isFinite(d) ? new Date(d + 9 * 3600000).toISOString().replace('T', ' ').slice(0, 16) + ' KST' : String(dup.lastSentAt).slice(0, 16))(Date.parse(dup.lastSentAt))})` });
           continue;
@@ -2638,10 +2674,10 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
           errMsg = e.name === 'TimeoutError' ? '응답 시간 초과 (15초)' : e.message;
         }
         // 이력 기록 — 전화번호는 마지막 4자리만 (개인정보 최소화). tranId 는 KTRCS MSG_ID.
-        if (ok) _smsMarkSent(legacyKey);   // 기록 성공 여부와 무관하게, 이 프로세스에선 다시 보내지 않는다
+        if (ok) { _smsMarkSent(kind + ':' + legacyKey); _smsMarkSent('key:' + logKey); }   // 기록 실패해도 이 프로세스에선 다시 보내지 않는다
         const logRow = {
             order_id: logKey, to_phone: `****${digits.slice(-4)}`,
-            template_code: SMS_TEMPLATE_CODE, message_id: tranId,
+            template_code: KIND_CODE, message_id: tranId,
             success: ok, error_message: errMsg,
           };
         try {

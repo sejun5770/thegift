@@ -16246,8 +16246,9 @@ const server = http.createServer(async (req, res) => {
           const cfg = await smsAuto.loadConfig();
           let sheets = [];
           try { sheets = (await giftSheetTabs()).sheets || []; } catch (e) { console.warn('[sms-auto] 시트 목록 조회 실패:', e.message); }
-          const { wanted, tab } = smsAuto.resolveSheet(sheets, cfg.sheet, smsAuto.kstToday());
-          data = { config: cfg, resolved_sheet: { name: wanted, gid: tab ? tab.gid : null, found: !!tab }, sheets: sheets.map(s => s.name), last_run: smsAuto.getLastRun(), slack_configured: require('./barungift/stock-alert').slackConfigured() };
+          // 출고일 기준 — 오늘 읽을 탭 (커스텀 시트 + 월별 전월·당월·익월)
+          const src = smsAuto.resolveSheets(sheets, smsAuto.kstToday());
+          data = { config: cfg, sources: { custom: src.custom ? src.custom.name : null, monthly: src.monthly.map(t => t.name) }, last_run: smsAuto.getLastRun(), slack_configured: require('./barungift/stock-alert').slackConfigured() };
         } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: e.message }));
@@ -17308,14 +17309,14 @@ function smsAutoDeps() {
     giftSheetTabs,
     giftSmsRows,
     // [문자 바로 발송] 과 같은 경로 — 검증·중복 방지·이력이 같다. 50건씩 나눠 보낸다.
-    async sendRows(rows) {
+    async sendRows(rows, kind = 'monthly') {
       const results = [];
       for (let i = 0; i < rows.length; i += 50) {
         const chunk = rows.slice(i, i + 50).map(r => ({ order_id: r.order_id, name: r.name, phone: r.phone, ship_date: r.ship_date, invoice: r.invoice }));
         const res = await fetch(`${base}/api/bg/sms/send`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-internal-token': INTERNAL_TOKEN },
-          body: JSON.stringify({ rows: chunk }),
+          body: JSON.stringify({ rows: chunk, sheet_kind: kind }),
         });
         const d = await res.json().catch(() => ({}));
         if (!res.ok || d.error) throw new Error(d.error || `문자 발송 API HTTP ${res.status}`);
@@ -17325,8 +17326,11 @@ function smsAutoDeps() {
     },
     postToSlack: (text, opt) => require('./barungift/stock-alert').postToSlack(text, opt),
     // 성공 발송 이력이 있는 주문번호 Set — 이미 발송된 주문 제외용 (템플릿 코드는 api.js SMS_TEMPLATE_CODE 와 같다)
-    async sentOrders(orderIds) {
-      const m = await _bgStore.getSmsSentByOrder(orderIds, 'SMS_출고완료안내');
+    //   시트 종류별 코드 — api.js SMS_KIND_CODE 와 같다 (답례품 SMS_출고완료안내 / 커스텀 SMS_출고완료안내_커스텀)
+    async sentOrders(orderIds, kind = 'monthly') {
+      const own = kind === 'custom' ? 'SMS_출고완료안내_커스텀' : 'SMS_출고완료안내';
+      const other = kind === 'custom' ? 'SMS_출고완료안내' : 'SMS_출고완료안내_커스텀';
+      const m = await _bgStore.getSmsSentByOrderForKind(orderIds, own, other);   // 송장 없는 레거시 키는 두 종류 모두 발송됨
       return new Set([...m].filter(([, v]) => v.successCount > 0).map(([k]) => k));
     },
   };
