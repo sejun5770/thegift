@@ -1902,9 +1902,7 @@ nav.nav-loading a[href^="#"] {
       <span>표시 <strong id="sms-count" style="color:var(--gray-800)">0</strong>건</span>
       <span>선택 <strong id="sms-selected-count" style="color:var(--gray-800)">0</strong>건</span>
       <span id="sms-warn" style="color:#b45309"></span>
-      <label style="display:flex;align-items:center;gap:4px;cursor:pointer" title="이미 발송된 주문도 다시 발송합니다. 고객이 같은 안내를 두 번 받으니 송장이 바뀐 경우 등에만 사용하세요">
-        <input type="checkbox" id="sms-force"> 중복 재발송 허용
-      </label>
+      <span style="color:var(--gray-500)" title="송장이 달라도 같은 주문이면 발송된 것으로 봅니다">이미 발송된 주문은 선택·발송·엑셀에서 제외됩니다</span>
       <div style="flex:1"></div>
       <button class="btn" onclick="copySmsTemplate()" style="padding:5px 12px;font-size:12px" title="문자 시스템에 붙여넣을 메시지 본문을 복사합니다 (출고일={#A}, 송장번호={#B})">메시지 본문 복사</button>
       <button class="btn btn-primary" onclick="downloadSmsExcel()" style="padding:5px 14px;font-size:12px" title="선택된 행(없으면 표시된 전체)을 문자발송 엑셀 업로드 양식으로 다운로드">문자발송 엑셀 다운로드</button>
@@ -26636,7 +26634,7 @@ function renderSmsList() {
     if (!r.invoice_ok) marks.push(`<span style="background:#f3f4f6;color:var(--gray-500);font-size:12px;padding:1px 5px;border-radius:3px">${esc((r.invoice || '송장 없음').slice(0, 12))}</span>`);
     if (!r.order_id) marks.push('<span style="background:#ede9fe;color:#5b21b6;font-size:12px;padding:1px 5px;border-radius:3px" title="시트에 주문번호가 없는 행 (이벤트·단독주문) — 연락처 기준으로 발송 이력을 관리합니다">주문번호 없음</span>');
     return `<tr>
-      <td><input type="checkbox" class="sms-check" data-idx="${i}" onchange="_smsUpdateSelected()"></td>
+      <td><input type="checkbox" class="sms-check" data-idx="${i}"${_smsAlreadySent(r) ? ' disabled title="이미 발송된 주문 — 발송 대상에서 제외됩니다"' : ''} onchange="_smsUpdateSelected()"></td>
       <td style="font-family:monospace">${esc(r.order_id || '-')}</td>
       <td>${r.site_name
         ? esc(r.site_name)
@@ -26660,7 +26658,7 @@ function renderSmsList() {
 }
 
 function _smsToggleAll(cb) {
-  document.querySelectorAll('.sms-check').forEach(c => { c.checked = cb.checked; });
+  document.querySelectorAll('.sms-check:not(:disabled)').forEach(c => { c.checked = cb.checked; });   // 이미 발송된 주문은 선택되지 않는다
   _smsUpdateSelected();
 }
 function _smsUpdateSelected() {
@@ -26760,7 +26758,9 @@ function _smsKey(r) {
 }
 /** 이력 조회 — 신규 키(주문+송장) 우선, 없으면 레거시 키(주문번호만)로 본다.
  *   송장별 기록 이전에 보낸 건은 주문번호로만 남아 있어, 그것도 '발송됨' 으로 인정한다. */
-function _smsHist(r) { return _smsHistory[_smsKey(r)] || _smsHistory[_smsBaseKey(r)] || null; }
+function _smsHist(r) { return _smsHistoryByOrder[_smsBaseKey(r)] || _smsHistory[_smsKey(r)] || _smsHistory[_smsBaseKey(r)] || null; }
+/** 이미 1회 이상 발송된 주문 — 송장이 달라도 같은 주문이면 발송 대상에서 제외한다 (2026-09-15 운영 규칙). */
+function _smsAlreadySent(r) { return (_smsHist(r)?.successCount || 0) > 0; }
 
 function _smsHistBadge(orderId) {
   const h = typeof orderId === 'object' ? _smsHist(orderId) : _smsHistory[orderId];
@@ -26771,6 +26771,7 @@ function _smsHistBadge(orderId) {
   return okPart;
 }
 
+var _smsHistoryByOrder = {};   // 주문번호(또는 PH-연락처) → 주문 단위 발송 이력
 async function _smsLoadHistory() {
   try {
     // 신규 키와 레거시 주문번호 키를 함께 조회한다 (과거 이력은 주문번호로만 남아 있다).
@@ -26778,11 +26779,12 @@ async function _smsLoadHistory() {
     if (!ids.length) { _smsHistory = {}; return; }
     const r = await fetch(`${API}/api/bg/sms/history`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_ids: ids }),
+      body: JSON.stringify({ order_ids: ids, order_bases: [...new Set(_smsRows.map(_smsBaseKey))] }),
     });
     const j = await r.json();
     _smsHistory = (r.ok && j.history) || {};
-  } catch { _smsHistory = {}; }
+    _smsHistoryByOrder = (r.ok && j.by_order) || {};
+  } catch { _smsHistory = {}; _smsHistoryByOrder = {}; }
 }
 
 async function sendSmsDirect() {
@@ -26794,45 +26796,47 @@ async function sendSmsDirect() {
   const ready = picked.filter(r => r.name && r.phone_ok && /^\d{4}-\d{2}-\d{2}$/.test(r.ship_date || '') && r.invoice_ok);
   const skipped = picked.length - ready.length;
   if (!ready.length) { showToast('발송 가능한 행이 없습니다 (연락처/출고일/송장 확인)'); return; }
-  const already = ready.filter(r => (_smsHist(r)?.successCount || 0) > 0);
-  // 중복 재발송 — 체크했을 때만. 실수 방지로 대상이 있으면 한 번 더 묻는다.
-  const force = !!document.getElementById('sms-force')?.checked;
-  const sample = ready[0];
+  // 이미 1회 이상 발송된 주문은 제외 (주문 단위). 같은 주문의 여러 행(박스 분리 등)도 1건만 보낸다.
+  const already = ready.filter(_smsAlreadySent);
+  const seenOrder = new Set();
+  const sendable = ready.filter(r => {
+    if (_smsAlreadySent(r)) return false;
+    const k = _smsBaseKey(r);
+    if (seenOrder.has(k)) return false;
+    seenOrder.add(k); return true;
+  });
+  const sameOrder = ready.length - already.length - sendable.length;
+  if (!sendable.length) { showToast(already.length ? '선택한 주문이 모두 이미 발송된 주문입니다' : '발송 가능한 행이 없습니다'); return; }
+  const sample = sendable[0];
   const sampleMsg = _smsFillTemplate(_smsTpl || _smsTplDefault, sample);
-  let msg = `${ready.length}건에 출고완료 안내 문자를 발송합니다.` +
+  const msg = `${sendable.length}건에 출고완료 안내 문자를 발송합니다.` +
     (skipped ? `\n(선택 ${picked.length}건 중 ${skipped}건은 연락처/출고일/송장 미비로 제외)` : '') +
-    (already.length ? (force
-      ? `
-
-⚠️ 이미 발송된 주문 ${already.length}건을 다시 발송합니다 (고객이 같은 안내를 두 번 받습니다).`
-      : `\n⚠️ 이미 발송된 주문 ${already.length}건은 건너뜁니다.`) : '') +
+    (already.length ? `\n이미 발송된 주문 ${already.length}건은 제외합니다.` : '') +
+    (sameOrder ? `\n같은 주문의 추가 행 ${sameOrder}건은 1건으로 합칩니다.` : '') +
     `\n\n발신번호: 1644-0708\n──── 첫 건 미리보기 ────\n${sampleMsg}\n────────────────\n\n진행할까요?`;
   if (!confirm(msg)) return;
-  if (force && already.length &&
-      !confirm(`재발송 확인 — 이미 발송된 ${already.length}건에 문자를 한 번 더 보냅니다.
-정말 진행할까요?`)) return;
   const btn = document.getElementById('sms-send-btn');
   btn.disabled = true; btn.style.opacity = '.5';
   const CHUNK = 50;
   const total = { sent: 0, duplicate: 0, failed: 0 };
   const failReasons = [];
   try {
-    for (let i = 0; i < ready.length; i += CHUNK) {
-      const chunk = ready.slice(i, i + CHUNK).map(r => ({
+    for (let i = 0; i < sendable.length; i += CHUNK) {
+      const chunk = sendable.slice(i, i + CHUNK).map(r => ({
         order_id: r.order_id, name: r.name, phone: r.phone, ship_date: r.ship_date, invoice: r.invoice,
       }));
-      btn.textContent = `📨 발송 중 ${Math.min(i + CHUNK, ready.length)}/${ready.length}…`;
+      btn.textContent = `📨 발송 중 ${Math.min(i + CHUNK, sendable.length)}/${sendable.length}…`;
       const resp = await fetch(`${API}/api/bg/sms/send`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows: chunk, force }),
+        body: JSON.stringify({ rows: chunk }),
       });
       const j = await resp.json();
       if (!resp.ok) throw new Error(j.error || `HTTP ${resp.status}`);
       total.sent += j.sent || 0; total.duplicate += j.duplicate || 0; total.failed += j.failed || 0;
       (j.results || []).filter(x => !x.success && !x.duplicate).forEach(x => failReasons.push(`${x.order_id}: ${x.error}`));
     }
-    showToast(`문자 발송 완료 — 성공 ${total.sent}${force && already.length ? ` (재발송 ${already.length} 포함)` : ''}`
-      + ` · 중복 건너뜀 ${total.duplicate} · 실패 ${total.failed}`);
+    showToast(`문자 발송 완료 — 성공 ${total.sent}${already.length ? ` · 이미 발송 제외 ${already.length}` : ''}`
+      + ` · 발송 직전 중복 ${total.duplicate} · 실패 ${total.failed}`);
     if (failReasons.length) alert(`실패 ${failReasons.length}건:\n` + failReasons.slice(0, 12).join('\n') + (failReasons.length > 12 ? `\n… 외 ${failReasons.length - 12}건` : ''));
     await _smsLoadHistory();
     renderSmsList();
@@ -26859,8 +26863,12 @@ function copySmsTemplate() {
 function downloadSmsExcel() {
   const rows = _smsFiltered();
   const checkedIdx = [...document.querySelectorAll('.sms-check:checked')].map(c => parseInt(c.dataset.idx));
-  const targets = checkedIdx.length ? checkedIdx.map(i => rows[i]).filter(Boolean) : rows;
-  if (!targets.length) { showToast('다운로드할 행이 없습니다'); return; }
+  const picked = checkedIdx.length ? checkedIdx.map(i => rows[i]).filter(Boolean) : rows;
+  // 엑셀도 문자 시스템으로 발송하는 경로라 같은 규칙 — 이미 발송된 주문은 뺀다
+  const sentOut = picked.filter(_smsAlreadySent).length;
+  const targets = picked.filter(r => !_smsAlreadySent(r));
+  if (!targets.length) { showToast(sentOut ? '대상이 모두 이미 발송된 주문입니다' : '다운로드할 행이 없습니다'); return; }
+  if (sentOut) showToast(`이미 발송된 주문 ${sentOut}건은 엑셀에서 제외했습니다`);
   const bad = targets.filter(r => !r.phone_ok || !r.invoice_ok);
   if (bad.length && !confirm(`연락처/송장 형식이 확인 안 된 행이 ${bad.length}건 포함돼 있습니다. 그대로 내려받을까요?`)) return;
   if (typeof XLSX === 'undefined') { alert('엑셀 라이브러리(SheetJS)가 로드되지 않았습니다. 새로고침 후 재시도해주세요.'); return; }

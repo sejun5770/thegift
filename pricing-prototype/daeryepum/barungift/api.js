@@ -5,6 +5,10 @@ const url = require('url');
 const store = require('./store');
 const { logAccess, getRecentLogs } = require('./audit-log');
 const { check: rlCheck, rateLimitResponse, LIMITS: RL_LIMITS } = require('./rate-limit');
+// 출고안내문자 — 발송 중인 주문(주문번호 단위). 같은 주문을 두 요청이 동시에 보내지 못하게 막는다.
+//   이력은 발송 뒤에 기록되므로, 더블클릭·수동+자동 동시 실행이면 둘 다 '미발송' 으로 보고 보냈다
+//   (2026-09-03 3249996·3250011 같은 분 2회). 프로세스 메모리라 컨테이너 1개 전제.
+const _smsInflight = new Set();
 const signedUrl = require('./signed-url');
 const stockAlert = require('./stock-alert');
 
@@ -2496,7 +2500,11 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const map = await store.getSmsSendHistory(ids, SMS_TEMPLATE_CODE);
       const history = {};
       for (const [k, v] of map) history[k] = v;
-      return json(res, { history });
+      // 주문 단위 이력 (송장 무관) — 화면이 '이미 발송된 주문' 을 선택·발송에서 뺀다
+      const bases = Array.isArray(body.order_bases) ? body.order_bases.slice(0, 5000) : [];
+      const byOrder = {};
+      if (bases.length) for (const [k, v] of await store.getSmsSentByOrder(bases, SMS_TEMPLATE_CODE)) byOrder[k] = v;
+      return json(res, { history, by_order: byOrder });
     } catch (err) { return json(res, { error: err.message }, 400); }
   }
 
@@ -2517,9 +2525,9 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       if (!rows.length) return json(res, { error: '발송할 행이 없습니다.' }, 400);
       if (rows.length > 50) return json(res, { error: '한 번에 최대 50건까지 발송할 수 있습니다 (화면이 나눠 보냅니다).' }, 400);
 
-      // 중복 방지 키 = 주문번호 + 송장번호. 주문번호 없는 행은 연락처 기반 PH- 키.
-      //   한 주문이 상품별로 여러 행이 되는데, 송장이 같으면(합포장) 안내가 하나라 1건만,
-      //   송장이 다르면(박스 분리) 각 송장을 따로 안내해야 한다. 주문번호만으로는 구분이 안 된다.
+      // 기록 키 = 주문번호 + 송장번호 (주문번호 없는 행은 연락처 기반 PH- 키).
+      //   발송 여부 판정은 **주문 단위**다 (2026-09-15 운영 규칙): 이미 1회 이상 발송된 주문은 송장이 달라도
+      //   제외하고, 한 요청 안에서도 같은 주문은 1건만 보낸다. 재발송 허용(force)은 없다.
       const baseKeyOf = r => (String(r.order_id || '').trim()) || ('PH-' + String(r.phone || '').replace(/\D/g, ''));
       const keyOf = r => {
         const inv = String(r.invoice || '').replace(/\D/g, '');
@@ -2527,8 +2535,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       };
       // 이력은 신규 키와 레거시 주문번호 키를 함께 조회한다 — 송장별 기록 이전에 보낸 건은
       //   주문번호로만 남아 있어, 그대로 두면 이미 받은 고객에게 또 나간다.
-      const history = await store.getSmsSendHistory(
-        rows.flatMap(r => [keyOf(r), baseKeyOf(r)]), SMS_TEMPLATE_CODE);
+      const history = await store.getSmsSentByOrder(rows.map(baseKeyOf), SMS_TEMPLATE_CODE);
 
       // 같은 주문·송장 행이 여러 개면(상품 분리) 문자는 한 번만 — 첫 행으로 합친다.
       const collapsed = [];
@@ -2536,8 +2543,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       {
         const seen = new Set();
         for (const r of rows) {
-          const k = keyOf(r);
-          if (seen.has(k)) { collapsed.push({ order_id: k, success: false, duplicate: true, error: '같은 주문·송장 행이 여러 개 — 1건으로 합쳤습니다' }); continue; }
+          const k = baseKeyOf(r);
+          if (seen.has(k)) { collapsed.push({ order_id: keyOf(r), success: false, duplicate: true, error: '같은 주문 행이 여러 개 — 1건만 발송합니다' }); continue; }
           seen.add(k);
           uniqueRows.push(r);
         }
@@ -2546,7 +2553,16 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const tpl = await _smsTemplate();
       logAccess(req, 'sms_send_start', null, { metadata: { count: rows.length, unique: uniqueRows.length } });
       const results = [...collapsed];
-      for (const raw of uniqueRows) {
+      // 동시 요청 잠금 — 다른 요청이 발송 중인 주문은 건너뛴다. 끝나면 반드시 푼다.
+      const claimed = [];
+      const claimedRows = [];
+      for (const r of uniqueRows) {
+        const b = baseKeyOf(r);
+        if (_smsInflight.has(b)) { results.push({ order_id: keyOf(r), success: false, duplicate: true, error: '같은 주문을 다른 요청이 발송 중입니다' }); continue; }
+        _smsInflight.add(b); claimed.push(b); claimedRows.push(r);
+      }
+      try {
+      for (const raw of claimedRows) {
         const name = String(raw.name || '').trim();
         const shipDate = String(raw.ship_date || '').trim();
         const invoice = String(raw.invoice || '').trim();
@@ -2559,8 +2575,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         if (!/^01[016789]\d{7,8}$/.test(digits) && !isSafeNum) { results.push({ order_id: logKey, success: false, error: '휴대폰 번호 형식 오류' }); continue; }
         if (!/^\d{4}-\d{2}-\d{2}$/.test(shipDate)) { results.push({ order_id: logKey, success: false, error: '출고일 형식 오류 (YYYY-MM-DD)' }); continue; }
         if (!/^[\d-]{9,}$/.test(invoice)) { results.push({ order_id: logKey, success: false, error: '송장번호 형식 오류' }); continue; }
-        const dup = history.get(logKey) || history.get(legacyKey);
-        if (dup && dup.successCount > 0 && !body.force) {
+        const dup = history.get(legacyKey);   // 주문 단위 — 송장이 달라도 이미 보냈으면 제외
+        if (dup && dup.successCount > 0) {
           results.push({ order_id: logKey, success: false, duplicate: true, error: `이미 발송됨 (${(d => Number.isFinite(d) ? new Date(d + 9 * 3600000).toISOString().replace('T', ' ').slice(0, 16) + ' KST' : String(dup.lastSentAt).slice(0, 16))(Date.parse(dup.lastSentAt))})` });
           continue;
         }
@@ -2619,6 +2635,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         } catch { /* 로그 실패는 발송 결과에 영향 없음 */ }
         results.push({ order_id: logKey, success: ok, tran_id: tranId, error: errMsg });
       }
+      } finally { claimed.forEach(k => _smsInflight.delete(k)); }
       const sent = results.filter(r => r.success).length;
       const dup = results.filter(r => r.duplicate).length;
       logAccess(req, 'sms_send_done', null, { metadata: { count: rows.length, sent, dup } });

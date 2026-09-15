@@ -17315,7 +17315,7 @@ function smsAutoDeps() {
         const res = await fetch(`${base}/api/bg/sms/send`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-internal-token': INTERNAL_TOKEN },
-          body: JSON.stringify({ rows: chunk, force: false }),
+          body: JSON.stringify({ rows: chunk }),
         });
         const d = await res.json().catch(() => ({}));
         if (!res.ok || d.error) throw new Error(d.error || `문자 발송 API HTTP ${res.status}`);
@@ -17324,6 +17324,11 @@ function smsAutoDeps() {
       return results;
     },
     postToSlack: (text, opt) => require('./barungift/stock-alert').postToSlack(text, opt),
+    // 성공 발송 이력이 있는 주문번호 Set — 이미 발송된 주문 제외용 (템플릿 코드는 api.js SMS_TEMPLATE_CODE 와 같다)
+    async sentOrders(orderIds) {
+      const m = await _bgStore.getSmsSentByOrder(orderIds, 'SMS_출고완료안내');
+      return new Set([...m].filter(([, v]) => v.successCount > 0).map(([k]) => k));
+    },
   };
 }
 
