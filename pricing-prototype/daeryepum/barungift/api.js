@@ -9,6 +9,13 @@ const { check: rlCheck, rateLimitResponse, LIMITS: RL_LIMITS } = require('./rate
 //   이력은 발송 뒤에 기록되므로, 더블클릭·수동+자동 동시 실행이면 둘 다 '미발송' 으로 보고 보냈다
 //   (2026-09-03 3249996·3250011 같은 분 2회). 프로세스 메모리라 컨테이너 1개 전제.
 const _smsInflight = new Set();
+// 이 프로세스에서 발송 성공한 주문 — 이력 기록(Supabase insert)이 실패해도 같은 주문이 다시 나가지 않게 한다.
+//   재시작 전까지 유효. 기록 실패는 1회 재시도 후에도 실패하면 콘솔 오류로 남긴다.
+const _smsRecentSent = new Map();   // 주문 base 키 → 발송 시각(ISO)
+function _smsMarkSent(base) {
+  _smsRecentSent.set(base, new Date().toISOString());
+  if (_smsRecentSent.size > 20000) _smsRecentSent.delete(_smsRecentSent.keys().next().value);
+}
 const signedUrl = require('./signed-url');
 const stockAlert = require('./stock-alert');
 
@@ -2504,6 +2511,10 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       const bases = Array.isArray(body.order_bases) ? body.order_bases.slice(0, 5000) : [];
       const byOrder = {};
       if (bases.length) for (const [k, v] of await store.getSmsSentByOrder(bases, SMS_TEMPLATE_CODE)) byOrder[k] = v;
+      for (const b of bases) {   // 이력 기록이 실패했던 발송도 '발송됨' 으로 보이게
+        const at = _smsRecentSent.get(String(b));
+        if (at && !(byOrder[b] && byOrder[b].successCount > 0)) byOrder[b] = { count: 1, successCount: 1, lastSentAt: at };
+      }
       return json(res, { history, by_order: byOrder });
     } catch (err) { return json(res, { error: err.message }, 400); }
   }
@@ -2533,10 +2544,6 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         const inv = String(r.invoice || '').replace(/\D/g, '');
         return inv ? `${baseKeyOf(r)}#${inv}` : baseKeyOf(r);
       };
-      // 이력은 신규 키와 레거시 주문번호 키를 함께 조회한다 — 송장별 기록 이전에 보낸 건은
-      //   주문번호로만 남아 있어, 그대로 두면 이미 받은 고객에게 또 나간다.
-      const history = await store.getSmsSentByOrder(rows.map(baseKeyOf), SMS_TEMPLATE_CODE);
-
       // 같은 주문·송장 행이 여러 개면(상품 분리) 문자는 한 번만 — 첫 행으로 합친다.
       const collapsed = [];
       const uniqueRows = [];
@@ -2562,6 +2569,10 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         _smsInflight.add(b); claimed.push(b); claimedRows.push(r);
       }
       try {
+      // 이력은 **잠금을 잡은 뒤** 읽는다. 먼저 읽으면, 이력을 읽는 사이 앞선 요청이 발송·기록·잠금 해제까지 끝내
+      //   이 요청이 옛 이력으로 판단해 다시 보낸다 (2026-09-15 재검증에서 재현). 잠금 후 읽으면 앞선 요청의 기록이 보인다.
+      //   레거시 주문번호 키·송장별 키를 모두 본다 (주문 단위). 조회 실패면 예외 → 아무것도 보내지 않는다.
+      const history = claimedRows.length ? await store.getSmsSentByOrder(claimedRows.map(baseKeyOf), SMS_TEMPLATE_CODE) : new Map();
       for (const raw of claimedRows) {
         const name = String(raw.name || '').trim();
         const shipDate = String(raw.ship_date || '').trim();
@@ -2575,7 +2586,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         if (!/^01[016789]\d{7,8}$/.test(digits) && !isSafeNum) { results.push({ order_id: logKey, success: false, error: '휴대폰 번호 형식 오류' }); continue; }
         if (!/^\d{4}-\d{2}-\d{2}$/.test(shipDate)) { results.push({ order_id: logKey, success: false, error: '출고일 형식 오류 (YYYY-MM-DD)' }); continue; }
         if (!/^[\d-]{9,}$/.test(invoice)) { results.push({ order_id: logKey, success: false, error: '송장번호 형식 오류' }); continue; }
-        const dup = history.get(legacyKey);   // 주문 단위 — 송장이 달라도 이미 보냈으면 제외
+        const recentAt = _smsRecentSent.get(legacyKey);
+        const dup = history.get(legacyKey) || (recentAt ? { successCount: 1, lastSentAt: recentAt } : null);   // 주문 단위 — 송장이 달라도 이미 보냈으면 제외
         if (dup && dup.successCount > 0) {
           results.push({ order_id: logKey, success: false, duplicate: true, error: `이미 발송됨 (${(d => Number.isFinite(d) ? new Date(d + 9 * 3600000).toISOString().replace('T', ' ').slice(0, 16) + ' KST' : String(dup.lastSentAt).slice(0, 16))(Date.parse(dup.lastSentAt))})` });
           continue;
@@ -2626,13 +2638,18 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
           errMsg = e.name === 'TimeoutError' ? '응답 시간 초과 (15초)' : e.message;
         }
         // 이력 기록 — 전화번호는 마지막 4자리만 (개인정보 최소화). tranId 는 KTRCS MSG_ID.
-        try {
-          await store.logAlimtalkSend({
+        if (ok) _smsMarkSent(legacyKey);   // 기록 성공 여부와 무관하게, 이 프로세스에선 다시 보내지 않는다
+        const logRow = {
             order_id: logKey, to_phone: `****${digits.slice(-4)}`,
             template_code: SMS_TEMPLATE_CODE, message_id: tranId,
             success: ok, error_message: errMsg,
-          });
-        } catch { /* 로그 실패는 발송 결과에 영향 없음 */ }
+          };
+        try {
+          await store.logAlimtalkSend(logRow);
+        } catch (e1) {
+          try { await store.logAlimtalkSend(logRow); }   // 1회 재시도
+          catch (e2) { console.error(`[sms send] 발송 이력 기록 실패 (${logKey}, 성공=${ok}) — 재시작 전까지는 메모리로 중복을 막습니다:`, e2.message); }
+        }
         results.push({ order_id: logKey, success: ok, tran_id: tranId, error: errMsg });
       }
       } finally { claimed.forEach(k => _smsInflight.delete(k)); }

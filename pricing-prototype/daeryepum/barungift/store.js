@@ -1107,23 +1107,28 @@ async function getSmsSentByOrder(orderBases, templateCode) {
   let rows = [];
   const jsonMatch = r => want.has(baseOf(r.order_id)) && r.template_code === templateCode;
   if (USE_SUPABASE) {
-    let anyFail = false;
-    for (let i = 0; i < bases.length; i += 40) {
-      const chunk = bases.slice(i, i + 40);
-      const q = (s) => encodeURIComponent(String(s).replace(/"/g, ''));
-      const ors = [`order_id.in.(${chunk.map(b => `"${q(b)}"`).join(',')})`]
-        .concat(chunk.map(b => `order_id.like."${q(b)}%23*"`));   // %23 = '#'
-      try {
-        const got = await sbGet('bg_alimtalk_log',
-          `or=(${ors.join(',')})&template_code=eq.${encodeURIComponent(templateCode)}&order=sent_at.desc`);
-        rows.push(...(got || []));
-      } catch (e) {
-        anyFail = true;
-        console.warn(`[store] sms 주문별 이력 조회 실패 (${i}~${i + 40}):`, e.message);
-      }
+    // 40개씩 나눠 4개 청크씩 병렬 조회. **한 청크라도 실패하면 전체를 실패로 본다** — 일부만 읽힌 이력으로
+    //   판정하면 실패한 청크의 주문이 '미발송' 으로 보여 이미 받은 고객에게 또 나간다 (2026-09-15 재검증).
+    const chunks = [];
+    for (let i = 0; i < bases.length; i += 40) chunks.push(bases.slice(i, i + 40));
+    const q = (s) => encodeURIComponent(String(s).replace(/"/g, ''));
+    let failMsg = null;
+    for (let i = 0; i < chunks.length; i += 4) {
+      await Promise.all(chunks.slice(i, i + 4).map(async chunk => {
+        const ors = [`order_id.in.(${chunk.map(b => `"${q(b)}"`).join(',')})`]
+          .concat(chunk.map(b => `order_id.like."${q(b)}%23*"`));   // %23 = '#'
+        try {
+          const got = await sbGet('bg_alimtalk_log',
+            `or=(${ors.join(',')})&template_code=eq.${encodeURIComponent(templateCode)}&order=sent_at.desc`);
+          rows.push(...(got || []));
+        } catch (e) {
+          failMsg = e.message;
+          console.warn('[store] sms 주문별 이력 조회 실패:', e.message);
+        }
+      }));
+      if (failMsg) break;
     }
-    if (anyFail && !rows.length) {
-      // 이력을 못 읽었는데 '발송 안 됨' 으로 보면 이미 받은 고객에게 또 나간다 — 발송을 막는다.
+    if (failMsg) {
       throw new Error('발송 이력을 조회하지 못해 중복 여부를 확인할 수 없습니다 — 잠시 뒤 다시 시도하세요');
     }
   } else {
