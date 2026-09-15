@@ -1,8 +1,8 @@
 /**
  * 출고안내문자 자동 발송 (2026-09-14, migration 083)
  *
- *   매일 지정 시각(기본 19:00 KST)에 지정한 기프트팀 시트(커스텀 주문 시트 / 월별 답례품 시트)에서
- *   출고일이 오늘인 행을 읽어, 바른손카드·바른손몰 주문(사내 DB 에서 찾은 주문)에만 출고완료 안내
+ *   매일 지정 시각(기본 19:00 KST)에 **출고일 기준**으로 — 커스텀 상품 주문시트와 월별 답례품 시트(전월·당월·익월)에서
+ *   출고일이 오늘인 행을 읽어 (2026-09-15 운영 결정, 시트 선택 없음), 바른손카드·바른손몰 주문(사내 DB 에서 찾은 주문)에만 출고완료 안내
  *   문자를 보내고 결과를 슬랙으로 보고한다.
  *
  *   발송은 기존 [문자 바로 발송] 과 같은 경로(POST /api/bg/sms/send)를 컨테이너 내부에서 부른다 —
@@ -61,6 +61,25 @@ function resolveSheet(sheets, setting, ymd) {
   return { wanted, tab };
 }
 
+/** 'YYYY-MM-DD' 기준 delta 개월 뒤 월별 탭 이름 ('26년 10월') */
+function monthNameOffset(ymd, delta) {
+  const d = new Date(Date.UTC(Number(ymd.slice(0, 4)), Number(ymd.slice(5, 7)) - 1 + delta, 1));
+  return `${String(d.getUTCFullYear()).slice(2)}년 ${d.getUTCMonth() + 1}월`;
+}
+/**
+ * 출고일 기준 자동 발송이 읽을 탭 — 커스텀 상품 주문시트 1개 + 월별 답례품 시트(전월·당월·익월).
+ *   월별 탭은 희망출고월 기준이지만 월 착오 등록(수집누락 점검의 '다른 월 시트')이 있어 앞뒤 달도 본다.
+ *   행은 어차피 출고일=오늘로 거른다.
+ */
+function resolveSheets(sheets, ymd) {
+  const norm = s => String(s || '').replace(/\s+/g, '');
+  const custom = (sheets || []).find(t => /커스텀/.test(t.name)) || null;
+  const want = [-1, 0, 1].map(d => norm(monthNameOffset(ymd, d)));
+  const monthly = (sheets || []).filter(t => want.includes(norm(t.name)));
+  return { custom, monthly };
+}
+const KIND_LABEL = { custom: '커스텀 시트', monthly: '답례품 시트' };
+
 /**
  * 오늘 출고 행 중 발송 대상을 고른다.
  *   대상 = 출고일이 오늘 + 사내 DB(바른손카드·바른손몰)에서 찾은 주문 + 이름·연락처·송장이 유효한 행.
@@ -111,24 +130,10 @@ function summarizeSend(results) {
   return out;
 }
 
-/** 슬랙 리포트 본문 (mrkdwn). 개인정보는 넣지 않는다 — 주문번호와 건수만. */
-function buildReport({ ymd, time, sheetName, sheetFound, todayCount, targets, skipped, send, dryRun, error }) {
-  const head = dryRun ? '🧪 *출고안내문자 자동 발송 미리보기* (발송 없음)' : '📨 *출고안내문자 자동 발송*';
-  const lines = [`${head} — ${kstDateLabel(ymd)} ${time} KST`];
-  if (error) { lines.push(`• ⚠️ 실패: ${error}`); return lines.join('\n'); }
-  if (!sheetFound) { lines.push(`• ⚠️ 시트 \`${sheetName}\` 를 찾지 못했습니다 — 문자발송 화면의 시트 목록과 자동 발송 설정을 확인하세요.`); return lines.join('\n'); }
-  lines.push(`• 시트 \`${sheetName}\` · 출고일 ${ymd} 행 ${todayCount}건`);
-  const tCount = targets.length;
-  if (dryRun) {
-    lines.push(`• 바른손카드·바른손몰 발송 대상 *${tCount}건* (이미 발송된 주문은 제외한 수)`);
-  } else if (send) {
-    lines.push(`• 바른손카드·바른손몰 발송 대상 ${tCount}건 → *발송 ${send.sent}* · 실패 ${send.failed}${send.already ? ` · 발송 직전 중복 ${send.already}` : ''}`);
-  } else {
-    lines.push(`• 바른손카드·바른손몰 대상 ${tCount}건`);
-  }
+function _exclusionText(skipped = {}) {
   const ex = [];
   if (skipped.other_channel) {
-    const by = Object.entries(skipped.other_by_site).sort((a, b) => b[1] - a[1]).map(([s, n]) => `${s} ${n}`).join(' · ');
+    const by = Object.entries(skipped.other_by_site || {}).sort((a, b) => b[1] - a[1]).map(([s, n]) => `${s} ${n}`).join(' · ');
     ex.push(`다른 채널 ${skipped.other_channel}${by ? ` (${by})` : ''}`);
   }
   if (skipped.already_sent) ex.push(`이미 발송 ${skipped.already_sent}`);
@@ -137,58 +142,100 @@ function buildReport({ ymd, time, sheetName, sheetFound, todayCount, targets, sk
   if (skipped.no_invoice) ex.push(`송장 없음 ${skipped.no_invoice}`);
   if (skipped.bad_phone) ex.push(`연락처 형식 ${skipped.bad_phone}`);
   if (skipped.no_name) ex.push(`성함 없음 ${skipped.no_name}`);
-  const exTotal = skipped.other_channel + skipped.unknown_order + skipped.no_invoice + skipped.bad_phone + skipped.no_name + (skipped.already_sent || 0) + (skipped.same_order || 0);
-  if (exTotal) lines.push(`• 제외 ${exTotal}건 — ${ex.join(' · ')}`);
-  if (send && send.failures.length) lines.push(`• 실패: ${send.failures.slice(0, 10).join(' / ')}${send.failures.length > 10 ? ` 외 ${send.failures.length - 10}건` : ''}`);
-  if (!tCount && !exTotal) lines.push('• 오늘 출고일로 적힌 행이 없습니다.');
+  const total = ['other_channel', 'already_sent', 'same_order', 'unknown_order', 'no_invoice', 'bad_phone', 'no_name'].reduce((a, k) => a + (skipped[k] || 0), 0);
+  return { total, text: ex.join(' · ') };
+}
+
+/** 슬랙 리포트 본문 (mrkdwn). 개인정보는 넣지 않는다 — 주문번호와 건수만. 시트 종류별로 한 줄씩. */
+function buildReport({ ymd, time, sources, per, dryRun, error }) {
+  const head = dryRun ? '🧪 *출고안내문자 자동 발송 미리보기* (발송 없음)' : '📨 *출고안내문자 자동 발송*';
+  const lines = [`${head} — ${kstDateLabel(ymd)} ${time} KST`];
+  if (error) { lines.push(`• ⚠️ 실패: ${error}`); return lines.join('\n'); }
+  lines.push(`• 출고일 ${ymd} · 바른손카드·바른손몰 주문 · 시트 종류별 1회`);
+  let anyRow = false, anyErr = false;
+  for (const kind of ['custom', 'monthly']) {
+    const label = KIND_LABEL[kind];
+    const names = kind === 'custom' ? (sources && sources.custom ? [sources.custom] : []) : ((sources && sources.monthly) || []);
+    if (!names.length) {
+      lines.push(`• ${label}: 시트를 찾지 못했습니다 ${kind === 'custom' ? "(이름에 '커스텀' 이 들어간 탭)" : `(${monthNameOffset(ymd, -1)} · ${monthNameOffset(ymd, 0)} · ${monthNameOffset(ymd, 1)})`}`);
+      continue;
+    }
+    const p = per && per[kind];
+    if (!p) continue;
+    const sheetText = names.map(n => `\`${n}\``).join(' ');
+    if (p.error) { anyErr = true; lines.push(`• ${label} ${sheetText} — ⚠️ ${p.error} (이 시트 종류는 발송하지 않았습니다)`); continue; }
+    if (p.todayCount) anyRow = true;
+    const t = p.targets.length;
+    let line = `• ${label} ${sheetText} — 오늘 행 ${p.todayCount} · 발송 대상 ${dryRun ? `*${t}건*` : `${t}건`}`;
+    if (!dryRun && p.send) line += ` → *발송 ${p.send.sent}* · 실패 ${p.send.failed}${p.send.already ? ` · 발송 직전 중복 ${p.send.already}` : ''}`;
+    lines.push(line);
+    const ex = _exclusionText(p.skipped);
+    if (ex.total) lines.push(`      제외 ${ex.total} — ${ex.text}`);
+    if (p.send && p.send.failures.length) lines.push(`      실패: ${p.send.failures.slice(0, 10).join(' / ')}${p.send.failures.length > 10 ? ` 외 ${p.send.failures.length - 10}건` : ''}`);
+  }
+  if (!anyRow && !anyErr) lines.push('• 오늘 출고일로 적힌 행이 없습니다.');
   return lines.join('\n');
 }
 
 /**
- * 한 번 실행. deps = { giftSheetTabs, giftSmsRows, sendRows, postToSlack }
+ * 한 번 실행. deps = { giftSheetTabs, giftSmsRows, sentOrders(ids, kind), sendRows(rows, kind), postToSlack }
+ *   출고일 기준 — 커스텀 시트와 월별 답례품 시트를 시트 종류별로 나눠 고르고·제외하고·보낸다.
  *   dryRun 이면 대상만 고르고 문자·슬랙 모두 보내지 않는다 (화면 미리보기용).
+ *   한 시트 종류에서 오류(이력 조회 실패 등)가 나면 그 종류는 보내지 않고, 다른 종류는 자기 이력으로 판단해 진행한다.
  */
 async function run(deps, { dryRun = false, now = new Date() } = {}) {
   if (_running) throw new Error('자동 발송이 이미 실행 중입니다');
   _running = true;
-  const startedAt = new Date().toISOString();
-  const cfg = await loadConfig();
-  const ymd = kstToday(now);
-  const ctx = { ymd, time: cfg.time, sheetName: cfg.sheet === MONTH_AUTO ? monthSheetName(ymd) : cfg.sheet, sheetFound: false, todayCount: 0, targets: [], skipped: {}, send: null, dryRun, error: null };
   try {
-    const { sheets } = await deps.giftSheetTabs();
-    const { wanted, tab } = resolveSheet(sheets, cfg.sheet, ymd);
-    ctx.sheetName = wanted;
-    if (tab) {
-      ctx.sheetFound = true;
-      const data = await deps.giftSmsRows(tab.gid);
-      const sel = selectRows(data.rows || [], ymd);
-      // 이미 1회 이상 발송된 주문 제외 — 미리보기에도 반영해 실제 발송 수와 맞춘다. 이력 조회 실패면 발송하지 않는다.
-      const sentSet = sel.targets.length ? await deps.sentOrders(sel.targets.map(t => t.order_id)) : new Set();
-      const ex = excludeAlreadySent(sel.targets, sentSet);
-      sel.targets = ex.targets; sel.skipped.already_sent = ex.alreadySent; sel.skipped.same_order = ex.sameOrder;
-      ctx.todayCount = sel.todayCount; ctx.targets = sel.targets; ctx.skipped = sel.skipped;
-      if (!dryRun && sel.targets.length) {
-        const results = await deps.sendRows(sel.targets);
-        ctx.send = summarizeSend(results);
-      } else if (!dryRun) {
-        ctx.send = summarizeSend([]);
+    const startedAt = new Date().toISOString();
+    const cfg = await loadConfig();
+    const ymd = kstToday(now);
+    const ctx = { ymd, time: cfg.time, sources: { custom: null, monthly: [] }, per: {}, dryRun, error: null };
+    try {
+      const { sheets } = await deps.giftSheetTabs();
+      const src = resolveSheets(sheets, ymd);
+      ctx.sources = { custom: src.custom ? src.custom.name : null, monthly: src.monthly.map(t => t.name) };
+      for (const kind of ['custom', 'monthly']) {
+        const tabs = kind === 'custom' ? (src.custom ? [src.custom] : []) : src.monthly;
+        if (!tabs.length) continue;
+        const p = { todayCount: 0, targets: [], skipped: {}, send: null, error: null };
+        ctx.per[kind] = p;
+        try {
+          const rows = [];
+          for (const tab of tabs) rows.push(...((((await deps.giftSmsRows(tab.gid)) || {}).rows) || []));
+          const sel = selectRows(rows, ymd);
+          // 이미 발송된 주문 제외 — 그 시트 종류 안에서. 미리보기에도 반영. 이력 조회 실패면 이 종류는 보내지 않는다.
+          const sentSet = sel.targets.length ? await deps.sentOrders(sel.targets.map(t => t.order_id), kind) : new Set();
+          const ex = excludeAlreadySent(sel.targets, sentSet);
+          p.todayCount = sel.todayCount;
+          p.targets = ex.targets;
+          p.skipped = { ...sel.skipped, already_sent: ex.alreadySent, same_order: ex.sameOrder };
+          if (!dryRun) p.send = p.targets.length ? summarizeSend(await deps.sendRows(p.targets, kind)) : summarizeSend([]);
+        } catch (e) {
+          p.error = e.message;
+        }
       }
+    } catch (e) {
+      ctx.error = e.message;
     }
-  } catch (e) {
-    ctx.error = e.message;
+    const text = buildReport(ctx);
+    let slack = null;
+    if (!dryRun) {
+      try { slack = await deps.postToSlack(text, { channel: cfg.channel || null }); }
+      catch (e) { slack = { error: e.message }; console.warn('[sms-auto] 슬랙 리포트 실패:', e.message); }
+    }
+    const kinds = Object.keys(ctx.per);
+    const sum = f => kinds.reduce((a, k) => a + (f(ctx.per[k]) || 0), 0);
+    const send = dryRun ? null : { sent: sum(p => p.send && p.send.sent), already: sum(p => p.send && p.send.already), failed: sum(p => p.send && p.send.failed) };
+    const per = Object.fromEntries(kinds.map(k => { const p = ctx.per[k]; return [k, { today: p.todayCount, targets: p.targets.length, skipped: p.skipped, send: p.send, error: p.error }]; }));
+    const err = ctx.error || kinds.map(k => ctx.per[k].error).find(Boolean) || null;
+    const summary = { ymd, sources: ctx.sources, per, today: sum(p => p.todayCount), targets: sum(p => p.targets.length), send, slack, text };
+    _lastRun = { at: startedAt, dry_run: dryRun, ok: !err, error: err, summary };
+    if (err) throw Object.assign(new Error(err), { summary });
+    return summary;
+  } finally {
+    _running = false;
   }
-  const text = buildReport(ctx);
-  let slack = null;
-  if (!dryRun) {
-    try { slack = await deps.postToSlack(text, { channel: cfg.channel || null }); }
-    catch (e) { slack = { error: e.message }; console.warn('[sms-auto] 슬랙 리포트 실패:', e.message); }
-  }
-  _running = false;
-  const summary = { ymd, sheet: ctx.sheetName, sheet_found: ctx.sheetFound, today: ctx.todayCount, targets: ctx.targets.length, skipped: ctx.skipped, send: ctx.send, slack, text };
-  _lastRun = { at: startedAt, dry_run: dryRun, ok: !ctx.error, error: ctx.error, summary };
-  if (ctx.error) throw Object.assign(new Error(ctx.error), { summary });
-  return summary;
 }
 
 /** HH:MM → 자정 이후 분. 형식이 이상하면 null (stock-alert 와 같은 규칙). */
@@ -225,18 +272,18 @@ function scheduleDaily(deps) {
     lastSentDate = d.today;   // 실패해도 같은 날 다시 돌지 않는다 (중복 발송 방지)
     try {
       const s = await run(deps, { dryRun: false });
-      console.log(`[sms-auto] ${d.today} ${cfg.time} 실행 — 시트 ${s.sheet} · 오늘 행 ${s.today} · 대상 ${s.targets} · 발송 ${s.send ? s.send.sent : 0}`);
+      console.log(`[sms-auto] ${d.today} ${cfg.time} 실행 — 커스텀 ${s.sources && s.sources.custom ? 'O' : 'X'} · 답례품 ${((s.sources && s.sources.monthly) || []).join(',') || 'X'} · 오늘 행 ${s.today} · 대상 ${s.targets} · 발송 ${s.send ? s.send.sent : 0}`);
     } catch (e) {
       console.error('[sms-auto] 실행 실패:', e.message);
     }
   }
   setInterval(() => { tick().catch(() => {}); }, 60000);
-  console.log('[sms-auto] 출고안내문자 자동 발송 감시 시작 — 설정(사용/시각/시트/채널)은 문자발송 화면에서 변경');
+  console.log('[sms-auto] 출고안내문자 자동 발송 감시 시작 — 설정(사용/시각/채널)은 문자발송 화면에서 변경 · 대상은 출고일 기준');
 }
 
 module.exports = {
   MONTH_AUTO, DEFAULT_TIME,
   loadConfig, invalidateConfig, getLastRun,
-  kstToday, monthSheetName, resolveSheet, selectRows, excludeAlreadySent, summarizeSend, buildReport,
+  kstToday, monthSheetName, monthNameOffset, resolveSheet, resolveSheets, selectRows, excludeAlreadySent, summarizeSend, buildReport,
   parseHhmm, shouldFireNow, run, scheduleDaily,
 };

@@ -1098,7 +1098,7 @@ async function logAlimtalkSend(record) {
  *   정확히 일치 + 'base#' 접두 일치를 함께 본다. 반환: Map(base → {count, successCount, lastSentAt}).
  *   "이미 1회 이상 발송된 주문은 제외" 규칙의 근거 (2026-09-15) — 송장이 달라도 같은 주문이면 발송된 것으로 본다.
  */
-async function getSmsSentByOrder(orderBases, templateCode) {
+async function getSmsSentByOrder(orderBases, templateCode, opts = {}) {
   const result = new Map();
   const bases = [...new Set((orderBases || []).map(v => String(v || '').trim()).filter(Boolean))];
   if (!bases.length || !templateCode) return result;
@@ -1137,6 +1137,7 @@ async function getSmsSentByOrder(orderBases, templateCode) {
   for (const r of rows) {
     const base = baseOf(r.order_id);
     if (!want.has(base)) continue;
+    if (opts.legacyOnly && String(r.order_id).includes('#')) continue;   // 송장 없는 레거시 키만
     const cur = result.get(base) || { count: 0, successCount: 0, lastSentAt: null };
     cur.count++;
     if (r.success) cur.successCount++;
@@ -1146,7 +1147,26 @@ async function getSmsSentByOrder(orderBases, templateCode) {
   return result;
 }
 
-async function getSmsSendHistory(orderIds, templateCode) {
+/**
+ * 시트 종류별 주문 단위 이력 (084). kindCode 의 모든 기록 + 다른 종류 코드의 **송장 없는 레거시 키**(주문번호만).
+ *   레거시 키(8월 말 송장별 기록 이전)는 어느 시트로 보낸 것인지 알 수 없어 두 종류 모두에서 '발송됨' 으로 본다.
+ *   마이그레이션 084 재분류 전·후 어느 상태에서도 중복 발송이 나지 않게 하는 보수적 규칙.
+ */
+async function getSmsSentByOrderForKind(orderBases, kindCode, otherCode) {
+  const [own, legacy] = await Promise.all([
+    getSmsSentByOrder(orderBases, kindCode),
+    otherCode ? getSmsSentByOrder(orderBases, otherCode, { legacyOnly: true }) : Promise.resolve(new Map()),
+  ]);
+  for (const [k, v] of legacy) {
+    const cur = own.get(k);
+    if (!cur) { own.set(k, { ...v }); continue; }
+    cur.count += v.count; cur.successCount += v.successCount;
+    if (String(v.lastSentAt) > String(cur.lastSentAt)) cur.lastSentAt = v.lastSentAt;
+  }
+  return own;
+}
+
+async function getSmsSendHistory(orderIds, templateCode, opts = {}) {
   const result = new Map();
   const ids = [...new Set((orderIds || []).map(v => String(v || '').trim()).filter(Boolean))];
   if (!ids.length) return result;
@@ -1174,7 +1194,9 @@ async function getSmsSendHistory(orderIds, templateCode) {
         console.warn(`[store] sms history 조회 실패 (${i}~${i + 150}):`, e.message);
       }
     }
-    // 전 청크 실패(테이블 미적용 등)일 때만 JSON 폴백 — 일부 실패는 부분 결과가 낫다
+    // strict(발송 판정용): 한 청크라도 실패하면 예외 — 일부만 읽힌 이력으로 '미발송' 판정하면 중복 발송이 난다.
+    if (opts.strict && anyFail) throw new Error('발송 이력을 조회하지 못해 중복 여부를 확인할 수 없습니다 — 잠시 뒤 다시 시도하세요');
+    // 전 청크 실패(테이블 미적용 등)일 때만 JSON 폴백 — 일부 실패는 부분 결과가 낫다 (화면 표시용)
     if (anyFail && !rows.length) rows = (readJson(FILES.alimtalkLog, [])).filter(jsonMatch);
   } else {
     rows = (readJson(FILES.alimtalkLog, [])).filter(jsonMatch);
@@ -1968,7 +1990,8 @@ async function updateSiteSettings(patch, updatedBy = null) {
   if (!USE_SUPABASE) throw new Error('Supabase 미설정 — 사이트 설정 저장 불가');
   const allowed = ['custom_guide_title', 'custom_guide_text', 'sms_ship_template',
                    'stock_alert_channel', 'stock_alert_time',    // migration 049
-                   'sms_auto_time', 'sms_auto_sheet', 'sms_auto_slack_channel'];   // migration 083 (문자 자동 발송)
+                   'sms_auto_time', 'sms_auto_sheet', 'sms_auto_slack_channel',   // migration 083 (문자 자동 발송)
+                   'sms_ship_template_custom'];   // migration 084 (커스텀 시트 문자 본문)
   const clean = {};
   for (const k of allowed) if (k in patch) clean[k] = patch[k] == null ? null : String(patch[k]);
   // boolean 은 문자열 변환하면 안 됨
@@ -2745,6 +2768,7 @@ module.exports = {
   logAlimtalkSend,
   getSmsSendHistory,
   getSmsSentByOrder,
+  getSmsSentByOrderForKind,
   getAlimtalkHistory,
   // 위탁업체 (Phase 1)
   listSalesGroups,
