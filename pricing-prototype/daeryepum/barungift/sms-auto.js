@@ -69,7 +69,7 @@ function resolveSheet(sheets, setting, ymd) {
 function selectRows(rows, ymd) {
   const today = (rows || []).filter(r => r && r.ship_date === ymd);
   const targets = [];
-  const skipped = { other_channel: 0, other_by_site: {}, unknown_order: 0, no_invoice: 0, bad_phone: 0, no_name: 0 };
+  const skipped = { other_channel: 0, other_by_site: {}, unknown_order: 0, no_invoice: 0, bad_phone: 0, no_name: 0, already_sent: 0, same_order: 0 };
   for (const r of today) {
     if (r.source !== 'mall') {
       if (r.source) { skipped.other_channel++; const s = r.site_name || r.source; skipped.other_by_site[s] = (skipped.other_by_site[s] || 0) + 1; }
@@ -84,12 +84,27 @@ function selectRows(rows, ymd) {
   return { todayCount: today.length, targets, skipped };
 }
 
+/**
+ * 이미 1회 이상 발송된 주문 제외 + 같은 주문 여러 행은 1건만 (주문 단위, 송장 무관).
+ *   sentSet = 성공 발송 이력이 있는 주문번호 Set.
+ */
+function excludeAlreadySent(targets, sentSet) {
+  const out = []; const seen = new Set(); let alreadySent = 0, sameOrder = 0;
+  for (const t of targets || []) {
+    const k = String(t.order_id || '');
+    if (sentSet && sentSet.has(k)) { alreadySent++; continue; }
+    if (seen.has(k)) { sameOrder++; continue; }
+    seen.add(k); out.push(t);
+  }
+  return { targets: out, alreadySent, sameOrder };
+}
+
 /** 발송 결과(POST /api/bg/sms/send 응답 합산) 요약 */
 function summarizeSend(results) {
   const out = { sent: 0, already: 0, merged: 0, failed: 0, failures: [] };
   for (const x of results || []) {
     if (x.success) out.sent++;
-    else if (x.duplicate && /합쳤/.test(x.error || '')) out.merged++;
+    else if (x.duplicate && /합쳤|1건만/.test(x.error || '')) out.merged++;
     else if (x.duplicate) out.already++;
     else { out.failed++; out.failures.push(`${String(x.order_id || '').split('#')[0]} — ${x.error || '알 수 없는 오류'}`); }
   }
@@ -105,9 +120,9 @@ function buildReport({ ymd, time, sheetName, sheetFound, todayCount, targets, sk
   lines.push(`• 시트 \`${sheetName}\` · 출고일 ${ymd} 행 ${todayCount}건`);
   const tCount = targets.length;
   if (dryRun) {
-    lines.push(`• 바른손카드·바른손몰 대상 *${tCount}건* (실행하면 이 중 이미 보낸 주문은 자동으로 건너뜁니다)`);
+    lines.push(`• 바른손카드·바른손몰 발송 대상 *${tCount}건* (이미 발송된 주문은 제외한 수)`);
   } else if (send) {
-    lines.push(`• 바른손카드·바른손몰 대상 ${tCount}건 → *발송 ${send.sent}* · 이미 발송 ${send.already} · 실패 ${send.failed}${send.merged ? ` · 같은 송장 합침 ${send.merged}` : ''}`);
+    lines.push(`• 바른손카드·바른손몰 발송 대상 ${tCount}건 → *발송 ${send.sent}* · 실패 ${send.failed}${send.already ? ` · 발송 직전 중복 ${send.already}` : ''}`);
   } else {
     lines.push(`• 바른손카드·바른손몰 대상 ${tCount}건`);
   }
@@ -116,11 +131,13 @@ function buildReport({ ymd, time, sheetName, sheetFound, todayCount, targets, sk
     const by = Object.entries(skipped.other_by_site).sort((a, b) => b[1] - a[1]).map(([s, n]) => `${s} ${n}`).join(' · ');
     ex.push(`다른 채널 ${skipped.other_channel}${by ? ` (${by})` : ''}`);
   }
+  if (skipped.already_sent) ex.push(`이미 발송 ${skipped.already_sent}`);
+  if (skipped.same_order) ex.push(`같은 주문 추가 행 ${skipped.same_order}`);
   if (skipped.unknown_order) ex.push(`주문 미확인 ${skipped.unknown_order}`);
   if (skipped.no_invoice) ex.push(`송장 없음 ${skipped.no_invoice}`);
   if (skipped.bad_phone) ex.push(`연락처 형식 ${skipped.bad_phone}`);
   if (skipped.no_name) ex.push(`성함 없음 ${skipped.no_name}`);
-  const exTotal = skipped.other_channel + skipped.unknown_order + skipped.no_invoice + skipped.bad_phone + skipped.no_name;
+  const exTotal = skipped.other_channel + skipped.unknown_order + skipped.no_invoice + skipped.bad_phone + skipped.no_name + (skipped.already_sent || 0) + (skipped.same_order || 0);
   if (exTotal) lines.push(`• 제외 ${exTotal}건 — ${ex.join(' · ')}`);
   if (send && send.failures.length) lines.push(`• 실패: ${send.failures.slice(0, 10).join(' / ')}${send.failures.length > 10 ? ` 외 ${send.failures.length - 10}건` : ''}`);
   if (!tCount && !exTotal) lines.push('• 오늘 출고일로 적힌 행이 없습니다.');
@@ -146,6 +163,10 @@ async function run(deps, { dryRun = false, now = new Date() } = {}) {
       ctx.sheetFound = true;
       const data = await deps.giftSmsRows(tab.gid);
       const sel = selectRows(data.rows || [], ymd);
+      // 이미 1회 이상 발송된 주문 제외 — 미리보기에도 반영해 실제 발송 수와 맞춘다. 이력 조회 실패면 발송하지 않는다.
+      const sentSet = sel.targets.length ? await deps.sentOrders(sel.targets.map(t => t.order_id)) : new Set();
+      const ex = excludeAlreadySent(sel.targets, sentSet);
+      sel.targets = ex.targets; sel.skipped.already_sent = ex.alreadySent; sel.skipped.same_order = ex.sameOrder;
       ctx.todayCount = sel.todayCount; ctx.targets = sel.targets; ctx.skipped = sel.skipped;
       if (!dryRun && sel.targets.length) {
         const results = await deps.sendRows(sel.targets);
@@ -216,6 +237,6 @@ function scheduleDaily(deps) {
 module.exports = {
   MONTH_AUTO, DEFAULT_TIME,
   loadConfig, invalidateConfig, getLastRun,
-  kstToday, monthSheetName, resolveSheet, selectRows, summarizeSend, buildReport,
+  kstToday, monthSheetName, resolveSheet, selectRows, excludeAlreadySent, summarizeSend, buildReport,
   parseHhmm, shouldFireNow, run, scheduleDaily,
 };

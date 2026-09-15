@@ -1093,6 +1093,54 @@ async function logAlimtalkSend(record) {
  * 출고완료 안내 문자(template_code) 발송 이력 — 중복 발송 방지용.
  *   bg_alimtalk_log 를 template_code 로 걸러 order_id → {count, lastSentAt, lastSuccess} 맵.
  */
+/**
+ * 주문 단위 발송 이력 — 기록 키가 '주문번호#송장'(송장별) 또는 '주문번호'(레거시) 라서
+ *   정확히 일치 + 'base#' 접두 일치를 함께 본다. 반환: Map(base → {count, successCount, lastSentAt}).
+ *   "이미 1회 이상 발송된 주문은 제외" 규칙의 근거 (2026-09-15) — 송장이 달라도 같은 주문이면 발송된 것으로 본다.
+ */
+async function getSmsSentByOrder(orderBases, templateCode) {
+  const result = new Map();
+  const bases = [...new Set((orderBases || []).map(v => String(v || '').trim()).filter(Boolean))];
+  if (!bases.length || !templateCode) return result;
+  const baseOf = id => String(id || '').split('#')[0];
+  const want = new Set(bases);
+  let rows = [];
+  const jsonMatch = r => want.has(baseOf(r.order_id)) && r.template_code === templateCode;
+  if (USE_SUPABASE) {
+    let anyFail = false;
+    for (let i = 0; i < bases.length; i += 40) {
+      const chunk = bases.slice(i, i + 40);
+      const q = (s) => encodeURIComponent(String(s).replace(/"/g, ''));
+      const ors = [`order_id.in.(${chunk.map(b => `"${q(b)}"`).join(',')})`]
+        .concat(chunk.map(b => `order_id.like."${q(b)}%23*"`));   // %23 = '#'
+      try {
+        const got = await sbGet('bg_alimtalk_log',
+          `or=(${ors.join(',')})&template_code=eq.${encodeURIComponent(templateCode)}&order=sent_at.desc`);
+        rows.push(...(got || []));
+      } catch (e) {
+        anyFail = true;
+        console.warn(`[store] sms 주문별 이력 조회 실패 (${i}~${i + 40}):`, e.message);
+      }
+    }
+    if (anyFail && !rows.length) {
+      // 이력을 못 읽었는데 '발송 안 됨' 으로 보면 이미 받은 고객에게 또 나간다 — 발송을 막는다.
+      throw new Error('발송 이력을 조회하지 못해 중복 여부를 확인할 수 없습니다 — 잠시 뒤 다시 시도하세요');
+    }
+  } else {
+    rows = (readJson(FILES.alimtalkLog, [])).filter(jsonMatch);
+  }
+  for (const r of rows) {
+    const base = baseOf(r.order_id);
+    if (!want.has(base)) continue;
+    const cur = result.get(base) || { count: 0, successCount: 0, lastSentAt: null };
+    cur.count++;
+    if (r.success) cur.successCount++;
+    if (!cur.lastSentAt || String(r.sent_at) > String(cur.lastSentAt)) cur.lastSentAt = r.sent_at;
+    result.set(base, cur);
+  }
+  return result;
+}
+
 async function getSmsSendHistory(orderIds, templateCode) {
   const result = new Map();
   const ids = [...new Set((orderIds || []).map(v => String(v || '').trim()).filter(Boolean))];
@@ -2691,6 +2739,7 @@ module.exports = {
   deleteShippingGroup,
   logAlimtalkSend,
   getSmsSendHistory,
+  getSmsSentByOrder,
   getAlimtalkHistory,
   // 위탁업체 (Phase 1)
   listSalesGroups,
