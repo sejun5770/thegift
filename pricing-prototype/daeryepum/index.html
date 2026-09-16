@@ -25672,7 +25672,8 @@ function copyBgUnified() {
   //            N=스티커코드(수량) [시트: 스티커타입1],
   //            O=자유옵션 1번째 그룹 '코드(수량)' [시트: 스티커타입2] — 기획전 미니카드 등,
   //            P=남은 옵션(구성품 3번째+ / 자유옵션 2번째+, '라벨: 이름' / ' / ' 구분),
-  //            Q=스티커 문구(고객 입력), R=배송메세지(MSSQL recv_msg), S=주문수량, T='', U='',
+  //            Q=스티커 문구(고객 입력) [시트: 입력메시지], R=배송메세지(MSSQL recv_msg), S=주문수량,
+  //            T=구글드라이브(스티커 폴더) — 스티커가 없을 때만 상태를 적는다, U='',
   //            V=희망출고일(빠른출고시 짙은빨강), W=희망출고일
   //
   // 옵션 매핑 정책 — 성격이 다른 두 소스를 칸으로 분리한다:
@@ -25857,6 +25858,20 @@ function copyBgUnified() {
     }
     // S열(index 18) = 주문수량 — 나눔배송 대응 (product_qty 우선, sel.quantity 는 주문 전체라 폴백용)
     cells[18] = product_qty || sel?.quantity || '';
+    // N·Q·T열 스티커 상태 — 빈칸은 '아직 안 정해짐' 과 구분이 안 된다. 인쇄팀이 읽을 글자를 넣는다 (2026-09-16 운영 요청).
+    //   · 샘플세트(정보입력 불필요 상품): 세트에 고정 스티커가 붙어 인쇄 대상이 아니다 → 세 칸 모두 '샘플스티커'.
+    //   · 스티커 안 고름: N·Q='선택안함', 폴더(T)='없음'.
+    //   · 스티커는 없는데 문구만 있음: 비정상이라 폴더(T)='확인필요' 로 표시하고 문구(Q)는 그대로 둔다.
+    //   미입력 행(고객이 아직 제출 안 한 자사 주문)은 건드리지 않는다 — 빈칸이 곧 '입력 대기' 다.
+    if (computeRowStage(order, ci, sel) !== 'unsubmitted') {
+      if (_bgRowIsNoInput(sel, product_code)) {
+        cells[13] = cells[16] = cells[19] = '샘플스티커';
+      } else if (!cells[13]) {
+        cells[13] = '선택안함';
+        cells[19] = cells[16] ? '확인필요' : '없음';
+        if (!cells[16]) cells[16] = '선택안함';
+      }
+    }
     // V/W열 = 출고일 — product 단위 (멀티 그룹 호환): sel.desired_ship_date 우선, 없으면 ci.desired_ship_date
     const tsvShipDate = sel?.desired_ship_date || ci?.desired_ship_date || '';
     const tsvIsExpress = (typeof sel?.is_express === 'boolean') ? sel.is_express : !!ci?.is_express;
