@@ -23127,10 +23127,14 @@ function _bgPsLookup(code) {
   return null;
 }
 
-/** 고객정보가 '입력 불필요' 자동 스텁인지 — 모든 품목이 input_mode='not_required' (082). */
-function _bgCiIsNoInput(ci) {
-  const sels = ci?.sticker_selections;
-  return Array.isArray(sels) && sels.length > 0 && sels.every(s => s && s.input_mode === 'not_required');
+/**
+ * 이 품목 행이 '입력 불필요' 상품인지 (082) — 저장된 선택 행의 input_mode, 없으면 상품설정으로 판정.
+ *   주문 단위(저장된 모든 행이 not_required)로 판정하면 안 된다: 샘플세트와 본품이 섞인 주문에서 고객이 본품을
+ *   '선택안함'으로 제출하면 본품 행은 저장되지 않아 샘플 행만 남고, 본품까지 '입력 불필요'로 보였다 (3250923, 2026-09-16).
+ */
+function _bgRowIsNoInput(sel, productCode) {
+  if (sel && sel.input_mode) return sel.input_mode === 'not_required';
+  return !!productCode && _bgPsLookup(productCode)?.customer_input_required === false;
 }
 
 /**
@@ -23771,9 +23775,9 @@ function renderBgUnified() {
       : (orderIsNaver
         ? '<span style="color:#03c75a;font-size:12px;font-weight:600;white-space:nowrap" title="네이버 스마트스토어 주문은 고객 정보입력 불필요 — 동기화 시 자동 입력완료 처리">네이버 자동</span>'
         : (hasInput
-          ? (_bgCiIsNoInput(ci)
-            // 상품설정 '고객 정보입력 불필요' 상품만 있는 주문 — 로드 때 자동 생성한 스텁 (082)
-            ? '<span style="color:#475569;font-size:12px;font-weight:600;white-space:nowrap" title="고객 정보입력 불필요 상품만 있는 주문 — 자동 입력완료, 희망출고일은 주문일 다음 영업일">입력 불필요</span>'
+          ? (_bgRowIsNoInput(sel, product_code)
+            // 상품설정 '고객 정보입력 불필요' 상품 행 (082) — 품목 단위. 이 상품만 있는 주문은 로드 때 자동 스텁, 본품과 섞이면 고객이 본품만 입력.
+            ? '<span style="color:#475569;font-size:12px;font-weight:600;white-space:nowrap" title="고객 정보입력 불필요 상품 — 스티커·출고일 입력 없이 입력완료. 이 상품만 있는 주문은 자동 입력완료(희망출고일은 주문일 다음 영업일), 본품과 섞인 주문은 고객이 본품만 입력">입력 불필요</span>'
             : '<span style="color:#16a34a;font-size:12px;font-weight:600;white-space:nowrap">' + (fmtSubmittedAt || '✅ 완료') + '</span>')
           : '<span style="color:var(--gray-300);font-size:12px">미입력</span>'));
 
