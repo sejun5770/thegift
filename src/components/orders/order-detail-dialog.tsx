@@ -16,14 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  Calendar,
-} from '@/components/ui/calendar';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,18 +27,94 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { CalendarIcon, Trash2, Plus, Send } from 'lucide-react';
+import { Trash2, Send, CheckCircle2, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { cn } from '@/lib/utils';
-import { ORDER_STATUS_LABELS } from '@/lib/constants';
 import { HighlightBadges } from './highlight-badges';
 import { OrderStatusBadge } from './order-status-badge';
 import { formatDateTimeKo } from '@/lib/date-utils';
 import type { Order, OrderHistory } from '@/types/order';
 import type { HighlightType } from '@/types/enums';
+import type { CustomerInfoDetail } from '@/app/api/orders/[orderId]/customer-info/route';
 
+// ─── EditableField — 컴포넌트 외부 정의 (깜빡임 방지) ─────────────
+interface EditableFieldProps {
+  label: string;
+  field: string;
+  value: string;
+  editable: boolean;
+  editingField: string | null;
+  editValues: Record<string, string>;
+  onEdit: (field: string, value: string) => void;
+  onCancel: () => void;
+  onSave: (field: string, value: string) => void;
+  onChange: (field: string, value: string) => void;
+}
+
+function EditableField({
+  label,
+  field,
+  value,
+  editable,
+  editingField,
+  editValues,
+  onEdit,
+  onCancel,
+  onSave,
+  onChange,
+}: EditableFieldProps) {
+  if (!editable) {
+    return (
+      <div>
+        <Label className="text-xs text-gray-500">{label}</Label>
+        <p className="mt-1 text-sm">{value || '-'}</p>
+      </div>
+    );
+  }
+
+  if (editingField === field) {
+    return (
+      <div>
+        <Label className="text-xs text-gray-500">{label}</Label>
+        <div className="mt-1 flex gap-1">
+          <Input
+            value={editValues[field] ?? value}
+            onChange={(e) => onChange(field, e.target.value)}
+            className="h-8 text-sm"
+          />
+          <Button
+            size="sm"
+            className="h-8"
+            onClick={() => onSave(field, editValues[field] ?? value)}
+          >
+            저장
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8"
+            onClick={onCancel}
+          >
+            취소
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="cursor-pointer rounded p-1 hover:bg-gray-50"
+      onClick={() => onEdit(field, value)}
+    >
+      <Label className="text-xs text-gray-500">{label}</Label>
+      <p className="mt-1 text-sm">{value || '-'}</p>
+    </div>
+  );
+}
+
+// ─── 메인 컴포넌트 ────────────────────────────────────────────────
 interface OrderDetailDialogProps {
   orderId: string;
   open: boolean;
@@ -65,8 +134,8 @@ export function OrderDetailDialog({
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [newMemo, setNewMemo] = useState('');
-  const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [customerInfo, setCustomerInfo] = useState<CustomerInfoDetail | null | 'loading'>('loading');
 
   const fetchOrder = useCallback(async () => {
     try {
@@ -83,12 +152,28 @@ export function OrderDetailDialog({
     }
   }, [orderId]);
 
+  const fetchCustomerInfo = useCallback(async () => {
+    setCustomerInfo('loading');
+    try {
+      const res = await fetch(`/api/orders/${orderId}/customer-info`);
+      if (res.ok) {
+        const data = await res.json();
+        setCustomerInfo(data); // null이면 미입력 상태
+      } else {
+        setCustomerInfo(null);
+      }
+    } catch {
+      setCustomerInfo(null);
+    }
+  }, [orderId]);
+
   useEffect(() => {
     if (open && orderId) {
       setLoading(true);
       fetchOrder();
+      fetchCustomerInfo();
     }
-  }, [open, orderId, fetchOrder]);
+  }, [open, orderId, fetchOrder, fetchCustomerInfo]);
 
   const handleFieldUpdate = async (field: string, value: string) => {
     if (!order) return;
@@ -131,7 +216,6 @@ export function OrderDetailDialog({
 
       if (res.ok) {
         toast.success('희망출고일이 변경되었습니다.');
-        setDatePickerOpen(false);
         fetchOrder();
       }
     } catch {
@@ -219,6 +303,16 @@ export function OrderDetailDialog({
     }
   };
 
+  // EditableField에 내려줄 핸들러 (안정적인 참조를 위해 인라인 사용)
+  const handleEdit = (field: string, value: string) => {
+    setEditingField(field);
+    setEditValues((prev) => ({ ...prev, [field]: value }));
+  };
+  const handleCancelEdit = () => setEditingField(null);
+  const handleEditChange = (field: string, value: string) => {
+    setEditValues((prev) => ({ ...prev, [field]: value }));
+  };
+
   if (loading || !order) {
     return (
       <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -231,69 +325,9 @@ export function OrderDetailDialog({
     );
   }
 
-  const EditableField = ({
-    label,
-    field,
-    value,
-  }: {
-    label: string;
-    field: string;
-    value: string;
-  }) => {
-    if (!editable) {
-      return (
-        <div>
-          <Label className="text-xs text-gray-500">{label}</Label>
-          <p className="mt-1 text-sm">{value || '-'}</p>
-        </div>
-      );
-    }
-
-    if (editingField === field) {
-      return (
-        <div>
-          <Label className="text-xs text-gray-500">{label}</Label>
-          <div className="mt-1 flex gap-1">
-            <Input
-              value={editValues[field] ?? value}
-              onChange={(e) =>
-                setEditValues({ ...editValues, [field]: e.target.value })
-              }
-              className="h-8 text-sm"
-            />
-            <Button
-              size="sm"
-              className="h-8"
-              onClick={() => handleFieldUpdate(field, editValues[field] ?? value)}
-            >
-              저장
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8"
-              onClick={() => setEditingField(null)}
-            >
-              취소
-            </Button>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div
-        className="cursor-pointer rounded p-1 hover:bg-gray-50"
-        onClick={() => {
-          setEditingField(field);
-          setEditValues({ ...editValues, [field]: value });
-        }}
-      >
-        <Label className="text-xs text-gray-500">{label}</Label>
-        <p className="mt-1 text-sm">{value || '-'}</p>
-      </div>
-    );
-  };
+  const shippingDateValue = order.desired_shipping_date
+    ? new Date(order.desired_shipping_date)
+    : undefined;
 
   return (
     <>
@@ -321,6 +355,15 @@ export function OrderDetailDialog({
                   <TabsTrigger value="info">기본정보</TabsTrigger>
                   <TabsTrigger value="items">주문상품</TabsTrigger>
                   <TabsTrigger value="shipping">배송정보</TabsTrigger>
+                  <TabsTrigger value="customer-input" className="flex items-center gap-1">
+                    고객입력
+                    {customerInfo && customerInfo !== 'loading' && (
+                      <CheckCircle2 className="h-3 w-3 text-green-500" />
+                    )}
+                    {customerInfo === null && (
+                      <Clock className="h-3 w-3 text-gray-400" />
+                    )}
+                  </TabsTrigger>
                   <TabsTrigger value="memo">메모</TabsTrigger>
                   <TabsTrigger value="history">이력</TabsTrigger>
                 </TabsList>
@@ -342,37 +385,28 @@ export function OrderDetailDialog({
 
                   <Separator />
 
-                  {/* 희망출고일 */}
-                  <div className="flex items-center gap-4">
-                    <div>
-                      <Label className="text-xs text-gray-500">희망출고일</Label>
-                      <p className="mt-1 text-sm">
-                        {order.desired_shipping_date}
-                        {order.original_desired_shipping_date &&
-                          order.original_desired_shipping_date !== order.desired_shipping_date && (
-                            <span className="ml-2 text-xs text-orange-600">
-                              (변경전: {order.original_desired_shipping_date})
-                            </span>
-                          )}
-                      </p>
+                  {/* 희망출고일 — 인라인 캘린더 */}
+                  <div className="space-y-2">
+                    <Label className="text-xs text-gray-500">희망출고일</Label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">
+                        {order.desired_shipping_date || '-'}
+                      </span>
+                      {order.original_desired_shipping_date &&
+                        order.original_desired_shipping_date !== order.desired_shipping_date && (
+                          <span className="text-xs text-orange-600">
+                            (변경전: {order.original_desired_shipping_date})
+                          </span>
+                        )}
                     </div>
                     {editable && (
-                      <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
-                        <PopoverTrigger asChild>
-                          <Button variant="outline" size="sm" className="h-7 text-xs">
-                            <CalendarIcon className="mr-1 h-3 w-3" />
-                            변경
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                          <Calendar
-                            mode="single"
-                            selected={new Date(order.desired_shipping_date)}
-                            onSelect={handleDateChange}
-                            locale={ko}
-                          />
-                        </PopoverContent>
-                      </Popover>
+                      <Calendar
+                        mode="single"
+                        selected={shippingDateValue}
+                        onSelect={handleDateChange}
+                        locale={ko}
+                        className="rounded-lg border w-fit"
+                      />
                     )}
                   </div>
 
@@ -385,22 +419,50 @@ export function OrderDetailDialog({
                       label="수령인"
                       field="recipient_name"
                       value={order.recipient_name}
+                      editable={editable}
+                      editingField={editingField}
+                      editValues={editValues}
+                      onEdit={handleEdit}
+                      onCancel={handleCancelEdit}
+                      onSave={handleFieldUpdate}
+                      onChange={handleEditChange}
                     />
                     <EditableField
                       label="연락처"
                       field="recipient_phone"
                       value={order.recipient_phone || ''}
+                      editable={editable}
+                      editingField={editingField}
+                      editValues={editValues}
+                      onEdit={handleEdit}
+                      onCancel={handleCancelEdit}
+                      onSave={handleFieldUpdate}
+                      onChange={handleEditChange}
                     />
                   </div>
                   <EditableField
                     label="배송지"
                     field="recipient_address"
                     value={order.recipient_address || ''}
+                    editable={editable}
+                    editingField={editingField}
+                    editValues={editValues}
+                    onEdit={handleEdit}
+                    onCancel={handleCancelEdit}
+                    onSave={handleFieldUpdate}
+                    onChange={handleEditChange}
                   />
                   <EditableField
                     label="배송메시지"
                     field="delivery_message"
                     value={order.delivery_message || ''}
+                    editable={editable}
+                    editingField={editingField}
+                    editValues={editValues}
+                    onEdit={handleEdit}
+                    onCancel={handleCancelEdit}
+                    onSave={handleFieldUpdate}
+                    onChange={handleEditChange}
                   />
 
                   <Separator />
@@ -564,9 +626,107 @@ export function OrderDetailDialog({
                     ))}
                 </TabsContent>
 
+                {/* 고객입력 */}
+                <TabsContent value="customer-input">
+                  {customerInfo === 'loading' && (
+                    <div className="flex h-32 items-center justify-center text-sm text-gray-400">
+                      불러오는 중...
+                    </div>
+                  )}
+                  {customerInfo === null && (
+                    <div className="flex h-32 flex-col items-center justify-center gap-2 text-center">
+                      <Clock className="h-8 w-8 text-gray-300" />
+                      <p className="text-sm text-gray-400">아직 고객이 정보를 입력하지 않았습니다.</p>
+                    </div>
+                  )}
+                  {customerInfo && customerInfo !== 'loading' && (
+                    <div className="space-y-4">
+                      {/* 제출 완료 배너 */}
+                      <div className="flex items-center gap-2 rounded-lg bg-green-50 px-4 py-2.5">
+                        <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+                        <span className="text-sm font-medium text-green-700">
+                          고객 입력 완료
+                        </span>
+                        <span className="ml-auto text-xs text-green-600">
+                          {formatDateTimeKo(customerInfo.submitted_at)}
+                        </span>
+                      </div>
+
+                      {/* 출고 방식 */}
+                      <div className="rounded-lg border p-4 space-y-3">
+                        <h4 className="text-sm font-semibold text-gray-700">출고 방식</h4>
+                        <div className="flex items-center gap-3">
+                          <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
+                            customerInfo.is_express
+                              ? 'bg-orange-100 text-orange-700'
+                              : 'bg-gray-100 text-gray-600'
+                          }`}>
+                            {customerInfo.is_express ? '⚡ 빠른출고' : '일반출고'}
+                          </span>
+                          {customerInfo.is_express && customerInfo.express_fee > 0 && (
+                            <span className="text-xs text-gray-500">
+                              추가금 +{customerInfo.express_fee.toLocaleString()}원
+                            </span>
+                          )}
+                        </div>
+                        {customerInfo.desired_ship_date && (
+                          <div>
+                            <span className="text-xs text-gray-500">희망출고일</span>
+                            <p className="mt-0.5 text-sm font-medium">{customerInfo.desired_ship_date}</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 스티커 선택 */}
+                      {customerInfo.sticker_selections_detail.length > 0 && (
+                        <div className="rounded-lg border p-4 space-y-3">
+                          <h4 className="text-sm font-semibold text-gray-700">스티커 선택</h4>
+                          {customerInfo.sticker_selections_detail.map((sel, idx) => (
+                            <div key={idx} className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <Badge variant="secondary" className="text-xs">{sel.sticker_name}</Badge>
+                              </div>
+                              {sel.custom_values_formatted.length > 0 && (
+                                <div className="ml-1 space-y-1">
+                                  {sel.custom_values_formatted.map((cv) => (
+                                    <div key={cv.label} className="flex gap-2 text-sm">
+                                      <span className="min-w-[80px] text-xs text-gray-500">{cv.label}</span>
+                                      <span className="font-medium">{cv.value}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* 현금영수증 */}
+                      <div className="rounded-lg border p-4 space-y-2">
+                        <h4 className="text-sm font-semibold text-gray-700">현금영수증</h4>
+                        {customerInfo.cash_receipt_yn ? (
+                          <div className="space-y-1 text-sm">
+                            <div className="flex gap-2">
+                              <span className="text-xs text-gray-500">구분</span>
+                              <span className="font-medium">
+                                {customerInfo.receipt_type === 'business' ? '사업자' : '개인'}
+                              </span>
+                            </div>
+                            <div className="flex gap-2">
+                              <span className="text-xs text-gray-500">번호</span>
+                              <span className="font-medium font-mono">{customerInfo.receipt_number}</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-sm text-gray-400">신청 안함</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </TabsContent>
+
                 {/* 메모 */}
                 <TabsContent value="memo" className="space-y-4">
-                  {/* 메모 입력 */}
                   <div className="flex gap-2">
                     <Textarea
                       value={newMemo}
@@ -585,7 +745,6 @@ export function OrderDetailDialog({
                     </Button>
                   </div>
 
-                  {/* 메모 목록 */}
                   {(order.admin_memos || []).map((memo) => (
                     <div
                       key={memo.id}
@@ -663,6 +822,7 @@ export function OrderDetailDialog({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
     </>
   );
 }
