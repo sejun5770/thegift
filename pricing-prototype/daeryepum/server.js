@@ -6972,7 +6972,8 @@ async function apiLeadtime(query = {}) {
   try {
     // === Step 1: ETC 주문 목록 + member_id ===
     const etcOrdersRes = await p.request().query(`
-      SELECT DISTINCT o.order_seq, o.member_id, CONVERT(varchar(10), o.order_date, 120) AS order_date
+      SELECT DISTINCT o.order_seq, o.member_id, CONVERT(varchar(10), o.order_date, 120) AS order_date,
+             c.Card_Code AS product_code, c.Card_Name AS product_name
       FROM CUSTOM_ETC_ORDER o WITH (NOLOCK)
       INNER JOIN CUSTOM_ETC_ORDER_ITEM oi WITH (NOLOCK) ON o.order_seq = oi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON oi.card_seq = c.Card_Seq
@@ -6980,7 +6981,15 @@ async function apiLeadtime(query = {}) {
         AND o.member_id IS NOT NULL
         AND o.order_date >= DATEADD(day, -${WINDOW_DAYS}, GETDATE())
     `);
-    const etcOrders = etcOrdersRes.recordset;
+    // 상품 컬럼이 붙으면서 한 주문이 품목 수만큼 나온다 — 주문 단위로 접고 상품은 배열로 모은다.
+    //   전체 통계(평균·중앙값·분포)는 예전처럼 주문 1건 = 표본 1개를 유지해야 한다.
+    const etcOrders = [...etcOrdersRes.recordset.reduce((m, r) => {
+      const cur = m.get(r.order_seq)
+        || { order_seq: r.order_seq, member_id: r.member_id, order_date: r.order_date, products: [] };
+      if (r.product_code) cur.products.push({ code: r.product_code, name: r.product_name });
+      m.set(r.order_seq, cur);
+      return m;
+    }, new Map()).values()];
     const memberIds = [...new Set(etcOrders.map(r => r.member_id).filter(Boolean))];
 
     // === Step 2: member_id chunk 단위로 청첩장 후보 lookup ===
@@ -7040,6 +7049,7 @@ async function apiLeadtime(query = {}) {
         order_date: o.order_date,
         wedding_date: picked.wd,
         lead_days: picked.leadDays,
+        products: o.products,
       });
     }
 
@@ -7049,7 +7059,8 @@ async function apiLeadtime(query = {}) {
         CONCAT('C', co.order_seq) AS order_key,
         CONVERT(varchar(10), co.order_date, 120) AS order_date,
         TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) AS wedding_date,
-        DATEDIFF(day, co.order_date, TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date)) AS lead_days
+        DATEDIFF(day, co.order_date, TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date)) AS lead_days,
+        c.Card_Code AS product_code, c.Card_Name AS product_name
       FROM custom_order co WITH (NOLOCK)
       INNER JOIN custom_order_item coi WITH (NOLOCK) ON co.order_seq = coi.order_seq
       INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
@@ -7059,8 +7070,18 @@ async function apiLeadtime(query = {}) {
         AND TRY_CAST(w.event_year+'-'+RIGHT('0'+w.event_month,2)+'-'+RIGHT('0'+w.event_Day,2) AS date) IS NOT NULL
         AND co.order_date >= DATEADD(day, -${WINDOW_DAYS}, GETDATE())
     `);
-    cardRes.recordset.forEach(r => allRows.push(r));
-    console.log(`[leadtime] partial 로드 완료 — ETC ${etcOrders.length} (members ${memberIds.length}) + CARD ${cardRes.recordset.length} = ${allRows.length}건, ${Date.now()-t0}ms`);
+    // CARD 도 상품 컬럼 때문에 주문당 여러 행 — 주문 단위로 접는다 (ETC 와 같은 이유).
+    const cardByOrder = new Map();
+    for (const r of cardRes.recordset) {
+      const cur = cardByOrder.get(r.order_key) || {
+        order_key: r.order_key, order_date: r.order_date,
+        wedding_date: r.wedding_date, lead_days: r.lead_days, products: [],
+      };
+      if (r.product_code) cur.products.push({ code: r.product_code, name: r.product_name });
+      cardByOrder.set(r.order_key, cur);
+    }
+    cardByOrder.forEach(r => allRows.push(r));
+    console.log(`[leadtime] partial 로드 완료 — ETC ${etcOrders.length} (members ${memberIds.length}) + CARD ${cardByOrder.size} = ${allRows.length}건, ${Date.now()-t0}ms`);
   } catch (e) {
     console.error('[leadtime] SQL 실패:', e.message);
     return { ...FALLBACK, error: 'sql: ' + e.message };
@@ -7091,7 +7112,52 @@ async function apiLeadtime(query = {}) {
     else buckets['60일+']++;
   }
 
-  return { avg_days: avg, median_days: median, total_samples: allDays.length, distribution: buckets };
+  // 상품별 리드타임 — 상품마다 주문 시점이 다르다 (포스터는 예식 2개월 전, 스탬프는 3개월 전).
+  //   전체 분포 하나로는 그 차이가 '60일+' 한 칸에 뭉개져 안 보여서 상품 축을 따로 낸다.
+  //   한 주문에 여러 상품이 있으면 상품마다 그 주문을 한 번씩 센다 (표본 = 주문×상품).
+  //   그룹 묶기(구간 나누기)는 화면에서 한다 — 그룹 수를 바꿀 때마다 재조회하지 않도록.
+  const byProduct = new Map();
+  for (const r of allRows) {
+    if (r.lead_days === null || r.lead_days <= -365 || r.lead_days >= 365) continue;
+    for (const pr of (r.products || [])) {
+      const code = String(pr.code || '').trim();
+      if (!code) continue;
+      if (!byProduct.has(code)) {
+        byProduct.set(code, { code, name: _ltCleanName(pr.name) || code, days: [] });
+      }
+      byProduct.get(code).days.push(r.lead_days);
+    }
+  }
+  const pct = (sorted, f) => sorted.length
+    ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * f))] : null;
+  const products = [...byProduct.values()].map(g => {
+    const positive = g.days.filter(d => d >= 0).sort((a, b) => a - b);
+    const postCount = g.days.filter(d => d < 0).length;
+    return {
+      code: g.code,
+      name: g.name,
+      samples: g.days.length,
+      // 평균·중앙값은 전체 카드와 같은 기준 — 예식 전 주문(양수)만 본다.
+      avg_days: positive.length
+        ? Math.round(positive.reduce((a, b) => a + b, 0) / positive.length) : null,
+      median_days: pct(positive, 0.5),
+      p25_days: pct(positive, 0.25),
+      p75_days: pct(positive, 0.75),
+      post_wedding_pct: g.days.length ? Math.round(postCount / g.days.length * 100) : 0,
+    };
+  }).sort((a, b) => b.samples - a.samples);
+
+  return {
+    avg_days: avg, median_days: median, total_samples: allDays.length, distribution: buckets,
+    products,
+  };
+}
+
+/** S2_Card 이름 정리 — '[무료배송]…' 처럼 앞에 붙는 대괄호 꼬리표만 떼어 낸다. */
+function _ltCleanName(raw) {
+  const s = String(raw || '').trim();
+  const m = s.match(/^\[[^\]]*\]\s*(.+)$/);
+  return (m ? m[1] : s).trim();
 }
 
 // === 주차별 전환율 (예식수 vs 답례품 주문수) ===
