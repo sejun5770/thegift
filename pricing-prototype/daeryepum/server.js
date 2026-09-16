@@ -6967,6 +6967,8 @@ async function apiLeadtime(query = {}) {
   // 윈도우는 90일 (기존 180일 → 데이터 부담 절반)
   const WINDOW_DAYS = 90;
   const allRows = []; // { order_key, order_date, wedding_date, lead_days }
+  // 표본에서 빠진 주문 — 화면에 "왜 이 숫자가 전부가 아닌지" 를 적기 위한 근거.
+  const skipped = { old_wedding: 0, old_wedding_days: [], no_wedding_info: 0 };
   const t0 = Date.now();
 
   try {
@@ -7026,24 +7028,37 @@ async function apiLeadtime(query = {}) {
 
     // === Step 3: ETC 주문에 wedding_date join → lead_days 계산 ===
     //   매칭 정책: 주문일 이후의 결혼식 중 가장 가까운 것을 선택 (정상 답례품 패턴).
-    //   주문일 이후 결혼식이 없으면 -14일 이내 과거 결혼식 허용 (늦은 답례품 케이스).
-    //   둘 다 없으면 skip — 옛날 결혼식 매칭으로 인한 노이즈 제거.
-    const POST_WEDDING_GRACE_DAYS = 14;
+    //   주문일 이후 결혼식이 없으면 과거 결혼식을 허용하되 창(POST_WEDDING_GRACE_DAYS)까지만.
+    //   창 밖(오래된 예식)은 skip — 옛날 결혼식 매칭으로 인한 노이즈 제거.
+    //
+    //   창을 14일 → 30일 로 넓혔다 (2026-09-16). 14일이면 '예식후 15~21일'·'21일+' 막대가
+    //   구조적으로 항상 0 이라 "2주 뒤부터는 주문이 없다" 로 잘못 읽혔다. 실측(최근 90일
+    //   답례품)으로는 15~30일 47건이 잘려 나가고 있었다. 반면 180일 넘게 지난 매칭은
+    //   늦은 주문이 아니라 옛 청첩장 오매칭에 가깝다(최대 1,002일) — 그래서 창은 30일.
+    //   잘려 나간 건수는 버리지 않고 세어서 화면에 근거로 보여 준다.
+    const POST_WEDDING_GRACE_DAYS = 30;
     for (const o of etcOrders) {
       const candidates = memberWeddingsMap.get(o.member_id);
-      if (!candidates || !candidates.length) continue;
+      if (!candidates || !candidates.length) { skipped.no_wedding_info++; continue; }
       const orderDt = new Date(o.order_date);
       // 후보별 lead_days 계산 후 정책에 맞는 최적 매칭 picking
       const ranked = candidates.map(wd => {
         const weddingDt = new Date(wd);
         return { wd, leadDays: Math.round((weddingDt - orderDt) / 86400000) };
       });
-      // 우선순위: lead_days >= 0 (미래 결혼식) 중 가장 작은 값 → 없으면 -14 ~ -1 중 가장 큰 값
+      // 우선순위: lead_days >= 0 (미래 결혼식) 중 가장 작은 값 → 없으면 창 안의 과거 중 가장 가까운 값
       const future = ranked.filter(c => c.leadDays >= 0).sort((a, b) => a.leadDays - b.leadDays);
-      const recentPast = ranked.filter(c => c.leadDays < 0 && c.leadDays >= -POST_WEDDING_GRACE_DAYS)
-        .sort((a, b) => b.leadDays - a.leadDays);
+      const past = ranked.filter(c => c.leadDays < 0).sort((a, b) => b.leadDays - a.leadDays);
+      const recentPast = past.filter(c => c.leadDays >= -POST_WEDDING_GRACE_DAYS);
       const picked = future[0] || recentPast[0];
-      if (!picked) continue;
+      if (!picked) {
+        // 과거 예식만 있는데 창 밖 — 늦은 주문인지 오매칭인지 갈라낼 근거가 없어 표본에서 뺀다.
+        if (past.length) {
+          skipped.old_wedding++;
+          skipped.old_wedding_days.push(-past[0].leadDays);
+        } else skipped.no_wedding_info++;
+        continue;
+      }
       allRows.push({
         order_key: 'E' + o.order_seq,
         order_date: o.order_date,
@@ -7093,14 +7108,16 @@ async function apiLeadtime(query = {}) {
   const sorted = [...positiveDays].sort((a,b) => a-b);
   const median = sorted.length ? sorted[Math.floor(sorted.length/2)] : 0;
 
-  // 분포 (마이너스 = 예식 후 주문 포함, 구간 세분화)
+  // 분포 (마이너스 = 예식 후 주문 포함, 구간 세분화).
+  //   예식 후 구간은 매칭 창(30일)까지만 존재한다 — 그래서 마지막 칸이 '22~30일'.
+  //   창 밖은 buckets 에 넣지 않고 skipped 로 따로 보고한다 (0 으로 보이면 '없다' 로 읽힌다).
   const buckets = {
-    '예식후 21일+':0, '예식후 15~21일':0, '예식후 8~14일':0, '예식후 1~7일':0,
+    '예식후 22~30일':0, '예식후 15~21일':0, '예식후 8~14일':0, '예식후 1~7일':0,
     '0-7일':0, '8-14일':0, '15-21일':0,
     '22-30일':0, '31-60일':0, '60일+':0
   };
   for (const d of allDays) {
-    if (d < -21) buckets['예식후 21일+']++;
+    if (d < -21) buckets['예식후 22~30일']++;
     else if (d < -14) buckets['예식후 15~21일']++;
     else if (d < -7) buckets['예식후 8~14일']++;
     else if (d < 0) buckets['예식후 1~7일']++;
@@ -7147,9 +7164,18 @@ async function apiLeadtime(query = {}) {
     };
   }).sort((a, b) => b.samples - a.samples);
 
+  const oldDays = skipped.old_wedding_days.sort((a, b) => a - b);
   return {
     avg_days: avg, median_days: median, total_samples: allDays.length, distribution: buckets,
     products,
+    // 매칭 창과 제외 건수 — 화면이 "이 분포가 전부가 아니다" 를 말할 수 있게 함께 내린다.
+    post_wedding: {
+      window_days: 30,
+      excluded_orders: skipped.old_wedding,
+      excluded_median_days: oldDays.length ? oldDays[Math.floor(oldDays.length / 2)] : null,
+      excluded_max_days: oldDays.length ? oldDays[oldDays.length - 1] : null,
+      no_wedding_info_orders: skipped.no_wedding_info,
+    },
   };
 }
 
