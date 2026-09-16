@@ -145,6 +145,8 @@ nav.menu a .ic{width:18px;height:18px;flex:0 0 auto;stroke:currentColor;fill:non
 .chart-container{position:relative;height:300px;margin-top:12px}
 /* TABS & FILTERS */
 .toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+/* 대시보드 기간 바 — 카테고리 탭에 이어 붙는 면. 아래 하위 탭과 구분되도록 여백을 둔다 */
+#dash-period-bar{margin:0 0 24px;padding:10px 12px;background:var(--gray-50);border:1px solid var(--gray-200);border-top:0;border-radius:0 0 var(--radius) var(--radius)}
 .toolbar input,.toolbar select{padding:8px 12px;border:1px solid var(--gray-300);border-radius:var(--radius-btn);font-size:13px}
 .toolbar input[type=date]{width:140px}
 .btn{padding:8px 16px;border:1px solid var(--gray-300);border-radius:var(--radius-btn);background:#fff;cursor:pointer;font-size:13px;font-weight:500;transition:all .15s}
@@ -439,8 +441,10 @@ nav.nav-loading a[href^="#"] {
 </div>
 </div>
 
-<!-- 카테고리 탭 -->
-  <div class="tabs tabs-lg">
+<!-- 카테고리 탭 + 그 카테고리에 걸리는 기간 필터.
+     기간 바를 탭에 붙여 놓아야 "지금 고른 카테고리의 기간" 임이 보인다 — 아래 하위 탭
+     필터들과 섞여 보이던 문제 (2026-09-16 사용자 지적). 흰 카드로 감싸지는 않는다. -->
+  <div class="tabs tabs-lg" style="margin-bottom:0">
     <button class="tab active" id="dash-tab-daeryepum" onclick="setDashCategory('daeryepum')">
       답례품
     </button>
@@ -450,11 +454,13 @@ nav.nav-loading a[href^="#"] {
   </div>
 
   <!-- 대시보드 기간 조회 -->
-  <div class="toolbar" style="margin-bottom:20px">
+  <div class="toolbar" id="dash-period-bar">
+    <span id="dash-scope-label" style="font-size:12px;color:var(--gray-500)">답례품 조회 기간</span>
     <input type="date" id="dash-start" />
     <span>~</span>
     <input type="date" id="dash-end" />
-    <button class="btn btn-primary" onclick="loadDashboard()">조회</button>
+    <button class="btn btn-primary" id="dash-search-btn" onclick="loadDashboard()">조회</button>
+    <span id="dash-search-status" style="font-size:12px;color:var(--gray-500)"></span>
   </div>
 
   <!-- 대시보드 하위 탭 (활성 탭만 lazy-load) -->
@@ -5190,6 +5196,7 @@ function init() {
   document.getElementById('ord-end').value = end;
   document.getElementById('dash-start').value = start30;
   document.getElementById('dash-end').value = end;
+  if (typeof _dashSyncScopeLabel === 'function') _dashSyncScopeLabel();
   // 상품별 통계: 기본 기간 90일 preset + 판매 상품 리스트 로드
   const ps90Start = fmt(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 89));
   const psStart = document.getElementById('ps-start');
@@ -9389,9 +9396,29 @@ function setDashSubTab(n) {
 
 // 탭별 fetch/렌더 — 최초 1회만 로드 (재진입 시 skip). 기간/카테고리 파라미터는
 //   기존 loadDashboard 와 동일 규칙 (dash-start / dash-end / dashCategory).
+// 조회 진행 표시 — 대시보드 집계는 한 달치가 20~30초 걸린다. 버튼이 그대로면
+//   "안 눌렸다" 로 읽혀서(2026-09-16 사용자 지적) 버튼을 잠그고 경과 시간을 보여 준다.
+let _dashBusyTimer = null;
+function _dashSetBusy(on, msg, isError) {
+  const btn = document.getElementById('dash-search-btn');
+  const st = document.getElementById('dash-search-status');
+  if (btn) { btn.disabled = on; btn.textContent = on ? '조회 중…' : '조회'; btn.style.opacity = on ? '.6' : ''; }
+  if (_dashBusyTimer) { clearInterval(_dashBusyTimer); _dashBusyTimer = null; }
+  if (!st) return;
+  st.style.color = isError ? 'var(--danger)' : 'var(--gray-500)';
+  if (on) {
+    const t0 = Date.now();
+    st.textContent = '불러오는 중… 0초';
+    _dashBusyTimer = setInterval(() => {
+      st.textContent = `불러오는 중… ${Math.round((Date.now() - t0) / 1000)}초`;
+    }, 1000);
+  } else st.textContent = msg || '';
+}
+
 async function _loadDashSection(n) {
   if (_dashSectionLoaded.has(n)) return;
   _dashSectionLoaded.add(n);
+  _dashSetBusy(true);
   const catParam = `category=${encodeURIComponent(dashCategory)}`;
   const dashStart = document.getElementById('dash-start').value;
   const dashEndVal = document.getElementById('dash-end').value;
@@ -9445,7 +9472,22 @@ async function _loadDashSection(n) {
       // 예식일 캘린더 — 자체 연/월 셀렉트로 조회한다 (대시보드 기간과 무관).
       initWeddingCalendar();
     }
-  } catch(e) { console.error(e); showToast('대시보드 로딩 실패: ' + e.message); }
+  } catch(e) {
+    console.error(e);
+    showToast('대시보드 로딩 실패: ' + e.message);
+    // 실패하면 캐시에서 빼 둔다 — 안 그러면 다시 조회를 눌러도 '로드 완료' 로 보고 건너뛴다.
+    _dashSectionLoaded.delete(n);
+    _dashSetBusy(false, '조회 실패: ' + e.message, true);
+    return;
+  }
+  _dashSetBusy(false, _dashLoadedNote());
+}
+
+/** 조회 완료 표시 — 어느 기간을 보고 있는지 한 줄로 남긴다. */
+function _dashLoadedNote() {
+  const s = document.getElementById('dash-start')?.value || '';
+  const e = document.getElementById('dash-end')?.value || '';
+  return (s && e) ? `${s} ~ ${e} 조회 완료` : '';
 }
 
 // 전환율 카드(#mk-conv-*)를 예식 윈도우(-14~+7일) 기반으로 덮어씀 (마케팅 렌더 후 호출).
@@ -9489,9 +9531,16 @@ function setDashCategory(cat) {
   if (typeof _psSelected !== 'undefined') _psSelected.clear();
   if (typeof renderPsChips === 'function') renderPsChips();
   if (typeof loadPsProductList === 'function') loadPsProductList();
+  _dashSyncScopeLabel();
   // 카테고리 변경 → 로드 캐시 비우고 활성 탭 재로드
   _dashSectionLoaded.clear();
   loadDashboard();
+}
+
+/** 기간 바 라벨 — 지금 기간이 어느 카테고리에 걸리는지 적는다. */
+function _dashSyncScopeLabel() {
+  const el = document.getElementById('dash-scope-label');
+  if (el) el.textContent = `${dashCategoryLabel()} 조회 기간`;
 }
 
 async function loadDashboard() {
