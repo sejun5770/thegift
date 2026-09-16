@@ -10950,9 +10950,16 @@ function renderLeadtime(lt) {
   const dist = lt.distribution || {};
   const maxVal = Math.max(...Object.values(dist), 1);
   const colors = ['#991b1b','#dc2626','#f87171','#fca5a5','#3b82f6','#2563eb','#1d4ed8','#1e40af','#1e3a8a','#172554'];
-  document.getElementById('lt-bars').innerHTML = Object.entries(dist).map(([label, count], i) => {
-    const h = Math.max(4, Math.round((count / maxVal) * 70));
-    return `<div class="leadtime-bar" style="height:${h}px;background:${colors[i]}"><span class="count">${count}</span><span class="label">${label}</span></div>`;
+  // 건수 0인 '예식후' 칸은 그리지 않는다 — 빈 막대가 "그런 주문이 없다" 로 읽히는데,
+  //   실제로는 매칭 창(예식 후 30일) 밖이라 집계하지 않은 구간이 섞여 있었다.
+  //   예식 전 구간은 0이어도 축을 유지해야 분포 모양이 보이므로 그대로 둔다.
+  //   색은 원래 순서(예식후=붉은 계열 → 예식전=푸른 계열)를 유지해야 하므로 필터 전 index 로 고른다.
+  const distShown = Object.entries(dist)
+    .map(([label, count], i) => ({ label, count, color: colors[i] }))
+    .filter(b => b.count > 0 || !b.label.startsWith('예식후'));
+  document.getElementById('lt-bars').innerHTML = distShown.map(b => {
+    const h = Math.max(4, Math.round((b.count / maxVal) * 70));
+    return `<div class="leadtime-bar" style="height:${h}px;background:${b.color}"><span class="count">${b.count}</span><span class="label">${b.label}</span></div>`;
   }).join('');
 
   // 분포에서 가장 비중 큰 bucket 식별 (텍스트 동적 생성용)
@@ -10974,6 +10981,24 @@ function renderLeadtime(lt) {
       ? '웨딩업계 평균(2~4주)에 부합하는 건강한 리드타임입니다. 청첩장 발송 시점과 맞물리는 패턴입니다.'
       : '평균 2~4주의 안정적 리드타임입니다.';
   } else feedback += '리드타임이 길어 <strong>사전 계획형 주문</strong>이 많습니다. 조기 주문 할인 프로모션이 효과적일 수 있습니다.';
+  // 예식 후 주문 — 창 밖은 집계에서 빠지므로 그 사실과 건수를 함께 적는다.
+  const pw = lt.post_wedding || null;
+  const postCnt = totalCnt - preWeddingCnt;
+  if (pw) {
+    feedback += `<br><br>예식 <strong>후</strong> 주문은 ${fmtNum(postCnt)}건`
+      + `(${totalCnt > 0 ? Math.round(postCnt / totalCnt * 100) : 0}%)입니다. `;
+    feedback += `<span style="color:var(--gray-500);font-size:12px">바른손몰 주문은 주문서에 예식일이 없어 회원의 청첩장 기록으로 예식일을 찾습니다. `
+      + `예식 후 <strong>${pw.window_days}일</strong>까지만 매칭하므로 그 뒤 구간은 분포에 없습니다`;
+    if (pw.excluded_orders) {
+      feedback += ` — 예식이 그보다 오래 지난 주문 <strong>${fmtNum(pw.excluded_orders)}건</strong>`
+        + `(경과 중앙값 ${pw.excluded_median_days}일, 최대 ${fmtNum(pw.excluded_max_days)}일)은 늦은 주문인지 옛 청첩장 오매칭인지 가릴 수 없어 표본에서 제외했습니다`;
+    }
+    feedback += `.`;
+    if (pw.no_wedding_info_orders) {
+      feedback += ` 청첩장 기록이 없어 예식일을 못 찾은 주문 ${fmtNum(pw.no_wedding_info_orders)}건도 표본 밖입니다.`;
+    }
+    feedback += `</span>`;
+  }
   // 데코소품은 예식과 연관도가 약함을 안내 (lead_days 의미 약화 가능)
   if (!dashIsDaeryepum()) {
     feedback += `<br><span style="color:#92400e;font-size:12px">⚠️ 데코소품 구매자의 예식일 매칭은 회원 ID 기반 추정값으로, 본인 예식과 직접 연관되지 않을 수 있습니다.</span>`;
@@ -11064,6 +11089,7 @@ function renderLeadtimeGroups() {
         <td class="num" style="padding:5px 8px;font-size:12px;color:var(--gray-600)">${fmtNum(p.samples)}건</td>
         <td class="num" style="padding:5px 8px;font-size:12px;font-weight:600">${p.median_days}일</td>
         <td class="num" style="padding:5px 8px;font-size:12px;color:var(--gray-500)">${lo}~${hi}일</td>
+        <td class="num" style="padding:5px 8px;font-size:12px;color:${p.post_wedding_pct >= 30 ? '#b45309' : 'var(--gray-500)'}">${p.post_wedding_pct ? p.post_wedding_pct + '%' : '-'}</td>
         <td style="padding:5px 8px;min-width:140px">
           <div style="position:relative;height:8px;background:var(--gray-100);border-radius:4px">
             <div style="position:absolute;left:${left}%;width:${width}%;top:0;height:8px;background:${color};opacity:.35;border-radius:4px"></div>
@@ -11083,6 +11109,7 @@ function renderLeadtimeGroups() {
           <th class="num" style="padding:4px 8px;font-size:12px;color:var(--gray-500);font-weight:500">표본</th>
           <th class="num" style="padding:4px 8px;font-size:12px;color:var(--gray-500);font-weight:500">중앙값</th>
           <th class="num" style="padding:4px 8px;font-size:12px;color:var(--gray-500);font-weight:500">P25~P75</th>
+          <th class="num" style="padding:4px 8px;font-size:12px;color:var(--gray-500);font-weight:500" title="예식일이 지난 뒤 들어온 주문 비중 (중앙값·P25~P75 는 예식 전 주문만 씁니다)">예식후</th>
           <th style="padding:4px 8px;font-size:12px;color:var(--gray-500);font-weight:500">분포</th>
         </tr></thead>
         <tbody>${rows}</tbody>
