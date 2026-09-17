@@ -9490,10 +9490,7 @@ const server = http.createServer(async (req, res) => {
   // --- 바른기프트 라우트 (고객 페이지: 인증 불필요 / 관리 API: 인증 필요) ---
   // 고객 페이지 (정적 HTML) - 인증 불필요
   if (pathname === '/order-info') {
-    // 고객 화면 되돌리기 스위치 — BG_ORDER_INFO_UI=legacy 면 개편 전 파일을 그대로 낸다 (2026-09-11 1차 톤 정리).
-    //   재배포 없이 환경변수만 바꿔 옛 화면으로 돌아갈 수 있다. legacy 파일은 개편 안정화 뒤 지운다.
-    const uiFile = process.env.BG_ORDER_INFO_UI === 'legacy' ? 'order-info.legacy.html' : 'order-info.html';
-    const bgHtml = fs.readFileSync(path.join(__dirname, 'barungift', uiFile), 'utf-8');
+    const bgHtml = fs.readFileSync(path.join(__dirname, 'barungift', 'order-info.html'), 'utf-8');
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(bgHtml);
     return;
