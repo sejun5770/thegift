@@ -178,6 +178,30 @@ function buildReport({ ymd, time, sources, per, dryRun, error }) {
 }
 
 /**
+ * 슬랙 리포트 — 운영이 한눈에 보는 요약만 (2026-09-17 운영 요청). 제외 사유·실패 주문번호 같은 상세는
+ *   대시보드 문자발송 화면의 실행 기록(buildReport)에 남는다.
+ *   :incoming_envelope: 출고안내문자 자동 발송 — 2026-09-17 (목)
+ *   커스텀 주문 : N건(성공 : n건, 실패 : n건)
+ *   답례품 주문 : N건(성공 : n건, 실패 : n건)
+ *   N = 발송 대상(이미 발송·다른 채널 등 제외 후). 보내지 못한 경우는 이유를 한 줄로 적는다 — 조용히 0건으로 보이면 안 된다.
+ */
+const SLACK_KIND_LABEL = { custom: '커스텀 주문', monthly: '답례품 주문' };
+function buildSlackReport({ ymd, sources, per, error }) {
+  const lines = [`:incoming_envelope: 출고안내문자 자동 발송 — ${kstDateLabel(ymd)}`];
+  if (error) { lines.push(`:warning: 발송하지 못했습니다 — ${error}`); return lines.join('\n'); }
+  for (const kind of ['custom', 'monthly']) {
+    const label = SLACK_KIND_LABEL[kind];
+    const hasSheet = kind === 'custom' ? !!(sources && sources.custom) : !!(sources && sources.monthly && sources.monthly.length);
+    const p = per && per[kind];
+    if (!hasSheet || !p) { lines.push(`${label} : 시트를 찾지 못해 발송하지 않았습니다`); continue; }
+    if (p.error) { lines.push(`${label} : :warning: 발송하지 못했습니다 (${p.error})`); continue; }
+    const sent = p.send ? p.send.sent : 0, failed = p.send ? p.send.failed : 0;
+    lines.push(`${label} : ${p.targets.length}건(성공 : ${sent}건, 실패 : ${failed}건)`);
+  }
+  return lines.join('\n');
+}
+
+/**
  * 한 번 실행. deps = { giftSheetTabs, giftSmsRows, sentOrders(ids, kind), sendRows(rows, kind), postToSlack }
  *   출고일 기준 — 커스텀 시트와 월별 답례품 시트를 시트 종류별로 나눠 고르고·제외하고·보낸다.
  *   dryRun 이면 대상만 고르고 문자·슬랙 모두 보내지 않는다 (화면 미리보기용).
@@ -218,10 +242,10 @@ async function run(deps, { dryRun = false, now = new Date() } = {}) {
     } catch (e) {
       ctx.error = e.message;
     }
-    const text = buildReport(ctx);
+    const text = buildReport(ctx);   // 화면 실행 기록용 상세
     let slack = null;
     if (!dryRun) {
-      try { slack = await deps.postToSlack(text, { channel: cfg.channel || null }); }
+      try { slack = await deps.postToSlack(buildSlackReport(ctx), { channel: cfg.channel || null }); }
       catch (e) { slack = { error: e.message }; console.warn('[sms-auto] 슬랙 리포트 실패:', e.message); }
     }
     const kinds = Object.keys(ctx.per);
@@ -284,6 +308,6 @@ function scheduleDaily(deps) {
 module.exports = {
   MONTH_AUTO, DEFAULT_TIME,
   loadConfig, invalidateConfig, getLastRun,
-  kstToday, monthSheetName, monthNameOffset, resolveSheet, resolveSheets, selectRows, excludeAlreadySent, summarizeSend, buildReport,
+  kstToday, monthSheetName, monthNameOffset, resolveSheet, resolveSheets, selectRows, excludeAlreadySent, summarizeSend, buildReport, buildSlackReport,
   parseHhmm, shouldFireNow, run, scheduleDaily,
 };
