@@ -15311,6 +15311,18 @@ function smsAutoDeps() {
   };
 }
 
+// ── 자동 작업 실패 슬랙 알림 (barungift/job-alert.js) ──
+//   채널: JOB_ALERT_SLACK_CHANNEL 이 있으면 그곳, 없으면 문자 자동 발송 리포트와 같은 채널
+//   (문자발송 화면의 슬랙 채널 설정 → 없으면 재고 알림 채널). 슬랙 설정이 없으면 로그만 남긴다.
+async function _jobAlertPost(text) {
+  let channel = (process.env.JOB_ALERT_SLACK_CHANNEL || '').trim();
+  if (!channel) { try { channel = (await smsAuto.loadConfig()).channel || ''; } catch { channel = ''; } }
+  return require('./barungift/stock-alert').postToSlack(text, { channel: channel || null });
+}
+function _jobMonitor(job) {
+  return require('./barungift/job-alert').createJobMonitor(job, { post: _jobAlertPost });
+}
+
 function scheduleCoupangSync(baseUrl) {
   if (process.env.COUPANG_AUTO_SYNC_DISABLED === '1') {
     console.log('[coupang auto-sync] 비활성 (COUPANG_AUTO_SYNC_DISABLED=1)');
@@ -15323,6 +15335,17 @@ function scheduleCoupangSync(baseUrl) {
   const minutes = Math.min(Math.max(parseInt(process.env.COUPANG_SYNC_INTERVAL_MIN, 10) || 15, 5), 1440);
   const daysBack = Math.min(Math.max(parseInt(process.env.COUPANG_SYNC_DAYS_BACK, 10) || 7, 1), 30);
   let running = false;
+  // 15분 주기라 한 번 실패는 일시 오류일 수 있다 — 2회 연속부터 알린다 (약 30분)
+  const mon = _jobMonitor({
+    label: '쿠팡 주문 가져오기', schedule: `${minutes}분마다`, threshold: 2, remindHours: 6,
+    impact: '쿠팡 주문이 정보입력현황에 들어오지 않습니다',
+    action: '대시보드에서 쿠팡 수동 동기화 · 컨테이너 로그 [coupang auto-sync] · 401/403 이면 쿠팡 API 키 만료',
+  });
+  const rgMon = process.env.COUPANG_RG_SYNC_DISABLED === '1' ? null : _jobMonitor({
+    label: '쿠팡 로켓그로스 동기화', schedule: `${minutes}분마다 · 쿠팡 주문과 함께`, threshold: 2, remindHours: 6,
+    impact: '로켓그로스 주문·매출이 누락됩니다',
+    action: '컨테이너 로그 [coupang auto-sync] 의 로켓그로스 오류 · COUPANG_RG_SYNC_DISABLED=1 로 끌 수 있음',
+  });
 
   async function tick() {
     // 앞 회차가 길어지면 겹쳐 돌지 않게 한다 — 쿠팡 호출량이 두 배가 된다
@@ -15335,15 +15358,23 @@ function scheduleCoupangSync(baseUrl) {
         body: JSON.stringify({ days_back: daysBack }),
       });
       const d = await res.json().catch(() => ({}));
-      if (d.error) {
-        console.warn('[coupang auto-sync] 실패:', d.error);
+      if (d.error || !res.ok) {
+        console.warn('[coupang auto-sync] 실패:', d.error || `HTTP ${res.status}`);
+        await mon.fail(d.error || `동기화 API HTTP ${res.status}`);
       } else {
         console.log(`[coupang auto-sync] 마켓플레이스 ${d.fetched ?? '?'}건`
           + ` · 로켓그로스 ${d.rocket_growth?.orders ?? (d.rocket_growth?.error ? 'ERR' : '-')}건`
           + ` · 옵션맵 ${d.option_map?.options ?? (d.option_map?.error ? 'ERR' : '-')}개`);
+        await mon.ok(`마켓플레이스 주문 ${d.fetched ?? '?'}건 수집`);
+        // 로켓그로스는 같은 호출 안에서 따로 성공·실패한다 (쿠팡 주문이 성공해도 로켓그로스만 실패할 수 있다)
+        if (rgMon && d.rocket_growth) {
+          if (d.rocket_growth.error) await rgMon.fail(d.rocket_growth.error);
+          else await rgMon.ok(`로켓그로스 주문 ${d.rocket_growth.orders ?? '?'}건`);
+        }
       }
     } catch (e) {
       console.warn('[coupang auto-sync] 오류:', e.message);
+      await mon.fail(e);
     } finally {
       running = false;
     }
@@ -15377,6 +15408,11 @@ function schedulePriceSnapshot() {
   }
   const minutes = Math.min(Math.max(parseInt(process.env.PRICE_SNAPSHOT_INTERVAL_MIN, 10) || 30, 5), 1440);
   let running = false;
+  const mon = _jobMonitor({
+    label: '가격 스냅샷', schedule: `${minutes}분마다`, threshold: 2, remindHours: 6,
+    impact: '답례품 판매가 변경 이력이 끊겨 가격 변경 전후 비교가 부정확해집니다',
+    action: '컨테이너 로그 [price-snapshot] · 바른손 DB(MSSQL)·Supabase 접속 확인 · PRICE_SNAPSHOT_DISABLED=1 로 끌 수 있음',
+  });
 
   async function tick() {
     if (running) return;
@@ -15384,15 +15420,17 @@ function schedulePriceSnapshot() {
     try {
       const snap = await require('./barungift/price-watch').snapshotPrices({ getPool });
       if (snap.skipped) return;
-      if (snap.error) { console.warn('[price-snapshot]', snap.error); return; }
+      if (snap.error) { console.warn('[price-snapshot]', snap.error); await mon.fail(snap.error); return; }
       if (snap.changed) {
         console.log(`[price-snapshot] 가격변경 ${snap.changed}건: `
           + snap.details.map(d => `${d.code} ${d.from}→${d.to}`).join(', '));
       } else if (snap.baseline) {
         console.log(`[price-snapshot] 기준선 ${snap.baseline}건 기록`);
       }
+      await mon.ok();
     } catch (e) {
       console.warn('[price-snapshot] 오류:', e.message);
+      await mon.fail(e);
     } finally {
       running = false;
     }
@@ -15431,6 +15469,11 @@ function scheduleNaverConfirmBackfill() {
     return (h >= 0 && h <= 23 && mi >= 0 && mi <= 59) ? h * 60 + mi : 4 * 60 + 10;
   })();
   const MAX_PAGES = 20;          // 한 번에 최대 2000건 — 못 채운 건은 다음 날 이어서
+  const mon = _jobMonitor({
+    label: '네이버 구매확정 보정', schedule: '매일 ' + (process.env.NAVER_CONFIRM_BACKFILL_TIME || '04:10') + ' KST', threshold: 1, remindHours: 20,
+    impact: '네이버 주문의 구매확정일이 비어 구매확정 기준 매출에서 빠집니다 (다음 날 다시 시도)',
+    action: '컨테이너 로그 [naver confirm-backfill] · 401/403 이면 네이버 API 키 확인',
+  });
   let lastRunDate = null;
   let running = false;
 
@@ -15463,8 +15506,10 @@ function scheduleNaverConfirmBackfill() {
       }
       console.log(`[naver confirm-backfill] 완료 — 확인 ${total.processed} / 채움 ${total.updated}`
         + ` / 변화없음 ${total.no_change}${total.failed ? ` / 실패 ${total.failed}` : ''}`);
+      await mon.ok(`확인 ${total.processed}건 · 채움 ${total.updated}건`);
     } catch (e) {
       console.error('[naver confirm-backfill] 실패:', e.message);
+      await mon.fail(e);
     } finally {
       running = false;
     }
@@ -15499,6 +15544,11 @@ function scheduleCoupangConfirmBackfill() {
   })();
   let lastRunDate = null;
   let running = false;
+  const mon = _jobMonitor({
+    label: '쿠팡 구매확정 보정', schedule: '매일 ' + (process.env.COUPANG_CONFIRM_BACKFILL_TIME || '04:20') + ' KST', threshold: 1, remindHours: 20,
+    impact: '쿠팡 주문의 구매확정일이 비어 정산 기준 매출에서 빠집니다 (다음 날 최근 45일을 다시 훑음)',
+    action: '컨테이너 로그 [coupang confirm-backfill] · 401/403 이면 쿠팡 API 키 만료',
+  });
 
   async function tick() {
     if (running) return;
@@ -15515,8 +15565,10 @@ function scheduleCoupangConfirmBackfill() {
       if (r.error) throw new Error(r.error);
       console.log(`[coupang confirm-backfill] 완료 — 매출행 ${r.sales_rows} / 대상 ${r.candidates}`
         + ` / 채움 ${r.updated} / 미매칭 ${r.unmatched}${r.failed ? ` / 실패 ${r.failed}` : ''}`);
+      await mon.ok(`대상 ${r.candidates}건 · 채움 ${r.updated}건`);
     } catch (e) {
       console.error('[coupang confirm-backfill] 실패:', e.message);
+      await mon.fail(e);
     } finally {
       running = false;
     }
