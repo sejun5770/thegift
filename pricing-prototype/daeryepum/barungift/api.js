@@ -1827,20 +1827,6 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
   // ============================================
   // 수동 주문 등록 (MSSQL 누락 사고 케이스 대응)
   // ============================================
-  // GET /api/bg/manual-orders?category=&start_date=&end_date=
-  if (pathname === '/api/bg/manual-orders' && method === 'GET') {
-    try {
-      const orders = await store.listManualOrders({
-        category: query.category || null,
-        startDate: query.start_date || null,
-        endDate: query.end_date || null,
-      });
-      return json(res, { orders });
-    } catch (err) {
-      console.error('[manual-orders GET] error:', err.message);
-      return json(res, { error: err.message }, 500);
-    }
-  }
   // POST /api/bg/manual-orders
   if (pathname === '/api/bg/manual-orders' && method === 'POST') {
     try {
