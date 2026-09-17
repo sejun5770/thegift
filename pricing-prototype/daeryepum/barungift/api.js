@@ -968,7 +968,11 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
   // 관리자 API는 인증 필요 (개발모드에서는 우회)
   const DEV_SKIP_AUTH = !process.env.GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID === 'test';
-  if (pathname.startsWith('/api/bg/') && !session && !DEV_SKIP_AUTH) {
+  // 컨테이너 내부 자기 호출(문자 자동 발송 등)은 server.js 가 기동마다 새로 만드는 프로세스 토큰으로 통과한다.
+  //   이 핸들러는 server.js 의 인증 게이트(내부 토큰 허용)보다 먼저 실행되므로 여기서도 같은 토큰을 인정해야 한다.
+  //   빠져 있어 운영(GOOGLE_CLIENT_ID 설정)에서 자동 발송이 매번 401 이었다 — 로컬은 개발모드라 드러나지 않음 (2026-09-17).
+  const INTERNAL_CALL = !!process.env.BG_INTERNAL_TOKEN && req.headers['x-internal-token'] === process.env.BG_INTERNAL_TOKEN;
+  if (pathname.startsWith('/api/bg/') && !session && !DEV_SKIP_AUTH && !INTERNAL_CALL) {
     return json(res, { error: '인증이 필요합니다.' }, 401);
   }
 
