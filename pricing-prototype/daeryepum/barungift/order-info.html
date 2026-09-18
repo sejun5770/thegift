@@ -1518,12 +1518,21 @@
       return b && b.image_url && (Array.isArray(b.placements) && b.placements.length ? b.placements : ['complete']).indexOf(placement) >= 0;
     });
   }
+  /** 방금 제출한 정보에 오늘출발 추가비용이 있는지 — 주문 단위 또는 출고 그룹(상품) 단위 */
+  function _cbNeedsExpressDeposit() {
+    const info = orderData?.existing_info || {};
+    if (Number(info.express_fee) > 0 && info.is_express) return true;
+    return Array.isArray(info.sticker_selections) && info.sticker_selections.some(function(s) { return s && s.is_express && Number(s.express_fee) > 0; });
+  }
   function renderCompletionBanners(screenEl) {
     const slot = screenEl && screenEl.querySelector('[data-cb-slot]:not([data-cb-slot="delivery"])');
     if (!slot) return;
     // 입력한 정보 화면은 배송 조회 결과를 보고 자리를 정한다 (renderDeliveryBanners) — 먼저 맨 아래에 그렸다가
     //   접으면 그 사이에 보인 배너가 노출로 잘못 기록된다.
     if (screenEl.id === 'submittedSummaryScreen' && _cbFor('delivery').length) { slot.classList.add('hidden'); slot.innerHTML = ''; return; }
+    // 오늘출발 비용을 입금해야 하는 고객은 제출 직후 완료 화면에 배너를 두지 않는다 — 입금이 먼저다 (2026-09-18 요청).
+    //   입금 대기(결제대기) 화면은 원래 배너 자리가 없다.
+    if (screenEl.id === 'successScreen' && _cbNeedsExpressDeposit()) { slot.classList.add('hidden'); slot.innerHTML = ''; return; }
     _cbRenderSlot(slot, screenEl.id === 'noInputScreen' ? 'noinput' : 'complete');
   }
   /** 배송 조회 카드 바로 아래 — 출고된 주문(카드가 그려진 경우)에만. 이 자리가 보이면 같은 화면 맨 아래 배너는 접는다 (한 화면에 배너 영역 하나). */
