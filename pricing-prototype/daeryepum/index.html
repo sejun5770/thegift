@@ -422,6 +422,7 @@ nav.nav-loading a[href^="#"] {
     <div class="grp" data-grp="관리">관리</div>
     <a href="#cust-banner" data-grp="관리" onclick="showPage('cust-banner')" style="display:none"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-8 8"/></svg><span>배너 설정</span></a>
     <a href="#cust-guide" data-grp="관리" onclick="showPage('cust-guide')" style="display:none"><svg class="ic" viewBox="0 0 24 24"><path d="M4 4h16v12H8l-4 4z"/><path d="M8 8h8M8 12h5"/></svg><span>안내사항 설정</span></a>
+    <a href="#cust-admins" data-grp="관리" onclick="showPage('cust-admins')" style="display:none"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/></svg><span>권한 설정</span></a>
   </nav>
 </aside>
 <header class="top">
@@ -1764,6 +1765,28 @@ nav.nav-loading a[href^="#"] {
       </div>
       <input type="file" id="cb-file" accept="image/png,image/jpeg" style="display:none" onchange="cbOnFilePicked(this)">
     </div>
+</div>
+
+<!-- ========== 권한 설정 — 로그인 이력 + 슈퍼 관리자 부여 (migration 088, 2026-09-18) ========== -->
+<div id="page-cust-admins" class="page">
+  <div class="page-header">
+    <div>
+      <h2 class="page-title">🛡️ 권한 설정</h2>
+      <div class="page-subtitle">대시보드에 로그인한 적 있는 사용자에게 <b>슈퍼 관리자</b> 권한을 주거나 뺍니다. 슈퍼 관리자는 GNB 설정·배너 설정·안내사항 설정·권한 설정 등 시스템 설정을 바꿀 수 있습니다.</div>
+    </div>
+  </div>
+  <div class="card">
+    <div style="font-size:13px;color:var(--gray-500);margin-bottom:12px;line-height:1.6">
+      목록은 <b>로그인 기록</b>입니다. 한 번도 로그인하지 않은 계정은 먼저 로그인해야 목록에 나타납니다.
+      <b>기본 관리자</b>는 서버 설정(SUPER_ADMIN_EMAILS)으로 정해져 여기서 뺄 수 없고, 자기 자신의 권한도 바꿀 수 없습니다.
+      바꾼 권한은 1분 안에 모든 화면에 적용됩니다 (상대방은 새로고침 필요).
+    </div>
+    <div id="adm-users"></div>
+    <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+      <button class="btn" onclick="admLoadUsers()">다시 불러오기</button>
+      <span id="adm-status" style="font-size:12px;color:var(--gray-500)"></span>
+    </div>
+  </div>
 </div>
 
 <!-- ========== ORDERS ========== -->
@@ -5256,7 +5279,7 @@ function init() {
 
   // URL hash 기반 페이지 전환
   const hash = location.hash.replace('#', '') || 'dashboard';
-  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-unified', 'monthly-report', 'admin-nav-settings', 'cust-banner', 'cust-guide', 'coupang-rfm'].includes(hash)) showPage(hash);
+  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-unified', 'monthly-report', 'admin-nav-settings', 'cust-banner', 'cust-guide', 'cust-admins', 'coupang-rfm'].includes(hash)) showPage(hash);
 }
 
 function fmt(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -5357,6 +5380,7 @@ function showPage(name) {
   if (name === 'monthly-report') initMonthlyReport();
   if (name === 'admin-nav-settings') loadAdminNavSettings();
   if (name === 'cust-guide') loadSiteGuideSettings().catch(e => console.warn('site-guide 로드 실패:', e.message));
+  if (name === 'cust-admins') admLoadUsers();
   if (name === 'cust-banner') cbLoadBanners().catch(e => console.warn('배너 로드 실패:', e.message));
   if (name === 'orders') loadOrders();
   if (name === 'sns') loadSnsInsight();
@@ -9037,6 +9061,65 @@ function downloadMonthlyReportTsv() {
 }
 
 // ============================================
+// 권한 설정 (cust-admins 페이지, migration 088)
+// ============================================
+//   GET /api/admin/users · POST /api/admin/users/super-admin { email, grant } — 둘 다 super admin 전용
+function _admFmt(ts) {
+  if (!ts) return '-';
+  const d = new Date(ts);
+  return isNaN(d) ? '-' : d.toLocaleString('ko-KR', { year: '2-digit', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+async function admLoadUsers() {
+  const box = document.getElementById('adm-users'), st = document.getElementById('adm-status');
+  if (!box) return;
+  box.innerHTML = '<div class="state">불러오는 중...</div>';
+  try {
+    const r = await fetch(`${API}/api/admin/users`);
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || j.message || ('HTTP ' + r.status));
+    const users = j.users || [];
+    const me = j.me;
+    const nSuper = users.filter(u => u.is_super_admin).length;
+    if (st) st.textContent = `${users.length}명 · 슈퍼 관리자 ${nSuper}명`;
+    if (!users.length) { box.innerHTML = '<div class="state">로그인 기록이 없습니다.</div>'; return; }
+    box.innerHTML = `<table class="data-table">
+      <thead><tr><th style="text-align:left">계정</th><th style="text-align:left">이름</th><th>첫 로그인</th><th>마지막 로그인</th><th style="text-align:right">로그인 횟수</th><th>슈퍼 관리자</th><th style="text-align:left">마지막 변경</th></tr></thead>
+      <tbody>${users.map(u => {
+        const locked = u.is_default_admin || (me && u.email === me);
+        const why = u.is_default_admin ? '기본 관리자 — 서버 설정으로 고정' : (me && u.email === me ? '자기 자신의 권한은 바꿀 수 없습니다' : '');
+        const tag = u.is_default_admin ? ' <span class="badge badge-neutral" style="font-size:11px">기본 관리자</span>' : (me && u.email === me ? ' <span class="badge badge-neutral" style="font-size:11px">나</span>' : '');
+        return `<tr>
+          <td>${escapeHtml(u.email)}${tag}</td>
+          <td>${escapeHtml(u.name || '-')}</td>
+          <td style="text-align:center;white-space:nowrap">${_admFmt(u.first_login_at)}</td>
+          <td style="text-align:center;white-space:nowrap">${_admFmt(u.last_login_at)}</td>
+          <td style="text-align:right">${u.login_count ? Number(u.login_count).toLocaleString() : '<span style="color:var(--gray-400)" title="이 기능 전 작업 기록으로 채운 계정">-</span>'}</td>
+          <td style="text-align:center"><label title="${escapeHtml(why)}" style="cursor:${locked ? 'not-allowed' : 'pointer'}"><input type="checkbox" ${u.is_super_admin ? 'checked' : ''} ${locked ? 'disabled' : ''} onchange="admToggle('${escapeHtml(u.email)}', this)"></label></td>
+          <td style="font-size:12px;color:var(--gray-500)">${u.granted_at ? escapeHtml((u.granted_by || '') + ' · ' + _admFmt(u.granted_at)) : ''}</td>
+        </tr>`;
+      }).join('')}</tbody></table>`;
+  } catch (e) {
+    box.innerHTML = `<div class="state" style="color:#b91c1c">${escapeHtml(e.message)}</div>`;
+    if (st) st.textContent = '';
+  }
+}
+async function admToggle(email, el) {
+  const grant = !!el.checked;
+  if (!confirm(grant ? `${email} 에게 슈퍼 관리자 권한을 줄까요?
+GNB·배너·안내사항·권한 설정을 바꿀 수 있게 됩니다.` : `${email} 의 슈퍼 관리자 권한을 뺄까요?`)) { el.checked = !grant; return; }
+  el.disabled = true;
+  try {
+    const r = await fetch(`${API}/api/admin/users/super-admin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, grant }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || j.message || ('HTTP ' + r.status));
+    await admLoadUsers();
+  } catch (e) {
+    alert('권한 변경 실패: ' + e.message);
+    el.checked = !grant; el.disabled = false;
+  }
+}
+
+// ============================================
 // GNB 설정 (admin-nav-settings 페이지)
 // ============================================
 //   서버: GET/PUT /api/admin/nav-menu
@@ -9049,7 +9132,7 @@ let _navIsSuperAdmin = false;
 
 // super admin 전용 메뉴 — GNB 설정의 표시/숨김 목록에 넣지 않고 권한으로만 보인다.
 //   GNB 설정 자체는 상단 버튼 (_topButtonsHtml).
-const ADMIN_ONLY_NAV = new Set(['cust-banner', 'cust-guide']);
+const ADMIN_ONLY_NAV = new Set(['cust-banner', 'cust-guide', 'cust-admins']);
 
 /** 현재 DOM 의 nav 에서 menu item 메타 추출 — fallback / merge 용 기준. */
 function _collectDomNavItems() {
