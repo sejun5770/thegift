@@ -825,6 +825,50 @@ async function listProcessedShipDateBefore({ before, from }) {
   return out;
 }
 
+/**
+ * 오늘출발 현금영수증 슬랙 (barungift/express-receipt-slack.js, migration 085) 용.
+ *   sinceIso 이후 수집완료됐고 아직 슬랙에 안 올린 행. 오늘출발 여부는 상품 단위(sticker_selections)
+ *   에도 있어 서버 필터로 못 거른다 — 호출측이 거른다. 하루 수집완료는 수백 건이라 페이징만 한다.
+ *   컬럼(express_receipt_posted_at)이 없으면 Supabase 가 400 을 준다 → 호출측이 '마이그레이션 필요' 로 본다.
+ */
+async function listProcessedUnpostedSince(sinceIso) {
+  if (!USE_SUPABASE) return [];
+  const PAGE = 1000;
+  const out = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const url = `${REST_BASE}/bg_order_customer_info`
+      + '?select=order_id,is_express,sticker_selections,cash_receipt_yn,receipt_type,receipt_number,processed_at'
+      + `&processed_at=gte.${encodeURIComponent(sinceIso)}`
+      + '&express_receipt_posted_at=is.null'
+      + `&order=processed_at.asc&limit=${PAGE}&offset=${offset}`;
+    const res = await fetch(url, { headers: HEADERS });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Supabase GET bg_order_customer_info [${res.status}]: ${text}`);
+    }
+    const page = await res.json();
+    out.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return out;
+}
+
+/** 슬랙에 올린 주문 표시 — 다시 수집완료해도(되돌리기 후) 두 번 올라가지 않게. */
+async function markExpressReceiptPosted(orderId, at = now()) {
+  return sbUpdate('bg_order_customer_info', `order_id=eq.${encodeURIComponent(orderId)}`, { express_receipt_posted_at: at });
+}
+
+/** 오늘출발 현금영수증 스레드 — 하루 1개. 날짜('YYYY-MM-DD')와 부모 메시지 ts 를 사이트 설정에 둔다. */
+async function getExpressReceiptThread() {
+  const rows = await sbGet('bg_site_settings', 'id=eq.1&limit=1');
+  const r = rows[0] || {};
+  if (!('express_receipt_thread_ts' in r)) throw new Error('MIGRATION_085_MISSING');
+  return { date: r.express_receipt_thread_date || null, ts: r.express_receipt_thread_ts || null };
+}
+async function setExpressReceiptThread(date, ts) {
+  return sbUpdate('bg_site_settings', 'id=eq.1', { express_receipt_thread_date: date, express_receipt_thread_ts: ts });
+}
+
 // ============================================
 // 주문조회 '수집완료' 상태 (bg_order_collected)
 // 답례품/데코소품/꽃다발 주문조회 페이지에서 마킹하는 수집 상태.
@@ -2757,6 +2801,10 @@ module.exports = {
   setProcessed,
   setProcessedBatch,
   listProcessedShipDateBefore,
+  listProcessedUnpostedSince,
+  markExpressReceiptPosted,
+  getExpressReceiptThread,
+  setExpressReceiptThread,
   getCollectedOrderSeqs,
   addCollectedOrderSeqs,
   removeCollectedOrderSeqs,
