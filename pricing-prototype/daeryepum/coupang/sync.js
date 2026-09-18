@@ -133,7 +133,9 @@ function normalizeOrderSheet(sheet, unitOf = null) {
         paid_at: paidAt,
         product_name: item.vendorItemName || item.sellerProductName || '쿠팡 답례품',
         product_code: item.sellerProductId ? String(item.sellerProductId) : null,
-        external_vendor_sku: item.externalVendorSku || null,
+        // 셀러센터 '업체상품코드' — API 필드명은 externalVendorSkuCode (옛 externalVendorSku 는 없는 필드라 늘 null 이었다).
+        //   옵션마다 우리 상품코드(TGJSD04D1·D2)가 들어 있어 같은 등록상품ID 의 옵션을 가른다 (2026-09-18).
+        external_vendor_sku: item.externalVendorSkuCode || item.externalVendorSku || null,
         // item_count: 실제 출고 개수 (cart × setSize) — 주문조회 '수량' 컬럼이 표시할 값
         item_count: effectiveCount,
         item_sale_price: unit,
@@ -261,7 +263,7 @@ async function syncRecent({ daysBack = 7, status } = {}) {
           productCode: r.product_code,
           productName: r.product_name,
           quantity: r.item_count,
-          modelNo: r.external_vendor_sku, // 쿠팡 셀러센터의 '모델번호'
+          modelNo: r.external_vendor_sku, // 쿠팡 셀러센터의 업체상품코드 — 내부 상품코드 판정에도 쓴다
           optionId: r.vendor_item_id,     // 채널 고정 스티커 조회용 (056/057)
           stickers,
           productSettings,

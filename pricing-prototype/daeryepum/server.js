@@ -2026,13 +2026,20 @@ async function apiOrders(query) {
         //   옵션ID 매핑을 먼저 본다 — 같은 등록상품 안에서 옵션마다 내부코드가 갈리는 경우가 있다.
         const cpByOption = new Map();
         const cpByProduct = new Map();
+        const cpAmbiguous = new Set();   // 두 상품 이상이 등록한 등록상품ID — 어느 상품인지 정할 수 없다
+        const cpInternal = new Set();    // 상품설정 코드 전체 — 업체상품코드가 내부코드인지 확인용
         try {
           for (const ps of (await require('./barungift/store').getAllProductSettings()) || []) {
+            cpInternal.add(ps.product_id);
             const m = ps.channel_product_codes?.coupang;
             if (!m) continue;
             // 구형(배열만) 값은 등록상품ID 로 본다
             const pIds = Array.isArray(m) ? m : (m.product_ids || []);
-            for (const c of pIds) cpByProduct.set(String(c).trim(), ps.product_id);
+            for (const c of pIds) {
+              const k = String(c).trim();
+              if (cpByProduct.has(k) && cpByProduct.get(k) !== ps.product_id) cpAmbiguous.add(k);
+              cpByProduct.set(k, ps.product_id);
+            }
             for (const c of (Array.isArray(m) ? [] : (m.option_ids || []))) {
               cpByOption.set(String(c).trim(), ps.product_id);
             }
@@ -2045,12 +2052,20 @@ async function apiOrders(query) {
         catch (e) { console.warn('[apiOrders] 옵션맵 로드 실패:', e.message); }
         const cpSpid = (code, optionId) =>
           String(code || '').trim() || cpOptToProduct.get(String(optionId || '').trim()) || '';
-        const mapCp = (code, optionId) =>
-          cpByOption.get(String(optionId || '').trim())
-          || cpByProduct.get(cpSpid(code, optionId))
+        // 업체상품코드(externalVendorSkuCode) — 옵션마다 우리 상품코드가 들어 있다. 예전 동기화는 필드명을 잘못 읽어
+        //   컬럼이 비어 있으니 원본(raw_payload)에서도 찾는다 → 이미 쌓인 주문도 재동기화 없이 맞는 코드로 보인다.
+        const cpSku = r => {
+          const v = String(r.external_vendor_sku || r.raw_payload?.item?.externalVendorSkuCode || '').trim();
+          return v && cpInternal.has(v) ? v : '';
+        };
+        const cpByProductSafe = k => (cpAmbiguous.has(k) ? '' : (cpByProduct.get(k) || ''));
+        const mapCp = (code, optionId, r) =>
+          (r && cpSku(r))
+          || cpByOption.get(String(optionId || '').trim())
+          || cpByProductSafe(cpSpid(code, optionId))
           || code || '';
-        const isMapped = (code, optionId) =>
-          cpByOption.has(String(optionId || '').trim()) || cpByProduct.has(cpSpid(code, optionId));
+        const isMapped = (code, optionId, r) =>
+          !!(r && cpSku(r)) || cpByOption.has(String(optionId || '').trim()) || !!cpByProductSafe(cpSpid(code, optionId));
         const normalized = coupangRows.map(r => ({
           order_seq: r.coupang_order_id, // 쿠팡 orderId (BIGINT)
           member_id: null,
@@ -2068,11 +2083,11 @@ async function apiOrders(query) {
           // 내부 상품코드로 치환 (057). 옵션ID 매핑 > 등록상품ID 매핑 > 원본 코드.
           // 로켓그로스 여부 (062) — 정보입력현황이 '쿠팡창고' 탭으로 가르는 기준
           is_rocket_growth: !!r.is_rocket_growth,
-          card_code: mapCp(r.product_code, r.vendor_item_id),
+          card_code: mapCp(r.product_code, r.vendor_item_id, r),
           // 원본은 지우지 않는다 — 매핑이 틀렸을 때 추적이 끊기면 안 된다
           channel_product_code: r.product_code || '',
           channel_option_id: r.vendor_item_id || '',
-          channel_code_mapped: isMapped(r.product_code, r.vendor_item_id),
+          channel_code_mapped: isMapped(r.product_code, r.vendor_item_id, r),
           unit_value: 1,  // 쿠팡은 unit_value 개념 없음 (1:1)
           item_count: r.item_count || 0,
           item_amount: r.item_total_price || 0,

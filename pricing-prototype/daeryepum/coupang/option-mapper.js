@@ -70,7 +70,41 @@ function findChannelSticker(productSettings, channel, productCode, optionId) {
 }
 
 /**
+ * 쿠팡 품목 → 내부 상품코드 (상품설정 product_id).
+ *   1) 업체상품코드(externalVendorSkuCode)가 상품설정에 있는 코드면 그대로 — 옵션마다 지정돼 가장 정확하다
+ *   2) 옵션ID 매핑 (057)
+ *   3) 등록상품ID 매핑 — 단, 두 상품 이상이 같은 ID 를 등록했으면 정할 수 없어 쓰지 않는다
+ *      (TGJSD04D1·D2 가 16191414384 를 공유 → 화이트·블루가 한 상품으로 합쳐졌다, 주문 3103037497390)
+ *   못 찾으면 null.
+ */
+function resolveInternalCode(productSettings, { sku, optionId, productCode } = {}) {
+  if (!Array.isArray(productSettings)) return null;
+  const s = String(sku ?? '').trim();
+  if (s && productSettings.some(ps => ps && ps.product_id === s)) return s;
+  const oid = String(optionId ?? '').trim();
+  const pc = String(productCode ?? '').trim();
+  const codesOf = (ps, kind) => {
+    const m = ps && ps.channel_product_codes && ps.channel_product_codes.coupang;
+    if (!m) return [];
+    if (Array.isArray(m)) return kind === 'product_ids' ? m : [];
+    return m[kind] || [];
+  };
+  if (oid) {
+    const hit = productSettings.find(ps => codesOf(ps, 'option_ids').some(c => String(c).trim() === oid));
+    if (hit) return hit.product_id;
+  }
+  if (pc) {
+    const ids = [...new Set(productSettings.filter(ps => codesOf(ps, 'product_ids').some(c => String(c).trim() === pc)).map(ps => ps.product_id))];
+    if (ids.length === 1) return ids[0];
+    if (productSettings.some(ps => ps && ps.product_id === pc)) return pc;
+  }
+  return null;
+}
+
+/**
  * 한 쿠팡 orderItem → sticker_selection 1개.
+ *   product_code 는 내부 상품코드로 판정되면 그 코드(정보입력현황이 상품 행과 짝지을 때 쓴다), 아니면 쿠팡 코드.
+ *   박스: 모델번호가 박스 코드면 그것, 아니면 그 상품의 박스 옵션이 하나뿐일 때 그 박스 (쿠팡은 고객이 박스를 고르지 않는다).
  *   modelNo 필드는 externalVendorSku 우선, 부재시 vendorItemPackageId 등 폴백.
  */
 function enrichOrderItem({
@@ -82,12 +116,19 @@ function enrichOrderItem({
   stickers = [],
   productSettings = [],
 }) {
-  let { sticker, box } = matchModelNo(stickers, productSettings, productCode, modelNo);
+  const internal = resolveInternalCode(productSettings, { sku: modelNo, optionId, productCode });
+  const code = internal || productCode;
+  let { sticker, box } = matchModelNo(stickers, productSettings, code, modelNo);
+  if (!box && internal) {
+    const ps = productSettings.find(s => s && s.product_id === internal);
+    const opts = (ps && Array.isArray(ps.available_box_options)) ? ps.available_box_options.filter(b => b && b.code) : [];
+    if (opts.length === 1) box = opts[0];
+  }
   // 채널 고정 스티커 (migration 056) — 쿠팡은 고객이 고르지 않고 정해진 스티커가 반드시 붙는다.
   //   모델번호로 못 찾았을 때만 쓴다 (모델번호가 있으면 그쪽이 더 구체적인 지정이다).
   //   상품설정의 채널 상품코드(057)로 내부 상품을 먼저 찾고, 그 상품의 고정 스티커를 본다.
   if (!sticker) {
-    const fixedCode = findChannelSticker(productSettings, 'coupang', productCode, optionId);
+    const fixedCode = findChannelSticker(productSettings, 'coupang', code, optionId);
     if (fixedCode) {
       const found = (stickers || []).find(x => x && x.sticker_code === fixedCode);
       // bg_stickers 에 없는 코드여도 코드 자체는 남긴다 — 인쇄팀은 코드로 작업한다
@@ -95,7 +136,7 @@ function enrichOrderItem({
     }
   }
   return {
-    product_code: productCode || null,
+    product_code: code || null,
     product_name: productName || null,
     quantity: Number(quantity) || 0,
     sticker_id: sticker ? (sticker.id || null) : null,
@@ -129,6 +170,7 @@ function calcCoupangShipDate(orderedAt) {
 module.exports = {
   matchModelNo,
   findChannelSticker,
+  resolveInternalCode,
   enrichOrderItem,
   calcCoupangShipDate,
 };
