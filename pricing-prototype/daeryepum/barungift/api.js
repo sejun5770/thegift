@@ -2226,6 +2226,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         status_code: 200,
         metadata: { actor: session?.email || 'admin' },
       });
+      // 오늘출발 현금영수증 슬랙 댓글 (085) — 대상 판정·중복 방지는 모듈이 한다
+      if (body.processed) require('./express-receipt-slack').trigger();
       return json(res, { ok: true, info: updated });
     } catch (err) {
       if (err.message === 'NOT_FOUND') return json(res, { error: '주문 정보를 찾을 수 없습니다.' }, 404);
@@ -2252,6 +2254,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         status_code: 200,
         metadata: { actor: session?.email || 'admin', count: orderIds.length, ok: result.ok, fail: result.fail },
       });
+      if (body.processed && result.ok) require('./express-receipt-slack').trigger();
       return json(res, { ok: true, ...result });
     } catch (err) {
       console.error('setProcessedBatch error:', err.message);

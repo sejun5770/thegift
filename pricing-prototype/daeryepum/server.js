@@ -15587,6 +15587,8 @@ server.listen(PORT, '0.0.0.0', () => {
     .scheduleDailyStockAlert(`http://localhost:${PORT}${BASE_PATH || ''}`);
   // 출고안내문자 자동 발송 (083) — 매일 지정 시각, 설정은 문자발송 화면
   smsAuto.scheduleDaily(smsAutoDeps());
+  // 오늘출발 현금영수증 슬랙 댓글 (085) — 수집완료 직후 + 5분마다, #cs-더기프트 그날 스레드
+  require('./barungift/express-receipt-slack').start({ getPool });
   scheduleCoupangSync(`http://localhost:${PORT}${BASE_PATH || ''}`);
   scheduleNaverConfirmBackfill();
   scheduleCoupangConfirmBackfill();
