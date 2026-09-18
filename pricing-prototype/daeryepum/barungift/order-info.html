@@ -1516,6 +1516,10 @@
     if (!slot) return;
     const banners = (orderData?.completion_banners || []).filter(b => b && b.image_url);
     if (!banners.length) { slot.classList.add('hidden'); slot.innerHTML = ''; return; }
+    // 표시 크기(설정, 50~100%) — 배너 영역 전체를 줄여 가운데에 둔다. 점도 같이 따라온다.
+    const scale = Math.min(100, Math.max(50, parseInt(orderData?.completion_banner_scale, 10) || 100));
+    slot.style.width = scale + '%';
+    slot.style.marginLeft = slot.style.marginRight = 'auto';
     slot.innerHTML = '<div class="cb-track">' + banners.map(function(b) {
       const img = '<img src="' + _cbEsc(b.image_url) + '" alt="' + _cbEsc(b.alt || '') + '" loading="lazy" decoding="async">';
       return b.link_url

@@ -1984,7 +1984,8 @@ function normAlertFormat(src) {
 
 // ────────────────────────────────────────────────────────────
 // 고객 입력완료 화면 배너 (086)
-//   bg_site_settings.completion_banners JSONB — 최대 5개, 배열 순서 = 노출 순서.
+//   bg_site_settings.completion_banners JSONB — { scale, items } (2026-09-18 표시 크기 추가. 그 전 저장분은 배열 = items).
+//   items 는 최대 5개, 배열 순서 = 노출 순서. scale 은 배너 영역의 표시 크기(%) — 전체 공통.
 //   고객 화면은 서버가 걸러 준 목록(activeCompletionBanners)만 받는다.
 // ────────────────────────────────────────────────────────────
 const BANNER_SITES = ['바른손카드', '바른손몰'];
@@ -2030,8 +2031,28 @@ function normCompletionBanners(src) {
  *   sites 가 비어 있으면 모든 채널. 채널을 모르는 주문에는 채널 제한 없는 배너만.
  *   고객 화면에 필요한 필드만 내보낸다 (image_path 같은 관리용 값은 빼고).
  */
+/** 표시 크기(%) — 50~100, 10 단위. 없거나 이상하면 100. */
+function normBannerScale(v) {
+  const n = Math.round((parseInt(v, 10) || 100) / 10) * 10;
+  return Math.min(100, Math.max(50, n));
+}
+
+/** 저장 형태 정규화 — 배열(옛 저장분)·{scale, items} 모두 받아 { scale, items } 로. 형태를 못 알아보면 null. */
+function normCompletionBannerConfig(src) {
+  if (Array.isArray(src)) return { scale: 100, items: normCompletionBanners(src) };
+  if (src && typeof src === 'object' && Array.isArray(src.items)) {
+    return { scale: normBannerScale(src.scale), items: normCompletionBanners(src.items) };
+  }
+  return null;
+}
+
+/** 고객 화면에 내려줄 표시 크기(%). */
+function completionBannerScale(settings) {
+  return (normCompletionBannerConfig(settings?.completion_banners) || { scale: 100 }).scale;
+}
+
 function activeCompletionBanners(settings, site, todayYmd) {
-  const list = normCompletionBanners(settings?.completion_banners) || [];
+  const list = (normCompletionBannerConfig(settings?.completion_banners) || { items: [] }).items;
   const today = todayYmd || new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
   return list
     .filter(b => b.enabled
@@ -2139,9 +2160,9 @@ async function updateSiteSettings(patch, updatedBy = null) {
   if ('shared_option_groups' in patch) {
     clean.shared_option_groups = normSharedOptionGroups(patch.shared_option_groups);
   }
-  // 입력완료 화면 배너 (086) — JSONB. 형태 검증은 normCompletionBanners 가 한다.
+  // 입력완료 화면 배너 (086) — JSONB { scale, items }. 형태 검증은 normCompletionBannerConfig 가 한다.
   if ('completion_banners' in patch) {
-    clean.completion_banners = normCompletionBanners(patch.completion_banners);
+    clean.completion_banners = normCompletionBannerConfig(patch.completion_banners);
   }
   // 구분별 경고 기준일 (073) — JSONB. 키는 ITEM_KINDS 만, 값은 1~365 정수만 남긴다.
   if ('stock_alert_warn_days' in patch) {
@@ -2940,6 +2961,8 @@ module.exports = {
   normSharedOptionGroups,
   // 입력완료 화면 배너 (086)
   normCompletionBanners,
+  normCompletionBannerConfig,
+  completionBannerScale,
   activeCompletionBanners,
   logBannerEvent,
   getBannerStats,

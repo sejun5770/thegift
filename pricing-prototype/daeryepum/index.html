@@ -1700,13 +1700,18 @@ nav.nav-loading a[href^="#"] {
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
         <div style="font-weight:700;font-size:16px">고객 입력완료 화면 배너</div>
         <span id="cb-count" class="badge" style="font-size:12px"></span>
+        <label style="margin-left:auto;font-size:12px;color:var(--gray-700);display:flex;align-items:center;gap:6px" title="고객 화면에서 배너 영역이 차지하는 너비 — 모든 배너에 똑같이 적용됩니다">표시 크기
+          <select id="cb-scale" onchange="cbSetScale(this.value)" style="padding:4px 6px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
+            <option value="100">100% (화면 너비 가득)</option><option value="90">90%</option><option value="80">80%</option><option value="70">70%</option><option value="60">60%</option><option value="50">50%</option>
+          </select>
+        </label>
       </div>
       <div style="font-size:13px;color:var(--gray-500);margin-bottom:14px;line-height:1.6">
         고객이 정보 입력을 마친 화면(제출 완료 · 입력한 정보 확인)에 보이는 배너입니다. <b>최대 5개</b>, 위에서부터 순서대로 옆으로 넘겨 보입니다.
         노출 기간은 시작일·종료일을 <b>포함</b>하며 비워 두면 제한이 없습니다. 채널을 고르지 않으면 바른손카드·바른손몰 모두에 보입니다.
         <br><b>이미지 규격</b>: PNG·JPG, 5MB 이하. <b>가로 720px 이상</b>(고객 화면에서 가로 약 320~350px 로 보이고, 선명하게 보이려면 그 두 배) ·
         비율은 자유지만 <b>정사각형(1:1, 예: 720×720)</b> 또는 <b>가로형(2:1, 예: 720×360)</b>을 권장합니다. 세로로 길면 완료 화면의 버튼이 밀려 내려갑니다.
-        여러 장을 쓸 때는 <b>모두 같은 비율</b>로 맞춰 주세요 — 비율이 다르면 넘길 때 높이가 들쭉날쭉합니다. 글자는 이미지 안에 넣되 가장자리 24px 안쪽에 두세요(모서리가 둥글게 잘립니다).
+        배너가 너무 크게 보이면 오른쪽 위 <b>표시 크기</b>로 줄일 수 있습니다(모든 배너 공통, 가운데 정렬). 여러 장을 쓸 때는 <b>모두 같은 비율</b>로 맞춰 주세요 — 비율이 다르면 넘길 때 높이가 들쭉날쭉합니다. 글자는 이미지 안에 넣되 가장자리 24px 안쪽에 두세요(모서리가 둥글게 잘립니다).
       </div>
       <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">
         <div id="cb-list" style="flex:1;min-width:420px;display:flex;flex-direction:column;gap:10px"></div>
@@ -9188,6 +9193,19 @@ let _cbStats = {};        // { banner_id: { views, clicks, views_30d, clicks_30d
 let _cbUploadIdx = -1;    // 파일 선택 창을 연 배너
 let _cbRemovedPaths = []; // 저장 뒤에 Storage 에서 지울 이미지
 
+let _cbScale = 100;       // 배너 영역 표시 크기(%) — 전체 공통
+/** 저장된 값 → 편집 상태. 옛 저장분(배열)과 { scale, items } 를 모두 읽는다. */
+function _cbApplySaved(v) {
+  const items = Array.isArray(v) ? v : (v && Array.isArray(v.items) ? v.items : []);
+  _cbDraft = items.map(b => ({ ...b, sites: Array.isArray(b.sites) ? b.sites : [] }));
+  _cbScale = (!Array.isArray(v) && v && parseInt(v.scale, 10)) || 100;
+  const sel = document.getElementById('cb-scale'); if (sel) sel.value = String(_cbScale);
+}
+function cbSetScale(v) {
+  _cbScale = Math.min(100, Math.max(50, parseInt(v, 10) || 100));
+  _cbSetStatus('변경됨 — [배너 저장]을 눌러야 반영됩니다.');
+  cbRenderPreview();
+}
 function _cbSetStatus(msg, color) {
   const el = document.getElementById('cb-status');
   if (el) { el.textContent = msg || ''; el.style.color = color || 'var(--gray-500)'; }
@@ -9208,7 +9226,7 @@ async function cbLoadBanners() {
   const r = await fetch(`${API}/api/bg/site-settings`);
   if (!r.ok) { _cbSetStatus('로드 실패: HTTP ' + r.status, '#dc2626'); throw new Error('HTTP ' + r.status); }
   const s = await r.json();
-  _cbDraft = Array.isArray(s?.completion_banners) ? s.completion_banners.map(b => ({ ...b, sites: Array.isArray(b.sites) ? b.sites : [] })) : [];
+  _cbApplySaved(s?.completion_banners);
   _cbRemovedPaths = [];
   try {
     const sr = await fetch(`${API}/api/bg/banner-stats`);
@@ -9321,10 +9339,12 @@ function cbRenderPreview() {
     ${bar('100%', 'background:#EEF9FC;height:54px')}
     ${bar('100%', 'border:1px solid #1596B8;background:#fff')}
     ${shown.length ? `
+      <div style="width:${_cbScale}%;margin:0 auto">
       <div id="cb-pv-track" style="display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;border-radius:16px;margin-top:14px;scrollbar-width:none">
         ${shown.map(({ b }) => `<div style="flex:0 0 100%;scroll-snap-align:center;border-radius:16px;overflow:hidden;background:#EEF9FC"><img src="${escapeHtml(b.image_url)}" alt="" style="display:block;width:100%;height:auto"></div>`).join('')}
       </div>
-      ${shown.length > 1 ? `<div id="cb-pv-dots" style="display:flex;justify-content:center;gap:6px;margin-top:10px">${shown.map((_, k) => `<span style="height:6px;border-radius:3px;width:${k === 0 ? 16 : 6}px;background:${k === 0 ? '#1BAED4' : '#CBD5E1'}"></span>`).join('')}</div>` : ''}`
+      ${shown.length > 1 ? `<div id="cb-pv-dots" style="display:flex;justify-content:center;gap:6px;margin-top:10px">${shown.map((_, k) => `<span style="height:6px;border-radius:3px;width:${k === 0 ? 16 : 6}px;background:${k === 0 ? '#1BAED4' : '#CBD5E1'}"></span>`).join('')}</div>` : ''}
+      </div>`
       : '<div style="margin-top:14px;padding:16px 8px;border:1px dashed var(--gray-300);border-radius:12px;font-size:12px;color:var(--gray-500)">이 채널·날짜의 고객에게는 배너가 보이지 않습니다.</div>'}`;
   const track = document.getElementById('cb-pv-track'), dots = document.getElementById('cb-pv-dots');
   if (track && dots) track.addEventListener('scroll', () => {
@@ -9403,7 +9423,7 @@ async function cbSaveBanners() {
     const r = await fetch(`${API}/api/bg/site-settings`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ completion_banners: _cbDraft }),
+      body: JSON.stringify({ completion_banners: { scale: _cbScale, items: _cbDraft } }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
@@ -9414,7 +9434,7 @@ async function cbSaveBanners() {
       fetch(`${API}/api/bg/banner-image?path=${encodeURIComponent(p)}`, { method: 'DELETE' }).catch(() => {});
     }
     _cbRemovedPaths = [];
-    _cbDraft = Array.isArray(j.completion_banners) ? j.completion_banners : _cbDraft;
+    if (j.completion_banners) _cbApplySaved(j.completion_banners);
     cbRender();
     _cbSetStatus('저장했습니다 — 고객 화면에 바로 반영됩니다.', '#16a34a');
   } catch (e) {
