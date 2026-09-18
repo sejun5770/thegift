@@ -23804,8 +23804,13 @@ function renderBgUnified() {
         if (selPos < 0) {
           // 1) product_code 정확 매칭
           // 옛 ci 는 원본 쿠팡 코드로 저장돼 있다 — 별칭도 같은 상품으로 인정한다 (057)
-          selPos = selEntries.findIndex((e, i) => !usedSelIdx.has(i)
-            && (e.s.product_code === productCode || _bgAliasHas(productCode, e.s.product_code)));
+          selPos = selEntries.findIndex((e, i) => !usedSelIdx.has(i) && e.s.product_code === productCode);
+          // 별칭 매칭 — 같은 등록상품ID 를 여러 옵션(화이트·블루)이 공유하면 별칭만으론 어느 쪽인지 모른다.
+          //   상품명까지 같은 sel 을 먼저 고르고, 없을 때만 순서대로 (주문 3103037497390).
+          if (selPos < 0) selPos = selEntries.findIndex((e, i) => !usedSelIdx.has(i)
+            && _bgAliasHas(productCode, e.s.product_code) && e.s.product_name && e.s.product_name === productInfo.card_name);
+          if (selPos < 0) selPos = selEntries.findIndex((e, i) => !usedSelIdx.has(i)
+            && _bgAliasHas(productCode, e.s.product_code));
           // 2) fallback — 남은 sel 을 순서대로 (MANUAL CSV 파생 코드 전용)
           if (selPos < 0 && selEntries.length && isManualOrder) {
             while (fallbackIter < selEntries.length && usedSelIdx.has(fallbackIter)) fallbackIter++;
