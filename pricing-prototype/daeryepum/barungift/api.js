@@ -868,7 +868,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
     }
     const orderId = String(body.order_id || '').trim().slice(0, 40) || null;
     const site = ['바른손카드', '바른손몰'].includes(body.site) ? body.site : null;
-    const ok = await store.logBannerEvent({ banner_id: bannerId, event, order_id: orderId, site });
+    const placement = ['complete', 'delivery', 'noinput'].includes(body.placement) ? body.placement : null;
+    const ok = await store.logBannerEvent({ banner_id: bannerId, event, order_id: orderId, site, placement });
     return json(res, { ok });
   }
 
