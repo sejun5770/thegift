@@ -8,6 +8,8 @@
  *   스레드: "[9/18] 바른손카드, 바른손몰 답례품 오늘출발 서비스비용 입금확인 및 현금영수증 발행"
  *           + Sojeong Eo · Jiwon Chu · @팀-고객만족팀 멘션. 하루 1개, 그날 첫 대상 주문이 생길 때 만든다
  *           (대상이 없는 날은 빈 스레드를 만들지 않는다).
+ *   주말·공휴일엔 스레드를 만들지 않는다 (2026-09-18 요청). 휴일은 출고 설정 기본 그룹의 휴무 요일·휴무일
+ *           (운영이 관리하는 회사 휴무 달력) 을 쓴다. 휴일에 수집완료된 주문은 다음 영업일 스레드에 올린다.
  *   댓글:   `3250823 / 김신애 / 소득공제 01093815077` — 정보입력현황의 [현금영수증 복사] 와 같은 형식.
  *
  *   대상 = 오늘(KST) 수집완료 + 오늘출발(주문 또는 상품 단위) + 사내 DB 주문 중 사이트가 바른손카드·바른손몰
@@ -37,6 +39,41 @@ let _thread = null;        // { date, ts } — DB 저장이 실패해도 같은 
 const _postedToday = new Set();   // `${ymd}|${order_id}` — 게시 후 표시 저장이 실패해도 다시 올리지 않게
 let _warnedMigration = false;
 let _lastRun = null;
+let _calCache = { at: 0, val: null };
+
+/** 휴일 달력 — 출고 설정 기본 그룹의 휴무 요일·휴무일 (10분 캐시). 조회 실패면 주말만. */
+async function loadCalendar() {
+  if (_calCache.val && Date.now() - _calCache.at < 10 * 60 * 1000) return _calCache.val;
+  let cfg = null;
+  try { cfg = await store.getShippingConfig(); } catch (e) { console.warn('[express-receipt] 출고 설정 조회 실패 — 주말만 휴일로 봅니다:', e.message); }
+  const val = {
+    weekdays: new Set(Array.isArray(cfg?.closed_weekdays) ? cfg.closed_weekdays.map(Number) : [0, 6]),
+    dates: new Set([
+      ...(Array.isArray(cfg?.closed_dates) ? cfg.closed_dates.map(d => (typeof d === 'string' ? d : d?.date)) : []),
+      ...(Array.isArray(cfg?.blackout_dates) ? cfg.blackout_dates : []),
+    ].filter(Boolean).map(d => String(d).slice(0, 10))),
+  };
+  _calCache = { at: Date.now(), val };
+  return val;
+}
+function isHoliday(ymd, cal) {
+  const wd = new Date(ymd + 'T00:00:00Z').getUTCDay();
+  return cal.weekdays.has(wd) || cal.dates.has(ymd);
+}
+function addDays(ymd, n) {
+  const d = new Date(ymd + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+/**
+ * 영업일 ymd 의 스레드가 모을 수집완료 시작일 — 직전 영업일 다음 날.
+ *   월요일이면 토요일부터 → 주말·연휴에 수집완료된 주문도 그날 스레드에 올라간다.
+ */
+function windowStartYmd(ymd, cal) {
+  let d = addDays(ymd, -1);
+  for (let i = 0; i < 30 && isHoliday(d, cal); i++) d = addDays(d, -1);
+  return addDays(d, 1);
+}
 
 function kstToday(now = new Date()) {
   return new Date(now.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
@@ -151,12 +188,15 @@ async function _run({ now = new Date() } = {}) {
   if (!_deps) { res.error = 'not_started'; return res; }
   if (ymd < START_FROM) { res.error = 'before_start'; return res; }
   if (!stockAlert.canThread(CHANNEL)) { res.error = 'slack_bot_not_configured'; return res; }
+  const cal = await loadCalendar();
+  if (isHoliday(ymd, cal)) { res.error = 'holiday'; return res; }   // 주말·공휴일 — 다음 영업일에 올린다
   if (_thread && _thread.date !== ymd) _thread = null;
   for (const k of _postedToday) if (!k.startsWith(ymd + '|')) _postedToday.delete(k);
 
   let rows;
   try {
-    rows = await store.listProcessedUnpostedSince(kstDayStartIso(ymd));
+    const from = windowStartYmd(ymd, cal);
+    rows = await store.listProcessedUnpostedSince(kstDayStartIso(from < START_FROM ? START_FROM : from));
   } catch (e) {
     if (/express_receipt_posted_at/.test(e.message)) {
       if (!_warnedMigration) console.warn('[express-receipt] migration 085 미적용 — 오늘출발 현금영수증 슬랙 전달을 하지 않습니다');
@@ -225,5 +265,6 @@ function getLastRun() { return _lastRun; }
 module.exports = {
   CHANNEL, MENTIONS, START_FROM,
   kstToday, kstDayStartIso, threadText, isExpress, receiptLine, isAlive, selectTargets, lookupOrders,
+  isHoliday, windowStartYmd,
   run, trigger, start, getLastRun,
 };
