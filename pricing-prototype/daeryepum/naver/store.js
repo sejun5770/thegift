@@ -60,6 +60,20 @@ async function upsertNaverStubCustomerInfos(stubs) {
   return { upserted: stubs.length };
 }
 
+/** 기존 스텁 조회 — 동기화가 운영자 수정값을 덮어쓰지 않도록 병합 기준으로 쓴다. { order_id: row } */
+async function getNaverStubs(orderIds) {
+  const out = {};
+  if (!USE_SUPABASE || !orderIds.length) return out;
+  for (let i = 0; i < orderIds.length; i += 80) {
+    const inl = orderIds.slice(i, i + 80).map(id => `"${id}"`).join(',');
+    const url = `${REST_BASE}/bg_order_customer_info?select=order_id,processed_at,sticker_selections&order_id=in.(${inl})`;
+    const res = await fetch(url, { headers: HEADERS });
+    if (!res.ok) throw new Error(`Supabase GET bg_order_customer_info [${res.status}]: ${(await res.text()).slice(0, 200)}`);
+    for (const r of await res.json()) out[r.order_id] = r;
+  }
+  return out;
+}
+
 /**
  * 네이버 stub 의 enrichment 필드(sticker_selections, desired_ship_date) 만 PATCH.
  *   processed_at / customer_request 등 운영팀이 변경할 수 있는 필드는 건드리지 않음.
@@ -174,6 +188,7 @@ module.exports = {
   upsertNaverOrders,
   upsertNaverStubCustomerInfos,
   patchNaverStubEnrichment,
+  getNaverStubs,
   listNaverOrders,
   getSyncState,
   updateSyncState,
