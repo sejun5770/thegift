@@ -68,6 +68,40 @@ function isEtcOptionRow(r) {
   if (!opt || opt === '0') return false;
   return opt !== String(r.card_seq ?? '');
 }
+// ── CARD(바른손카드 custom_order) 세트의 구성품 행 ──────────────────────────────────
+//   CARD 는 card_opt 가 없다. 세트 1행 + 고객이 고른 구성품(핸드워시·수건·쇼핑백·미니카드)이 **0원 아이템 행**으로
+//   같이 오고, 어느 세트의 구성품인지는 custom_order_custom_option(ETCSET).selected_value(card_seq CSV)에만 있다.
+//   구성품 행을 그대로 두면 고객 화면에 독립 상품으로 떠서, 단품용 띠지 설정이 있는 수건(TGJBK09O22)은
+//   세트에서 이미 고른 띠지를 한 번 더 고르게 된다 (주문 4790329, 2026-09-18). 대시보드 attachCardSetOptions 와 같은 규칙.
+const COMPONENT_OPTION_CODE = /^TG[A-Z]+\d+O\d+/i;   // 원물 구성품 코드 계열 (server.js 와 동일)
+/**
+ * @param products  아이템 행으로 만든 상품 목록 (_card_seq, _sale_price, _free_in_master 보유)
+ * @param etcsetRows [{ card_seq(세트), selected_value('42240,42086,0') }]
+ * @returns 구성품 행을 뺀 목록. 무료 사은품(원물 코드가 아니고 마스터 가격 0)은 세트의 addons 로 옮긴다.
+ *   세트 자신·유료 행·ETCSET 의 세트가 주문에 없는 경우(장바구니 잔재)는 건드리지 않는다.
+ */
+function absorbCardSetComponents(products, etcsetRows) {
+  const bySeq = new Map();
+  for (const p of products) if (p._card_seq != null) bySeq.set(String(p._card_seq), p);
+  const drop = new Set();
+  for (const o of etcsetRows || []) {
+    const parent = bySeq.get(String(o.card_seq));
+    if (!parent) continue;   // 고아 ETCSET (주문 아이템에 세트가 없다)
+    const seqs = String(o.selected_value || '').split(',').map(v => String(v).trim()).filter(v => /^\d+$/.test(v) && v !== '0');
+    for (const sq of seqs) {
+      const comp = bySeq.get(sq);
+      if (!comp || comp === parent || drop.has(comp)) continue;
+      if ((Number(comp._sale_price) || 0) !== 0) continue;   // 돈을 받은 행은 따로 산 상품이다
+      drop.add(comp);
+      const isGift = !COMPONENT_OPTION_CODE.test(String(comp.product_code || '').trim()) && comp._free_in_master;
+      if (isGift && !parent.addons.some(a => a.code === comp.product_code)) {
+        parent.addons.push({ code: comp.product_code || '', name: comp.product_name || comp.product_code || '', quantity: comp.quantity || 0 });
+      }
+    }
+  }
+  return drop.size ? products.filter(p => !drop.has(p)) : products;
+}
+
 /** 부모 행이 없는 옵션들이 가리키는 세트 card_seq (숫자만). */
 function collectMissingSetSeqs(records) {
   const parents = new Set(records.filter(r => !isEtcOptionRow(r) && r.card_seq != null).map(r => String(r.card_seq)));
@@ -439,7 +473,8 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
               co.order_seq, co.order_date, co.order_total_price, co.last_total_price,
               co.order_name, co.order_hphone, co.status_seq, co.settle_status, co.settle_date,
               coi.id AS item_id, coi.item_count, coi.item_price, coi.item_sale_price,
-              c.Card_Code, c.Card_Name, c.Card_Price,
+              coi.card_seq AS card_seq, -- 세트 구성품 판정용 (ETCSET.selected_value 가 이 값을 가리킨다)
+              c.Card_Code, c.Card_Name, c.Card_Price, c.CardSet_Price,
               di.NAME AS delivery_name, di.HPHONE AS delivery_hphone, di.ADDR AS delivery_addr,
               ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR(20))) AS site  -- 주문 사이트 (배너 채널 판정, 086)
             FROM custom_order co WITH (NOLOCK)
@@ -490,8 +525,22 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
           quantity: r.item_count || 1,
           item_price: r.item_sale_price || r.Card_Price || 0,
           _card_seq: r.card_seq != null ? String(r.card_seq) : null,  // 아래 사은품 연결용 (응답 전 제거)
+          _sale_price: Number(r.item_sale_price) || 0,
+          _free_in_master: (Number(r.Card_Price) || 0) === 0 && (Number(r.CardSet_Price) || 0) === 0,
           addons: [],
         });
+      }
+      // CARD 세트의 구성품 행 제외 — 세트에서 이미 고른 것이라 고객이 다시 입력할 것이 없다.
+      //   조회가 실패하면 지금까지처럼 전부 보여 준다 (입력 화면이 막히는 것보다 낫다).
+      if (!isEtc && products.length > 1) {
+        try {
+          const er = await pool.request().input('orderSeq', sql.Int, seq).query(`
+            SELECT cco.card_seq, CAST(cco.selected_value AS varchar(400)) AS selected_value
+            FROM custom_order_custom_option cco WITH (NOLOCK)
+            WHERE cco.input_type = 'ETCSET' AND cco.order_seq = @orderSeq`);
+          const kept = absorbCardSetComponents(products, er.recordset);
+          if (kept.length !== products.length) products.splice(0, products.length, ...kept);
+        } catch (e) { console.warn('[order-info] ETCSET 구성품 조회 실패 (구성품 행 그대로 노출):', e.message); }
       }
       // 부모 행이 없는 답례품 세트 — B2B 몰 경로는 0원 세트 행 없이 구성품 행만 남긴다 (주문 3250185).
       //   세트 상품을 S2_Card 에서 찾아 부모로 세운다. 못 찾으면(식권 그룹 등) 그대로 둔다.
@@ -527,7 +576,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
             quantity: r.item_count || 0,
           });
         }
-        for (const p of products) { delete p._card_seq; delete p._synthesized; }
+        for (const p of products) { delete p._card_seq; delete p._synthesized; delete p._sale_price; delete p._free_in_master; }
       }
 
       // 상품별 스티커 / 박스옵션 / 자유옵션그룹 / 장식명칭 / 출고일그룹 매핑 + 합집합 계산
@@ -3312,4 +3361,4 @@ async function searchDaeryepumOrders(pool, sql, opts) {
   }));
 }
 
-module.exports = { handleBarungiftApi };
+module.exports = { handleBarungiftApi, absorbCardSetComponents };
