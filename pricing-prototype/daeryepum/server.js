@@ -104,7 +104,93 @@ function isSuperAdmin(session) {
   //   운영에는 GOOGLE_CLIENT_ID 가 반드시 있어 이 분기가 켜지지 않는다.
   if (DEV_SKIP_AUTH) return true;
   if (!session || !session.email) return false;
-  return SUPER_ADMIN_EMAILS.includes(String(session.email).toLowerCase());
+  const e = String(session.email).toLowerCase();
+  return SUPER_ADMIN_EMAILS.includes(e) || _grantedSuperAdmins.has(e);
+}
+
+// ============================================
+// 로그인 이력 + 부여된 슈퍼 관리자 (migration 088, 2026-09-18)
+// ============================================
+//   관리 › 권한 설정 에서 로그인한 적 있는 사용자에게 슈퍼 관리자를 준다.
+//   isSuperAdmin 은 동기 함수라(호출처 70곳) DB 값을 메모리에 들고 1분마다·변경 직후 갱신한다.
+//   088 전이면 조회가 실패해 기본 관리자(SUPER_ADMIN_EMAILS)만 슈퍼 관리자다.
+let _grantedSuperAdmins = new Set();
+async function refreshGrantedSuperAdmins() {
+  if (!USE_SUPABASE_AUTH) return;
+  try {
+    const r = await fetch(`${AUTH_REST_BASE}/bg_admin_logins?is_super_admin=eq.true&select=email`, { headers: AUTH_HEADERS });
+    if (!r.ok) return;
+    _grantedSuperAdmins = new Set((await r.json()).map(x => String(x.email || '').toLowerCase()).filter(Boolean));
+  } catch (e) {
+    console.warn('[super-admin] 부여 목록 조회 실패 (기본 관리자만 적용):', e.message);
+  }
+}
+refreshGrantedSuperAdmins();
+setInterval(() => { refreshGrantedSuperAdmins(); }, 60 * 1000);
+
+/** 로그인 1회 기록 — 이메일별 1행 (첫·마지막 로그인, 횟수). 실패해도 로그인은 막지 않는다. */
+async function recordAdminLogin(user) {
+  if (!USE_SUPABASE_AUTH || !user || !user.email) return;
+  const email = String(user.email).toLowerCase();
+  const nowIso = new Date().toISOString();
+  try {
+    const r = await fetch(`${AUTH_REST_BASE}/bg_admin_logins?email=eq.${encodeURIComponent(email)}&select=login_count`, { headers: AUTH_HEADERS });
+    if (!r.ok) return;   // 088 전
+    const rows = await r.json();
+    if (rows.length) {
+      await fetch(`${AUTH_REST_BASE}/bg_admin_logins?email=eq.${encodeURIComponent(email)}`, {
+        method: 'PATCH', headers: { ...AUTH_HEADERS, Prefer: 'return=minimal' },
+        body: JSON.stringify({ name: user.name || null, picture: user.picture || null, last_login_at: nowIso, login_count: (Number(rows[0].login_count) || 0) + 1 }),
+      });
+    } else {
+      await fetch(`${AUTH_REST_BASE}/bg_admin_logins`, {
+        method: 'POST', headers: { ...AUTH_HEADERS, Prefer: 'return=minimal,resolution=ignore-duplicates' },
+        body: JSON.stringify({ email, name: user.name || null, picture: user.picture || null, first_login_at: nowIso, last_login_at: nowIso, login_count: 1 }),
+      });
+    }
+  } catch (e) {
+    console.warn('[login-log] 기록 실패 (무시):', e.message);
+  }
+}
+
+/** 권한 설정 화면용 — 로그인 이력 목록 + 기본 관리자 표시. */
+async function listAdminLogins() {
+  const r = await fetch(`${AUTH_REST_BASE}/bg_admin_logins?select=*&order=last_login_at.desc`, { headers: AUTH_HEADERS });
+  if (!r.ok) {
+    const t = await r.text();
+    if (/bg_admin_logins/.test(t)) throw Object.assign(new Error('DB 마이그레이션 088 적용이 필요합니다.'), { code: 'MIGRATION_088' });
+    throw new Error(`로그인 이력 조회 실패 [${r.status}]: ${t.slice(0, 200)}`);
+  }
+  const rows = await r.json();
+  const seen = new Set(rows.map(x => String(x.email).toLowerCase()));
+  // 기본 관리자인데 아직 이력이 없는 계정도 목록에 보인다 (항상 슈퍼 관리자 — 바꿀 수 없음)
+  for (const e of SUPER_ADMIN_EMAILS) if (!seen.has(e)) rows.push({ email: e, name: null, login_count: 0, first_login_at: null, last_login_at: null, is_super_admin: true });
+  return rows.map(x => {
+    const e = String(x.email).toLowerCase();
+    const fixed = SUPER_ADMIN_EMAILS.includes(e);
+    return { ...x, email: e, is_default_admin: fixed, is_super_admin: fixed || !!x.is_super_admin };
+  });
+}
+
+/** 슈퍼 관리자 부여·해제 — 로그인 이력이 있는 계정만. 기본 관리자와 자기 자신은 바꾸지 않는다. */
+async function setAdminSuperFlag(email, grant, byEmail) {
+  const e = String(email || '').toLowerCase().trim();
+  if (!e) throw new Error('이메일이 없습니다');
+  if (SUPER_ADMIN_EMAILS.includes(e)) throw new Error('기본 관리자는 항상 슈퍼 관리자입니다 (환경변수 SUPER_ADMIN_EMAILS)');
+  if (byEmail && e === String(byEmail).toLowerCase()) throw new Error('자기 자신의 권한은 바꿀 수 없습니다');
+  const r = await fetch(`${AUTH_REST_BASE}/bg_admin_logins?email=eq.${encodeURIComponent(e)}`, {
+    method: 'PATCH', headers: { ...AUTH_HEADERS, Prefer: 'return=representation' },
+    body: JSON.stringify({ is_super_admin: !!grant, granted_by: byEmail || null, granted_at: new Date().toISOString() }),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    if (/bg_admin_logins/.test(t)) throw new Error('DB 마이그레이션 088 적용이 필요합니다.');
+    throw new Error(`권한 저장 실패 [${r.status}]: ${t.slice(0, 200)}`);
+  }
+  const rows = await r.json();
+  if (!rows.length) throw new Error('로그인 이력이 없는 계정입니다 — 한 번 로그인한 뒤 부여할 수 있습니다');
+  await refreshGrantedSuperAdmins();
+  return rows[0];
 }
 
 // ============================================
@@ -9454,6 +9540,7 @@ const server = http.createServer(async (req, res) => {
         const { credential } = JSON.parse(body);
         const payload = await verifyGoogleToken(credential);
         const signedId = await createSession({ email: payload.email, name: payload.name, picture: payload.picture });
+        recordAdminLogin(payload).catch(() => {});   // 로그인 이력 (088) — 기다리지 않는다
         const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
         res.writeHead(200, {
           'Set-Cookie': `session=${signedId}; Path=${cookiePath}; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE/1000}${secure}`,
@@ -11710,7 +11797,34 @@ const server = http.createServer(async (req, res) => {
       } else if (pathname === '/api/admin/nav-menu' && req.method === 'GET') {
         // GNB 메뉴 설정 조회 — 모든 로그인 사용자 허용 (페이지 init 에서 호출)
         const config = await getNavMenuConfig();
-        data = { config, is_super_admin: isSuperAdmin(session), super_admin_emails: SUPER_ADMIN_EMAILS };
+        data = { config, is_super_admin: isSuperAdmin(session), super_admin_emails: [...new Set([...SUPER_ADMIN_EMAILS, ..._grantedSuperAdmins])] };
+      } else if (pathname === '/api/admin/users' && req.method === 'GET') {
+        // 권한 설정 — 로그인 이력 목록 (super admin 전용)
+        if (!isSuperAdmin(session)) return denyForbidden(res, 'super admin 필요');
+        try {
+          data = { users: await listAdminLogins(), me: session?.email ? String(session.email).toLowerCase() : null };
+        } catch (e) {
+          res.writeHead(e.code === 'MIGRATION_088' ? 409 : 500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
+      } else if (pathname === '/api/admin/users/super-admin' && req.method === 'POST') {
+        // 슈퍼 관리자 부여·해제 — body { email, grant } (super admin 전용)
+        if (!isSuperAdmin(session)) return denyForbidden(res, 'super admin 필요');
+        const body = await new Promise((resolve) => {
+          let raw = '';
+          req.on('data', c => raw += c);
+          req.on('end', () => { try { resolve(JSON.parse(raw)); } catch { resolve({}); } });
+        });
+        try {
+          const row = await setAdminSuperFlag(body.email, !!body.grant, session?.email || null);
+          logAdminAccess(session, req, body.grant ? 'super-admin-grant' : 'super-admin-revoke', { email: row.email });
+          data = { ok: true, user: row };
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+          return;
+        }
       } else if (pathname === '/api/admin/nav-menu' && req.method === 'PUT') {
         // GNB 메뉴 설정 저장 — super admin 전용
         if (!isSuperAdmin(session)) {
