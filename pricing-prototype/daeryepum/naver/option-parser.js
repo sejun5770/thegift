@@ -120,6 +120,54 @@ function matchSticker(stickers, productCode, optionValue) {
   return null;
 }
 
+/**
+ * 네이버 옵션 관리코드 해석 (2026-09-18 운영 합의) — 셀러센터 조합형 옵션의 '옵션 관리코드' 칸에
+ *   "상품코드/스티커코드" 를 넣는다 (네이버 제한 20자). 옵션 이름이 바뀌어도 코드는 그대로 따라오므로
+ *   이름 매칭보다 우선한다.
+ *     "TGJSD04D2/TGJSD01S1"  → 상품 TGJSD04D2 · 스티커 TGJSD01S1
+ *     "TGJSD01S1"            → 스티커만 (20자를 넘는 조합용 — 상품코드는 판매자 상품코드 그대로)
+ *     "TGJSD04D2"            → 상품만 (스티커는 이름 매칭으로)
+ *     "TGJSD01/NONE"         → 스티커 선택안함
+ *   칸이 하나일 때는 끝이 S+숫자(…S1, …TS3)면 스티커 코드로 본다.
+ */
+const STICKER_CODE_SHAPE = /S\d+$/i;
+const NO_STICKER_WORDS = ['NONE', 'NO', 'X', '없음', '선택안함'];
+function parseOptionManageCode(raw) {
+  const out = { raw: null, product_code: null, sticker_code: null, no_sticker: false };
+  const v = String(raw == null ? '' : raw).trim();
+  if (!v) return out;
+  out.raw = v;
+  const parts = v.split('/').map(s => s.trim()).filter(Boolean);
+  if (!parts.length) return out;
+  let sticker = null;
+  if (parts.length === 1) {
+    if (STICKER_CODE_SHAPE.test(parts[0]) || NO_STICKER_WORDS.includes(parts[0].toUpperCase())) sticker = parts[0];
+    else out.product_code = parts[0];
+  } else {
+    out.product_code = parts[0];
+    sticker = parts[parts.length - 1];
+  }
+  if (sticker) {
+    if (NO_STICKER_WORDS.includes(sticker.toUpperCase())) out.no_sticker = true;
+    else out.sticker_code = sticker;
+  }
+  return out;
+}
+
+/**
+ * 비타민 답례품 박스 짝 (2026-09-18 운영 지정) — 네이버에서 박스를 고르는 상품은 비타민 답례품뿐이고,
+ *   상품코드가 곧 박스 색을 뜻한다: TGJSD04D1 → TGJSD04B3(화이트), TGJSD04D2 → TGJSD04B4(블루).
+ *   이름은 상품설정의 박스 옵션에서 찾고, 없으면 코드만 넣는다.
+ */
+const NAVER_BOX_BY_PRODUCT = { TGJSD04D1: 'TGJSD04B3', TGJSD04D2: 'TGJSD04B4' };
+function pairedBoxForProduct(productSettings, productCode) {
+  const code = NAVER_BOX_BY_PRODUCT[String(productCode || '')];
+  if (!code) return null;
+  const setting = Array.isArray(productSettings) ? productSettings.find(s => s && s.product_id === productCode) : null;
+  const opt = setting && Array.isArray(setting.available_box_options) ? setting.available_box_options.find(b => b && b.code === code) : null;
+  return { code, name: opt ? opt.name : null };
+}
+
 /** 표기 차이 흡수 — 공백·괄호·밑줄·가운뎃점 제거 + 소문자. "클로버(옐로우)" = "클로버 옐로우" = "클로버_옐로우". */
 function normStickerLabel(v) {
   return String(v == null ? '' : v).toLowerCase().replace(/[\s()（）\[\]_·・\-\/]/g, '');
@@ -200,20 +248,45 @@ function enrichFromOption({
   quantity,
   stickers = [],
   productSettings = [],
+  optionManageCode = null,
 }) {
   const parsed = parseProductOption(productOption);
+  const mc = parseOptionManageCode(optionManageCode);
 
   // 희망 출고일: 운영팀 정책상 sync 시 미사용. 파서 함수는 export 유지 (참고/향후).
   const desired_ship_date = null;
   const stickerOptionVal = parsed['스티커 타입'] || parsed['스티커타입'] || null;
-  const sticker = matchStickerForProduct(stickers, productSettings, productCode, stickerOptionVal);
+  // 관리코드에 스티커 코드가 있으면 그것이 답이다 — 등록된(사용 중) 스티커여야 한다.
+  //   대시보드에 없는 코드면 이름 매칭으로 넘어가지 않고 비워 둔다: 셀러센터 입력 오타를 '확인필요' 로 드러내기 위해서다.
+  let sticker = null;
+  let manageCodeUnknown = false;
+  if (mc.sticker_code) {
+    sticker = (Array.isArray(stickers) ? stickers : []).find(s => s && s.is_active !== false
+      && String(s.sticker_code || '').toUpperCase() === mc.sticker_code.toUpperCase()) || null;
+    if (!sticker) manageCodeUnknown = true;
+  } else if (!mc.no_sticker) {
+    sticker = matchStickerForProduct(stickers, productSettings, productCode, stickerOptionVal);
+  }
 
   // 박스 키 — "박스" 로 시작하는 첫 페어 (박스 색상, 박스 컬러, 박스 타입, 박스 선택 등)
   let boxOptionVal = null;
   for (const [k, v] of Object.entries(parsed)) {
     if (k.startsWith('박스') && v) { boxOptionVal = v; break; }
   }
-  const box = matchBox(productSettings, productCode, boxOptionVal);
+  // 비타민 답례품은 상품코드가 박스를 정한다 (pairedBoxForProduct). 그 밖에는 옵션값으로 찾는다.
+  //   단, 고객이 옵션에서 고른 색("패키지 컬러: 블루")이 짝지은 박스와 다르면 박스를 비워 둔다 —
+  //   관리코드가 들어오기 전에는 블루를 골라도 상품코드가 TGJSD04D1(화이트)로 온다 (주문 2026072456208511).
+  //   틀린 박스가 시트로 나가는 것보다 빈칸으로 사람이 확인하는 편이 낫다.
+  let packageColorVal = boxOptionVal;
+  if (!packageColorVal) for (const [k, v] of Object.entries(parsed)) { if (k.startsWith('패키지') && v) { packageColorVal = v; break; } }
+  let box = pairedBoxForProduct(productSettings, productCode);
+  let boxMismatch = false;
+  if (box && packageColorVal && box.name
+      && !normStickerLabel(packageColorVal).includes(normStickerLabel(box.name))
+      && !normStickerLabel(box.name).includes(normStickerLabel(packageColorVal))) {
+    box = null; boxMismatch = true;
+  }
+  if (!box && !boxMismatch) box = matchBox(productSettings, productCode, boxOptionVal);
 
   // 문구 컬럼 = 감사 문구 + 성함 (공백 결합)
   //   상품에 따라 항목명이 "상단 문구(문구 입력)" / "하단 문구(성함 또는 문구 입력)" 다 (올리브오일 TGJSD07D1, 2026-08 주문) —
@@ -235,6 +308,10 @@ function enrichFromOption({
     box_code: box ? box.code : null,
     box_name: box ? box.name : null,
   };
+  // 진단용 — 어떤 관리코드로 정해졌는지, 모르는 스티커 코드였는지 (값이 있을 때만 붙인다)
+  if (mc.raw) sticker_selection.option_manage_code = mc.raw;
+  if (manageCodeUnknown) sticker_selection.manage_code_unknown = true;
+  if (boxMismatch) sticker_selection.box_option_mismatch = packageColorVal;   // 고객이 고른 색 ≠ 상품코드의 박스
 
   return { sticker_selection, desired_ship_date, parsed };
 }
@@ -278,6 +355,8 @@ module.exports = {
   resolveMonthDay,
   matchSticker,
   matchStickerForProduct,
+  parseOptionManageCode,
+  pairedBoxForProduct,
   normStickerLabel,
   matchBox,
   enrichFromOption,
