@@ -159,6 +159,32 @@ function normalizeOrder(item, storeConfig = null, filters = null) {
 }
 
 /**
+ * 옵션에서 새로 읽은 선택값을 기존 스텁에 **채워 넣기만** 한다 (2026-09-18).
+ *   예전에는 동기화(10분마다, 최근 7일 주문 전부)가 sticker_selections 를 통째로 덮어써서, 운영자가 정보입력현황에서
+ *   고친 스티커·문구가 다음 동기화 때 옵션 원문 값으로 되돌아갔다. 네이버는 주문 뒤 옵션이 바뀌지 않으므로
+ *   비어 있는 칸만 채우면 충분하다 — 매칭 규칙이 좋아져 새로 찾은 스티커는 들어가고, 사람이 넣은 값은 남는다.
+ *   '입력안함'(input_mode none) 으로 둔 품목은 건드리지 않는다.
+ *   @returns 바뀐 것이 있으면 병합된 배열, 없으면 null
+ */
+function mergeStubSelections(existing, fresh) {
+  if (!Array.isArray(existing) || !existing.length) return Array.isArray(fresh) && fresh.length ? fresh : null;
+  let changed = false;
+  const out = existing.map(e => ({ ...e }));
+  for (const f of fresh || []) {
+    const cur = out.find(e => e.product_code === f.product_code);
+    if (!cur) { out.push(f); changed = true; continue; }
+    if (cur.input_mode === 'none') continue;
+    if (!cur.sticker_id && !cur.sticker_code && (f.sticker_id || f.sticker_code)) {
+      cur.sticker_id = f.sticker_id; cur.sticker_code = f.sticker_code; changed = true;
+    }
+    if (!cur.box_code && f.box_code) { cur.box_code = f.box_code; cur.box_name = f.box_name; changed = true; }
+    const curHasText = cur.custom_values && Object.keys(cur.custom_values).length;
+    if (!curHasText && f.custom_values && Object.keys(f.custom_values).length) { cur.custom_values = f.custom_values; changed = true; }
+  }
+  return changed ? out : null;
+}
+
+/**
  * 메인 동기화 — 기간 내 변경 주문 fetch → 정규화 → upsert + stub ci.
  */
 /**
@@ -320,14 +346,22 @@ async function syncOneStore(storeConfig, { daysBack = 7 } = {}) {
       //   sticker_selections 만 patch (desired_ship_date / processed_at / customer_request 등은 운영팀 수동 입력값 보존).
       //   매 sync 마다 호출 → 옵션 변경 시 자동 반영, idempotent.
       //   정책 변경: 자동 bound timestamp 조건 제거 — 옵션 데이터 변경만 patch 트리거.
+      //   채움 전용 (mergeStubSelections) — 이미 값이 있는 칸은 그대로 둔다. 운영자 수정값 보존.
+      let existingStubs = {};
+      try { existingStubs = await store.getNaverStubs(stubs.map(s => s.order_id)); }
+      catch (e) { console.warn('[naver sync] 기존 스텁 조회 실패 (이번 동기화는 enrichment patch 생략):', e.message); existingStubs = null; }
       for (const stub of stubs) {
+        if (!existingStubs) break;
         const hasEnrich = Array.isArray(stub.sticker_selections) && stub.sticker_selections.some(s =>
           s.sticker_code || s.box_code || (s.custom_values && Object.keys(s.custom_values).length)
         );
         if (!hasEnrich) continue;
+        if (existingStubs[stub.order_id]?.processed_at) continue;   // 수집완료된 주문은 시트로 나간 값 그대로 둔다
+        const merged = mergeStubSelections(existingStubs[stub.order_id]?.sticker_selections, stub.sticker_selections);
+        if (!merged) continue;   // 채울 것이 없다
         try {
           await store.patchNaverStubEnrichment(stub.order_id, {
-            sticker_selections: stub.sticker_selections,
+            sticker_selections: merged,
             // desired_ship_date 는 의도적으로 제외 — 운영팀 수동 입력값 보존
           });
         } catch (e) {
@@ -545,4 +579,4 @@ async function backfillConfirmedAt({ offset = 0, limit = 100, includeAllStatus =
   return result;
 }
 
-module.exports = { syncRecent, syncOneStore, normalizeOrder, STATUS_LABEL, backfillConfirmedAt };
+module.exports = { syncRecent, syncOneStore, normalizeOrder, STATUS_LABEL, backfillConfirmedAt, mergeStubSelections };

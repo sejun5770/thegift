@@ -120,6 +120,56 @@ function matchSticker(stickers, productCode, optionValue) {
   return null;
 }
 
+/** 표기 차이 흡수 — 공백·괄호·밑줄·가운뎃점 제거 + 소문자. "클로버(옐로우)" = "클로버 옐로우" = "클로버_옐로우". */
+function normStickerLabel(v) {
+  return String(v == null ? '' : v).toLowerCase().replace(/[\s()（）\[\]_·・\-\/]/g, '');
+}
+
+/**
+ * 네이버용 스티커 매칭 (2026-09-18) — matchSticker 가 놓치던 세 가지를 보강한다.
+ *   ① 후보 = 상품설정(bg_product_settings.available_sticker_ids) ∪ 스티커의 product_codes.
+ *      운영은 상품설정에서 스티커를 붙인다 — product_codes 만 보면 TGJSD01 은 12종 중 3종, TGJSD10O1 은 0종이었다.
+ *   ② 스티커 종류 컬럼은 sticker_type 이다 (matchSticker 는 없는 필드 type 을 읽어 종류 매칭이 한 번도 안 됐다).
+ *   ③ 표기만 다른 값은 같은 것으로 본다 (normStickerLabel).
+ *   느슨한 비교(포함 관계)는 후보가 **정확히 하나**일 때만 채택한다 — 틀린 스티커가 시트로 나가는 것보다
+ *   비워 두고 '확인필요' 로 남기는 편이 안전하다.
+ *   카페24 는 matchSticker 를 그대로 쓴다 (동작 변경 없음).
+ */
+function matchStickerForProduct(stickers, productSettings, productCode, optionValue) {
+  if (!optionValue || !productCode || !Array.isArray(stickers)) return null;
+  const val = String(optionValue).trim();
+  if (!val) return null;
+  const setting = Array.isArray(productSettings) ? productSettings.find(s => s && s.product_id === productCode) : null;
+  const allowed = new Set(setting && Array.isArray(setting.available_sticker_ids) ? setting.available_sticker_ids : []);
+  const candidates = stickers.filter(s => s && s.is_active !== false
+    && (allowed.has(s.id) || (Array.isArray(s.product_codes) && s.product_codes.includes(productCode))));
+  if (!candidates.length) return null;
+  const nv = normStickerLabel(val);
+  const typeOf = s => s.sticker_type || s.type || '';
+  const exact = [
+    s => s.name && s.name === val,
+    s => typeOf(s) && typeOf(s) === val,
+    s => s.name && normStickerLabel(s.name) === nv,
+    s => typeOf(s) && normStickerLabel(typeOf(s)) === nv,
+  ];
+  for (const fn of exact) {
+    const hit = candidates.filter(fn);
+    if (hit.length === 1) return hit[0];
+    if (hit.length > 1) return null;   // 같은 이름이 둘 — 고를 수 없다
+  }
+  if (nv.length < 2) return null;      // "1" 같은 한 글자는 포함 비교를 하지 않는다
+  const loose = [
+    s => s.name && normStickerLabel(s.name).length >= 2 && nv.includes(normStickerLabel(s.name)),
+    s => s.name && normStickerLabel(s.name).includes(nv),
+  ];
+  for (const fn of loose) {
+    const hit = candidates.filter(fn);
+    if (hit.length === 1) return hit[0];
+    if (hit.length > 1) return null;
+  }
+  return null;
+}
+
 /**
  * 박스 매칭 — productCode + 옵션값(예: "화이트") 으로 available_box_options 에서 선택.
  */
@@ -156,7 +206,7 @@ function enrichFromOption({
   // 희망 출고일: 운영팀 정책상 sync 시 미사용. 파서 함수는 export 유지 (참고/향후).
   const desired_ship_date = null;
   const stickerOptionVal = parsed['스티커 타입'] || parsed['스티커타입'] || null;
-  const sticker = matchSticker(stickers, productCode, stickerOptionVal);
+  const sticker = matchStickerForProduct(stickers, productSettings, productCode, stickerOptionVal);
 
   // 박스 키 — "박스" 로 시작하는 첫 페어 (박스 색상, 박스 컬러, 박스 타입, 박스 선택 등)
   let boxOptionVal = null;
@@ -166,8 +216,11 @@ function enrichFromOption({
   const box = matchBox(productSettings, productCode, boxOptionVal);
 
   // 문구 컬럼 = 감사 문구 + 성함 (공백 결합)
-  const msg = (parsed['스티커 감사 문구'] || parsed['감사 문구'] || parsed['스티커 문구'] || '').trim();
-  const nm = (parsed['스티커 성함'] || parsed['성함'] || '').trim();
+  //   상품에 따라 항목명이 "상단 문구(문구 입력)" / "하단 문구(성함 또는 문구 입력)" 다 (올리브오일 TGJSD07D1, 2026-08 주문) —
+  //   이름이 "상단 문구"/"하단 문구" 로 시작하는 항목도 같은 자리로 받는다.
+  const startsWithKey = prefix => { for (const [k, v] of Object.entries(parsed)) if (k.startsWith(prefix) && v) return v; return ''; };
+  const msg = (parsed['스티커 감사 문구'] || parsed['감사 문구'] || parsed['스티커 문구'] || startsWithKey('상단 문구') || '').trim();
+  const nm = (parsed['스티커 성함'] || parsed['성함'] || startsWithKey('하단 문구') || '').trim();
   const combinedText = [msg, nm].filter(Boolean).join(' ');
 
   const sticker_selection = {
@@ -224,6 +277,8 @@ module.exports = {
   parseShipDate,
   resolveMonthDay,
   matchSticker,
+  matchStickerForProduct,
+  normStickerLabel,
   matchBox,
   enrichFromOption,
   kstYmd,
