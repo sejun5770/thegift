@@ -1711,7 +1711,7 @@ nav.nav-loading a[href^="#"] {
         노출 기간은 시작일·종료일을 <b>포함</b>하며 비워 두면 제한이 없습니다. 채널을 고르지 않으면 바른손카드·바른손몰 모두에 보입니다.
         <br><b>이미지 규격</b>: PNG·JPG, 5MB 이하. <b>가로 720px 이상</b>(고객 화면에서 가로 약 320~350px 로 보이고, 선명하게 보이려면 그 두 배) ·
         비율은 자유지만 <b>정사각형(1:1, 예: 720×720)</b> 또는 <b>가로형(2:1, 예: 720×360)</b>을 권장합니다. 세로로 길면 완료 화면의 버튼이 밀려 내려갑니다.
-        <b>위치</b>는 배너마다 고릅니다 — <b>완료 화면</b>(제출 완료·입력한 정보 화면 아래), <b>배송 조회</b>(출고된 주문의 배송 조회 카드 바로 아래 · 이때는 화면 맨 아래 배너를 접습니다), <b>샘플 주문 안내</b>(입력할 정보가 없는 주문). 배너가 너무 크게 보이면 오른쪽 위 <b>표시 크기</b>로 줄일 수 있습니다(모든 배너 공통, 가운데 정렬). 여러 장을 쓸 때는 <b>모두 같은 비율</b>로 맞춰 주세요 — 비율이 다르면 넘길 때 높이가 들쭉날쭉합니다. 글자는 이미지 안에 넣되 가장자리 24px 안쪽에 두세요(모서리가 둥글게 잘립니다).
+        <b>위치</b>는 배너마다 고릅니다 — <b>정보입력완료 화면</b>(제출 완료·입력한 정보 화면 아래), <b>배송 조회 카드 아래</b>(출고된 주문 · 이때는 화면 맨 아래 배너를 접습니다), <b>입력 불필요 주문 화면</b>(샘플세트처럼 입력할 정보가 없는 주문의 고객이 링크를 열면 입력 단계 없이 바로 보는 별도 화면). 배너가 너무 크게 보이면 오른쪽 위 <b>표시 크기</b>로 줄일 수 있습니다(모든 배너 공통, 가운데 정렬). 여러 장을 쓸 때는 <b>모두 같은 비율</b>로 맞춰 주세요 — 비율이 다르면 넘길 때 높이가 들쭉날쭉합니다. 글자는 이미지 안에 넣되 가장자리 24px 안쪽에 두세요(모서리가 둥글게 잘립니다).
       </div>
       <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">
         <div id="cb-list" style="flex:1;min-width:420px;display:flex;flex-direction:column;gap:10px"></div>
@@ -1720,7 +1720,7 @@ nav.nav-loading a[href^="#"] {
           <div style="font-size:12px;font-weight:600;color:var(--gray-700);margin-bottom:6px">고객 화면 미리보기 <span style="font-weight:400;color:var(--gray-500)">(저장 전 내용 포함)</span></div>
           <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;font-size:12px;color:var(--gray-700);flex-wrap:wrap">
             <select id="cb-pv-place" onchange="cbRenderPreview()" style="padding:4px 6px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px" title="어느 화면의 모습을 볼지">
-              <option value="complete">완료 화면</option><option value="delivery">배송 조회</option><option value="noinput">샘플 주문 안내</option>
+              <option value="complete">정보입력완료 화면</option><option value="delivery">배송 조회 카드 아래</option><option value="noinput">입력 불필요 주문 화면</option>
             </select>
             <select id="cb-pv-site" onchange="cbRenderPreview()" style="padding:4px 6px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
               <option value="바른손카드">바른손카드 고객</option><option value="바른손몰">바른손몰 고객</option>
@@ -1728,6 +1728,7 @@ nav.nav-loading a[href^="#"] {
             <input type="date" id="cb-pv-date" onchange="cbRenderPreview()" style="padding:4px 6px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px" title="이 날짜에 접속한 고객에게 보이는 모습">
             <span id="cb-pv-count" style="color:var(--gray-500)"></span>
           </div>
+          <div id="cb-pv-who" style="font-size:12px;color:var(--gray-600);background:var(--gray-50);border:1px solid var(--gray-200);border-radius:8px;padding:6px 10px;margin-bottom:8px;line-height:1.5"></div>
           <div style="background:#F1F3F5;border:1px solid var(--gray-200);border-radius:20px;padding:14px">
             <div id="cb-pv-body" style="background:#fff;border-radius:18px;padding:22px 18px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.05)"></div>
           </div>
@@ -9192,7 +9193,13 @@ async function saveSiteGuideSettings() {
 const CB_MAX = 5;
 const CB_SITES = ['바른손카드', '바른손몰'];
 // 노출 위치 — 서버 store.BANNER_PLACEMENTS 와 같은 키. 지정이 없으면 complete.
-const CB_PLACEMENTS = [['complete', '완료 화면'], ['delivery', '배송 조회'], ['noinput', '샘플 주문 안내']];
+const CB_PLACEMENTS = [['complete', '정보입력완료 화면'], ['delivery', '배송 조회 카드 아래'], ['noinput', '입력 불필요 주문 화면']];
+// 미리보기 위 설명 — 이 화면을 '어떤 고객이 언제' 보는지. 세 번째는 완료 화면과 다른 별도 화면이라 헷갈리기 쉽다.
+const CB_PLACEMENT_WHO = {
+  complete: '<b>정보를 입력·제출한 고객</b> — 제출 직후 완료 화면과, 링크를 다시 열었을 때 보는 입력한 정보 화면 아래에 나옵니다.',
+  delivery: '<b>출고된 주문의 고객</b> — 입력한 정보 화면의 배송 조회 카드 바로 아래에 나옵니다. 이때 화면 맨 아래 배너는 접힙니다.',
+  noinput: '<b>입력할 정보가 없는 주문의 고객</b> (샘플세트 등 상품설정에서 고객 정보입력 불필요로 둔 상품만 산 경우) — 링크를 열면 입력 단계·완료 화면 없이 이 안내 화면을 바로 봅니다.',
+};
 function _cbPlacements(b) { return Array.isArray(b.placements) && b.placements.length ? b.placements : ['complete']; }
 let _cbDraft = [];        // 편집 중인 목록
 let _cbStats = {};        // { banner_id: { views, clicks, views_30d, clicks_30d } }
@@ -9335,6 +9342,8 @@ function cbRenderPreview() {
   const day = (dateEl && dateEl.value) || _cbToday();
   const site = document.getElementById('cb-pv-site')?.value || '바른손카드';
   const place = document.getElementById('cb-pv-place')?.value || 'complete';
+  const who = document.getElementById('cb-pv-who');
+  if (who) who.innerHTML = CB_PLACEMENT_WHO[place] || '';
   const shown = _cbDraft.map((b, i) => ({ b, i })).filter(({ b }) => b.image_url && b.enabled !== false
     && (!b.start_date || b.start_date <= day) && (!b.end_date || b.end_date >= day)
     && (!(b.sites || []).length || b.sites.includes(site))
@@ -9352,8 +9361,9 @@ function cbRenderPreview() {
     : place === 'noinput' ? `
     <div style="width:56px;height:56px;border-radius:50%;background:#10b981;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px">✓</div>
     <div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:4px">입력할 정보가 없어요</div>
-    <div style="font-size:12px;color:#64748b;margin-bottom:14px">이 주문의 상품은 입력 없이 바로 준비돼요.</div>
-    ${bar('100%', 'background:#f8fafc;height:54px')}`
+    <div style="font-size:12px;color:#64748b;margin-bottom:14px">이 주문의 상품은 희망출고일과 스티커 입력 없이<br>바로 준비돼요.</div>
+    <div style="text-align:left;background:#f8fafc;border-radius:14px;padding:10px 12px;margin-bottom:8px;font-size:12px;color:#334155">샘플세트 · 1개</div>
+    <div style="font-size:11px;color:#64748b">주문번호 <b style="color:#334155">3250000</b></div>`
     : `
     <div style="width:56px;height:56px;border-radius:50%;background:#1BAED4;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px">✓</div>
     <div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:4px">제출이 완료됐어요!</div>
@@ -9390,6 +9400,9 @@ function cbTogglePlacement(i, key, on) {
   if (on) set.add(key); else set.delete(key);
   if (!set.size) { alert('노출 위치는 하나 이상 골라야 합니다. 잠시 내리려면 [사용]을 끄세요.'); cbRender(); return; }
   b.placements = CB_PLACEMENTS.map(([k]) => k).filter(k => set.has(k));
+  // 방금 켠 위치의 화면으로 미리보기를 바꾼다 — 그 배너가 실제 어느 화면에 붙는지 바로 보이게
+  const pv = document.getElementById('cb-pv-place');
+  if (on && pv) pv.value = key;
   _cbSetStatus('변경됨 — [배너 저장]을 눌러야 반영됩니다.');
   cbRender();
 }
