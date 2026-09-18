@@ -95,7 +95,8 @@ function normalizeOrder(item, storeConfig = null, filters = null) {
   //   관리코드에 상품코드가 있으면 그것을 주문의 상품코드로 쓴다: 한 상품 페이지에서 색을 옵션으로 고르는
   //   비타민 답례품은 판매자 상품코드가 늘 TGJSD04D1 이라, 블루를 골라도 화이트로 들어오고 있었다.
   //   (위의 답례품 필터는 판매자 상품코드·네이버 상품번호 기준 그대로다)
-  const optionManageCode = po.optionManageCode || po.optionManagementCode || po.sellerManagementCode || po.optionCode || null;
+  //   sellerManagerCode — 상품 API 의 조합형 옵션 칸 이름. 주문 응답도 같은 이름일 수 있어 후보에 둔다.
+  const optionManageCode = po.optionManageCode || po.optionManagementCode || po.sellerManagerCode || po.sellerManagementCode || po.optionCode || null;
   const manage = parseOptionManageCode(optionManageCode);
 
   const orderedAt = order.orderDate ? new Date(order.orderDate).toISOString() : (po.orderDate ? new Date(po.orderDate).toISOString() : null);
@@ -156,6 +157,10 @@ function normalizeOrder(item, storeConfig = null, filters = null) {
       po_optionCode: po.optionCode,
       po_optionManagementCode: po.optionManagementCode,
       po_sellerManagementCode: po.sellerManagementCode,
+      po_sellerManagerCode: po.sellerManagerCode,
+      // 응답 필드 이름 전체 — 관리코드가 위 후보와 다른 이름으로 와도 첫 동기화에서 바로 찾을 수 있게.
+      //   이름만 남긴다 (값에는 수령인 정보가 섞여 있다).
+      po_keys: Object.keys(po).sort(),
       inflowPath: po.inflowPath,
       // sticker_selections enrichment 입력 (sync 단계에서 사용)
       productOption: po.productOption,
