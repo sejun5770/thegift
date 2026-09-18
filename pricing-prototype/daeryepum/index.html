@@ -85,10 +85,10 @@ nav.menu a .ic{width:18px;height:18px;flex:0 0 auto;stroke:currentColor;fill:non
 .main{grid-column:2;min-width:0}
 .user-area{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--gray-500);flex:0 0 auto}
 .user-area img{width:28px;height:28px;border-radius:50%;border:1px solid var(--gray-200)}
-.user-area button{padding:4px 10px;font-size:12px;border:1px solid var(--gray-300);border-radius:var(--radius-btn);background:#fff;cursor:pointer;color:var(--gray-500)}
+/* 로그아웃·배경·GNB 설정·매뉴얼 — button 과 a 가 섞여 높이가 달랐다 → 같은 상자로 (2026-09-18) */
+.user-area button,.user-area .manual-btn{display:inline-flex;align-items:center;height:28px;padding:0 10px;box-sizing:border-box;font-size:12px;line-height:1;font-family:inherit;border:1px solid var(--gray-300);border-radius:var(--radius-btn);background:#fff;cursor:pointer;color:var(--gray-500);text-decoration:none;white-space:nowrap}
 .user-area button:hover{background:var(--gray-50);color:var(--gray-700)}
 /* 매뉴얼 — GNB 링크가 아니라 로그아웃 오른쪽 버튼 (운영 요청 2026-08-13) */
-.user-area .manual-btn{padding:4px 10px;font-size:12px;border:1px solid var(--gray-300);border-radius:var(--radius-btn);background:#fff;color:var(--gray-500);text-decoration:none;white-space:nowrap}
 .user-area .manual-btn:hover{background:var(--gray-50);color:var(--gray-700)}
 /* LAYOUT */
 .container{max-width:none;margin:0;padding:20px 24px}
@@ -420,7 +420,8 @@ nav.nav-loading a[href^="#"] {
     <a href="#sns" data-grp="기록" onclick="showPage('sns')"><svg class="ic" viewBox="0 0 24 24"><path d="M23 3a10.9 10.9 0 01-3.1 1.5A4.5 4.5 0 0012 8v1A10.7 10.7 0 013 4s-4 9 5 13a11.6 11.6 0 01-7 2c9 5 20 0 20-11.5a4.5 4.5 0 00-.1-.8A7.7 7.7 0 0023 3z"/></svg><span>SNS 인사이트</span></a>
     <a href="#worklog" data-grp="기록" onclick="showPage('worklog')"><svg class="ic" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg><span>일지</span></a>
     <div class="grp" data-grp="관리">관리</div>
-    <a href="#admin-nav-settings" data-grp="관리" onclick="showPage('admin-nav-settings')" id="nav-link-admin-nav-settings" style="display:none"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 01-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 01-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 010-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 012.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 012.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg><span>GNB 설정</span></a>
+    <a href="#cust-banner" data-grp="관리" onclick="showPage('cust-banner')" style="display:none"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-8 8"/></svg><span>입력완료 배너</span></a>
+    <a href="#cust-guide" data-grp="관리" onclick="showPage('cust-guide')" style="display:none"><svg class="ic" viewBox="0 0 24 24"><path d="M4 4h16v12H8l-4 4z"/><path d="M8 8h8M8 12h5"/></svg><span>고객 페이지 공통 안내</span></a>
   </nav>
 </aside>
 <header class="top">
@@ -1667,6 +1668,17 @@ nav.nav-loading a[href^="#"] {
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- ========== 고객 페이지 공통 안내 (GNB 설정 페이지에서 분리, 2026-09-18) ========== -->
+<div id="page-cust-guide" class="page">
+  <div class="page-header">
+    <div>
+      <h2 class="page-title">📌 고객 페이지 공통 안내</h2>
+      <div class="page-subtitle">고객 정보입력 페이지 STEP 1 상단 안내 박스의 공통 문구를 관리합니다. 변경 권한은 super admin 만 가집니다.</div>
+    </div>
+  </div>
     <!-- 공통 안내 편집 (migration 036) — 모든 상품에 적용될 사이트 공통 안내 -->
     <div class="card" style="margin-bottom:16px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
@@ -1695,6 +1707,16 @@ nav.nav-loading a[href^="#"] {
       </div>
     </div>
 
+</div>
+
+<!-- ========== 고객 입력완료 화면 배너 (GNB 설정 페이지에서 분리, 2026-09-18) ========== -->
+<div id="page-cust-banner" class="page">
+  <div class="page-header">
+    <div>
+      <h2 class="page-title">🖼️ 고객 입력완료 화면 배너</h2>
+      <div class="page-subtitle">고객이 정보 입력을 마친 화면에 보이는 자사 서비스 배너를 관리합니다. 변경 권한은 super admin 만 가집니다.</div>
+    </div>
+  </div>
     <!-- 입력완료 화면 배너 (migration 086) — 고객이 정보 입력을 마친 화면에 보이는 자사 서비스 배너 -->
     <div class="card" style="margin-bottom:16px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
@@ -1742,7 +1764,6 @@ nav.nav-loading a[href^="#"] {
       </div>
       <input type="file" id="cb-file" accept="image/png,image/jpeg" style="display:none" onchange="cbOnFilePicked(this)">
     </div>
-  </div>
 </div>
 
 <!-- ========== ORDERS ========== -->
@@ -5156,12 +5177,23 @@ function isCancelled(r) {
 //   현재 사용자 role 캐시 (워크플로우 권한 UI 분기용). 'admin' | 'operator' | 'designer'
 let _currentUserRole = 'operator';
 
+/**
+ * 상단 오른쪽 버튼 — 배경 · GNB 설정(super admin 만) · 매뉴얼.
+ *   GNB 설정은 사이드바가 아니라 여기 둔다 (2026-09-18 요청). 권한은 nav 설정 조회가 끝나야 알 수 있어
+ *   _applyNavConfigToDom 이 다시 켜고 끈다 (어느 쪽이 먼저 끝나도 맞게).
+ */
+function _topButtonsHtml() {
+  return '<button type="button" class="manual-btn" id="bg-picker-btn" onclick="toggleBgPicker()" title="배경 패턴 선택">배경</button>'
+    + `<button type="button" class="manual-btn" id="gnb-settings-btn" onclick="showPage('admin-nav-settings')" title="사이드바 메뉴 표시/순서" style="${_navIsSuperAdmin ? '' : 'display:none'}">GNB 설정</button>`
+    + '<a href="manual.html" target="_blank" rel="noopener" class="manual-btn" title="기능 정의 · 사용법 위키 (새 탭)">매뉴얼</a>';
+}
+
 function loadUserInfo() {
   fetch(API + '/auth/me').then(r => {
     if (!r.ok) {
       // 개발모드(인증 우회)에서는 reload하지 않음
       document.getElementById('user-area').innerHTML =
-        '<span style="color:var(--gray-500);font-size:12px">개발 모드</span><button type="button" class="manual-btn" id="bg-picker-btn" onclick="toggleBgPicker()" title="배경 패턴 선택">배경</button><a href="manual.html" target="_blank" rel="noopener" class="manual-btn" title="기능 정의 · 사용법 위키 (새 탭)">매뉴얼</a>';
+        '<span style="color:var(--gray-500);font-size:12px">개발 모드</span>' + _topButtonsHtml();
       return;
     }
     return r.json();
@@ -5175,10 +5207,10 @@ function loadUserInfo() {
     const pic = safePicUrl ? `<img src="${esc(safePicUrl)}" alt="">` : '';
     const name = esc(user.name || user.email || '');
     document.getElementById('user-area').innerHTML =
-      `${pic}<span>${name}</span><button onclick="logout()">로그아웃</button><button type="button" class="manual-btn" id="bg-picker-btn" onclick="toggleBgPicker()" title="배경 패턴 선택">배경</button><a href="manual.html" target="_blank" rel="noopener" class="manual-btn" title="기능 정의 · 사용법 위키 (새 탭)">매뉴얼</a>`;
+      `${pic}<span>${name}</span><button onclick="logout()">로그아웃</button>` + _topButtonsHtml();
   }).catch(() => {
     document.getElementById('user-area').innerHTML =
-      '<span style="color:var(--gray-500);font-size:12px">개발 모드</span><button type="button" class="manual-btn" id="bg-picker-btn" onclick="toggleBgPicker()" title="배경 패턴 선택">배경</button><a href="manual.html" target="_blank" rel="noopener" class="manual-btn" title="기능 정의 · 사용법 위키 (새 탭)">매뉴얼</a>';
+      '<span style="color:var(--gray-500);font-size:12px">개발 모드</span>' + _topButtonsHtml();
   });
 }
 function logout() {
@@ -5224,7 +5256,7 @@ function init() {
 
   // URL hash 기반 페이지 전환
   const hash = location.hash.replace('#', '') || 'dashboard';
-  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-unified', 'monthly-report', 'admin-nav-settings', 'coupang-rfm'].includes(hash)) showPage(hash);
+  if (['dashboard', 'orders', 'sns', 'worklog', 'bg-stickers', 'bg-products', 'bg-shipping', 'bg-unified', 'monthly-report', 'admin-nav-settings', 'cust-banner', 'cust-guide', 'coupang-rfm'].includes(hash)) showPage(hash);
 }
 
 function fmt(d) { return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
@@ -5318,12 +5350,14 @@ function showPage(name) {
   document.getElementById('page-' + name).classList.add('active');
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
   const _navLink = document.querySelector(`nav a[href="#${name}"]`);
-  _navLink.classList.add('active');
-  _updateCrumb(_navLink);
+  if (_navLink) { _navLink.classList.add('active'); _updateCrumb(_navLink); }
+  else if (name === 'admin-nav-settings') { const c = document.getElementById('crumb'); if (c) c.innerHTML = '관리 <span>›</span> <b>GNB 설정</b>'; }
   // 탭 전환 시마다 해당 탭 데이터 리로드 (딥링크/왕복 일관성 보장)
   if (name === 'dashboard') loadDashboard();
   if (name === 'monthly-report') initMonthlyReport();
   if (name === 'admin-nav-settings') loadAdminNavSettings();
+  if (name === 'cust-guide') loadSiteGuideSettings().catch(e => console.warn('site-guide 로드 실패:', e.message));
+  if (name === 'cust-banner') cbLoadBanners().catch(e => console.warn('배너 로드 실패:', e.message));
   if (name === 'orders') loadOrders();
   if (name === 'sns') loadSnsInsight();
   if (name === 'worklog') loadWorklog();
@@ -9013,6 +9047,10 @@ let _navConfigCache = null;
 let _navEditDraft = null;
 let _navIsSuperAdmin = false;
 
+// super admin 전용 메뉴 — GNB 설정의 표시/숨김 목록에 넣지 않고 권한으로만 보인다.
+//   GNB 설정 자체는 상단 버튼 (_topButtonsHtml).
+const ADMIN_ONLY_NAV = new Set(['cust-banner', 'cust-guide']);
+
 /** 현재 DOM 의 nav 에서 menu item 메타 추출 — fallback / merge 용 기준. */
 function _collectDomNavItems() {
   const items = [];
@@ -9049,8 +9087,8 @@ function _applyNavConfigToDom(config) {
   merged.forEach(item => {
     const a = links[item.id];
     if (!a) return;
-    // GNB 설정 메뉴는 super admin 일 때만 — visibility 와 별개로 권한 우선
-    if (item.id === 'admin-nav-settings') {
+    // 관리 메뉴(배너·공통 안내)는 super admin 일 때만 — visibility 와 별개로 권한 우선
+    if (ADMIN_ONLY_NAV.has(item.id)) {
       a.style.display = _navIsSuperAdmin ? '' : 'none';
     } else {
       a.style.display = item.visible === false ? 'none' : '';
@@ -9072,6 +9110,8 @@ function _applyNavConfigToDom(config) {
   });
   const cur = nav.querySelector('a.active');
   if (cur) _updateCrumb(cur);
+  const gbtn = document.getElementById('gnb-settings-btn');
+  if (gbtn) gbtn.style.display = _navIsSuperAdmin ? '' : 'none';
 }
 
 async function fetchAndApplyNavConfig() {
@@ -9120,9 +9160,6 @@ async function loadAdminNavSettings() {
     _navEditDraft = _buildEditDraft(_navConfigCache);
     _renderNavEditList();
     document.getElementById('ans-status').textContent = '';
-    // 공통 안내 로드 (migration 036) — 실패해도 admin nav 페이지 로드는 계속.
-    loadSiteGuideSettings().catch(e => console.warn('site-guide 로드 실패:', e.message));
-    cbLoadBanners().catch(e => console.warn('배너 로드 실패:', e.message));
   } catch (e) {
     tag.textContent = '조회 실패';
     tag.className = 'badge badge-warn';
@@ -9503,7 +9540,7 @@ function fillSiteGuideDefaults() {
 }
 
 function _buildEditDraft(config) {
-  const domItems = _collectDomNavItems().filter(d => d.id !== 'admin-nav-settings');
+  const domItems = _collectDomNavItems().filter(d => !ADMIN_ONLY_NAV.has(d.id));
   // 서버 config 의 id 들 — DOM 에 없는 id 는 제외 (stale)
   const domIds = new Set(domItems.map(d => d.id));
   const validServer = config.filter(c => domIds.has(c.id));
@@ -9580,7 +9617,7 @@ async function saveAdminNavSettings() {
 
 function resetAdminNavSettings() {
   if (!confirm('모든 GNB 메뉴를 기본값(전부 표시 + 원래 순서)으로 초기화합니다. 계속할까요?')) return;
-  const domItems = _collectDomNavItems().filter(d => d.id !== 'admin-nav-settings');
+  const domItems = _collectDomNavItems().filter(d => !ADMIN_ONLY_NAV.has(d.id));
   _navEditDraft = domItems.map((d, i) => ({ id: d.id, label: d.label, visible: true, order: i }));
   _renderNavEditList();
   document.getElementById('ans-status').textContent = '※ 기본값으로 리셋됨. 저장 버튼을 눌러야 반영됩니다.';
