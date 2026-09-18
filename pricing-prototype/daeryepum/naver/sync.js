@@ -25,7 +25,7 @@
 const api = require('./api');
 const store = require('./store');
 const bgStore = require('../barungift/store');
-const { enrichFromOption } = require('./option-parser');
+const { enrichFromOption, parseOptionManageCode } = require('./option-parser');
 const { autoAdvanceNoStickerSelections } = require('../barungift/workflow-store');
 
 // 전역 폴백 — 스토어별 필터 미설정 시 사용
@@ -91,6 +91,13 @@ function normalizeOrder(item, storeConfig = null, filters = null) {
     if (!catOk && !codeOk) return null;
   }
 
+  // 옵션 관리코드 ("상품코드/스티커코드") — 네이버 응답 필드명이 문서·버전마다 달라 후보를 차례로 본다.
+  //   관리코드에 상품코드가 있으면 그것을 주문의 상품코드로 쓴다: 한 상품 페이지에서 색을 옵션으로 고르는
+  //   비타민 답례품은 판매자 상품코드가 늘 TGJSD04D1 이라, 블루를 골라도 화이트로 들어오고 있었다.
+  //   (위의 답례품 필터는 판매자 상품코드·네이버 상품번호 기준 그대로다)
+  const optionManageCode = po.optionManageCode || po.optionManagementCode || po.sellerManagementCode || po.optionCode || null;
+  const manage = parseOptionManageCode(optionManageCode);
+
   const orderedAt = order.orderDate ? new Date(order.orderDate).toISOString() : (po.orderDate ? new Date(po.orderDate).toISOString() : null);
   const paidAt = order.paymentDate ? new Date(order.paymentDate).toISOString() : (po.paymentDate ? new Date(po.paymentDate).toISOString() : null);
   // 구매확정 시점 (migration 037) — 네이버 응답의 필드명이 문서/버전에 따라 다를 수 있어 후보 4개 우선 매핑.
@@ -119,7 +126,7 @@ function normalizeOrder(item, storeConfig = null, filters = null) {
     product_name: po.productName || '네이버 답례품',
     product_option: po.productOption || null,
     // product_code: sellerProductCode 우선, 없으면 productId 폴백
-    product_code: productCode || productId,
+    product_code: manage.product_code || productCode || productId,
     category_id: categoryId || null,
     category_name: po.categoryName || po.category?.categoryName || null,
     item_count: qty,
@@ -142,6 +149,13 @@ function normalizeOrder(item, storeConfig = null, filters = null) {
       deliveryAttributeType: po.deliveryAttributeType,
       productId: po.productId,
       sellerCustomCode1: po.sellerCustomCode1,
+      // 옵션 관리코드 (2026-09-18) — 값과, 어느 필드로 왔는지 확인용 후보 dump
+      optionManageCode: optionManageCode,
+      sellerProductCode: po.sellerProductCode,
+      po_optionManageCode: po.optionManageCode,
+      po_optionCode: po.optionCode,
+      po_optionManagementCode: po.optionManagementCode,
+      po_sellerManagementCode: po.sellerManagementCode,
       inflowPath: po.inflowPath,
       // sticker_selections enrichment 입력 (sync 단계에서 사용)
       productOption: po.productOption,
@@ -171,7 +185,14 @@ function mergeStubSelections(existing, fresh) {
   let changed = false;
   const out = existing.map(e => ({ ...e }));
   for (const f of fresh || []) {
-    const cur = out.find(e => e.product_code === f.product_code);
+    let cur = out.find(e => e.product_code === f.product_code);
+    // 품목이 하나뿐인 주문에서 상품코드만 달라졌다면 (옵션 관리코드로 TGJSD04D1 → D2 처럼 바로잡힌 경우) 같은 품목이다.
+    //   새 선택을 덧붙이면 옛 코드의 선택이 짝 없는 줄로 남아 정보입력현황에 품목이 하나 더 생긴다.
+    if (!cur && out.length === 1 && (fresh || []).length === 1) {
+      cur = out[0];
+      cur.product_code = f.product_code; if (f.product_name) cur.product_name = f.product_name;
+      changed = true;
+    }
     if (!cur) { out.push(f); changed = true; continue; }
     if (cur.input_mode === 'none') continue;
     if (!cur.sticker_id && !cur.sticker_code && (f.sticker_id || f.sticker_code)) {
@@ -302,6 +323,7 @@ async function syncOneStore(storeConfig, { daysBack = 7 } = {}) {
           entry.byCode.set(code, {
             row: r,
             productOption,
+            optionManageCode: r.raw_payload?.optionManageCode || null,
             quantity: Number(r.item_count) || 0,
           });
         }
@@ -314,6 +336,7 @@ async function syncOneStore(storeConfig, { daysBack = 7 } = {}) {
         for (const [code, info] of byCode) {
           const enriched = enrichFromOption({
             productOption: info.productOption,
+            optionManageCode: info.optionManageCode,
             productCode: code,
             productName: row.product_name,
             quantity: info.quantity,
