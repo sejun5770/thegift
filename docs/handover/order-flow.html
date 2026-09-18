@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>답례품 주문 흐름도</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#f3f4f6; --paper:#ffffff; --ink:#18212b; --ink-2:#46515e; --ink-3:#77828f; --rule:#dde1e6; --rule-2:#eceef1; --line:#8b95a1;
+  --accent:#1d5b79; --dash:#e3eef4; --sheet:#e6f3ea; --store:#eef0f3; --ext:#fdf1e3;
+  --human:#b45309; --risk:#b3261e;
+  --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#13171b; --paper:#1b2026; --ink:#e9edf1; --ink-2:#b3bcc6; --ink-3:#86909b; --rule:#2e353d; --rule-2:#242a31; --line:#6f7a86;
+    --accent:#7fbfdc; --dash:#1c2e38; --sheet:#1a3024; --store:#242a31; --ext:#35291a;
+    --human:#f0b35a; --risk:#f28b82;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#13171b; --paper:#1b2026; --ink:#e9edf1; --ink-2:#b3bcc6; --ink-3:#86909b; --rule:#2e353d; --rule-2:#242a31; --line:#6f7a86;
+  --accent:#7fbfdc; --dash:#1c2e38; --sheet:#1a3024; --store:#242a31; --ext:#35291a;
+  --human:#f0b35a; --risk:#f28b82;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif;font-size:15px;line-height:1.7;padding-inline:16px;padding-block:0 72px}
+.wrap{max-width:1140px;margin:0 auto}
+h1,h2{margin:0;text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:2rem;line-height:1.3}
+h2{font-size:1.25rem}
+p{margin:0 0 10px;max-width:74ch}
+code{font-family:var(--mono);font-size:.86em;background:var(--rule-2);padding:1px 5px;border-radius:3px}
+a{color:var(--accent)}
+header{padding-block:40px 22px;border-bottom:2px solid var(--ink)}
+.kicker{font-size:.76rem;letter-spacing:.14em;color:var(--accent);font-weight:600;margin-bottom:8px}
+header p{color:var(--ink-2);margin-top:10px}
+.legend{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:16px;font-size:.84rem;color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:8px}
+.sw{width:18px;height:12px;border-radius:3px;border:1px solid var(--line);display:inline-block}
+.ln{width:30px;height:0;border-top:2px solid var(--ink);display:inline-block}
+.ln.h{border-top:2px dashed var(--human)}
+section{padding-top:40px}
+.sh{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--rule);padding-bottom:8px;margin-bottom:14px}
+.no{font-family:var(--mono);font-size:.82rem;color:var(--accent);font-weight:500}
+figure{margin:14px 0 6px;background:var(--paper);border:1px solid var(--rule);padding:14px 12px 10px}
+.scroll{overflow-x:auto}
+figure svg{display:block;width:100%;min-width:780px;height:auto;color:var(--ink)}
+figcaption{font-size:.85rem;color:var(--ink-2);padding:10px 4px 2px;max-width:none}
+/* 도식 */
+.dg text{fill:var(--ink);font-family:"IBM Plex Sans KR","Malgun Gothic",sans-serif}
+.dg .t{font-size:13.5px;font-weight:600}
+.dg .s{font-size:11.5px;fill:var(--ink-2)}
+.dg .lb{font-size:11.5px;fill:var(--ink-2)}
+.dg .lbh{font-size:11.5px;fill:var(--human);font-weight:600}
+.dg .risk{font-size:12px;fill:var(--risk);font-weight:600}
+.dg .num{font-size:12px;fill:var(--accent);font-weight:700;font-family:var(--mono)}
+.dg rect{stroke:var(--line);stroke-width:1.2}
+.dg .dash rect{fill:var(--dash)}
+.dg .sheet rect{fill:var(--sheet)}
+.dg .store rect{fill:var(--store)}
+.dg .ext rect{fill:var(--ext)}
+.dg .src rect{fill:var(--paper)}
+.dg .ar{stroke:var(--ink);stroke-width:1.6;fill:none}
+.dg .hu{stroke:var(--human);stroke-width:1.8;stroke-dasharray:6 4;fill:none}
+.dg .mk{fill:var(--ink)}
+.dg .mkh{fill:var(--human)}
+/* 표 */
+.tbl{overflow-x:auto;background:var(--paper);border:1px solid var(--rule);margin:12px 0}
+table{border-collapse:collapse;width:100%;font-size:.88rem;min-width:720px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--rule-2);vertical-align:top}
+th{font-size:.78rem;color:var(--ink-3);font-weight:600;background:var(--rule-2);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td:first-child{font-weight:600;white-space:nowrap}
+.tag{display:inline-block;font-size:.74rem;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap}
+.t-auto{background:var(--dash);color:var(--accent)}
+.t-hand{background:var(--ext);color:var(--human)}
+/* 제작 단계 */
+.stages{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:14px 0 6px;padding:14px 12px;background:var(--paper);border:1px solid var(--rule)}
+.stage{background:var(--dash);border:1px solid var(--line);border-radius:6px;padding:6px 12px;font-size:.88rem;font-weight:600;white-space:nowrap}
+.stage.end{background:var(--sheet)}
+.arrow{color:var(--ink-3);font-size:.9rem}
+.notes{margin:8px 0 0;padding-left:20px;font-size:.9rem;color:var(--ink-2)}
+.notes li{margin-bottom:4px;max-width:80ch}
+.callout{border-left:3px solid var(--risk);background:var(--paper);padding:10px 14px;margin:12px 0;font-size:.9rem}
+.foot{margin-top:44px;padding-top:14px;border-top:1px solid var(--rule);font-size:.8rem;color:var(--ink-3)}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<header>
+  <div class="kicker">인계 자료 · 답례품 주문관리</div>
+  <h1>답례품 주문이 들어와서 고객 문자까지 가는 길</h1>
+  <p>채널별 주문이 대시보드로 들어오고, 고객이 희망출고일·스티커를 입력하고, 운영 구글시트에 등록돼 제작·출고된 뒤 출고안내문자가 나가기까지의 전체 흐름입니다. <b>점선은 사람이 버튼을 누르거나 시트에 직접 적어야 하는 단계</b>입니다. 이 단계를 놓치면 흐름이 그 자리에서 끊깁니다.</p>
+  <div class="legend">
+    <span><i class="ln"></i>자동 (대시보드·서버가 함)</span>
+    <span><i class="ln h"></i>사람이 함</span>
+    <span><i class="sw" style="background:var(--dash)"></i>대시보드 화면</span>
+    <span><i class="sw" style="background:var(--store)"></i>저장소</span>
+    <span><i class="sw" style="background:var(--sheet)"></i>운영 구글시트</span>
+    <span><i class="sw" style="background:var(--ext)"></i>외부 · 고객</span>
+  </div>
+</header>
+
+<section>
+  <div class="sh"><span class="no">전체</span><h2>다섯 단계와 세 저장소</h2></div>
+  <figure><div class="scroll">
+  <svg class="dg" viewBox="0 0 1120 380" role="img" aria-label="주문은 5단계를 거친다. 1 주문 들어옴, 2 고객 정보입력, 3 수집(시트 등록), 4 제작·출고, 5 출고 안내. 주문 원천에서 읽고, 고객 입력은 Supabase에 저장하며, 운영 구글시트에는 사람이 붙여넣고 팀별 체크와 송장을 적는다. 출고 안내는 시트의 출고일과 송장을 읽어 고객에게 문자를 보낸다.">
+    <defs>
+      <marker id="o-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+      <marker id="o-h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mkh" d="M0,0 L10,5 L0,10 z"/></marker>
+    </defs>
+    <!-- 단계 -->
+    <g class="dash"><rect x="20" y="30" width="160" height="90" rx="6"/><text class="num" x="36" y="56">1</text><text class="t" x="100" y="72" text-anchor="middle">주문 들어옴</text><text class="s" x="100" y="94" text-anchor="middle">채널 7곳</text></g>
+    <g class="dash"><rect x="216" y="30" width="160" height="90" rx="6"/><text class="num" x="232" y="56">2</text><text class="t" x="296" y="72" text-anchor="middle">고객 정보입력</text><text class="s" x="296" y="94" text-anchor="middle">희망출고일 · 스티커</text></g>
+    <g class="dash"><rect x="412" y="30" width="160" height="90" rx="6"/><text class="num" x="428" y="56">3</text><text class="t" x="492" y="72" text-anchor="middle">수집</text><text class="s" x="492" y="94" text-anchor="middle">시트에 등록</text></g>
+    <g class="dash"><rect x="608" y="30" width="160" height="90" rx="6"/><text class="num" x="624" y="56">4</text><text class="t" x="688" y="72" text-anchor="middle">제작 · 출고</text><text class="s" x="688" y="94" text-anchor="middle">스티커→인쇄→제본→포장</text></g>
+    <g class="dash"><rect x="804" y="30" width="160" height="90" rx="6"/><text class="num" x="820" y="56">5</text><text class="t" x="884" y="72" text-anchor="middle">출고 안내</text><text class="s" x="884" y="94" text-anchor="middle">문자 · 슬랙 리포트</text></g>
+    <g class="ext"><rect x="1000" y="30" width="110" height="90" rx="6"/><text class="t" x="1055" y="66" text-anchor="middle">고객 휴대폰</text><text class="s" x="1055" y="88" text-anchor="middle">출고안내 문자</text><text class="s" x="1055" y="104" text-anchor="middle">+ 슬랙 보고</text></g>
+    <line class="ar" x1="180" y1="75" x2="214" y2="75" marker-end="url(#o-a)"/>
+    <line class="ar" x1="376" y1="75" x2="410" y2="75" marker-end="url(#o-a)"/>
+    <line class="ar" x1="572" y1="75" x2="606" y2="75" marker-end="url(#o-a)"/>
+    <line class="ar" x1="768" y1="75" x2="802" y2="75" marker-end="url(#o-a)"/>
+    <line class="ar" x1="964" y1="75" x2="998" y2="75" marker-end="url(#o-a)"/>
+    <!-- 저장소 -->
+    <g class="src"><rect x="20" y="250" width="160" height="104" rx="6"/><text class="t" x="100" y="276" text-anchor="middle">주문 원천</text><text class="s" x="100" y="298" text-anchor="middle">바른손 DB (읽기 전용)</text><text class="s" x="100" y="316" text-anchor="middle">쿠팡·네이버·카페24 API</text><text class="s" x="100" y="334" text-anchor="middle">엑셀 업로드</text></g>
+    <g class="store"><rect x="216" y="250" width="160" height="104" rx="6"/><text class="t" x="296" y="276" text-anchor="middle">Supabase</text><text class="s" x="296" y="298" text-anchor="middle">고객 입력 · 수집완료</text><text class="s" x="296" y="316" text-anchor="middle">작업 단계 · 발송 이력</text><text class="s" x="296" y="334" text-anchor="middle">상품·스티커 설정</text></g>
+    <g class="sheet"><rect x="412" y="250" width="552" height="104" rx="6"/><text class="t" x="688" y="276" text-anchor="middle">운영 구글시트 — 월별 탭(26년 9월 …) · 커스텀 상품 주문시트</text><text class="s" x="688" y="302" text-anchor="middle">팀별 작업 체크(편집·인쇄·제본·물류)와 송장번호는 사람이 시트에 적는다</text><text class="s" x="688" y="322" text-anchor="middle">대시보드는 이 시트에 쓰지 않고 읽기만 한다 (공개 CSV)</text></g>
+    <!-- 연결 -->
+    <line class="ar" x1="100" y1="250" x2="100" y2="123" marker-end="url(#o-a)"/><text class="lb" x="108" y="192">조회 · 동기화</text>
+    <line class="ar" x1="296" y1="120" x2="296" y2="247" marker-end="url(#o-a)"/><text class="lb" x="304" y="192">저장</text>
+    <line class="hu" x1="492" y1="120" x2="492" y2="247" marker-end="url(#o-h)"/><text class="lbh" x="500" y="192">사람이 붙여넣기</text>
+    <line class="hu" x1="688" y1="120" x2="688" y2="247" marker-end="url(#o-h)"/><text class="lbh" x="696" y="192">체크 · 송장 입력</text>
+    <line class="ar" x1="884" y1="250" x2="884" y2="123" marker-end="url(#o-a)"/><text class="lb" x="892" y="192">출고일 · 송장 읽기</text>
+  </svg></div>
+  <figcaption>대시보드와 운영 시트는 <b>자동으로 연결돼 있지 않습니다.</b> 주문이 시트로 가는 길은 사람의 붙여넣기(3단계)뿐이고, 시트의 출고일·송장이 대시보드로 오는 길은 공개 CSV 읽기(5단계)뿐입니다. 2~5단계에서 대시보드가 기록하는 것(고객 입력, 수집완료 시각, 작업 단계, 문자 발송 이력)은 전부 Supabase에 쌓입니다.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sh"><span class="no">1단계</span><h2>채널별로 주문이 들어오는 방식</h2></div>
+  <p>채널마다 주문이 들어오는 길이 다릅니다. 자사 주문은 바른손 DB를 그때그때 읽고, 외부 채널은 <b>외부 크론이 10분마다</b> 대시보드의 동기화 API를 불러 가져와 저장하며, API가 없는 곳은 엑셀이나 시트로 받습니다. 주문 화면의 [동기화] 버튼은 크론을 기다리지 않고 지금 가져오는 수동 보조입니다.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>채널</th><th>주문 원천</th><th>대시보드로 들어오는 방식</th><th>고객 정보입력</th></tr></thead>
+    <tbody>
+      <tr><td>바른손카드</td><td>바른손 DB <code>custom_order</code></td><td><span class="tag t-auto">자동</span> 화면을 열 때마다 바로 조회 (따로 저장하지 않음)</td><td>알림톡 → 우리 정보입력 페이지에서 고객이 입력</td></tr>
+      <tr><td>바른손몰 · 제휴 B2B</td><td>바른손 DB <code>CUSTOM_ETC_ORDER</code> — 사이트명으로 구분</td><td><span class="tag t-auto">자동</span> 화면을 열 때마다 바로 조회</td><td>알림톡 → 우리 정보입력 페이지에서 고객이 입력</td></tr>
+      <tr><td>쿠팡</td><td>쿠팡 Wing API (판매자배송 · 로켓그로스)</td><td><span class="tag t-auto">자동</span> 외부 크론 10분마다 + 서버 안 15분마다 · 수동 버튼도 있음</td><td>고객 입력 없음 — 상품별 <b>고정 스티커 타입·문구</b>가 붙어 입력완료. 로켓그로스는 쿠팡이 직접 출고</td></tr>
+      <tr><td>네이버 (바른손카드 · 테넷텐)</td><td>네이버 커머스 API — 스토어 2곳</td><td><span class="tag t-auto">자동</span> 외부 크론 10분마다 · 수동 버튼도 있음</td><td>고객이 <b>네이버 주문 화면</b>에서 스티커·문구를 고름 → 동기화 때 옵션을 읽어 입력완료</td></tr>
+      <tr><td>정수당 (카페24)</td><td>카페24 API</td><td><span class="tag t-auto">자동</span> 외부 크론 10분마다 · 수동 버튼도 있음</td><td>고객이 <b>정수당 주문 화면</b>에서 스티커·문구·희망출고일을 고름 → 동기화 때 옵션을 읽어 입력완료</td></tr>
+      <tr><td>더기프트 (매입 · 위탁)</td><td>퍼스트몰(더기프트 자사몰) — 운영이 <b>퍼스트몰 관리자에서 엑셀을 내려받음</b></td><td><span class="tag t-hand">수동</span> 주문 화면 "답례품_더기프트" 탭에서 그 엑셀을 업로드 → 수기주문 등록 (매입·위탁은 업체 열로 갈림)</td><td>고객이 <b>퍼스트몰 주문 화면</b>에서 스티커·문구 입력 → 엑셀에 담겨 옴 → 업로드하면 입력완료</td></tr>
+      <tr><td>웅진 · 프리드라이프</td><td>웅진 포털 → 운영이 <b>시트 월별 탭에 직접 기입</b> (A열에 채널명)</td><td><span class="tag t-hand">수동</span> 시트 기입 뒤 정보입력현황의 <b>[제휴주문 수집]</b>을 눌러야 대시보드에 들어옴 (시트 행 → 수기주문 등록)</td><td>고객이 <b>웅진 포털</b>에서 입력한 내용을 운영이 시트에 옮김 — 우리 화면 입력 없음</td></tr>
+    </tbody>
+  </table></div>
+  <figure><div class="scroll">
+  <svg class="dg" viewBox="0 0 1110 130" role="img" aria-label="웅진·프리드라이프 주문은 다른 채널과 순서가 반대다. 고객이 웅진 포털에서 주문·입력하면 운영이 운영 시트 월별 탭에 직접 기입하고, 그 뒤 정보입력현황의 제휴주문 수집 버튼을 눌러야 시트 행이 수기주문으로 등록돼 대시보드 매출과 정보입력현황에 들어온다. 이 채널은 시트가 먼저이고 대시보드가 나중이다.">
+    <defs>
+      <marker id="w-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+      <marker id="w-h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mkh" d="M0,0 L10,5 L0,10 z"/></marker>
+    </defs>
+    <g class="ext"><rect x="20" y="30" width="180" height="58" rx="6"/><text class="t" x="110" y="55" text-anchor="middle">웅진 포털</text><text class="s" x="110" y="74" text-anchor="middle">고객이 주문·정보 입력</text></g>
+    <g class="sheet"><rect x="290" y="30" width="200" height="58" rx="6"/><text class="t" x="390" y="55" text-anchor="middle">운영 시트 월별 탭</text><text class="s" x="390" y="74" text-anchor="middle">A열 웅진 · 품목코드 · 수량 · 출고일</text></g>
+    <g class="dash"><rect x="580" y="30" width="180" height="58" rx="6"/><text class="t" x="670" y="55" text-anchor="middle">[제휴주문 수집]</text><text class="s" x="670" y="74" text-anchor="middle">정보입력현황 상단 버튼</text></g>
+    <g class="store"><rect x="860" y="30" width="230" height="58" rx="6"/><text class="t" x="975" y="55" text-anchor="middle">수기주문으로 등록</text><text class="s" x="975" y="74" text-anchor="middle">매출(공급단가×수량) · 정보입력현황 입력완료</text></g>
+    <line class="hu" x1="200" y1="59" x2="288" y2="59" marker-end="url(#w-h)"/><text class="lbh" x="244" y="48" text-anchor="middle">운영이 직접 기입</text>
+    <line class="hu" x1="490" y1="59" x2="578" y2="59" marker-end="url(#w-h)"/><text class="lbh" x="534" y="48" text-anchor="middle">미리보기 후 확인</text>
+    <line class="ar" x1="760" y1="59" x2="858" y2="59" marker-end="url(#w-a)"/><text class="lb" x="809" y="48" text-anchor="middle">등록</text>
+    <text class="risk" x="670" y="112" text-anchor="middle">안 누르면 매출·정보입력현황에 안 잡힘</text>
+  </svg></div>
+  <figcaption><b>웅진·프리드라이프는 다른 채널과 순서가 반대입니다.</b> 시트가 먼저이고 대시보드가 나중입니다. 고객이 웅진 포털에서 입력한 주문을 운영이 시트 월별 탭에 직접 기입하고(A열에 채널명), 그 다음 정보입력현황의 <b>[제휴주문 수집]</b>을 눌러야 시트 행이 수기주문으로 등록됩니다. 등록되어야 매출(상품설정의 제휴 공급단가 × 수량, 날짜는 희망출고일)과 정보입력현황에 잡힙니다. 버튼은 먼저 미리보기를 보여주고 확인을 받아야 저장하며, 이미 등록된 행은 다시 만들지 않습니다. 이 채널은 이미 시트에 있으므로 3단계 수집복사는 하지 않습니다. <b>상품설정에 제휴 공급단가가 없는 상품은 매출이 만들어지지 않으니</b> 웅진에 새 상품이 추가되면 공급단가부터 넣어야 합니다.</figcaption>
+  </figure>
+  <figure><div class="scroll">
+  <svg class="dg" viewBox="0 0 1110 130" role="img" aria-label="더기프트 주문은 고객이 퍼스트몰 주문 화면에서 스티커·문구를 입력하고, 운영이 퍼스트몰 관리자에서 엑셀을 내려받아 대시보드 주문 화면의 답례품_더기프트 탭에 업로드하면 수기주문으로 등록된다. 매입과 위탁은 업체 열로 갈리고, 등록된 주문은 정보입력현황에 입력완료로 들어와 다른 채널과 같이 수집복사한다.">
+    <defs>
+      <marker id="t-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+      <marker id="t-h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mkh" d="M0,0 L10,5 L0,10 z"/></marker>
+    </defs>
+    <g class="ext"><rect x="20" y="30" width="180" height="58" rx="6"/><text class="t" x="110" y="55" text-anchor="middle">퍼스트몰 (더기프트 자사몰)</text><text class="s" x="110" y="74" text-anchor="middle">고객이 주문 · 스티커·문구 입력</text></g>
+    <g class="ext"><rect x="290" y="30" width="200" height="58" rx="6"/><text class="t" x="390" y="55" text-anchor="middle">퍼스트몰 관리자 → 엑셀</text><text class="s" x="390" y="74" text-anchor="middle">주문 내려받기 (.xlsx)</text></g>
+    <g class="dash"><rect x="580" y="30" width="180" height="58" rx="6"/><text class="t" x="670" y="55" text-anchor="middle">[CSV/Excel 업로드]</text><text class="s" x="670" y="74" text-anchor="middle">주문 화면 · 답례품_더기프트 탭</text></g>
+    <g class="store"><rect x="860" y="30" width="230" height="58" rx="6"/><text class="t" x="975" y="55" text-anchor="middle">수기주문 등록 (매입 · 위탁)</text><text class="s" x="975" y="74" text-anchor="middle">정보입력현황 입력완료 → 3단계 수집복사</text></g>
+    <line class="hu" x1="200" y1="59" x2="288" y2="59" marker-end="url(#t-h)"/><text class="lbh" x="244" y="48" text-anchor="middle">운영이 내려받음</text>
+    <line class="hu" x1="490" y1="59" x2="578" y2="59" marker-end="url(#t-h)"/><text class="lbh" x="534" y="48" text-anchor="middle">업로드</text>
+    <line class="ar" x1="760" y1="59" x2="858" y2="59" marker-end="url(#t-a)"/><text class="lb" x="809" y="48" text-anchor="middle">등록</text>
+    <text class="risk" x="670" y="112" text-anchor="middle">업로드 전까지 대시보드에 없음</text>
+  </svg></div>
+  <figcaption><b>더기프트는 API가 없어 엑셀로 옮깁니다.</b> 고객은 퍼스트몰 주문 화면에서 스티커·문구를 입력하므로 우리 정보입력 페이지는 없습니다. 운영이 퍼스트몰 관리자에서 주문 엑셀을 내려받아 주문 화면 "답례품_더기프트" 탭의 <b>[CSV/Excel 업로드]</b>로 올리면 수기주문으로 등록되고, 한 파일에 섞여 있는 본사 매입과 위탁업체 주문은 업체 열로 갈립니다. 등록된 주문은 정보입력현황에 입력완료로 들어와(엑셀의 문구가 스티커 문구가 됨) 다른 채널과 똑같이 3단계 수집복사를 거칩니다. 같은 파일을 다시 올려도 이미 있는 주문은 갱신만 됩니다. 취소·환불 금액은 퍼스트몰 기본 엑셀에 없어 운영자가 열을 덧붙여 올립니다.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sh"><span class="no">2단계</span><h2>고객 정보입력 — 자사몰만 우리 페이지에서, 나머지는 채널에서 이미 입력됨</h2></div>
+  <figure><div class="scroll">
+  <svg class="dg" viewBox="0 0 1110 372" role="img" aria-label="정보입력은 세 갈래다. 바른손카드·바른손몰 주문은 담당자가 알림톡을 보내면 고객이 우리 정보입력 페이지에서 입력한다. 네이버·카페24·웅진 주문은 고객이 그 채널의 주문 화면에서 스티커·문구를 고르고, 동기화 때 옵션을 읽어 자동 입력완료가 된다. 쿠팡 판매자배송은 고객 입력 없이 상품별 고정 스티커 타입·문구가 붙고, 샘플세트만 담긴 주문도 고정 스티커로 자동 입력완료가 된다.">
+    <defs>
+      <marker id="b-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+      <marker id="b-h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mkh" d="M0,0 L10,5 L0,10 z"/></marker>
+    </defs>
+    <g class="src"><rect x="20" y="30" width="150" height="58" rx="6"/><text class="t" x="95" y="55" text-anchor="middle">바른손카드·바른손몰</text><text class="s" x="95" y="74" text-anchor="middle">자사 주문</text></g>
+    <g class="dash"><rect x="250" y="30" width="150" height="58" rx="6"/><text class="t" x="325" y="55" text-anchor="middle">미입력 탭</text><text class="s" x="325" y="74" text-anchor="middle">정보입력현황</text></g>
+    <g class="ext"><rect x="480" y="30" width="150" height="58" rx="6"/><text class="t" x="555" y="55" text-anchor="middle">정보입력 안내 알림톡</text><text class="s" x="555" y="74" text-anchor="middle">고객 카카오톡</text></g>
+    <g class="ext"><rect x="710" y="30" width="150" height="58" rx="6"/><text class="t" x="785" y="55" text-anchor="middle">고객 정보입력 화면</text><text class="s" x="785" y="74" text-anchor="middle">서명 링크 · 휴대폰 로그인</text></g>
+    <g class="dash"><rect x="940" y="30" width="150" height="58" rx="6"/><text class="t" x="1015" y="55" text-anchor="middle">입력완료 탭</text><text class="s" x="1015" y="74" text-anchor="middle">희망출고일·스티커·문구</text></g>
+    <line class="ar" x1="170" y1="59" x2="248" y2="59" marker-end="url(#b-a)"/><text class="lb" x="210" y="48" text-anchor="middle">입력 전</text>
+    <line class="hu" x1="400" y1="59" x2="478" y2="59" marker-end="url(#b-h)"/><text class="lbh" x="440" y="48" text-anchor="middle">[발송] 버튼</text>
+    <line class="ar" x1="630" y1="59" x2="708" y2="59" marker-end="url(#b-a)"/><text class="lb" x="670" y="48" text-anchor="middle">링크 클릭</text>
+    <line class="hu" x1="860" y1="59" x2="938" y2="59" marker-end="url(#b-h)"/><text class="lbh" x="900" y="48" text-anchor="middle">고객 제출</text>
+    <g class="ext"><rect x="20" y="140" width="150" height="58" rx="6"/><text class="t" x="95" y="165" text-anchor="middle">네이버 · 카페24 · 웅진</text><text class="s" x="95" y="184" text-anchor="middle">고객이 그 채널 화면에서 입력</text></g>
+    <g class="dash"><rect x="250" y="140" width="150" height="58" rx="6"/><text class="t" x="325" y="165" text-anchor="middle">주문 옵션 읽기</text><text class="s" x="325" y="184" text-anchor="middle">스티커 · 문구 · 출고일</text></g>
+    <line class="hu" x1="170" y1="169" x2="248" y2="169" marker-end="url(#b-h)"/><text class="lbh" x="210" y="158" text-anchor="middle">주문할 때</text>
+    <line class="ar" x1="400" y1="169" x2="560" y2="169"/><text class="lb" x="480" y="158" text-anchor="middle">동기화 때</text>
+    <g class="src"><rect x="20" y="216" width="150" height="58" rx="6"/><text class="t" x="95" y="241" text-anchor="middle">쿠팡 판매자배송</text><text class="s" x="95" y="260" text-anchor="middle">고객 입력 없음</text></g>
+    <g class="store"><rect x="250" y="216" width="150" height="58" rx="6"/><text class="t" x="325" y="241" text-anchor="middle">상품별 고정 스티커</text><text class="s" x="325" y="260" text-anchor="middle">타입 · 문구 (상품설정)</text></g>
+    <line class="ar" x1="170" y1="245" x2="248" y2="245" marker-end="url(#b-a)"/><text class="lb" x="210" y="234" text-anchor="middle">상품 매핑</text>
+    <line class="ar" x1="400" y1="245" x2="560" y2="245"/><text class="lb" x="480" y="234" text-anchor="middle">동기화 때</text>
+    <g class="src"><rect x="20" y="292" width="150" height="58" rx="6"/><text class="t" x="95" y="317" text-anchor="middle">샘플세트만 담긴 주문</text><text class="s" x="95" y="336" text-anchor="middle">자사 주문 중 (TGSAMPLE)</text></g>
+    <g class="store"><rect x="250" y="292" width="150" height="58" rx="6"/><text class="t" x="325" y="317" text-anchor="middle">세트 고정 스티커</text><text class="s" x="325" y="336" text-anchor="middle">제본은 필요</text></g>
+    <line class="ar" x1="170" y1="321" x2="248" y2="321" marker-end="url(#b-a)"/>
+    <line class="ar" x1="400" y1="321" x2="560" y2="321"/><text class="lb" x="480" y="310" text-anchor="middle">정보입력현황을 열 때</text>
+    <line class="ar" x1="560" y1="169" x2="560" y2="321"/>
+    <g class="dash"><rect x="710" y="216" width="150" height="58" rx="6"/><text class="t" x="785" y="241" text-anchor="middle">자동 입력완료</text><text class="s" x="785" y="260" text-anchor="middle">고객 페이지 없이 생성</text></g>
+    <line class="ar" x1="560" y1="245" x2="708" y2="245" marker-end="url(#b-a)"/>
+    <path class="ar" d="M860 245 H1015 V91" marker-end="url(#b-a)"/>
+  </svg></div>
+  <figcaption>정보입력은 세 갈래입니다. <b>자사몰(바른손카드·바른손몰)</b>만 우리 정보입력 페이지로 이동해 고객이 직접 입력합니다 — 알림톡은 담당자가 미입력 탭에서 <b>[알림톡 발송]</b>을 눌러야 나가고, 고객은 수집 전까지 입력을 고칠 수 있습니다. <b>네이버·카페24·웅진</b>은 고객이 그 채널의 주문 화면에서 이미 스티커·문구(카페24는 희망출고일도)를 골랐으므로 우리 페이지가 없고, 동기화 때 옵션을 읽어 입력완료가 됩니다. <b>쿠팡 판매자배송</b>은 고객이 고를 것이 없고 상품마다 정해진 고정 스티커 타입·문구가 붙습니다(상품설정에 등록). 샘플세트만 담긴 주문도 고정 스티커라 자동 입력완료이고, 본품과 섞이면 고객이 본품만 입력합니다.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sh"><span class="no">3단계</span><h2>수집 — 대시보드에서 운영 시트로 넘기기</h2></div>
+  <figure><div class="scroll">
+  <svg class="dg" viewBox="0 0 1110 300" role="img" aria-label="입력완료 탭에서 수집복사를 누르면 23열 형식으로 클립보드에 복사되고, 그 순간 수집완료로 표시된다. 담당자가 운영 시트 월별 탭에 붙여넣어야 시트에 등록된다. 붙여넣기를 놓치면 수집 누락 점검이 수집완료와 시트를 대조해 찾아내고, 출고 흔적이 없으면 출고 누락 경보가 뜬다.">
+    <defs>
+      <marker id="c-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+      <marker id="c-h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mkh" d="M0,0 L10,5 L0,10 z"/></marker>
+    </defs>
+    <g class="dash"><rect x="20" y="30" width="150" height="58" rx="6"/><text class="t" x="95" y="55" text-anchor="middle">입력완료 탭</text><text class="s" x="95" y="74" text-anchor="middle">작업할 주문 선택</text></g>
+    <g class="dash"><rect x="250" y="30" width="150" height="58" rx="6"/><text class="t" x="325" y="55" text-anchor="middle">[수집복사]</text><text class="s" x="325" y="74" text-anchor="middle">시트 형식 23열로</text></g>
+    <g class="src"><rect x="480" y="30" width="150" height="58" rx="6"/><text class="t" x="555" y="55" text-anchor="middle">클립보드</text><text class="s" x="555" y="74" text-anchor="middle">스티커 상태·옵션 포함</text></g>
+    <g class="sheet"><rect x="710" y="30" width="150" height="58" rx="6"/><text class="t" x="785" y="55" text-anchor="middle">운영 시트 월별 탭</text><text class="s" x="785" y="74" text-anchor="middle">예: 26년 9월</text></g>
+    <line class="hu" x1="170" y1="59" x2="248" y2="59" marker-end="url(#c-h)"/><text class="lbh" x="210" y="48" text-anchor="middle">선택 후 클릭</text>
+    <line class="ar" x1="400" y1="59" x2="478" y2="59" marker-end="url(#c-a)"/><text class="lb" x="440" y="48" text-anchor="middle">복사</text>
+    <line class="hu" x1="630" y1="59" x2="708" y2="59" marker-end="url(#c-h)"/><text class="lbh" x="670" y="48" text-anchor="middle">붙여넣기</text>
+    <text class="risk" x="670" y="112" text-anchor="middle">놓치면 여기서 끊김</text>
+    <g class="store"><rect x="250" y="200" width="150" height="58" rx="6"/><text class="t" x="325" y="225" text-anchor="middle">수집완료 표시</text><text class="s" x="325" y="244" text-anchor="middle">복사 성공 순간 기록</text></g>
+    <g class="dash"><rect x="710" y="200" width="150" height="58" rx="6"/><text class="t" x="785" y="225" text-anchor="middle">수집 누락 점검</text><text class="s" x="785" y="244" text-anchor="middle">완료인데 시트에 없음</text></g>
+    <g class="dash"><rect x="940" y="200" width="150" height="58" rx="6"/><text class="t" x="1015" y="225" text-anchor="middle">출고 누락 경보</text><text class="s" x="1015" y="244" text-anchor="middle">출고일 지나도 흔적 없음</text></g>
+    <line class="ar" x1="325" y1="88" x2="325" y2="197" marker-end="url(#c-a)"/><text class="lb" x="333" y="150">복사와 동시에</text>
+    <line class="ar" x1="400" y1="229" x2="707" y2="229" marker-end="url(#c-a)"/><text class="lb" x="555" y="220" text-anchor="middle">대조</text>
+    <line class="ar" x1="785" y1="88" x2="785" y2="197" marker-end="url(#c-a)"/><text class="lb" x="793" y="150">대조</text>
+    <path class="ar" d="M860 59 H1015 V197" marker-end="url(#c-a)"/><text class="lb" x="1023" y="150">출고 흔적</text>
+  </svg></div>
+  <figcaption><b>[수집복사]는 복사가 성공한 순간 주문을 "수집완료"로 표시합니다.</b> 붙여넣기를 잊으면 주문이 입력완료 목록에서 사라진 채 시트에도 없어 후공정이 통째로 안 돕니다(8/13 실제 사고). 그래서 두 가지 점검이 있습니다: 시트 대조로 미리 찾는 <b>수집 누락 점검</b>, 희망출고일이 지나도 출고 흔적이 없을 때의 <b>출고 누락 경보</b>. 다만 <b>경보에 뜨는 건 대부분 청첩장과 함께 산 복합 주문</b>입니다 — 답례품은 이미 나갔는데 주문 상태가 청첩장 발송에 묶여 바뀌지 않아 출고 흔적이 없는 것처럼 보이는 경우라, 운영 문제가 아닙니다. 경보에 뜬 주문은 시트에서 실제 출고 여부를 먼저 확인하세요. 복사되는 칸은 스티커 상태(선택안함·없음·확인필요·샘플스티커)와 옵션(구성품 K·L열, 사은품 O열, 부가옵션 P열)까지 정해진 규칙대로 채워집니다. <b>수집한 뒤 취소된 주문</b>은 시트에서 저절로 빠지지 않습니다 — 입력완료 탭의 "수집후취소만" 필터로 찾아 시트의 해당 행을 제작 중단 처리해야 합니다.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sh"><span class="no">오늘 출발</span><h2>오늘 출발(빠른출고) 주문 — 채널마다 들어오는 길이 다릅니다</h2></div>
+  <p>오늘 출발은 <b>어디서 고르고 어디서 결제하느냐</b>가 채널마다 다릅니다. 자사몰만 우리 정보입력 화면에서 고르고 추가비용을 계좌이체로 받기 때문에 <b>입금 확인·현금영수증</b> 절차가 붙습니다. 더기프트와 정수당은 채널에서 결제까지 끝나므로 우리 쪽에서는 표시만 합니다. 세 채널 모두 정보입력현황에 ⚡가 붙고, 수집복사하면 시트 <b>V열(오늘출발)</b>에 출고일이 빨간 글씨로 들어가 편집·인쇄·제본·물류가 먼저 처리합니다.</p>
+  <figure><div class="scroll">
+  <svg class="dg" viewBox="0 0 1110 440" role="img" aria-label="오늘 출발 주문은 채널마다 다르게 들어온다. 자사몰(바른손카드·바른손몰)은 고객이 우리 정보입력 화면에서 마감 전에 오늘 출발을 고르고 결제정보 단계에서 입금 계좌 안내와 현금영수증 신청을 거친다. 수집완료되면 슬랙 cs-더기프트 그날 스레드에 현금영수증 정보가 댓글로 자동 등록되고 CS팀이 입금 확인과 영수증 발행을 한다. 더기프트는 퍼스트몰에서 오늘출발 상품을 주문·결제하고, 엑셀 업로드 때 상품명으로 자동 분류된다. 정수당은 카페24에서 오늘출발 서비스 품목을 함께 담으면 10분 크론 동기화가 서비스 품목을 상품에서 빼고 오늘출발로 표시한다. 세 채널 모두 정보입력현황에 번개 표시가 붙고 수집복사 때 시트 V열에 출고일이 빨간 글씨로 들어간다. 더기프트와 정수당은 채널에서 결제하므로 우리 쪽 현금영수증 절차가 없다.">
+    <defs>
+      <marker id="x-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+      <marker id="x-h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mkh" d="M0,0 L10,5 L0,10 z"/></marker>
+    </defs>
+    <text class="t" x="20" y="38">자사몰 <tspan class="s">바른손카드 · 바른손몰</tspan></text>
+    <g class="ext"><rect x="20" y="50" width="176" height="58" rx="6"/><text class="t" x="108" y="75" text-anchor="middle">우리 정보입력 화면</text><text class="s" x="108" y="94" text-anchor="middle">마감 전 오늘 출발 선택</text></g>
+    <line class="hu" x1="196" y1="79" x2="236" y2="79" marker-end="url(#x-h)"/><text class="lbh" x="217" y="39" text-anchor="middle">추가비용 있으면</text>
+    <g class="ext"><rect x="238" y="50" width="176" height="58" rx="6"/><text class="t" x="326" y="75" text-anchor="middle">결제정보 단계</text><text class="s" x="326" y="94" text-anchor="middle">입금 계좌 안내 · 현금영수증 신청</text></g>
+    <line class="hu" x1="414" y1="79" x2="454" y2="79" marker-end="url(#x-h)"/><text class="lbh" x="435" y="39" text-anchor="middle">제출</text>
+    <g class="dash"><rect x="456" y="50" width="176" height="58" rx="6"/><text class="t" x="544" y="75" text-anchor="middle">정보입력현황 ⚡</text><text class="s" x="544" y="94" text-anchor="middle">수집복사 → 시트 V열 빨간 날짜</text></g>
+    <line class="ar" x1="632" y1="79" x2="672" y2="79" marker-end="url(#x-a)"/><text class="lb" x="653" y="39" text-anchor="middle">수집완료 시 자동</text>
+    <g class="ext"><rect x="674" y="50" width="176" height="58" rx="6"/><text class="t" x="762" y="75" text-anchor="middle">#cs-더기프트 그날 스레드</text><text class="s" x="762" y="94" text-anchor="middle">주문번호 / 이름 / 영수증정보 댓글</text></g>
+    <line class="hu" x1="850" y1="79" x2="890" y2="79" marker-end="url(#x-h)"/><text class="lbh" x="871" y="39" text-anchor="middle">댓글 보고</text>
+    <g class="ext"><rect x="892" y="50" width="176" height="58" rx="6"/><text class="t" x="980" y="75" text-anchor="middle">CS팀 입금 확인 · 발행</text><text class="s" x="980" y="94" text-anchor="middle">스레드에 담당자 멘션</text></g>
+    <text class="risk" x="108" y="130" text-anchor="middle">마감(기본 14:00) 지나면 선택 불가</text>
+    <text class="risk" x="762" y="130" text-anchor="middle">주말·공휴일엔 다음 영업일 스레드로</text>
+
+    <text class="t" x="20" y="178">더기프트 <tspan class="s">퍼스트몰</tspan></text>
+    <g class="ext"><rect x="20" y="190" width="176" height="58" rx="6"/><text class="t" x="108" y="215" text-anchor="middle">퍼스트몰에서 주문·결제</text><text class="s" x="108" y="234" text-anchor="middle">"[오늘출발]" 붙은 상품</text></g>
+    <line class="hu" x1="196" y1="219" x2="236" y2="219" marker-end="url(#x-h)"/><text class="lbh" x="217" y="179" text-anchor="middle">엑셀 내려받아 업로드</text>
+    <g class="dash"><rect x="238" y="190" width="176" height="58" rx="6"/><text class="t" x="326" y="215" text-anchor="middle">[CSV/Excel 업로드]</text><text class="s" x="326" y="234" text-anchor="middle">상품명에 오늘출발 → 자동 분류</text></g>
+    <line class="ar" x1="414" y1="219" x2="454" y2="219" marker-end="url(#x-a)"/><text class="lb" x="435" y="179" text-anchor="middle">등록</text>
+    <g class="dash"><rect x="456" y="190" width="176" height="58" rx="6"/><text class="t" x="544" y="215" text-anchor="middle">정보입력현황 ⚡</text><text class="s" x="544" y="234" text-anchor="middle">수집복사 → 시트 V열 빨간 날짜</text></g>
+    <g class="store"><rect x="674" y="190" width="176" height="58" rx="6"/><text class="t" x="762" y="215" text-anchor="middle">현금영수증 절차 없음</text><text class="s" x="762" y="234" text-anchor="middle">퍼스트몰에서 결제 완료</text></g>
+    <text class="risk" x="326" y="270" text-anchor="middle">"[오늘출발무료]"는 배송비 이벤트, 일반 처리</text>
+
+    <text class="t" x="20" y="318">정수당 <tspan class="s">카페24</tspan></text>
+    <g class="ext"><rect x="20" y="330" width="176" height="58" rx="6"/><text class="t" x="108" y="355" text-anchor="middle">카페24에서 주문·결제</text><text class="s" x="108" y="374" text-anchor="middle">"오늘출발 서비스" 품목 함께 담음</text></g>
+    <line class="ar" x1="196" y1="359" x2="236" y2="359" marker-end="url(#x-a)"/><text class="lb" x="217" y="319" text-anchor="middle">외부 크론 10분</text>
+    <g class="dash"><rect x="238" y="330" width="176" height="58" rx="6"/><text class="t" x="326" y="355" text-anchor="middle">카페24 동기화</text><text class="s" x="326" y="374" text-anchor="middle">서비스 품목 빼고 주문에 ⚡</text></g>
+    <line class="ar" x1="414" y1="359" x2="454" y2="359" marker-end="url(#x-a)"/><text class="lb" x="435" y="319" text-anchor="middle">자동</text>
+    <g class="dash"><rect x="456" y="330" width="176" height="58" rx="6"/><text class="t" x="544" y="355" text-anchor="middle">정보입력현황 ⚡</text><text class="s" x="544" y="374" text-anchor="middle">수집복사 → 시트 V열 빨간 날짜</text></g>
+    <g class="store"><rect x="674" y="330" width="176" height="58" rx="6"/><text class="t" x="762" y="355" text-anchor="middle">현금영수증 절차 없음</text><text class="s" x="762" y="374" text-anchor="middle">카페24에서 결제 완료</text></g>
+    <text class="risk" x="326" y="410" text-anchor="middle">취소된 서비스 품목은 오늘출발 아님</text>
+    <text class="s" x="20" y="430">쿠팡·네이버·웅진·프리드라이프는 오늘 출발이 없습니다 (동기화가 항상 일반 출고로 넣음).</text>
+  </svg></div>
+  <figcaption><b>자사몰(바른손카드·바른손몰)</b>: 고객이 희망출고일 단계에서 마감 시각 전이면 오늘 출발을 고를 수 있고, 추가비용이 붙는 경우에만 결제정보 단계가 나타나 입금 계좌 안내와 현금영수증 신청(소득공제·지출증빙)을 받습니다. 추가비용이 0원이면 이 단계는 건너뜁니다. 마감 시각(기본 14:00)·추가비용·가능 요일은 대시보드 <b>출고일설정</b>에서 정하고, 빠른/일반 존이 겹치는 날은 추가비용 없이 일반으로 잡습니다(2026-05-21 정책). 수집완료되면 서버가 <b>#cs-더기프트</b>의 그날 스레드("[9/19] 바른손카드, 바른손몰 답례품 오늘출발 서비스비용 입금확인 및 현금영수증 발행")에 주문 1건 = 댓글 1개로 "주문번호 / 주문자명 / 영수증정보"를 자동으로 남기고, 스레드에 멘션된 CS 담당자가 입금 확인과 발행을 합니다. 한 번 올린 주문은 되돌리기 후 다시 수집완료해도 또 올리지 않습니다. 정보입력현황의 <b>[⚡ 현금영수증 복사]</b> 버튼은 같은 형식을 손으로 복사하는 보조 수단입니다.<br>
+  <b>더기프트</b>: 고객이 퍼스트몰에서 "[오늘출발]"이 붙은 상품을 주문하고 결제까지 끝냅니다. 운영이 엑셀을 업로드하면 상품명에 "오늘출발"이 있는 주문 전체가 빠른출고로 자동 분류됩니다("[오늘출발무료]"는 배송비 무료 이벤트 표기라 일반 처리). 우리 쪽 현금영수증 절차는 없고 슬랙 스레드 대상도 아닙니다.<br>
+  <b>정수당(카페24)</b>: 고객이 카페24에서 "오늘출발 서비스 (당일출고)" 품목(30,000원)을 상품과 함께 담습니다. 10분 크론 동기화가 이 품목을 상품에서 빼고 주문에 ⚡를 붙입니다(오늘출발은 켜기만 하고, 운영이 켠 값은 끄지 않음). 주문조회·매출의 주문 합계에는 서비스 금액이 그대로 들어 있습니다. 우리 쪽 현금영수증 절차는 없고 슬랙 스레드 대상도 아닙니다.</figcaption>
+  </figure>
+  <div class="callout"><b>자사몰 현금영수증 슬랙 자동화는 방금 코드에 들어간 것</b>(PR #96·#97·#99, 2026-09-18)이라 인수 시점에 실제로 돌고 있는지 확인이 필요합니다. 돌리려면 <b>마이그레이션 085 실행</b>, 봇을 <b>#cs-더기프트에 초대</b>, 배포가 끝나야 하고 2026-09-19 수집완료분부터 올립니다. 끄기 <code>EXPRESS_RECEIPT_SLACK_DISABLED=1</code>, 채널 변경 <code>EXPRESS_RECEIPT_SLACK_CHANNEL</code>. 085가 없으면 조용히 아무것도 올리지 않으니(로그 경고만) 스레드가 안 생기면 이것부터 확인하세요.</div>
+</section>
+
+<section>
+  <div class="sh"><span class="no">4단계</span><h2>제작 · 출고 — 팀별 작업 단계</h2></div>
+  <p>수집(3단계) 이후의 제작·출고는 <b>운영 시트 안에서</b> 진행됩니다. 대시보드는 이 단계를 보지 못합니다 — 시트의 팀별 칸과 송장번호 칸이 진행 상태의 원본입니다.</p>
+  <div class="stages" role="list" aria-label="시트 안에서의 작업 순서">
+    <span class="stage" role="listitem">편집팀 — 스티커 파일 (구글드라이브 폴더)</span><span class="arrow" aria-hidden="true">→</span>
+    <span class="stage" role="listitem">인쇄팀</span><span class="arrow" aria-hidden="true">→</span>
+    <span class="stage" role="listitem">제본팀</span><span class="arrow" aria-hidden="true">→</span>
+    <span class="stage" role="listitem">물류팀 — 포장 · 송장번호 입력</span><span class="arrow" aria-hidden="true">→</span>
+    <span class="stage end" role="listitem">출고 (시트 운송장번호 칸)</span>
+  </div>
+  <ul class="notes">
+    <li>각 팀은 시트의 자기 칸(편집팀·인쇄팀·제본팀·물류팀)에 완료를 표시합니다. 스티커 인쇄 파일은 시트 T열의 폴더명(<code>주문번호_성함_스티커타입_수량개</code>)으로 구글드라이브에 만듭니다. 이 폴더는 사람이 만듭니다.</li>
+    <li><b>물류팀이 시트에 적는 송장번호</b>가 5단계 문자 발송과 고객 화면 배송조회에 쓰입니다. 시트에 송장이 없으면 문자가 나가지 않습니다.</li>
+    <li>수집복사 때 스티커가 없는 품목은 스티커~제본 칸이 이미 채워진 채로 나갑니다. <b>샘플세트는 고정 스티커가 붙어 제본이 필요해서 비워 둡니다.</b></li>
+    <li>쿠팡 로켓그로스는 쿠팡 물류센터가 보관·포장·출고하므로 우리 작업이 없습니다.</li>
+  </ul>
+  <div class="callout"><b>만들어져 있지만 지금은 쓰지 않는 기능</b> — 인수자가 "이걸로 해야 하나" 헷갈리지 않도록 적어 둡니다. 대시보드에는 정보입력현황의 <b>작업 단계 탭</b>(스티커 작업완료 → 인쇄완료 → 제본완료 → 포장완료 → 출고완료), 포장완료 탭의 <b>[출고처리] 송장 모달</b>, 주문 화면의 <b>[발송처리]</b>(송장을 쿠팡·네이버에 올려 배송중으로 바꾸는 기능)가 있습니다. 8~9월 수집 주문 611행 중 이 단계를 대시보드에서 진행한 건은 0건이고 송장 테이블도 비어 있습니다 — 팀들은 시트로 일합니다. 쿠팡·네이버 발송처리는 각 판매자센터에서 직접 하고 있는 것으로 보입니다(대시보드 기록 없음).</div>
+</section>
+
+<section>
+  <div class="sh"><span class="no">5단계</span><h2>출고 안내 — 시트의 출고일·송장을 읽어 문자 발송</h2></div>
+  <figure><div class="scroll">
+  <svg class="dg" viewBox="0 0 1110 300" role="img" aria-label="문자발송 화면이 운영 시트를 CSV로 읽어 출고일이 오늘이고 송장이 있는 자사 주문을 고르고, 이미 보낸 주문을 발송 이력으로 걸러낸 뒤 바른손 문자 API로 고객에게 LMS를 보낸다. 결과는 발송 이력에 기록되고, 자동 발송이면 슬랙에 세 줄 리포트가 간다. 고객 화면은 시트의 송장번호로 CJ 배송조회를 보여준다.">
+    <defs>
+      <marker id="d-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+      <marker id="d-h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="mkh" d="M0,0 L10,5 L0,10 z"/></marker>
+    </defs>
+    <g class="sheet"><rect x="20" y="30" width="150" height="58" rx="6"/><text class="t" x="95" y="55" text-anchor="middle">운영 시트</text><text class="s" x="95" y="74" text-anchor="middle">출고일 · 송장번호</text></g>
+    <g class="dash"><rect x="250" y="30" width="150" height="58" rx="6"/><text class="t" x="325" y="55" text-anchor="middle">문자발송 화면</text><text class="s" x="325" y="74" text-anchor="middle">[바로 발송] · 자동 19:05</text></g>
+    <g class="dash"><rect x="480" y="30" width="150" height="58" rx="6"/><text class="t" x="555" y="55" text-anchor="middle">대상 고르기</text><text class="s" x="555" y="74" text-anchor="middle">자사 주문 · 1회 규칙</text></g>
+    <g class="ext"><rect x="710" y="30" width="150" height="58" rx="6"/><text class="t" x="785" y="55" text-anchor="middle">바른손 문자 API</text><text class="s" x="785" y="74" text-anchor="middle">LMS</text></g>
+    <g class="ext"><rect x="940" y="30" width="150" height="58" rx="6"/><text class="t" x="1015" y="55" text-anchor="middle">고객 휴대폰</text><text class="s" x="1015" y="74" text-anchor="middle">출고안내 문자</text></g>
+    <line class="ar" x1="170" y1="59" x2="248" y2="59" marker-end="url(#d-a)"/><text class="lb" x="210" y="48" text-anchor="middle">CSV 읽기</text>
+    <line class="ar" x1="400" y1="59" x2="478" y2="59" marker-end="url(#d-a)"/><text class="lb" x="440" y="48" text-anchor="middle">오늘 출고</text>
+    <line class="ar" x1="630" y1="59" x2="708" y2="59" marker-end="url(#d-a)"/><text class="lb" x="670" y="48" text-anchor="middle">발송</text>
+    <line class="ar" x1="860" y1="59" x2="938" y2="59" marker-end="url(#d-a)"/>
+    <g class="ext"><rect x="20" y="200" width="150" height="58" rx="6"/><text class="t" x="95" y="225" text-anchor="middle">고객 화면 배송조회</text><text class="s" x="95" y="244" text-anchor="middle">CJ대한통운</text></g>
+    <g class="store"><rect x="480" y="200" width="150" height="58" rx="6"/><text class="t" x="555" y="225" text-anchor="middle">발송 이력</text><text class="s" x="555" y="244" text-anchor="middle">Supabase</text></g>
+    <g class="ext"><rect x="710" y="200" width="150" height="58" rx="6"/><text class="t" x="785" y="225" text-anchor="middle">슬랙 3줄 리포트</text><text class="s" x="785" y="244" text-anchor="middle">자동 발송일 때</text></g>
+    <line class="ar" x1="95" y1="88" x2="95" y2="197" marker-end="url(#d-a)"/><text class="lb" x="103" y="150">송장번호</text>
+    <line class="ar" x1="555" y1="200" x2="555" y2="91" marker-end="url(#d-a)"/><text class="lb" x="563" y="150">이미 보냈나</text>
+    <line class="ar" x1="722" y1="88" x2="632" y2="199" marker-end="url(#d-a)"/><text class="lb" x="648" y="176" text-anchor="end">결과 기록</text>
+    <line class="ar" x1="800" y1="88" x2="800" y2="197" marker-end="url(#d-a)"/><text class="lb" x="808" y="150">결과 보고</text>
+  </svg></div>
+  <figcaption>대상은 <b>출고일이 오늘이고 송장이 있는 바른손카드·바른손몰 주문</b>뿐입니다(쿠팡·네이버 등은 채널이 알아서 안내). 커스텀 상품 시트와 월별 답례품 시트(전월·당월·익월)를 함께 읽고, 한 주문에는 <b>시트 종류별로 한 번씩</b>만 보냅니다 — 이미 보낸 주문은 발송 이력으로 걸러집니다. 매일 19:05 자동 발송은 끝나면 슬랙에 "커스텀 주문 : N건(성공·실패) / 답례품 주문 : N건"을 보고합니다.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sh"><span class="no">주변</span><h2>흐름 옆에서 도는 자동 작업</h2></div>
+  <p>주문 흐름을 직접 움직이진 않지만 숫자를 맞춰 주는 작업들입니다. 서버 안 작업이 실패하면 슬랙(#기프트커머스-팀)으로 알림이 옵니다. 외부 크론의 실패는 서버가 알지 못합니다.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>작업</th><th>주기</th><th>하는 일</th></tr></thead>
+    <tbody>
+      <tr><td>외부 크론 — 쿠팡·네이버·카페24 동기화</td><td>10분마다</td><td>외부 웹 크론 서비스 <b>cron-job.org</b>가 <code>/api/coupang/sync</code> · <code>/api/naver/sync</code> · <code>/api/cafe24/sync</code>를 API 키(<code>EXPORT_API_KEY</code>)로 부른다. 1단계의 외부 채널 주문은 이걸로 들어온다</td></tr>
+      <tr><td>쿠팡 주문·로켓그로스 동기화 (서버 안)</td><td>15분마다</td><td>위 크론과 별개로 서버 안에서도 쿠팡을 가져온다 (둘 중 하나만 있어도 됨)</td></tr>
+      <tr><td>쿠팡 · 네이버 구매확정 보정</td><td>매일 04:20 · 04:10</td><td>동기화 기간을 지나 확정된 주문의 구매확정일을 채워 정산 기준 매출을 맞춘다</td></tr>
+      <tr><td>가격 스냅샷</td><td>30분마다</td><td>답례품 판매가가 바뀐 시점을 기록한다 (가격 변경 전후 비교용)</td></tr>
+      <tr><td>재고 데일리 알림</td><td>매일 (켜야 동작)</td><td>XERP 재고로 부족·품절 상품을 슬랙에 알린다</td></tr>
+      <tr><td>출고안내문자 자동 발송</td><td>매일 19:05</td><td>5단계를 자동으로 한다</td></tr>
+      <tr><td>매출 · 정산 화면 (사람이 봄)</td><td>—</td><td>1단계에서 들어온 주문으로 채널별 매출·위탁 정산을 집계. 위탁 거래처는 <b>거래처 정산 포털</b>(토큰 링크)에서 자기 정산만 봄. 웅진·프리드라이프는 1단계의 [제휴주문 수집]으로 등록된 수기주문이 매출에 잡힘</td></tr>
+    </tbody>
+  </table></div>
+  <p class="foot">배포·계정·설정값·장애 대응은 인계서에 정리돼 있습니다: <a href="https://claude.ai/artifact/JG9sNR1ezcbhXCPC1UWz2g">바른손 답례품 대시보드 인계서</a>. 이 흐름도는 배포 기준 <code>84ae897</code>(2026-09-18)의 코드를 읽고 그렸습니다.</p>
+</section>
+</div>
+
+</body>
+</html>
