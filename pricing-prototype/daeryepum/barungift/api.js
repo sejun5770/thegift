@@ -421,10 +421,12 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
               ei.card_opt AS card_opt, -- 옵션 라인(비용변동 옵션): 부모 아이템 card_seq 참조. NULL=부모(세트/메인)
               ei.card_seq AS card_seq, -- 부모 식별용 (옵션의 card_opt 가 이 값을 가리킨다)
               c.Card_Code, c.Card_Name, c.Card_Price,
-              co.recv_name AS delivery_name, co.recv_hphone AS delivery_hphone, co.recv_address AS delivery_addr
+              co.recv_name AS delivery_name, co.recv_hphone AS delivery_hphone, co.recv_address AS delivery_addr,
+              ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR(20))) AS site  -- 주문 사이트 (배너 채널 판정, 086)
             FROM CUSTOM_ETC_ORDER co WITH (NOLOCK)
             INNER JOIN CUSTOM_ETC_ORDER_ITEM ei WITH (NOLOCK) ON co.order_seq = ei.order_seq
             INNER JOIN S2_Card c WITH (NOLOCK) ON ei.card_seq = c.Card_Seq
+            LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
             WHERE co.order_seq = @orderSeq
               AND ${DAERYEPUM_WHERE}
           `);
@@ -438,11 +440,13 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
               co.order_name, co.order_hphone, co.status_seq, co.settle_status, co.settle_date,
               coi.id AS item_id, coi.item_count, coi.item_price, coi.item_sale_price,
               c.Card_Code, c.Card_Name, c.Card_Price,
-              di.NAME AS delivery_name, di.HPHONE AS delivery_hphone, di.ADDR AS delivery_addr
+              di.NAME AS delivery_name, di.HPHONE AS delivery_hphone, di.ADDR AS delivery_addr,
+              ISNULL(si.SiteName, CAST(co.company_Seq AS VARCHAR(20))) AS site  -- 주문 사이트 (배너 채널 판정, 086)
             FROM custom_order co WITH (NOLOCK)
             INNER JOIN custom_order_item coi WITH (NOLOCK) ON coi.order_seq = co.order_seq
             INNER JOIN S2_Card c WITH (NOLOCK) ON coi.card_seq = c.Card_Seq
             LEFT JOIN DELIVERY_INFO di WITH (NOLOCK) ON co.order_seq = di.ORDER_SEQ
+            LEFT JOIN SiteInfo si WITH (NOLOCK) ON co.company_Seq = si.CompayCode
             WHERE co.order_seq = @orderSeq
               AND ${DAERYEPUM_WHERE}
           `);
@@ -455,6 +459,12 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
 
       const row = result.recordset[0];
       const existingInfo = await store.getCustomerInfo(orderId);
+      // 주문 채널 — 테이블(ETC)이 아니라 주문의 사이트로 판정한다 (CUSTOM_ETC_ORDER 도 대부분 바른손카드).
+      //   바른손몰 계열(SiteName '바른손몰' 또는 2715 = 바른손몰 B2B)만 '바른손몰', 나머지는 '바른손카드'.
+      const rowSite = String(row.site || '').trim();
+      const orderSite = (rowSite.includes('바른손몰') || rowSite === '2715') ? '바른손몰' : '바른손카드';
+      // 사이트 공통 설정 — 공통 안내(036)와 입력완료 배너(086)가 같이 쓴다. 실패해도 기본값이 온다.
+      const siteSettings = await store.getSiteSettings();
 
       // 상품코드로 product_settings 조회 (변형 코드 fallback 적용)
       let productSettings = row.Card_Code ? await lookupProductSettings(row.Card_Code) : null;
@@ -762,15 +772,13 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         custom_guide_title_by_product: customGuideTitleByProduct, // { product_code: string|null } — migration 035
         // 사이트 공통 안내 (migration 036) — 상품별 커스텀 없을 때 폴백.
         //   실패해도 order-info 는 기본 FAQ 로 fallback → try/catch 안전.
-        site_guide: await (async () => {
-          try {
-            const s = await store.getSiteSettings();
-            return {
-              title: s?.custom_guide_title || null,
-              text: s?.custom_guide_text || null,
-            };
-          } catch (e) { return { title: null, text: null }; }
-        })(),
+        site_guide: {
+          title: siteSettings?.custom_guide_title || null,
+          text: siteSettings?.custom_guide_text || null,
+        },
+        site: orderSite,   // '바른손카드' | '바른손몰' — 배너 채널·이벤트 기록용
+        // 입력완료 화면 배너 (086) — 오늘 이 채널에 보여줄 것만, 저장 순서대로 (최대 5개).
+        completion_banners: store.activeCompletionBanners(siteSettings, orderSite),
         existing_info: existingInfo,
         deliveries,  // 배송지별 답례품 수량 (나눔배송 안내용, 입력엔 영향 없음)
         virtual_account: virtualAccount,  // 주문 결제용 가상계좌 (결제대기 상태일 때만)
@@ -843,6 +851,24 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       logAccess(req, 'submit', orderId, { status_code: 500, metadata: { reason: 'server_error', error: err.message } });
       return json(res, { error: '서버 오류가 발생했습니다.' }, 500);
     }
+  }
+
+  // ============================================
+  // 입력완료 화면 배너 노출·클릭 기록 (086) — 인증 게이트 앞에 배치 (고객 화면은 세션이 없다).
+  //   개인정보는 받지 않는다. 배너 id 와 이벤트 종류만 검증하고, 실패는 삼킨다 (고객 화면에 영향 X).
+  // ============================================
+  // POST /api/bg/banner-event  body: { banner_id, event: 'view'|'click', order_id?, site? }
+  if (pathname === '/api/bg/banner-event' && method === 'POST') {
+    const body = await parseBody(req).catch(() => ({}));
+    const bannerId = String(body.banner_id || '').trim();
+    const event = String(body.event || '').trim();
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(bannerId) || !['view', 'click'].includes(event)) {
+      return json(res, { error: 'banner_id / event 확인' }, 400);
+    }
+    const orderId = String(body.order_id || '').trim().slice(0, 40) || null;
+    const site = ['바른손카드', '바른손몰'].includes(body.site) ? body.site : null;
+    const ok = await store.logBannerEvent({ banner_id: bannerId, event, order_id: orderId, site });
+    return json(res, { ok });
   }
 
   // ============================================
@@ -1893,6 +1919,90 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
       return json(res, updated);
     } catch (err) {
       console.error('[site-settings PUT] error:', err.message);
+      return json(res, { error: err.message }, 500);
+    }
+  }
+
+  // ============================================
+  // 입력완료 화면 배너 (086) — 이미지 업로드·삭제·통계. 목록 자체는 site-settings 의 completion_banners 로 저장.
+  //   업로드는 고객 로고와 같은 버킷(bg-customer-logos)의 _banners/ 아래 — 버킷을 새로 만들지 않아도 된다.
+  //   권한은 site-settings PUT 과 같은 super admin.
+  // ============================================
+  // POST /api/bg/banner-image/upload   Headers: Content-Type image/png|jpeg, X-Filename   Body: raw bytes (≤5MB)
+  if (pathname === '/api/bg/banner-image/upload' && method === 'POST') {
+    if (!isSuperAdmin(session)) return json(res, { error: '권한이 없습니다 (super admin 전용)' }, 403);
+    const mime = (req.headers['content-type'] || '').toLowerCase();
+    if (!['image/png', 'image/jpeg'].includes(mime)) return json(res, { error: '허용 형식: PNG / JPG 만 지원' }, 415);
+    const MAX_BYTES = 5 * 1024 * 1024;
+    const declaredLen = parseInt(req.headers['content-length'] || '0', 10);
+    if (declaredLen && declaredLen > MAX_BYTES) return json(res, { error: '최대 5MB 까지 업로드 가능' }, 413);
+    const chunks = [];
+    let total = 0;
+    const aborted = await new Promise((resolve) => {
+      req.on('data', (c) => {
+        total += c.length;
+        if (total > MAX_BYTES) { req.destroy(); return resolve(true); }
+        chunks.push(c);
+      });
+      req.on('end', () => resolve(false));
+      req.on('error', () => resolve(true));
+    });
+    if (aborted) return json(res, { error: '최대 5MB 까지 업로드 가능' }, 413);
+    const buf = Buffer.concat(chunks);
+    if (!buf.length) return json(res, { error: '빈 파일' }, 400);
+    const SUPABASE_URL = process.env.SUPABASE_URL || '';
+    const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';   // 로고 업로드와 같은 이유 (service role)
+    if (!SUPABASE_URL || !SUPABASE_KEY) return json(res, { error: 'Storage 미설정 — 운영자에게 문의' }, 503);
+    const BUCKET = 'bg-customer-logos';
+    const ext = mime === 'image/png' ? 'png' : 'jpg';
+    const objectPath = `_banners/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    try {
+      const r = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${objectPath}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY, 'Content-Type': mime, 'x-upsert': 'true' },
+        body: buf,
+      });
+      if (!r.ok) {
+        const t = await r.text();
+        console.error('[banner-image upload] Storage 실패:', r.status, t);
+        let why = '';
+        try { why = JSON.parse(t).message || JSON.parse(t).error || ''; } catch (_) { why = String(t || '').slice(0, 120); }
+        return json(res, { error: 'Storage 업로드 실패: ' + r.status + (why ? ' — ' + why : '') }, 502);
+      }
+    } catch (err) {
+      return json(res, { error: '네트워크 실패: ' + err.message }, 502);
+    }
+    return json(res, {
+      image_url: `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${objectPath}`,
+      image_path: objectPath,
+      size: buf.length,
+      filename: (req.headers['x-filename'] || `banner.${ext}`).toString().slice(0, 120),
+    });
+  }
+  // DELETE /api/bg/banner-image?path=_banners/xxx.jpg — 배너를 지울 때 이미지도 정리 (best-effort)
+  if (pathname === '/api/bg/banner-image' && method === 'DELETE') {
+    if (!isSuperAdmin(session)) return json(res, { error: '권한이 없습니다 (super admin 전용)' }, 403);
+    const objectPath = (query.path || '').trim();
+    if (!/^_banners\/[A-Za-z0-9_.-]+$/.test(objectPath)) return json(res, { error: 'path 확인 (_banners/ 아래만)' }, 400);
+    const SUPABASE_URL = process.env.SUPABASE_URL || '';
+    const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
+    if (!SUPABASE_URL || !SUPABASE_KEY) return json(res, { error: 'Storage 미설정' }, 503);
+    try {
+      const r = await fetch(`${SUPABASE_URL}/storage/v1/object/bg-customer-logos/${objectPath}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${SUPABASE_KEY}`, apikey: SUPABASE_KEY },
+      });
+      if (!r.ok && r.status !== 404) return json(res, { error: 'Storage 삭제 실패: ' + r.status }, 502);
+    } catch (err) {
+      return json(res, { error: '네트워크 실패: ' + err.message }, 502);
+    }
+    return json(res, { ok: true });
+  }
+  // GET /api/bg/banner-stats — { [banner_id]: { views, clicks, views_30d, clicks_30d } }
+  if (pathname === '/api/bg/banner-stats' && method === 'GET') {
+    try {
+      return json(res, await store.getBannerStats());
+    } catch (err) {
+      console.error('[banner-stats] error:', err.message);
       return json(res, { error: err.message }, 500);
     }
   }

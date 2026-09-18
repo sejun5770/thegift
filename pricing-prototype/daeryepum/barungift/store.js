@@ -1982,6 +1982,92 @@ function normAlertFormat(src) {
   return out;
 }
 
+// ────────────────────────────────────────────────────────────
+// 고객 입력완료 화면 배너 (086)
+//   bg_site_settings.completion_banners JSONB — 최대 5개, 배열 순서 = 노출 순서.
+//   고객 화면은 서버가 걸러 준 목록(activeCompletionBanners)만 받는다.
+// ────────────────────────────────────────────────────────────
+const BANNER_SITES = ['바른손카드', '바른손몰'];
+const BANNER_MAX = 5;
+
+/**
+ * 배너 목록 정규화 — 모르는 키·이상값은 버리고 최대 5개만 남긴다.
+ *   저장 시점에 여기서 전부 걸러내므로 고객 화면은 형태를 다시 의심하지 않는다.
+ *   이미지가 없는 배너는 보여줄 수 없으니 버린다. 링크는 http(s) 만 받는다.
+ */
+function normCompletionBanners(src) {
+  if (!Array.isArray(src)) return null;
+  const out = [];
+  const seen = new Set();
+  const ymd = v => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
+  for (const b of src) {
+    if (!b || typeof b !== 'object') continue;
+    const imageUrl = String(b.image_url || '').trim();
+    if (!/^https?:\/\//.test(imageUrl)) continue;
+    let id = String(b.id || '').trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
+    if (!id || seen.has(id)) id = 'b_' + Date.now().toString(36) + '_' + out.length;
+    seen.add(id);
+    const linkUrl = String(b.link_url || '').trim();
+    const sites = Array.isArray(b.sites) ? b.sites.map(s => String(s).trim()).filter(s => BANNER_SITES.includes(s)) : [];
+    out.push({
+      id,
+      image_url: imageUrl.slice(0, 1000),
+      image_path: String(b.image_path || '').trim().slice(0, 300) || null,
+      link_url: /^https?:\/\//.test(linkUrl) ? linkUrl.slice(0, 1000) : null,
+      alt: String(b.alt || '').trim().slice(0, 120) || null,
+      start_date: ymd(b.start_date),
+      end_date: ymd(b.end_date),
+      sites: [...new Set(sites)],
+      enabled: b.enabled !== false,
+    });
+    if (out.length >= BANNER_MAX) break;
+  }
+  return out;
+}
+
+/**
+ * 오늘(KST) 이 채널에 보여줄 배너만 — 사용 중 + 기간 안(시작·종료일 포함) + 채널 일치.
+ *   sites 가 비어 있으면 모든 채널. 채널을 모르는 주문에는 채널 제한 없는 배너만.
+ *   고객 화면에 필요한 필드만 내보낸다 (image_path 같은 관리용 값은 빼고).
+ */
+function activeCompletionBanners(settings, site, todayYmd) {
+  const list = normCompletionBanners(settings?.completion_banners) || [];
+  const today = todayYmd || new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
+  return list
+    .filter(b => b.enabled
+      && (!b.start_date || b.start_date <= today)
+      && (!b.end_date || b.end_date >= today)
+      && (!b.sites.length || (site && b.sites.includes(site))))
+    .map(b => ({ id: b.id, image_url: b.image_url, link_url: b.link_url, alt: b.alt }));
+}
+
+/** 배너 노출·클릭 기록 — 고객 화면에 영향이 없어야 하므로 실패는 삼킨다. */
+async function logBannerEvent({ banner_id, event, order_id, site }) {
+  if (!USE_SUPABASE) return false;
+  try {
+    await sbInsert('bg_banner_events', { banner_id, event, order_id: order_id || null, site: site || null });
+    return true;
+  } catch (e) {
+    console.warn('[banner-event] 기록 실패:', e.message);
+    return false;
+  }
+}
+
+/** 배너별 노출·클릭 수 — 전체와 최근 30일. 건수가 적어(하루 수십 건) 행을 읽어 센다. */
+async function getBannerStats() {
+  if (!USE_SUPABASE) return {};
+  const since = new Date(Date.now() - 30 * 86400000).toISOString();
+  const rows = await sbGet('bg_banner_events', 'order=created_at.desc&limit=50000');
+  const stats = {};
+  for (const r of rows) {
+    const s = stats[r.banner_id] || (stats[r.banner_id] = { views: 0, clicks: 0, views_30d: 0, clicks_30d: 0 });
+    const k = r.event === 'click' ? 'clicks' : 'views';
+    s[k] += 1;
+    if (r.created_at >= since) s[k + '_30d'] += 1;
+  }
+  return stats;
+}
+
 /**
  * 공유 자유 옵션 그룹 정규화 (078) — 모르는 키·이상값은 버린다.
  *   저장 시점에 여기서 전부 걸러내므로, 고객 화면은 형태를 다시 의심하지 않아도 된다.
@@ -2053,6 +2139,10 @@ async function updateSiteSettings(patch, updatedBy = null) {
   if ('shared_option_groups' in patch) {
     clean.shared_option_groups = normSharedOptionGroups(patch.shared_option_groups);
   }
+  // 입력완료 화면 배너 (086) — JSONB. 형태 검증은 normCompletionBanners 가 한다.
+  if ('completion_banners' in patch) {
+    clean.completion_banners = normCompletionBanners(patch.completion_banners);
+  }
   // 구분별 경고 기준일 (073) — JSONB. 키는 ITEM_KINDS 만, 값은 1~365 정수만 남긴다.
   if ('stock_alert_warn_days' in patch) {
     const src = patch.stock_alert_warn_days;
@@ -2077,13 +2167,13 @@ async function updateSiteSettings(patch, updatedBy = null) {
     // 073/074 마이그레이션 전에는 새 컬럼이 없어 PGRST204 가 난다. 그 컬럼만 빼고
     // 다시 저장한다 — 새 기능 하나 때문에 채널·시각 저장까지 막히면 안 된다.
     const m = /Could not find the '([a-z_]+)' column/.exec(err.message || '');
-    if (m && ['stock_alert_format', 'stock_alert_warn_days', 'shared_option_groups', 'sms_auto_enabled', 'sms_auto_time', 'sms_auto_sheet', 'sms_auto_slack_channel'].includes(m[1]) && m[1] in clean) {
+    if (m && ['stock_alert_format', 'stock_alert_warn_days', 'shared_option_groups', 'completion_banners', 'sms_auto_enabled', 'sms_auto_time', 'sms_auto_sheet', 'sms_auto_slack_channel'].includes(m[1]) && m[1] in clean) {
       delete clean[m[1]];
       const retried = Object.keys(clean).some(k => !['updated_at', 'updated_by'].includes(k))
         ? ((await sbUpdate('bg_site_settings', 'id=eq.1', clean)) || (await sbInsert('bg_site_settings', { id: 1, ...clean })))
         : { id: 1 };
       return { ...retried, _skipped_column: m[1],
-        _warning: `${m[1]} 컬럼이 아직 없습니다 — 해당 설정은 저장되지 않았습니다. supabase/migrations/${({ stock_alert_format: '074', stock_alert_warn_days: '073', shared_option_groups: '078', sms_auto_enabled: '083', sms_auto_time: '083', sms_auto_sheet: '083', sms_auto_slack_channel: '083' })[m[1]] || '0??'}_*.sql 을 실행하세요.` };
+        _warning: `${m[1]} 컬럼이 아직 없습니다 — 해당 설정은 저장되지 않았습니다. supabase/migrations/${({ completion_banners: '086', stock_alert_format: '074', stock_alert_warn_days: '073', shared_option_groups: '078', sms_auto_enabled: '083', sms_auto_time: '083', sms_auto_sheet: '083', sms_auto_slack_channel: '083' })[m[1]] || '0??'}_*.sql 을 실행하세요.` };
     }
     throw err;
   }
@@ -2848,4 +2938,9 @@ module.exports = {
   getSiteSettings,
   updateSiteSettings,
   normSharedOptionGroups,
+  // 입력완료 화면 배너 (086)
+  normCompletionBanners,
+  activeCompletionBanners,
+  logBannerEvent,
+  getBannerStats,
 };

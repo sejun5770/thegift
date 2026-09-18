@@ -1694,6 +1694,27 @@ nav.nav-loading a[href^="#"] {
         <span id="site-guide-status" style="margin-left:8px;font-size:12px;color:var(--gray-500)"></span>
       </div>
     </div>
+
+    <!-- 입력완료 화면 배너 (migration 086) — 고객이 정보 입력을 마친 화면에 보이는 자사 서비스 배너 -->
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <div style="font-weight:700;font-size:16px">고객 입력완료 화면 배너</div>
+        <span id="cb-count" class="badge" style="font-size:12px"></span>
+      </div>
+      <div style="font-size:13px;color:var(--gray-500);margin-bottom:14px;line-height:1.6">
+        고객이 정보 입력을 마친 화면(제출 완료 · 입력한 정보 확인)에 보이는 배너입니다. <b>최대 5개</b>, 위에서부터 순서대로 옆으로 넘겨 보입니다.
+        노출 기간은 시작일·종료일을 <b>포함</b>하며 비워 두면 제한이 없습니다. 채널을 고르지 않으면 바른손카드·바른손몰 모두에 보입니다.
+        이미지는 PNG·JPG, 5MB 이하 — 정사각형(600×600 이상)을 권장합니다.
+      </div>
+      <div id="cb-list" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div style="display:flex;gap:8px;margin-top:14px;align-items:center;flex-wrap:wrap">
+        <button class="btn" id="cb-add-btn" onclick="cbAddBanner()">+ 배너 추가</button>
+        <button class="btn btn-primary" onclick="cbSaveBanners()">배너 저장</button>
+        <button class="btn" onclick="cbLoadBanners()">다시 불러오기</button>
+        <span id="cb-status" style="margin-left:8px;font-size:12px;color:var(--gray-500)"></span>
+      </div>
+      <input type="file" id="cb-file" accept="image/png,image/jpeg" style="display:none" onchange="cbOnFilePicked(this)">
+    </div>
   </div>
 </div>
 
@@ -9074,6 +9095,7 @@ async function loadAdminNavSettings() {
     document.getElementById('ans-status').textContent = '';
     // 공통 안내 로드 (migration 036) — 실패해도 admin nav 페이지 로드는 계속.
     loadSiteGuideSettings().catch(e => console.warn('site-guide 로드 실패:', e.message));
+    cbLoadBanners().catch(e => console.warn('배너 로드 실패:', e.message));
   } catch (e) {
     tag.textContent = '조회 실패';
     tag.className = 'badge badge-warn';
@@ -9133,6 +9155,196 @@ async function saveSiteGuideSettings() {
   } catch (e) {
     if (status) { status.textContent = '저장 실패: ' + e.message; status.style.color = '#dc2626'; }
     alert('공통 안내 저장 실패: ' + e.message);
+  }
+}
+
+// ============================================
+// 고객 입력완료 화면 배너 (migration 086)
+//   목록은 site-settings 의 completion_banners(JSONB) 로 저장한다. 이미지는 먼저 Storage 에 올리고
+//   받은 주소를 목록에 담는다 — [배너 저장]을 눌러야 고객 화면에 반영된다.
+// ============================================
+const CB_MAX = 5;
+const CB_SITES = ['바른손카드', '바른손몰'];
+let _cbDraft = [];        // 편집 중인 목록
+let _cbStats = {};        // { banner_id: { views, clicks, views_30d, clicks_30d } }
+let _cbUploadIdx = -1;    // 파일 선택 창을 연 배너
+let _cbRemovedPaths = []; // 저장 뒤에 Storage 에서 지울 이미지
+
+function _cbSetStatus(msg, color) {
+  const el = document.getElementById('cb-status');
+  if (el) { el.textContent = msg || ''; el.style.color = color || 'var(--gray-500)'; }
+}
+function _cbToday() { return new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10); }
+/** 오늘 기준 상태 — 고객 화면의 서버 판정(store.activeCompletionBanners)과 같은 규칙. */
+function _cbState(b) {
+  const t = _cbToday();
+  if (!b.image_url) return ['이미지 없음', 'badge-warn'];
+  if (b.enabled === false) return ['꺼짐', ''];
+  if (b.start_date && b.start_date > t) return ['노출 예정', 'badge-info'];
+  if (b.end_date && b.end_date < t) return ['기간 종료', ''];
+  return ['노출 중', 'badge-success'];
+}
+
+async function cbLoadBanners() {
+  _cbSetStatus('불러오는 중…');
+  const r = await fetch(`${API}/api/bg/site-settings`);
+  if (!r.ok) { _cbSetStatus('로드 실패: HTTP ' + r.status, '#dc2626'); throw new Error('HTTP ' + r.status); }
+  const s = await r.json();
+  _cbDraft = Array.isArray(s?.completion_banners) ? s.completion_banners.map(b => ({ ...b, sites: Array.isArray(b.sites) ? b.sites : [] })) : [];
+  _cbRemovedPaths = [];
+  try {
+    const sr = await fetch(`${API}/api/bg/banner-stats`);
+    _cbStats = sr.ok ? await sr.json() : {};
+    if (_cbStats && _cbStats.error) _cbStats = {};
+  } catch (_) { _cbStats = {}; }
+  cbRender();
+  _cbSetStatus('');
+}
+
+function cbRender() {
+  const list = document.getElementById('cb-list');
+  if (!list) return;
+  const cnt = document.getElementById('cb-count');
+  if (cnt) cnt.textContent = `${_cbDraft.length} / ${CB_MAX}`;
+  const addBtn = document.getElementById('cb-add-btn');
+  if (addBtn) addBtn.disabled = _cbDraft.length >= CB_MAX;
+  if (!_cbDraft.length) {
+    list.innerHTML = '<div style="padding:18px;border:1px dashed var(--gray-300);border-radius:8px;font-size:13px;color:var(--gray-500);text-align:center">등록된 배너가 없습니다. 배너가 없으면 고객 화면에는 아무것도 보이지 않습니다.</div>';
+    return;
+  }
+  const inp = 'padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px';
+  list.innerHTML = _cbDraft.map((b, i) => {
+    const [stLabel, stCls] = _cbState(b);
+    const st = _cbStats[b.id];
+    const ctr = st && st.views ? (st.clicks / st.views * 100).toFixed(1) + '%' : '-';
+    const statTxt = st ? `노출 ${st.views.toLocaleString()} · 클릭 ${st.clicks.toLocaleString()} (${ctr}) — 최근 30일 ${st.views_30d.toLocaleString()} · ${st.clicks_30d.toLocaleString()}` : '노출·클릭 기록 없음';
+    return `
+    <div style="display:flex;gap:12px;padding:12px;border:1px solid var(--gray-200);border-radius:8px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:96px;flex:0 0 96px">
+        <div style="width:96px;height:96px;border-radius:8px;background:var(--gray-100);overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--gray-500)">
+          ${b.image_url ? `<img src="${escapeHtml(b.image_url)}" alt="" style="width:100%;height:100%;object-fit:cover">` : '이미지 없음'}
+        </div>
+        <button class="btn" style="width:96px;margin-top:6px;padding:4px 0;font-size:12px" onclick="cbPickImage(${i})">${b.image_url ? '이미지 교체' : '이미지 올리기'}</button>
+      </div>
+      <div style="flex:1;min-width:280px;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <b style="font-size:13px">${i + 1}번</b>
+          <span class="badge ${stCls}" style="font-size:12px">${stLabel}</span>
+          <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" ${b.enabled !== false ? 'checked' : ''} onchange="cbSet(${i},'enabled',this.checked)"> 사용</label>
+          <span style="margin-left:auto;display:flex;gap:4px">
+            <button class="btn" style="padding:2px 8px;font-size:12px" ${i === 0 ? 'disabled' : ''} onclick="cbMove(${i},-1)" title="위로">▲</button>
+            <button class="btn" style="padding:2px 8px;font-size:12px" ${i === _cbDraft.length - 1 ? 'disabled' : ''} onclick="cbMove(${i},1)" title="아래로">▼</button>
+            <button class="btn btn-danger" style="padding:2px 8px;font-size:12px" onclick="cbRemove(${i})">삭제</button>
+          </span>
+        </div>
+        <input type="url" placeholder="클릭 시 이동할 링크 (https://…) — 비우면 이미지만 보입니다" value="${escapeHtml(b.link_url || '')}" oninput="cbSet(${i},'link_url',this.value,true)" style="${inp};width:100%">
+        <input type="text" placeholder="이미지 설명 (선택 — 화면 읽기 프로그램용)" maxlength="120" value="${escapeHtml(b.alt || '')}" oninput="cbSet(${i},'alt',this.value,true)" style="${inp};width:100%">
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--gray-700)">
+          <span>노출 기간 <input type="date" value="${escapeHtml(b.start_date || '')}" onchange="cbSet(${i},'start_date',this.value)" style="${inp}"> ~ <input type="date" value="${escapeHtml(b.end_date || '')}" onchange="cbSet(${i},'end_date',this.value)" style="${inp}"></span>
+          <span>채널 ${CB_SITES.map(sn => `<label style="margin-left:6px;cursor:pointer"><input type="checkbox" ${(b.sites || []).includes(sn) ? 'checked' : ''} onchange="cbToggleSite(${i},'${sn}',this.checked)"> ${sn}</label>`).join('')}
+            <span style="color:var(--gray-500);margin-left:6px">${(b.sites || []).length ? '' : '(전체)'}</span></span>
+        </div>
+        <div style="font-size:12px;color:var(--gray-500)">${statTxt}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/** 값 변경 — 글자 입력(noRender)은 포커스를 잃지 않게 다시 그리지 않는다. */
+function cbSet(i, key, val, noRender) {
+  if (!_cbDraft[i]) return;
+  _cbDraft[i][key] = (typeof val === 'string') ? (val.trim() || null) : val;
+  _cbSetStatus('변경됨 — [배너 저장]을 눌러야 반영됩니다.');
+  if (!noRender) cbRender();
+}
+function cbToggleSite(i, site, on) {
+  const b = _cbDraft[i]; if (!b) return;
+  const set = new Set(b.sites || []);
+  if (on) set.add(site); else set.delete(site);
+  b.sites = CB_SITES.filter(s => set.has(s));
+  _cbSetStatus('변경됨 — [배너 저장]을 눌러야 반영됩니다.');
+  cbRender();
+}
+function cbMove(i, d) {
+  const j = i + d;
+  if (j < 0 || j >= _cbDraft.length) return;
+  [_cbDraft[i], _cbDraft[j]] = [_cbDraft[j], _cbDraft[i]];
+  _cbSetStatus('변경됨 — [배너 저장]을 눌러야 반영됩니다.');
+  cbRender();
+}
+function cbAddBanner() {
+  if (_cbDraft.length >= CB_MAX) return;
+  _cbDraft.push({ id: 'b_' + Date.now().toString(36), image_url: null, image_path: null, link_url: null, alt: null, start_date: null, end_date: null, sites: [], enabled: true });
+  cbRender();
+  cbPickImage(_cbDraft.length - 1);
+}
+function cbRemove(i) {
+  const b = _cbDraft[i]; if (!b) return;
+  if (!confirm(`${i + 1}번 배너를 삭제할까요? [배너 저장]을 눌러야 고객 화면에서 사라집니다.`)) return;
+  if (b.image_path) _cbRemovedPaths.push(b.image_path);
+  _cbDraft.splice(i, 1);
+  _cbSetStatus('변경됨 — [배너 저장]을 눌러야 반영됩니다.');
+  cbRender();
+}
+function cbPickImage(i) {
+  _cbUploadIdx = i;
+  const f = document.getElementById('cb-file');
+  if (f) { f.value = ''; f.click(); }
+}
+async function cbOnFilePicked(input) {
+  const file = input.files && input.files[0];
+  const b = _cbDraft[_cbUploadIdx];
+  if (!file || !b) return;
+  if (!['image/png', 'image/jpeg'].includes(file.type)) { alert('PNG 또는 JPG 파일만 올릴 수 있습니다.'); return; }
+  if (file.size > 5 * 1024 * 1024) { alert('이미지는 5MB 이하만 올릴 수 있습니다.'); return; }
+  _cbSetStatus('이미지 올리는 중…');
+  try {
+    const r = await fetch(`${API}/api/bg/banner-image/upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': file.type, 'X-Filename': encodeURIComponent(file.name) },
+      body: file,
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+    if (b.image_path) _cbRemovedPaths.push(b.image_path);   // 교체된 옛 이미지는 저장 뒤 정리
+    b.image_url = j.image_url;
+    b.image_path = j.image_path;
+    _cbSetStatus('이미지를 올렸습니다 — [배너 저장]을 눌러야 반영됩니다.');
+    cbRender();
+  } catch (e) {
+    _cbSetStatus('이미지 올리기 실패: ' + e.message, '#dc2626');
+    alert('이미지 올리기 실패: ' + e.message);
+  }
+}
+async function cbSaveBanners() {
+  const noImg = _cbDraft.findIndex(b => !b.image_url);
+  if (noImg >= 0) { alert(`${noImg + 1}번 배너에 이미지가 없습니다. 이미지를 올리거나 배너를 삭제해 주세요.`); return; }
+  const badLink = _cbDraft.findIndex(b => b.link_url && !/^https?:\/\//.test(b.link_url));
+  if (badLink >= 0) { alert(`${badLink + 1}번 배너의 링크는 http:// 또는 https:// 로 시작해야 합니다.`); return; }
+  const badRange = _cbDraft.findIndex(b => b.start_date && b.end_date && b.start_date > b.end_date);
+  if (badRange >= 0) { alert(`${badRange + 1}번 배너의 노출 기간을 확인해 주세요 (시작일이 종료일보다 늦습니다).`); return; }
+  _cbSetStatus('저장 중…');
+  try {
+    const r = await fetch(`${API}/api/bg/site-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ completion_banners: _cbDraft }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
+    if (j._skipped_column) throw new Error(j._warning || '배너 컬럼이 아직 없습니다 (마이그레이션 086 실행 필요)');
+    // 목록에서 빠진 이미지는 Storage 에서도 지운다 — 실패해도 배너 저장은 끝난 것이라 넘어간다.
+    const stillUsed = new Set(_cbDraft.map(b => b.image_path).filter(Boolean));
+    for (const p of _cbRemovedPaths.filter(p => !stillUsed.has(p))) {
+      fetch(`${API}/api/bg/banner-image?path=${encodeURIComponent(p)}`, { method: 'DELETE' }).catch(() => {});
+    }
+    _cbRemovedPaths = [];
+    _cbDraft = Array.isArray(j.completion_banners) ? j.completion_banners : _cbDraft;
+    cbRender();
+    _cbSetStatus('저장했습니다 — 고객 화면에 바로 반영됩니다.', '#16a34a');
+  } catch (e) {
+    _cbSetStatus('저장 실패: ' + e.message, '#dc2626');
+    alert('배너 저장 실패: ' + e.message);
   }
 }
 
