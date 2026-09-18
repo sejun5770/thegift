@@ -1704,9 +1704,27 @@ nav.nav-loading a[href^="#"] {
       <div style="font-size:13px;color:var(--gray-500);margin-bottom:14px;line-height:1.6">
         고객이 정보 입력을 마친 화면(제출 완료 · 입력한 정보 확인)에 보이는 배너입니다. <b>최대 5개</b>, 위에서부터 순서대로 옆으로 넘겨 보입니다.
         노출 기간은 시작일·종료일을 <b>포함</b>하며 비워 두면 제한이 없습니다. 채널을 고르지 않으면 바른손카드·바른손몰 모두에 보입니다.
-        이미지는 PNG·JPG, 5MB 이하 — 정사각형(600×600 이상)을 권장합니다.
+        <br><b>이미지 규격</b>: PNG·JPG, 5MB 이하. <b>가로 720px 이상</b>(고객 화면에서 가로 약 320~350px 로 보이고, 선명하게 보이려면 그 두 배) ·
+        비율은 자유지만 <b>정사각형(1:1, 예: 720×720)</b> 또는 <b>가로형(2:1, 예: 720×360)</b>을 권장합니다. 세로로 길면 완료 화면의 버튼이 밀려 내려갑니다.
+        여러 장을 쓸 때는 <b>모두 같은 비율</b>로 맞춰 주세요 — 비율이 다르면 넘길 때 높이가 들쭉날쭉합니다. 글자는 이미지 안에 넣되 가장자리 24px 안쪽에 두세요(모서리가 둥글게 잘립니다).
       </div>
-      <div id="cb-list" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">
+        <div id="cb-list" style="flex:1;min-width:420px;display:flex;flex-direction:column;gap:10px"></div>
+        <!-- 고객 화면 미리보기 — 출고일설정의 캘린더 미리보기와 같은 역할. 저장 전 편집 내용이 바로 보인다. -->
+        <div style="flex:0 0 340px;position:sticky;top:12px">
+          <div style="font-size:12px;font-weight:600;color:var(--gray-700);margin-bottom:6px">고객 화면 미리보기 <span style="font-weight:400;color:var(--gray-500)">(저장 전 내용 포함)</span></div>
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;font-size:12px;color:var(--gray-700);flex-wrap:wrap">
+            <select id="cb-pv-site" onchange="cbRenderPreview()" style="padding:4px 6px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
+              <option value="바른손카드">바른손카드 고객</option><option value="바른손몰">바른손몰 고객</option>
+            </select>
+            <input type="date" id="cb-pv-date" onchange="cbRenderPreview()" style="padding:4px 6px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px" title="이 날짜에 접속한 고객에게 보이는 모습">
+            <span id="cb-pv-count" style="color:var(--gray-500)"></span>
+          </div>
+          <div style="background:#F1F3F5;border:1px solid var(--gray-200);border-radius:20px;padding:14px">
+            <div id="cb-pv-body" style="background:#fff;border-radius:18px;padding:22px 18px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.05)"></div>
+          </div>
+        </div>
+      </div>
       <div style="display:flex;gap:8px;margin-top:14px;align-items:center;flex-wrap:wrap">
         <button class="btn" id="cb-add-btn" onclick="cbAddBanner()">+ 배너 추가</button>
         <button class="btn btn-primary" onclick="cbSaveBanners()">배너 저장</button>
@@ -9210,6 +9228,7 @@ function cbRender() {
   if (addBtn) addBtn.disabled = _cbDraft.length >= CB_MAX;
   if (!_cbDraft.length) {
     list.innerHTML = '<div style="padding:18px;border:1px dashed var(--gray-300);border-radius:8px;font-size:13px;color:var(--gray-500);text-align:center">등록된 배너가 없습니다. 배너가 없으면 고객 화면에는 아무것도 보이지 않습니다.</div>';
+    cbRenderPreview();
     return;
   }
   const inp = 'padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px';
@@ -9222,7 +9241,7 @@ function cbRender() {
     <div style="display:flex;gap:12px;padding:12px;border:1px solid var(--gray-200);border-radius:8px;align-items:flex-start;flex-wrap:wrap">
       <div style="width:96px;flex:0 0 96px">
         <div style="width:96px;height:96px;border-radius:8px;background:var(--gray-100);overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--gray-500)">
-          ${b.image_url ? `<img src="${escapeHtml(b.image_url)}" alt="" style="width:100%;height:100%;object-fit:cover">` : '이미지 없음'}
+          ${b.image_url ? `<img src="${escapeHtml(b.image_url)}" alt="" onload="cbImgLoaded(${i},this)" style="width:100%;height:100%;object-fit:contain">` : '이미지 없음'}
         </div>
         <button class="btn" style="width:96px;margin-top:6px;padding:4px 0;font-size:12px" onclick="cbPickImage(${i})">${b.image_url ? '이미지 교체' : '이미지 올리기'}</button>
       </div>
@@ -9244,18 +9263,74 @@ function cbRender() {
           <span>채널 ${CB_SITES.map(sn => `<label style="margin-left:6px;cursor:pointer"><input type="checkbox" ${(b.sites || []).includes(sn) ? 'checked' : ''} onchange="cbToggleSite(${i},'${sn}',this.checked)"> ${sn}</label>`).join('')}
             <span style="color:var(--gray-500);margin-left:6px">${(b.sites || []).length ? '' : '(전체)'}</span></span>
         </div>
+        <div id="cb-dim-${i}" style="font-size:12px;color:var(--gray-500)"></div>
         <div style="font-size:12px;color:var(--gray-500)">${statTxt}</div>
       </div>
     </div>`;
   }).join('');
+  cbRenderPreview();
 }
 
-/** 값 변경 — 글자 입력(noRender)은 포커스를 잃지 않게 다시 그리지 않는다. */
+/** 값 변경 — 글자 입력(noRender)은 포커스를 잃지 않게 목록은 다시 그리지 않고 미리보기만 갱신한다. */
 function cbSet(i, key, val, noRender) {
   if (!_cbDraft[i]) return;
   _cbDraft[i][key] = (typeof val === 'string') ? (val.trim() || null) : val;
   _cbSetStatus('변경됨 — [배너 저장]을 눌러야 반영됩니다.');
-  if (!noRender) cbRender();
+  if (!noRender) cbRender(); else cbRenderPreview();
+}
+
+/** 올린 이미지의 실제 크기·비율 — 규격(가로 720px 이상, 같은 비율)에 안 맞으면 알려 준다. */
+const _cbDims = {};   // { banner_id: { w, h } }
+function cbImgLoaded(i, img) {
+  const b = _cbDraft[i]; if (!b || !img.naturalWidth) return;
+  _cbDims[b.id] = { w: img.naturalWidth, h: img.naturalHeight };
+  _cbDraft.forEach((x, k) => {
+    const el = document.getElementById('cb-dim-' + k), d = _cbDims[x.id];
+    if (!el || !d) return;
+    const ratio = d.w / d.h;
+    const name = Math.abs(ratio - 1) < 0.03 ? '1:1' : Math.abs(ratio - 2) < 0.06 ? '2:1' : Math.abs(ratio - 16 / 9) < 0.05 ? '16:9' : ratio.toFixed(2) + ':1';
+    const warns = [];
+    if (d.w < 720) warns.push('가로 720px 미만 — 흐리게 보일 수 있습니다');
+    if (ratio < 0.8) warns.push('세로로 깁니다 — 완료 화면 버튼이 밀립니다');
+    const first = _cbDims[_cbDraft[0].id];
+    if (k > 0 && first && Math.abs(first.w / first.h - ratio) > 0.05) warns.push('1번 배너와 비율이 다릅니다');
+    el.innerHTML = `이미지 ${d.w}×${d.h}px · ${name}` + (warns.length ? ` <span style="color:#b45309">— ${warns.join(' · ')}</span>` : '');
+  });
+}
+
+/**
+ * 고객 화면 미리보기 — 고른 채널·날짜의 고객에게 실제로 보일 배너만 (서버 store.activeCompletionBanners 와 같은 규칙).
+ *   편집 중인 목록(_cbDraft)으로 그리므로 저장 전에도 확인할 수 있다.
+ */
+function cbRenderPreview() {
+  const body = document.getElementById('cb-pv-body'); if (!body) return;
+  const dateEl = document.getElementById('cb-pv-date');
+  if (dateEl && !dateEl.value) dateEl.value = _cbToday();
+  const day = (dateEl && dateEl.value) || _cbToday();
+  const site = document.getElementById('cb-pv-site')?.value || '바른손카드';
+  const shown = _cbDraft.map((b, i) => ({ b, i })).filter(({ b }) => b.image_url && b.enabled !== false
+    && (!b.start_date || b.start_date <= day) && (!b.end_date || b.end_date >= day)
+    && (!(b.sites || []).length || b.sites.includes(site)));
+  const cnt = document.getElementById('cb-pv-count');
+  if (cnt) cnt.textContent = shown.length ? `${shown.length}장 노출 (${shown.map(x => x.i + 1 + '번').join(' → ')})` : '노출되는 배너 없음';
+  const bar = (w, c) => `<div style="height:36px;border-radius:12px;margin:0 auto 8px;width:${w};${c}"></div>`;
+  body.innerHTML = `
+    <div style="width:56px;height:56px;border-radius:50%;background:#1BAED4;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px">✓</div>
+    <div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:4px">제출이 완료됐어요!</div>
+    <div style="font-size:12px;color:#64748b;margin-bottom:14px">주문 정보가 정상적으로 접수됐습니다.</div>
+    ${bar('100%', 'background:#EEF9FC;height:54px')}
+    ${bar('100%', 'border:1px solid #1596B8;background:#fff')}
+    ${shown.length ? `
+      <div id="cb-pv-track" style="display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;border-radius:16px;margin-top:14px;scrollbar-width:none">
+        ${shown.map(({ b }) => `<div style="flex:0 0 100%;scroll-snap-align:center;border-radius:16px;overflow:hidden;background:#EEF9FC"><img src="${escapeHtml(b.image_url)}" alt="" style="display:block;width:100%;height:auto"></div>`).join('')}
+      </div>
+      ${shown.length > 1 ? `<div id="cb-pv-dots" style="display:flex;justify-content:center;gap:6px;margin-top:10px">${shown.map((_, k) => `<span style="height:6px;border-radius:3px;width:${k === 0 ? 16 : 6}px;background:${k === 0 ? '#1BAED4' : '#CBD5E1'}"></span>`).join('')}</div>` : ''}`
+      : '<div style="margin-top:14px;padding:16px 8px;border:1px dashed var(--gray-300);border-radius:12px;font-size:12px;color:var(--gray-500)">이 채널·날짜의 고객에게는 배너가 보이지 않습니다.</div>'}`;
+  const track = document.getElementById('cb-pv-track'), dots = document.getElementById('cb-pv-dots');
+  if (track && dots) track.addEventListener('scroll', () => {
+    const k = Math.round(track.scrollLeft / Math.max(1, track.clientWidth));
+    [...dots.children].forEach((d, j) => { d.style.width = (j === k ? 16 : 6) + 'px'; d.style.background = j === k ? '#1BAED4' : '#CBD5E1'; });
+  }, { passive: true });
 }
 function cbToggleSite(i, site, on) {
   const b = _cbDraft[i]; if (!b) return;
