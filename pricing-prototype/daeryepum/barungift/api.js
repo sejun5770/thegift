@@ -779,6 +779,7 @@ async function handleBarungiftApi(pathname, req, res, query, { getPool, sql, ses
         site: orderSite,   // '바른손카드' | '바른손몰' — 배너 채널·이벤트 기록용
         // 입력완료 화면 배너 (086) — 오늘 이 채널에 보여줄 것만, 저장 순서대로 (최대 5개).
         completion_banners: store.activeCompletionBanners(siteSettings, orderSite),
+        completion_banner_scale: store.completionBannerScale(siteSettings),   // 배너 영역 표시 크기(%) — 50~100
         existing_info: existingInfo,
         deliveries,  // 배송지별 답례품 수량 (나눔배송 안내용, 입력엔 영향 없음)
         virtual_account: virtualAccount,  // 주문 결제용 가상계좌 (결제대기 상태일 때만)
