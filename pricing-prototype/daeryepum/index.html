@@ -620,7 +620,7 @@ nav.nav-loading a[href^="#"] {
         <input type="date" id="ltc-b-start" value="2026-07-01" style="padding:4px 8px;border:1px solid #fca5a5;border-radius:4px;font-size:12px">
         <span style="font-size:12px">~</span>
         <input type="date" id="ltc-b-end" value="2026-07-12" style="padding:4px 8px;border:1px solid #fca5a5;border-radius:4px;font-size:12px">
-        <button class="btn btn-sm btn-primary" onclick="loadLeadtimeCompare()">비교</button>
+        <button class="btn btn-sm btn-primary" onclick="searchWithBusy(this, loadLeadtimeCompare)">비교</button>
       </div>
     </div>
     <div class="card" id="ltc-body" style="padding:16px;font-size:13px">
@@ -784,7 +784,7 @@ nav.nav-loading a[href^="#"] {
         <input type="date" id="bsd-start" style="padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
         <span style="color:var(--gray-500)">~</span>
         <input type="date" id="bsd-end" style="padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
-        <button class="btn btn-primary" style="padding:6px 14px;font-size:13px" onclick="loadByShipDate()">조회</button>
+        <button class="btn btn-primary" style="padding:6px 14px;font-size:13px" onclick="searchWithBusy(this, loadByShipDate)">조회</button>
         <span id="bsd-loading" style="color:var(--gray-500);font-size:12px;margin-left:8px"></span>
         <div style="flex:1"></div>
         <!-- 뷰 전환 토글: 차트 / 테이블 -->
@@ -848,7 +848,7 @@ nav.nav-loading a[href^="#"] {
         <input type="date" id="bcd-start" style="padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
         <span style="color:var(--gray-500)">~</span>
         <input type="date" id="bcd-end" style="padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
-        <button class="btn btn-primary" style="padding:6px 14px;font-size:13px" onclick="loadByConfirmDate()">조회</button>
+        <button class="btn btn-primary" style="padding:6px 14px;font-size:13px" onclick="searchWithBusy(this, loadByConfirmDate)">조회</button>
         <span id="bcd-loading" style="color:var(--gray-500);font-size:12px;margin-left:8px"></span>
         <div style="flex:1"></div>
         <div style="display:inline-flex;border:1px solid var(--gray-300);border-radius:6px;overflow:hidden">
@@ -990,7 +990,7 @@ nav.nav-loading a[href^="#"] {
           <option value="card">바른손카드</option>
           <option value="etc">바른손몰</option>
         </select>
-        <button class="btn btn-sm" onclick="loadGaProducts()">조회</button>
+        <button class="btn btn-sm" onclick="searchWithBusy(this, loadGaProducts)">조회</button>
       </div>
     </div>
     <div class="card" style="padding:16px">
@@ -1015,7 +1015,7 @@ nav.nav-loading a[href^="#"] {
         <input type="date" id="pt-from" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px">
         <span style="color:var(--gray-500)">~</span>
         <input type="date" id="pt-to" style="padding:4px 8px;font-size:12px;border:1px solid var(--gray-200);border-radius:6px">
-        <button class="btn btn-sm" onclick="loadPriceTrend()">조회</button>
+        <button class="btn btn-sm" onclick="searchWithBusy(this, loadPriceTrend)">조회</button>
       </div>
     </div>
     <div class="card" style="padding:16px">
@@ -1142,7 +1142,7 @@ nav.nav-loading a[href^="#"] {
         <input type="date" id="mk-start" style="font-size:12px;padding:4px 6px;border:1px solid #e2e8f0;border-radius:6px" />
         <span style="color:#94a3b8">~</span>
         <input type="date" id="mk-end" style="font-size:12px;padding:4px 6px;border:1px solid #e2e8f0;border-radius:6px" />
-        <button class="btn btn-sm btn-primary" onclick="loadMarketing()">조회</button>
+        <button class="btn btn-sm btn-primary" onclick="searchWithBusy(this, loadMarketing)">조회</button>
       </div>
     </div>
     <!-- 유입채널별 분석 -->
@@ -1352,7 +1352,7 @@ nav.nav-loading a[href^="#"] {
 </div>
 <div class="toolbar" style="margin-bottom:20px;align-items:center;flex-wrap:wrap">
     <input type="month" id="mr-month" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:var(--radius);font-size:14px" />
-    <button class="btn btn-primary" onclick="loadMonthlyReport()">조회</button>
+    <button class="btn btn-primary" onclick="searchWithBusy(this, loadMonthlyReport)">조회</button>
     <span style="margin-left:auto;display:inline-flex;gap:6px;flex-wrap:wrap">
       <button class="btn" id="mr-btn-copy" onclick="copyMonthlyReportTsv()" title="모든 섹션을 TSV 로 클립보드에 복사 — 스프레드시트 빈 셀에 붙여넣기">TSV 복사</button>
       <button class="btn" id="mr-btn-download" onclick="downloadMonthlyReportTsv()" title="UTF-8 BOM 포함 .tsv 파일 — Excel/구글시트에서 바로 열림">엑셀 다운로드</button>
@@ -1511,7 +1511,7 @@ nav.nav-loading a[href^="#"] {
       <input type="date" id="rgl-from" onchange="loadRgLines()" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
       <span style="color:var(--gray-500);font-size:12px">~</span>
       <input type="date" id="rgl-to" onchange="loadRgLines()" style="padding:4px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
-      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="loadRgLines()">조회</button>
+      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="searchWithBusy(this, loadRgLines)">조회</button>
       <button class="btn" style="padding:5px 12px;font-size:12px" onclick="downloadRgLinesXlsx()">엑셀</button>
       <button class="btn" id="rgl-optmap-sync" style="padding:5px 12px;font-size:12px" onclick="syncCoupangOptionMap()"
         title="쿠팡 상품 목록에서 옵션ID ↔ 등록상품ID 를 받아옵니다. 로켓그로스 주문은 옵션ID만 오기 때문에 이 맵이 있어야 상품코드가 붙습니다. 15분 크론에서도 함께 갱신됩니다.">옵션ID 매핑 갱신</button>
@@ -1608,7 +1608,7 @@ nav.nav-loading a[href^="#"] {
         <option value="30" selected>최근 30일</option>
         <option value="90">최근 90일</option>
       </select>
-      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="loadInquiries()">조회</button>
+      <button class="btn" style="padding:5px 12px;font-size:12px" onclick="searchWithBusy(this, loadInquiries)">조회</button>
       <button class="btn btn-primary" id="ciq-sync" onclick="syncInquiries()" style="padding:5px 12px;font-size:12px"
         title="채널에서 문의를 가져와 저장합니다. 쿠팡은 조회기간이 7일이라 창을 쪼개 여러 번 호출합니다.">채널에서 가져오기</button>
     </div>
@@ -1737,7 +1737,7 @@ nav.nav-loading a[href^="#"] {
         <option value="order">주문번호</option>
       </select>
       <input type="text" id="ord-code-search" placeholder="상품코드 또는 상품명" style="width:160px;min-width:100px" oninput="renderOrderTable()" />
-      <button class="btn btn-primary" onclick="loadOrders()">조회</button>
+      <button class="btn btn-primary" onclick="searchWithBusy(this, loadOrders)">조회</button>
     </div>
   </div>
 
@@ -2434,7 +2434,7 @@ nav.nav-loading a[href^="#"] {
         </select>
       </div>
       <div>
-        <button class="btn btn-primary" onclick="loadBgSettlements()" style="width:100%;padding:7px 12px;font-size:13px">조회</button>
+        <button class="btn btn-primary" onclick="searchWithBusy(this, loadBgSettlements)" style="width:100%;padding:7px 12px;font-size:13px">조회</button>
       </div>
     </div>
   </div>
@@ -2528,7 +2528,7 @@ nav.nav-loading a[href^="#"] {
         <input type="date" id="bvd-end" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px">
       </div>
       <div>
-        <button class="btn btn-primary" onclick="loadBgVendorDashboard()" style="width:100%;padding:7px 12px;font-size:13px">조회</button>
+        <button class="btn btn-primary" onclick="searchWithBusy(this, loadBgVendorDashboard)" style="width:100%;padding:7px 12px;font-size:13px">조회</button>
       </div>
     </div>
   </div>
@@ -2634,7 +2634,7 @@ nav.nav-loading a[href^="#"] {
             <span style="color:var(--gray-500)">~</span>
             <input type="date" id="art-stl-end" onchange="document.getElementById('art-stl-month').value=''" style="padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
           </div>
-          <button class="btn btn-primary" style="padding:6px 12px;font-size:12px" onclick="loadSettlements()">조회</button>
+          <button class="btn btn-primary" style="padding:6px 12px;font-size:12px" onclick="searchWithBusy(this, loadSettlements)">조회</button>
           <button class="btn" style="padding:6px 12px;font-size:12px" onclick="downloadSettlementCsv()" title="작가별 합계 CSV 다운로드">CSV</button>
           <button class="btn" style="padding:6px 12px;font-size:12px" onclick="openDiagnoseModal()" title="시드 코드가 MSSQL 과 매칭되는지 진단">진단</button>
         </div>
@@ -3823,7 +3823,7 @@ nav.nav-loading a[href^="#"] {
       <input type="date" id="uni-start" />
       <span>~</span>
       <input type="date" id="uni-end" />
-      <button class="btn btn-primary" onclick="loadBgUnified()">조회</button>
+      <button class="btn btn-primary" onclick="searchWithBusy(this, loadBgUnified)">조회</button>
       <span style="font-size:12px;color:var(--gray-500)">CI 매칭 옛날 주문은 자동 포함</span>
     </div>
     <button class="btn" id="uni-collect-check-btn" onclick="loadMissedCollectAlert()" style="padding:4px 10px;font-size:12px"
@@ -9343,6 +9343,43 @@ function setDashSubTab(n) {
 //   기존 loadDashboard 와 동일 규칙 (dash-start / dash-end / dashCategory).
 // 조회 진행 표시 — 대시보드 집계는 한 달치가 20~30초 걸린다. 버튼이 그대로면
 //   "안 눌렸다" 로 읽혀서(2026-09-16 사용자 지적) 버튼을 잠그고 경과 시간을 보여 준다.
+/**
+ * 기간 필터 조회 버튼 공통 — 대시보드 조회와 같은 모양으로 진행 상황을 보여 준다.
+ *   버튼은 잠그고 '조회 중…', 바로 옆 상태 칸에 '불러오는 중… N초', 끝나면 '조회 완료 · N초'.
+ *   fn 은 로딩이 끝날 때 resolve 하는 async 함수여야 한다 (전부 await 로 기다리는 것 확인).
+ *   조회가 20~30초 걸리는 화면이 있어 버튼만 그대로면 "안 눌린다" 로 읽힌다 (2026-09-18 요청).
+ *   상태 칸이 없으면 버튼 바로 뒤에 하나 만들어 붙인다 — 화면마다 마크업을 고치지 않아도 되게.
+ */
+async function searchWithBusy(btn, fn, ...args) {
+  if (!btn || btn.disabled) return;          // 중복 클릭 방지 — 같은 조회가 겹쳐 돌지 않게
+  const label = btn.dataset.label || btn.textContent.trim();
+  btn.dataset.label = label;
+  let st = btn.nextElementSibling;
+  if (!st || !st.classList.contains('search-status')) {
+    st = document.createElement('span');
+    st.className = 'search-status';
+    st.style.cssText = 'font-size:12px;color:var(--gray-500);margin-left:8px;white-space:nowrap';
+    btn.insertAdjacentElement('afterend', st);
+  }
+  const t0 = Date.now();
+  const secs = () => Math.round((Date.now() - t0) / 1000);
+  btn.disabled = true; btn.style.opacity = '.6'; btn.textContent = `${label} 중…`;
+  st.style.color = 'var(--gray-500)';
+  st.textContent = '불러오는 중… 0초';
+  const timer = setInterval(() => { st.textContent = `불러오는 중… ${secs()}초`; }, 1000);
+  try {
+    await fn(...args);
+    st.textContent = `${label} 완료 · ${secs()}초`;
+  } catch (e) {
+    console.error(e);
+    st.style.color = 'var(--danger)';
+    st.textContent = `${label} 실패: ${e.message}`;
+  } finally {
+    clearInterval(timer);
+    btn.disabled = false; btn.style.opacity = ''; btn.textContent = label;
+  }
+}
+
 let _dashBusyTimer = null;
 function _dashSetBusy(on, msg, isError) {
   const btn = document.getElementById('dash-search-btn');
