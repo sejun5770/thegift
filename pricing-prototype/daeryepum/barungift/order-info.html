@@ -514,6 +514,7 @@
     <p class="text-sm text-slate-500 mb-5 leading-relaxed">이 주문의 상품은 희망출고일과 스티커 입력 없이<br>바로 준비돼요.</p>
     <div id="noInputProducts" class="bg-slate-50 rounded-2xl p-4 text-left mb-4 space-y-1.5 text-sm"></div>
     <p class="text-[12px] text-slate-500 mb-5 leading-relaxed">주문번호 <span id="noInputOrderNum" class="font-mono font-semibold text-slate-700"></span></p>
+    <div class="cb-slot hidden" data-cb-slot style="margin-bottom:16px"></div>
     <button id="noInputGoListBtn" onclick="goBackToOrderList()" class="hidden btn pressable w-full py-3 rounded-2xl text-sm font-semibold" style="border:1px solid var(--gray-300);color:var(--gray-700);background:#fff">주문 선택 화면으로</button>
   </div>
 </div>
@@ -1499,22 +1500,46 @@
   //   서버가 오늘·이 채널에 보여줄 것만 걸러서 orderData.completion_banners 로 준다 (최대 5개, 순서 고정).
   //   없으면 자리를 숨긴다. 노출은 화면에 실제로 보인 배너만, 페이지당 한 번씩 기록한다.
   // ============================================
-  const CB_SCREENS = ['successScreen', 'completedScreen', 'submittedSummaryScreen'];
+  //   위치(placements): complete = 완료 계열 화면 아래 / delivery = 입력한 정보 화면의 배송 조회 카드 아래 / noinput = 입력할 정보 없는 주문 안내.
+  const CB_SCREENS = ['successScreen', 'completedScreen', 'submittedSummaryScreen', 'noInputScreen'];
   const _cbViewed = new Set();
   function _cbEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
-  function _cbLog(bannerId, event) {
+  function _cbLog(bannerId, event, placement) {
     try {
-      const body = JSON.stringify({ banner_id: bannerId, event: event, order_id: orderData?.order_id || null, site: orderData?.site || null });
+      const body = JSON.stringify({ banner_id: bannerId, event: event, placement: placement || 'complete', order_id: orderData?.order_id || null, site: orderData?.site || null });
       const url = API_BASE + '/api/bg/banner-event';
       // 클릭은 곧바로 새 탭이 열리므로 페이지가 뒤로 가도 보내지는 방식으로
       if (navigator.sendBeacon && navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }))) return;
       fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body, keepalive: true }).catch(function() {});
     } catch (e) {}
   }
+  function _cbFor(placement) {
+    return (orderData?.completion_banners || []).filter(function(b) {
+      return b && b.image_url && (Array.isArray(b.placements) && b.placements.length ? b.placements : ['complete']).indexOf(placement) >= 0;
+    });
+  }
   function renderCompletionBanners(screenEl) {
-    const slot = screenEl && screenEl.querySelector('[data-cb-slot]');
+    const slot = screenEl && screenEl.querySelector('[data-cb-slot]:not([data-cb-slot="delivery"])');
     if (!slot) return;
-    const banners = (orderData?.completion_banners || []).filter(b => b && b.image_url);
+    // 입력한 정보 화면은 배송 조회 결과를 보고 자리를 정한다 (renderDeliveryBanners) — 먼저 맨 아래에 그렸다가
+    //   접으면 그 사이에 보인 배너가 노출로 잘못 기록된다.
+    if (screenEl.id === 'submittedSummaryScreen' && _cbFor('delivery').length) { slot.classList.add('hidden'); slot.innerHTML = ''; return; }
+    _cbRenderSlot(slot, screenEl.id === 'noInputScreen' ? 'noinput' : 'complete');
+  }
+  /** 배송 조회 카드 바로 아래 — 출고된 주문(카드가 그려진 경우)에만. 이 자리가 보이면 같은 화면 맨 아래 배너는 접는다 (한 화면에 배너 영역 하나). */
+  function renderDeliveryBanners(wrap) {
+    if (!_cbFor('delivery').length) return;   // 배송 자리 배너가 없으면 맨 아래 배너는 이미 그려져 있다
+    const bottomSlot = document.querySelector('#submittedSummaryScreen [data-cb-slot]:not([data-cb-slot="delivery"])');
+    if (!wrap || !wrap.innerHTML.trim()) { if (bottomSlot) _cbRenderSlot(bottomSlot, 'complete'); return; }   // 미출고·조회 실패 → 맨 아래
+    const slot = document.createElement('div');
+    slot.className = 'cb-slot'; slot.setAttribute('data-cb-slot', 'delivery'); slot.style.marginTop = '8px'; slot.style.marginBottom = '12px';
+    wrap.appendChild(slot);
+    _cbRenderSlot(slot, 'delivery');
+    const bottom = document.querySelector('#submittedSummaryScreen [data-cb-slot]:not([data-cb-slot="delivery"])');
+    if (bottom) { bottom.classList.add('hidden'); bottom.innerHTML = ''; }
+  }
+  function _cbRenderSlot(slot, placement) {
+    const banners = _cbFor(placement);
     if (!banners.length) { slot.classList.add('hidden'); slot.innerHTML = ''; return; }
     // 표시 크기(설정, 50~100%) — 배너 영역 전체를 줄여 가운데에 둔다. 점도 같이 따라온다.
     const scale = Math.min(100, Math.max(50, parseInt(orderData?.completion_banner_scale, 10) || 100));
@@ -1536,7 +1561,7 @@
       // 이미지가 깨진 배너는 빈 상자로 남기지 않는다
       const im = el.querySelector('img');
       if (im) im.addEventListener('error', function() { el.remove(); if (!slot.querySelector('.cb-item')) slot.classList.add('hidden'); });
-      if (el.tagName === 'A') el.addEventListener('click', function() { _cbLog(el.dataset.cbId, 'click'); });
+      if (el.tagName === 'A') el.addEventListener('click', function() { _cbLog(el.dataset.cbId, 'click', placement); });
     });
     if (dots.length) {
       track.addEventListener('scroll', function() {
@@ -1550,9 +1575,9 @@
           if (!en.isIntersecting) return;
           const id = en.target.dataset.cbId;
           io.unobserve(en.target);
-          if (_cbViewed.has(id)) return;
-          _cbViewed.add(id);
-          _cbLog(id, 'view');
+          if (_cbViewed.has(id + '|' + placement)) return;
+          _cbViewed.add(id + '|' + placement);
+          _cbLog(id, 'view', placement);
         });
       }, { threshold: 0.6 });
       items.forEach(function(el) { io.observe(el); });
@@ -4332,17 +4357,18 @@
     const wrap = document.getElementById('deliveryTrackWrap');
     if (!wrap || !orderData?.order_id) return;
     // 재진입: 요약 화면이 컨테이너를 새로 그리므로, 받아둔 카드를 다시 붙이기만 한다
-    if (_deliveryLoadedFor === orderData.order_id) { wrap.innerHTML = _deliveryHtml; _syncLockNote(); return; }
+    if (_deliveryLoadedFor === orderData.order_id) { wrap.innerHTML = _deliveryHtml; renderDeliveryBanners(wrap); _syncLockNote(); return; }
     try {
       const url = withSignature(API_BASE + '/api/bg/orders/' + encodeURIComponent(orderData.order_id) + '/delivery');
       const resp = await fetch(url);
-      if (!resp.ok) return;
+      if (!resp.ok) { renderDeliveryBanners(wrap); return; }
       const d = await resp.json();
       _deliveryLoadedFor = orderData.order_id;
       _deliveryHtml = (d.found && d.invoices?.length) ? d.invoices.map(renderDeliveryCard).join('') : '';
       wrap.innerHTML = _deliveryHtml;
+      renderDeliveryBanners(wrap);
       _syncLockNote();
-    } catch (e) { /* 배송조회 실패는 요약 화면을 막지 않는다 */ }
+    } catch (e) { renderDeliveryBanners(wrap); /* 배송조회 실패는 요약 화면을 막지 않는다 — 배너는 맨 아래 자리로 */ }
   }
 
   function renderDeliveryCard(inv) {

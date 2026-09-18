@@ -1711,7 +1711,7 @@ nav.nav-loading a[href^="#"] {
         노출 기간은 시작일·종료일을 <b>포함</b>하며 비워 두면 제한이 없습니다. 채널을 고르지 않으면 바른손카드·바른손몰 모두에 보입니다.
         <br><b>이미지 규격</b>: PNG·JPG, 5MB 이하. <b>가로 720px 이상</b>(고객 화면에서 가로 약 320~350px 로 보이고, 선명하게 보이려면 그 두 배) ·
         비율은 자유지만 <b>정사각형(1:1, 예: 720×720)</b> 또는 <b>가로형(2:1, 예: 720×360)</b>을 권장합니다. 세로로 길면 완료 화면의 버튼이 밀려 내려갑니다.
-        배너가 너무 크게 보이면 오른쪽 위 <b>표시 크기</b>로 줄일 수 있습니다(모든 배너 공통, 가운데 정렬). 여러 장을 쓸 때는 <b>모두 같은 비율</b>로 맞춰 주세요 — 비율이 다르면 넘길 때 높이가 들쭉날쭉합니다. 글자는 이미지 안에 넣되 가장자리 24px 안쪽에 두세요(모서리가 둥글게 잘립니다).
+        <b>위치</b>는 배너마다 고릅니다 — <b>완료 화면</b>(제출 완료·입력한 정보 화면 아래), <b>배송 조회</b>(출고된 주문의 배송 조회 카드 바로 아래 · 이때는 화면 맨 아래 배너를 접습니다), <b>샘플 주문 안내</b>(입력할 정보가 없는 주문). 배너가 너무 크게 보이면 오른쪽 위 <b>표시 크기</b>로 줄일 수 있습니다(모든 배너 공통, 가운데 정렬). 여러 장을 쓸 때는 <b>모두 같은 비율</b>로 맞춰 주세요 — 비율이 다르면 넘길 때 높이가 들쭉날쭉합니다. 글자는 이미지 안에 넣되 가장자리 24px 안쪽에 두세요(모서리가 둥글게 잘립니다).
       </div>
       <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">
         <div id="cb-list" style="flex:1;min-width:420px;display:flex;flex-direction:column;gap:10px"></div>
@@ -1719,6 +1719,9 @@ nav.nav-loading a[href^="#"] {
         <div style="flex:0 0 340px;position:sticky;top:12px">
           <div style="font-size:12px;font-weight:600;color:var(--gray-700);margin-bottom:6px">고객 화면 미리보기 <span style="font-weight:400;color:var(--gray-500)">(저장 전 내용 포함)</span></div>
           <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;font-size:12px;color:var(--gray-700);flex-wrap:wrap">
+            <select id="cb-pv-place" onchange="cbRenderPreview()" style="padding:4px 6px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px" title="어느 화면의 모습을 볼지">
+              <option value="complete">완료 화면</option><option value="delivery">배송 조회</option><option value="noinput">샘플 주문 안내</option>
+            </select>
             <select id="cb-pv-site" onchange="cbRenderPreview()" style="padding:4px 6px;border:1px solid var(--gray-300);border-radius:6px;font-size:12px">
               <option value="바른손카드">바른손카드 고객</option><option value="바른손몰">바른손몰 고객</option>
             </select>
@@ -9188,6 +9191,9 @@ async function saveSiteGuideSettings() {
 // ============================================
 const CB_MAX = 5;
 const CB_SITES = ['바른손카드', '바른손몰'];
+// 노출 위치 — 서버 store.BANNER_PLACEMENTS 와 같은 키. 지정이 없으면 complete.
+const CB_PLACEMENTS = [['complete', '완료 화면'], ['delivery', '배송 조회'], ['noinput', '샘플 주문 안내']];
+function _cbPlacements(b) { return Array.isArray(b.placements) && b.placements.length ? b.placements : ['complete']; }
 let _cbDraft = [];        // 편집 중인 목록
 let _cbStats = {};        // { banner_id: { views, clicks, views_30d, clicks_30d } }
 let _cbUploadIdx = -1;    // 파일 선택 창을 연 배너
@@ -9254,7 +9260,8 @@ function cbRender() {
     const [stLabel, stCls] = _cbState(b);
     const st = _cbStats[b.id];
     const ctr = st && st.views ? (st.clicks / st.views * 100).toFixed(1) + '%' : '-';
-    const statTxt = st ? `노출 ${st.views.toLocaleString()} · 클릭 ${st.clicks.toLocaleString()} (${ctr}) — 최근 30일 ${st.views_30d.toLocaleString()} · ${st.clicks_30d.toLocaleString()}` : '노출·클릭 기록 없음';
+    const byPl = st && st.by_placement ? CB_PLACEMENTS.filter(([k]) => st.by_placement[k]).map(([k, l]) => { const p = st.by_placement[k]; return `${l} ${p.views.toLocaleString()}·${p.clicks.toLocaleString()}${p.views ? ' (' + (p.clicks / p.views * 100).toFixed(1) + '%)' : ''}`; }).join(' / ') : '';
+    const statTxt = st ? `노출 ${st.views.toLocaleString()} · 클릭 ${st.clicks.toLocaleString()} (${ctr}) — 최근 30일 ${st.views_30d.toLocaleString()} · ${st.clicks_30d.toLocaleString()}` + (byPl ? `<br>위치별 노출·클릭: ${byPl}` : '') : '노출·클릭 기록 없음';
     return `
     <div style="display:flex;gap:12px;padding:12px;border:1px solid var(--gray-200);border-radius:8px;align-items:flex-start;flex-wrap:wrap">
       <div style="width:96px;flex:0 0 96px">
@@ -9281,6 +9288,7 @@ function cbRender() {
           <span>채널 ${CB_SITES.map(sn => `<label style="margin-left:6px;cursor:pointer"><input type="checkbox" ${(b.sites || []).includes(sn) ? 'checked' : ''} onchange="cbToggleSite(${i},'${sn}',this.checked)"> ${sn}</label>`).join('')}
             <span style="color:var(--gray-500);margin-left:6px">${(b.sites || []).length ? '' : '(전체)'}</span></span>
         </div>
+        <div style="font-size:12px;color:var(--gray-700)">위치 ${CB_PLACEMENTS.map(([k, l]) => `<label style="margin-left:6px;cursor:pointer"><input type="checkbox" ${_cbPlacements(b).includes(k) ? 'checked' : ''} onchange="cbTogglePlacement(${i},'${k}',this.checked)"> ${l}</label>`).join('')}</div>
         <div id="cb-dim-${i}" style="font-size:12px;color:var(--gray-500)"></div>
         <div style="font-size:12px;color:var(--gray-500)">${statTxt}</div>
       </div>
@@ -9326,18 +9334,34 @@ function cbRenderPreview() {
   if (dateEl && !dateEl.value) dateEl.value = _cbToday();
   const day = (dateEl && dateEl.value) || _cbToday();
   const site = document.getElementById('cb-pv-site')?.value || '바른손카드';
+  const place = document.getElementById('cb-pv-place')?.value || 'complete';
   const shown = _cbDraft.map((b, i) => ({ b, i })).filter(({ b }) => b.image_url && b.enabled !== false
     && (!b.start_date || b.start_date <= day) && (!b.end_date || b.end_date >= day)
-    && (!(b.sites || []).length || b.sites.includes(site)));
+    && (!(b.sites || []).length || b.sites.includes(site))
+    && _cbPlacements(b).includes(place));
   const cnt = document.getElementById('cb-pv-count');
   if (cnt) cnt.textContent = shown.length ? `${shown.length}장 노출 (${shown.map(x => x.i + 1 + '번').join(' → ')})` : '노출되는 배너 없음';
   const bar = (w, c) => `<div style="height:36px;border-radius:12px;margin:0 auto 8px;width:${w};${c}"></div>`;
-  body.innerHTML = `
+  // 위치별 화면 모양 — 배너가 그 화면의 어디에 놓이는지 보여 주는 약식 그림
+  const head = place === 'delivery' ? `
+    <div style="text-align:left;font-size:13px;font-weight:700;color:#0f172a;margin-bottom:10px">입력한 정보</div>
+    <div style="text-align:left;border:1px solid #e2e8f0;border-radius:14px;padding:12px;margin-bottom:0">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><span style="font-size:11px;font-weight:700;color:#94a3b8">배송 조회</span><span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:#dbeafe;color:#1d4ed8">배송중</span></div>
+      <div style="height:8px;border-radius:4px;background:#e2e8f0;margin-bottom:6px;width:80%"></div><div style="height:8px;border-radius:4px;background:#f1f5f9;width:60%"></div>
+    </div>`
+    : place === 'noinput' ? `
+    <div style="width:56px;height:56px;border-radius:50%;background:#10b981;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px">✓</div>
+    <div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:4px">입력할 정보가 없어요</div>
+    <div style="font-size:12px;color:#64748b;margin-bottom:14px">이 주문의 상품은 입력 없이 바로 준비돼요.</div>
+    ${bar('100%', 'background:#f8fafc;height:54px')}`
+    : `
     <div style="width:56px;height:56px;border-radius:50%;background:#1BAED4;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px">✓</div>
     <div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:4px">제출이 완료됐어요!</div>
     <div style="font-size:12px;color:#64748b;margin-bottom:14px">주문 정보가 정상적으로 접수됐습니다.</div>
     ${bar('100%', 'background:#EEF9FC;height:54px')}
-    ${bar('100%', 'border:1px solid #1596B8;background:#fff')}
+    ${bar('100%', 'border:1px solid #1596B8;background:#fff')}`;
+  const tail = place === 'delivery' ? `<div style="margin-top:12px;text-align:left;border:1px solid #e2e8f0;border-radius:14px;padding:12px"><div style="height:8px;border-radius:4px;background:#e2e8f0;margin-bottom:6px;width:50%"></div><div style="height:8px;border-radius:4px;background:#f1f5f9;width:75%"></div></div>` : '';
+  body.innerHTML = `${head}
     ${shown.length ? `
       <div style="width:${_cbScale}%;margin:0 auto">
       <div id="cb-pv-track" style="display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;border-radius:16px;margin-top:14px;scrollbar-width:none">
@@ -9345,7 +9369,7 @@ function cbRenderPreview() {
       </div>
       ${shown.length > 1 ? `<div id="cb-pv-dots" style="display:flex;justify-content:center;gap:6px;margin-top:10px">${shown.map((_, k) => `<span style="height:6px;border-radius:3px;width:${k === 0 ? 16 : 6}px;background:${k === 0 ? '#1BAED4' : '#CBD5E1'}"></span>`).join('')}</div>` : ''}
       </div>`
-      : '<div style="margin-top:14px;padding:16px 8px;border:1px dashed var(--gray-300);border-radius:12px;font-size:12px;color:var(--gray-500)">이 채널·날짜의 고객에게는 배너가 보이지 않습니다.</div>'}`;
+      : '<div style="margin-top:14px;padding:16px 8px;border:1px dashed var(--gray-300);border-radius:12px;font-size:12px;color:var(--gray-500)">이 화면·채널·날짜의 고객에게는 배너가 보이지 않습니다.</div>'}${tail}`;
   const track = document.getElementById('cb-pv-track'), dots = document.getElementById('cb-pv-dots');
   if (track && dots) track.addEventListener('scroll', () => {
     const k = Math.round(track.scrollLeft / Math.max(1, track.clientWidth));
@@ -9360,6 +9384,15 @@ function cbToggleSite(i, site, on) {
   _cbSetStatus('변경됨 — [배너 저장]을 눌러야 반영됩니다.');
   cbRender();
 }
+function cbTogglePlacement(i, key, on) {
+  const b = _cbDraft[i]; if (!b) return;
+  const set = new Set(_cbPlacements(b));
+  if (on) set.add(key); else set.delete(key);
+  if (!set.size) { alert('노출 위치는 하나 이상 골라야 합니다. 잠시 내리려면 [사용]을 끄세요.'); cbRender(); return; }
+  b.placements = CB_PLACEMENTS.map(([k]) => k).filter(k => set.has(k));
+  _cbSetStatus('변경됨 — [배너 저장]을 눌러야 반영됩니다.');
+  cbRender();
+}
 function cbMove(i, d) {
   const j = i + d;
   if (j < 0 || j >= _cbDraft.length) return;
@@ -9369,7 +9402,7 @@ function cbMove(i, d) {
 }
 function cbAddBanner() {
   if (_cbDraft.length >= CB_MAX) return;
-  _cbDraft.push({ id: 'b_' + Date.now().toString(36), image_url: null, image_path: null, link_url: null, alt: null, start_date: null, end_date: null, sites: [], enabled: true });
+  _cbDraft.push({ id: 'b_' + Date.now().toString(36), image_url: null, image_path: null, link_url: null, alt: null, start_date: null, end_date: null, sites: [], placements: ['complete'], enabled: true });
   cbRender();
   cbPickImage(_cbDraft.length - 1);
 }

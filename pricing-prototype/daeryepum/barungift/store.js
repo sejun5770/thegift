@@ -1990,6 +1990,9 @@ function normAlertFormat(src) {
 // ────────────────────────────────────────────────────────────
 const BANNER_SITES = ['바른손카드', '바른손몰'];
 const BANNER_MAX = 5;
+// 노출 위치 (2026-09-18) — complete: 제출 완료·입력 완료·입력한 정보 화면 아래 / delivery: 입력한 정보 화면의 배송 조회 카드 바로 아래
+//   (출고된 주문만) / noinput: 입력할 정보가 없는 주문(샘플세트) 안내 화면. 지정이 없으면 complete — 위치 기능 전 저장분과 같은 동작.
+const BANNER_PLACEMENTS = ['complete', 'delivery', 'noinput'];
 
 /**
  * 배너 목록 정규화 — 모르는 키·이상값은 버리고 최대 5개만 남긴다.
@@ -2019,6 +2022,10 @@ function normCompletionBanners(src) {
       start_date: ymd(b.start_date),
       end_date: ymd(b.end_date),
       sites: [...new Set(sites)],
+      placements: (() => {
+        const p = Array.isArray(b.placements) ? BANNER_PLACEMENTS.filter(x => b.placements.includes(x)) : [];
+        return p.length ? p : ['complete'];
+      })(),
       enabled: b.enabled !== false,
     });
     if (out.length >= BANNER_MAX) break;
@@ -2059,14 +2066,21 @@ function activeCompletionBanners(settings, site, todayYmd) {
       && (!b.start_date || b.start_date <= today)
       && (!b.end_date || b.end_date >= today)
       && (!b.sites.length || (site && b.sites.includes(site))))
-    .map(b => ({ id: b.id, image_url: b.image_url, link_url: b.link_url, alt: b.alt }));
+    .map(b => ({ id: b.id, image_url: b.image_url, link_url: b.link_url, alt: b.alt, placements: b.placements }));
 }
 
 /** 배너 노출·클릭 기록 — 고객 화면에 영향이 없어야 하므로 실패는 삼킨다. */
-async function logBannerEvent({ banner_id, event, order_id, site }) {
+async function logBannerEvent({ banner_id, event, order_id, site, placement }) {
   if (!USE_SUPABASE) return false;
+  const row = { banner_id, event, order_id: order_id || null, site: site || null };
   try {
-    await sbInsert('bg_banner_events', { banner_id, event, order_id: order_id || null, site: site || null });
+    try {
+      await sbInsert('bg_banner_events', { ...row, placement: placement || null });
+    } catch (e) {
+      // 087 실행 전에는 placement 컬럼이 없다 — 위치만 빼고 기록한다 (기록 자체를 잃지 않게).
+      if (!/placement/.test(e.message || '')) throw e;
+      await sbInsert('bg_banner_events', row);
+    }
     return true;
   } catch (e) {
     console.warn('[banner-event] 기록 실패:', e.message);
@@ -2081,10 +2095,14 @@ async function getBannerStats() {
   const rows = await sbGet('bg_banner_events', 'order=created_at.desc&limit=50000');
   const stats = {};
   for (const r of rows) {
-    const s = stats[r.banner_id] || (stats[r.banner_id] = { views: 0, clicks: 0, views_30d: 0, clicks_30d: 0 });
+    const s = stats[r.banner_id] || (stats[r.banner_id] = { views: 0, clicks: 0, views_30d: 0, clicks_30d: 0, by_placement: {} });
     const k = r.event === 'click' ? 'clicks' : 'views';
     s[k] += 1;
     if (r.created_at >= since) s[k + '_30d'] += 1;
+    // 위치별 (087) — 위치 기록이 없는 옛 행은 complete (그때는 완료 화면뿐이었다)
+    const pl = BANNER_PLACEMENTS.includes(r.placement) ? r.placement : 'complete';
+    const bp = s.by_placement[pl] || (s.by_placement[pl] = { views: 0, clicks: 0 });
+    bp[k] += 1;
   }
   return stats;
 }
