@@ -105,6 +105,16 @@ function addBusinessDays(orderDate, n) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+/**
+ * 오늘출발 서비스 품목 — "오늘출발 서비스 (당일출고)" (P00000YN, 30,000원) 처럼 상품과 같은 주문에 품목으로 담긴다.
+ *   상품이 아니라 출고 옵션이라 정보입력현황의 상품(스티커 선택)에서 빼고 주문을 오늘출발로 표시한다 (2026-09-18).
+ *   "[오늘출발무료]" 는 배송비 무료 이벤트 표기라 제외 (barungift/store.js CSV 업로드 규칙과 같다).
+ */
+function isExpressServiceItem(it) {
+  const name = String(it && it.product_name != null ? it.product_name : '');
+  return name.includes('오늘출발') && !name.includes('오늘출발무료');
+}
+
 /** 희망출고일 파싱 — 추가입력 옵션(name 에 '희망'&'출고') 또는 옵션 문자열에서 날짜 추출 */
 function parseDesiredShippingDate(items) {
   for (const it of items) {
@@ -159,7 +169,7 @@ function normalizeOrder(o) {
     || parseDesiredShippingDate(rawItems)
     || addBusinessDays(o.order_date, 3);
   // shipping_method: '오늘출발' 품목 포함 시 same_day
-  const isSameDay = rawItems.some(it => String(it.product_name == null ? '' : it.product_name).includes('오늘출발'));
+  const isSameDay = rawItems.some(isExpressServiceItem);
 
   const receiver = (Array.isArray(o.receivers) && o.receivers[0]) || {};
   const recvName = receiver.name || (o.buyer && o.buyer.name) || null;
@@ -326,7 +336,12 @@ async function syncCafe24Orders({ since } = {}) {
 
       const stubs = [];
       for (const o of validOrders) {
-        const items = Array.isArray(o.items) ? o.items : [];
+        const allItems = Array.isArray(o.items) ? o.items : [];
+        // 오늘출발 서비스 품목은 상품이 아니다 — 스티커 선택에서 빼고 주문을 오늘출발로 표시
+        const serviceItems = allItems.filter(isExpressServiceItem);
+        const items = allItems.filter(it => !isExpressServiceItem(it));
+        const isExpress = serviceItems.length > 0;
+        const expressFee = serviceItems.reduce((a, it) => a + toInt(it.product_price, 0) * toInt(it.quantity, 1), 0);
         const selections = items.map(it => {
           const sel = enrichCafe24Item({
             productCode: pickProductCode(it),
@@ -344,8 +359,8 @@ async function syncCafe24Orders({ since } = {}) {
           || parseDesiredShippingDate(items) || addBusinessDays(o.order_date, 3);
         stubs.push({
           order_id: `CF-${o.order_id}`,
-          is_express: false,
-          express_fee: 0,
+          is_express: isExpress,
+          express_fee: expressFee,
           desired_ship_date: shipDate,
           sticker_selections: selections,
           cash_receipt_yn: false,
@@ -361,7 +376,7 @@ async function syncCafe24Orders({ since } = {}) {
       // enrichment PATCH — 기존 stub 도 스티커/문구/출고일 갱신 (스티커 미매칭이어도 문구/타입 보존).
       for (const stub of stubs) {
         const sels = stub.sticker_selections;
-        const hasEnrich = stub.desired_ship_date
+        const hasEnrich = stub.desired_ship_date || stub.is_express
           || (Array.isArray(sels) && sels.some(s =>
             s.sticker_code || s.box_code || s.sticker_name || (s.custom_values && s.custom_values.text)));
         if (!hasEnrich) continue;
@@ -369,6 +384,8 @@ async function syncCafe24Orders({ since } = {}) {
           await store.patchCafe24StubEnrichment(stub.order_id, {
             sticker_selections: sels,
             desired_ship_date: stub.desired_ship_date,
+            // 오늘출발은 켜기만 한다 — 서비스 품목이 없다고 운영이 켠 값을 끄지 않는다
+            ...(stub.is_express ? { is_express: true, express_fee: stub.express_fee } : {}),
           });
         } catch (e) {
           console.warn(`[cafe24 sync] enrichment patch 실패 ${stub.order_id}: ${e.message}`);
@@ -401,5 +418,6 @@ async function syncCafe24Orders({ since } = {}) {
 module.exports = {
   syncCafe24Orders,
   normalizeOrder, // for testing
+  isExpressServiceItem,
   STATUS_LABEL,
 };

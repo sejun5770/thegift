@@ -142,12 +142,14 @@ async function upsertCafe24StubCustomerInfos(stubs) {
  *   운영자 변경 가능 필드(processed_at/customer_request 등)는 미터치.
  *   ignore-duplicates upsert 로 안 채워진 기존 stub 도 새 enrichment 로 갱신.
  */
-async function patchCafe24StubEnrichment(orderId, { sticker_selections, desired_ship_date }) {
+async function patchCafe24StubEnrichment(orderId, { sticker_selections, desired_ship_date, is_express, express_fee }) {
   if (!USE_SUPABASE) return { patched: 0 };
   const url = `${REST_BASE}/bg_order_customer_info?order_id=eq.${encodeURIComponent(orderId)}`;
   const body = {};
   if (sticker_selections !== undefined) body.sticker_selections = sticker_selections;
   if (desired_ship_date !== undefined) body.desired_ship_date = desired_ship_date;
+  if (is_express !== undefined) body.is_express = !!is_express;          // 오늘출발 서비스 품목 (2026-09-18)
+  if (express_fee !== undefined) body.express_fee = Math.max(0, parseInt(express_fee, 10) || 0);
   if (!Object.keys(body).length) return { patched: 0 };
   const res = await fetch(url, {
     method: 'PATCH',

@@ -5084,6 +5084,12 @@ const SETTLE_METHOD_MAP = {
 // 수집 제외 상태: 3=결제취소, 5=주문취소, 또는 (1=결제대기 또는 9=초안컨펌완료/결제대기) + settle_date 없음
 // settle_date 가 있으면 결제 완료된 것으로 판정 (status_seq 무관)
 // 마켓플레이스 (네이버/쿠팡): status 문자열 기반 매칭
+/** 정수당(카페24) 오늘출발 서비스 품목 이름 — "[오늘출발무료]" 는 배송비 무료 이벤트 표기라 제외 (cafe24/sync.js 와 같은 규칙). */
+function _bgIsExpressServiceName(name) {
+  const n = String(name || '');
+  return n.includes('오늘출발') && !n.includes('오늘출발무료');
+}
+
 function isCancelled(r) {
   // CARD/ETC — status_seq 기반
   if (r.status_seq === 3 || r.status_seq === 5) return true;
@@ -22757,7 +22763,15 @@ async function loadBgUnified() {
     }
     setBgUnifiedProgress('2/3 주문-고객입력 매칭 중...');
 
-    const rawOrders = Array.isArray(ordersRes.value) ? ordersRes.value : [];
+    // 정수당(카페24) 오늘출발 서비스 품목 (2026-09-18) — "오늘출발 서비스 (당일출고)" 는 상품이 아니라 출고 옵션이다.
+    //   상품 행에서 빼고 그 주문을 오늘출발(⚡)로 본다. 취소된 서비스 품목은 오늘출발로 보지 않는다.
+    const cafe24ExpressSeqs = new Set();
+    const rawOrders = (Array.isArray(ordersRes.value) ? ordersRes.value : []).filter(r => {
+      if (r.order_type !== 'CAFE24' || !_bgIsExpressServiceName(r.card_name)) return true;
+      if (!isCancelled(r)) cafe24ExpressSeqs.add(String(r.order_seq));
+      return false;
+    });
+    rawOrders.forEach(r => { if (r.order_type === 'CAFE24' && cafe24ExpressSeqs.has(String(r.order_seq))) r._express_option = true; });
     // (order_seq, delivery_seq) 복합키 기준 행 분리 — 나눔배송으로 같은 주문에 배송지가 N개면 N행 표시.
     //   customer_info 입력은 여전히 order_seq 단위 1개 (모든 배송지에 동일 출고일/스티커 적용).
     //   productMap 도 배송지별 분리 — 각 행은 그 배송지의 답례품 수량만 표시.
@@ -22797,6 +22811,8 @@ async function loadBgUnified() {
       }
       ciMap.set(key, ci);
     });
+    // 정수당 오늘출발 서비스 품목이 있는 주문 — 동기화 전에 만들어진 스텁도 오늘출발로 (화면에서만, 저장 안 함)
+    cafe24ExpressSeqs.forEach(seq => { const ci = ciMap.get(`CF-${seq}`); if (ci && !ci.is_express) ci.is_express = true; });
     bgUnifiedCiMap = ciMap;
     // 고객 정보입력 불필요 상품만 있는 주문 (082) — 고객정보 없이 미입력에 쌓이지 않게 서버에 스텁을 만들어 달라고 한다.
     //   후보만 고른다 (취소·미결제 제외, 상품설정 customer_input_required=false 만). 최종 판정은 서버가 다시 한다.
@@ -23479,6 +23495,7 @@ function renderBgUnified() {
       selEntries.forEach((e, i) => {
         if (usedSelIdx.has(i)) return;
         const s = e.s;
+        if (order.order_type === 'CAFE24' && _bgIsExpressServiceName(s.product_name)) return;   // 오늘출발 서비스 품목 — 상품 아님
         if (s.product_code && !pmBaseCodes.has(s.product_code) && ![...pmBaseCodes].some(k => _bgAliasHas(k, s.product_code))) {
           bgUnifiedRows.push({
             order, ci, sel: s, sticker_index: e.gi,
@@ -23941,7 +23958,7 @@ function renderBgUnified() {
     // 요청사항 있는 주문 하이라이트 — 노란 배경 + 📝 아이콘 prefix. 운영자 주의 환기용.
     const hasRequest = !!(ci?.customer_request && String(ci.customer_request).trim() && !/^\[admin\]/.test(String(ci.customer_request)));
     // 빠른출고 ⚡ prefix — ci.is_express 면 주문번호 좌측에 번개 표시 (운영자 우선처리 환기).
-    const isExpressOrder = !!ci?.is_express;
+    const isExpressOrder = !!ci?.is_express || !!order._express_option;
     const expressPrefix = isExpressOrder
       ? '<span title="빠른출고" style="color:#dc2626;font-weight:700;margin-right:2px">⚡</span>'
       : '';
