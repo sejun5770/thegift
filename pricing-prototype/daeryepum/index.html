@@ -23813,7 +23813,7 @@ function renderBgUnified() {
           badge = _giftIdx++ === 0 ? _hint('#ede9fe', '#5b21b6', 'O↗', '수집복사 O열(스티커타입2) 매핑 — 코드(수량) 형태')
             : _hint('#f1f5f9', '#475569', 'P↗', '수집복사 P열(옵션선택) 매핑');
         } else {
-          badge = _hint('#fef3c7', '#92400e', 'P↗', '부가옵션(봉투·쇼핑백) — 수집복사 P열(옵션선택)에 코드(수량) 이름 으로 나갑니다. K열은 답례품 코드를 유지합니다');
+          badge = _hint('#fef3c7', '#92400e', 'P↗', '부가옵션(봉투·쇼핑백) — 수집복사 P열(옵션선택)에 코드(수량) 으로 나갑니다. K열은 답례품 코드를 유지합니다');
         }
         return `<div>${badge}<span style="color:var(--gray-500)">옵션:</span> ${esc(nm)}${codePart}</div>`;
       }).filter(Boolean);
@@ -25671,7 +25671,7 @@ function copyBgUnified() {
     // 몰 옵션은 세 갈래다 — 서버가 kind(component/gift/accessory) 로 분류해 내려준다 (classifyDaeryepumOption).
     //   · 구성품(원물 O코드: 수건·핸드워시·주방세제) = 세트를 이루는 품목 → K/L
     //   · 사은품(무료: 추석 미니카드 등)             = 상품에 딸린 증정물 → O열 (스티커처럼 무료)
-    //   · 부가옵션(유료지만 원물 아님: 트레싱지 미니봉투·쇼핑백) → P열에 '코드(수량) 이름'
+    //   · 부가옵션(유료지만 원물 아님: 트레싱지 미니봉투·쇼핑백) → P열에 '코드(수량)'
     //     예전엔 값만 보고 유료=구성품이라 미니봉투가 K열을 덮어 답례품 코드가 사라졌다 (2026-09-14, 주문 3250679).
     const _kindOf = o => o.kind || (o.addon ? 'gift' : 'component');
     const compList = _frontOpts.filter(o => _kindOf(o) === 'component')
@@ -25757,7 +25757,9 @@ function copyBgUnified() {
     }
 
     // P열(index 15) = 남은 옵션 — 구성품 3번째+ / O열에 못 실은 사은품 / 부가옵션(봉투·쇼핑백) / 자유 옵션.
-    //   부가옵션은 물류가 코드로 챙겨야 하므로 '코드(수량개) 이름' 으로 쓴다.
+    //   부가옵션은 물류가 코드로 챙기므로 N/O열 스티커와 같은 '코드(수량개)' 로만 쓴다.
+    //   예전엔 뒤에 상품명을 붙였는데 몰 옵션명이 길어(트레싱지 미니봉투 …) 칸이 줄줄이
+    //   길어지고 물류가 코드를 찾기 어려웠다 (2026-09-18 사용자 지적).
     //   TSV 안전: 탭/개행 → 공백 치환. 매핑할 것 없으면 셀 빈 채로 유지.
     const _pOpts = [...optList.slice(2), ...addonList.slice(1), ...accessoryList,
       ...(addonList.length ? customList : customList.slice(1))];
@@ -25767,7 +25769,7 @@ function copyBgUnified() {
         if (!o || !o.name) return '';
         if (o.accessory && o.code) {
           const q = o.qty || product_qty || sel?.quantity;
-          return `${safeStr(o.code)}${q ? `(${q}개)` : ''} ${safeStr(o.name)}`.trim();
+          return `${safeStr(o.code)}${q ? `(${q}개)` : ''}`;
         }
         return o.label ? `${safeStr(o.label)}: ${safeStr(o.name)}` : safeStr(o.name);
       }).filter(Boolean);
