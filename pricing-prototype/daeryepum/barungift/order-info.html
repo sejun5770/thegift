@@ -248,6 +248,16 @@
       border-radius: 50%; border: 2.5px solid rgba(255,255,255,0.35); border-top-color: #fff;
       animation: spin 0.8s linear infinite;
     }
+    /* 입력완료 화면 배너 (086) — 가로 스냅 캐러셀. 한 장이면 점·스크롤 없이 이미지만. */
+    .cb-slot { margin-top: 18px; }
+    .cb-track { display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; scrollbar-width: none; border-radius: 16px; }
+    .cb-track::-webkit-scrollbar { display: none; }
+    .cb-item { flex: 0 0 100%; scroll-snap-align: center; display: block; border-radius: 16px; overflow: hidden; background: var(--brand-50); -webkit-tap-highlight-color: transparent; }
+    .cb-item img { display: block; width: 100%; height: auto; }
+    a.cb-item:active { opacity: 0.85; }
+    .cb-dots { display: flex; justify-content: center; gap: 6px; margin-top: 10px; }
+    .cb-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--gray-300, #CBD5E1); transition: width 0.2s, background 0.2s; }
+    .cb-dots span.on { width: 16px; border-radius: 3px; background: var(--brand-500); }
     /* 완료 화면: 체크가 그려진 뒤 제목 → 안내 → 주문번호 → 버튼 순으로 올라온다 (아이콘 원은 기존 pop-in) */
     @keyframes riseIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
     @keyframes drawCheck { to { stroke-dashoffset: 0; } }
@@ -490,6 +500,7 @@
     <button id="completedBackToListBtn" onclick="goBackToOrderList()" class="hidden btn-primary pressable w-full py-3.5 rounded-2xl text-sm font-bold mb-4 attention-cta">
       다른 답례품 주문건도 입력하기
     </button>
+    <div class="cb-slot hidden" data-cb-slot></div>
   </div>
 </div>
 
@@ -522,6 +533,7 @@
       </div>
     </header>
     <div id="submittedSummaryContent" class="px-5 pt-5"><!-- 동적 렌더 --></div>
+    <div class="px-5"><div class="cb-slot hidden" data-cb-slot></div></div>
   </div>
 </div>
 
@@ -608,6 +620,7 @@
     <button id="successBackToListBtn" onclick="goBackToOrderList()" class="hidden btn-primary pressable w-full py-3.5 rounded-2xl text-sm font-bold mb-5 attention-cta">
       다른 답례품 주문건도 입력하기
     </button>
+    <div class="cb-slot hidden" data-cb-slot></div>
 
   </div>
 </div>
@@ -1478,6 +1491,68 @@
     });
     const target = document.getElementById(id);
     if (target) target.classList.remove('hidden');
+    if (CB_SCREENS.includes(id)) renderCompletionBanners(target);
+  }
+
+  // ============================================
+  // 입력완료 화면 배너 (086) — 대시보드 설정에서 올린 자사 서비스 배너.
+  //   서버가 오늘·이 채널에 보여줄 것만 걸러서 orderData.completion_banners 로 준다 (최대 5개, 순서 고정).
+  //   없으면 자리를 숨긴다. 노출은 화면에 실제로 보인 배너만, 페이지당 한 번씩 기록한다.
+  // ============================================
+  const CB_SCREENS = ['successScreen', 'completedScreen', 'submittedSummaryScreen'];
+  const _cbViewed = new Set();
+  function _cbEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+  function _cbLog(bannerId, event) {
+    try {
+      const body = JSON.stringify({ banner_id: bannerId, event: event, order_id: orderData?.order_id || null, site: orderData?.site || null });
+      const url = API_BASE + '/api/bg/banner-event';
+      // 클릭은 곧바로 새 탭이 열리므로 페이지가 뒤로 가도 보내지는 방식으로
+      if (navigator.sendBeacon && navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }))) return;
+      fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body, keepalive: true }).catch(function() {});
+    } catch (e) {}
+  }
+  function renderCompletionBanners(screenEl) {
+    const slot = screenEl && screenEl.querySelector('[data-cb-slot]');
+    if (!slot) return;
+    const banners = (orderData?.completion_banners || []).filter(b => b && b.image_url);
+    if (!banners.length) { slot.classList.add('hidden'); slot.innerHTML = ''; return; }
+    slot.innerHTML = '<div class="cb-track">' + banners.map(function(b) {
+      const img = '<img src="' + _cbEsc(b.image_url) + '" alt="' + _cbEsc(b.alt || '') + '" loading="lazy" decoding="async">';
+      return b.link_url
+        ? '<a class="cb-item" data-cb-id="' + _cbEsc(b.id) + '" href="' + _cbEsc(b.link_url) + '" target="_blank" rel="noopener">' + img + '</a>'
+        : '<div class="cb-item" data-cb-id="' + _cbEsc(b.id) + '">' + img + '</div>';
+    }).join('') + '</div>'
+      + (banners.length > 1 ? '<div class="cb-dots">' + banners.map(function(_, i) { return '<span' + (i === 0 ? ' class="on"' : '') + '></span>'; }).join('') + '</div>' : '');
+    slot.classList.remove('hidden');
+
+    const track = slot.querySelector('.cb-track');
+    const items = Array.prototype.slice.call(slot.querySelectorAll('.cb-item'));
+    const dots = Array.prototype.slice.call(slot.querySelectorAll('.cb-dots span'));
+    items.forEach(function(el) {
+      // 이미지가 깨진 배너는 빈 상자로 남기지 않는다
+      const im = el.querySelector('img');
+      if (im) im.addEventListener('error', function() { el.remove(); if (!slot.querySelector('.cb-item')) slot.classList.add('hidden'); });
+      if (el.tagName === 'A') el.addEventListener('click', function() { _cbLog(el.dataset.cbId, 'click'); });
+    });
+    if (dots.length) {
+      track.addEventListener('scroll', function() {
+        const i = Math.round(track.scrollLeft / Math.max(1, track.clientWidth));
+        dots.forEach(function(d, k) { d.classList.toggle('on', k === i); });
+      }, { passive: true });
+    }
+    if ('IntersectionObserver' in window) {
+      const io = new IntersectionObserver(function(entries) {
+        entries.forEach(function(en) {
+          if (!en.isIntersecting) return;
+          const id = en.target.dataset.cbId;
+          io.unobserve(en.target);
+          if (_cbViewed.has(id)) return;
+          _cbViewed.add(id);
+          _cbLog(id, 'view');
+        });
+      }, { threshold: 0.6 });
+      items.forEach(function(el) { io.observe(el); });
+    }
   }
 
   /** 입력 불필요 상품 카드 (082) — 확인 화면·요약 공통. 고를 것이 없으니 이름·수량과 배지만. */
